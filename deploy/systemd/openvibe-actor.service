@@ -1,0 +1,30 @@
+[Unit]
+Description=OpenVibe.Actor — OpenVibe's own agent and the router for agent work (tasks, the agent catalog, the live stream)
+# Network (sign-in, JWKS) should be up first, but Actor degrades honestly without it: the pages and the agent
+# catalog serve; sign-in and the task API wait for the signing key (see /api/ready).
+After=network.target postgresql.service pgbouncer.service valkey-server.service
+Wants=openvibe-network.service postgresql.service pgbouncer.service valkey-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/openvibe.actor
+EnvironmentFile=/etc/openvibe/actor.env
+Environment=NODE_ENV=production
+Environment=PORT=4950
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env node /opt/openvibe.actor/server/index.js
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+# Running tasks are stopped and recorded as interrupted within the 10 s drain.
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Actor's own database is PostgreSQL on the host's data role; the code tree stays read-only.
+
+[Install]
+WantedBy=multi-user.target

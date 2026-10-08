@@ -1,0 +1,52 @@
+{
+  "repository": "OpenVibers/OpenVibe.Actor",
+  "stage": "alpha",
+  "code": true,
+  "wave": "W20",
+  "plan": "OpenVibe Updated Plan Based On Codebase (T17, owner direction 2026-10-08: Actor is OpenVibe's own general agent and an OpenRouter for agents)",
+  "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
+  "port": 4950,
+  "domain": "openvibe.actor",
+  "contracts": "openvibe-contracts v0.115.0",
+  "sdk": "openvibe-sdk v0.35.2",
+  "shared": "openvibe-shared v2.13.3",
+  "packages": [
+    "openvibe-contracts v0.115.0",
+    "openvibe-sdk v0.35.2",
+    "openvibe-shared v2.13.3"
+  ],
+  "summary": "Public at https://openvibe.actor (sudo ovhost deploy actor; unit openvibe-actor on 127.0.0.1:4950). A task in plain words is classified, routed by openvibe-sdk/placement to the agent system that can do it (the OpenVibe runtime acting through OpenVibe.Search and OpenVibe.Tools, OpenAI's web agent, an open model on OpenVibe's server for private mode), run with its steps streamed live, checked by a model of another family, and delivered as platform.task@1 with its cost to a fraction of a cent and the explanation; a failed agent or check hands it to the next agent. Free tier per person with an operator ceiling.",
+  "works": [
+    "The task router: POST /api/v1/tasks with modes (cheapest, balanced, best, fastest, private) and hard budgets; the explanation (platform.placement-result@1) on every task",
+    "The OpenVibe runtime: a DeepSeek model whose tools are OpenVibe.Search, OpenVibe.Tools' catalog and run API, and the Tools page reader",
+    "OpenAI's Responses agent with web search as a routed agent platform",
+    "Private mode on the open model on OpenVibe's own server; the task text never leaves OpenVibe",
+    "A cross-family check on every answer; hand-off to the next agent on an error or a failed check",
+    "Live progress over server-sent events (actor.task-event@1), cancel, idempotency keys",
+    "Sign-in with OpenVibe.Network (PKCE); people's own tokens and app tokens with actor.task.* capabilities",
+    "The public agent catalog with rate cards (GET /api/v1/agents) and a dry-run router (POST /api/v1/route)",
+    "Free tier per person and an operator daily ceiling; costs metered per call at the published rate cards",
+    "Pages: home with the task box, your tasks, a task's live page, the agents, the API reference, updates; robots, sitemap, llms.txt"
+  ],
+  "notYet": [
+    "Browser and desktop agents on OpenVibe's own servers (OpenVibe.Run workers), watchable and taken over",
+    "Coding tasks through OpenVibe.Codes on hosted sandboxes (listed as unavailable with the reason)",
+    "More agent platforms, bring-your-own keys through OpenVibe.AI, paid tiers through OpenVibe.Billing",
+    "Personal agents: memory, schedules, Events triggers, approvals, reach from Chat and the Frame",
+    "Webhooks on task state changes",
+    "Account export and deletion (ADR-033); tasks expire after 30 days meanwhile"
+  ],
+  "capabilitiesRegistered": true,
+  "serviceManifestRegistered": true,
+  "deployed": true,
+  "placeholderInSites": false,
+  "features": [
+    "agent router (OpenRouter for agents)",
+    "OpenVibe runtime acting through OpenVibe services",
+    "other platforms' agents",
+    "private mode on OpenVibe hardware",
+    "cross-family answer checks",
+    "live task progress"
+  ],
+  "updated": "2026-10-08"
+}

@@ -1,0 +1,41 @@
+{
+  "name": "openvibe-actor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenVibe.Actor: OpenVibe's own agent and the router for agent work. A task in plain words goes to the best agent system for it (OpenVibe's runtime acting through OpenVibe services, other platforms' agents, an open model on OpenVibe hardware), a second model family checks the answer, and the task records its cost and why. Like OpenRouter, for agents.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "NODE_ENV=development node server/index.js",
+    "test": "node test/run.js",
+    "test:pg": "ACTOR_TEST_STORE=pg node test/run.js"
+  },
+  "keywords": [
+    "openvibe",
+    "ai-agent",
+    "agent-router",
+    "openrouter-for-agents",
+    "computer-use"
+  ],
+  "author": "OpenVibers",
+  "license": "AGPL-3.0-only",
+  "repository": "github:OpenVibers/OpenVibe.Actor",
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "iovalkey": "^0.4.0",
+    "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.115.0",
+    "openvibe-sdk": "https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v0.35.2",
+    "openvibe-shared": "https://codeload.github.com/OpenVibers/OpenVibe.Shared/tar.gz/refs/tags/v2.13.3",
+    "pg": "^8.23.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
+  }
+}
