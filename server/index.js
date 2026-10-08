@@ -12,13 +12,14 @@ const PRUNE_EVERY_MS = 6 * 60 * 60_000;
 
 /**
  * The process stop (openvibe-sdk/service): the HTTP drain runs, then running tasks are stopped and recorded as
- * interrupted (the person can ask again; nothing re-runs behind their back), the JWKS refresher stops and the store
- * closes. Exported so a test can inject `exit` and `signals: false`.
+ * interrupted (the person can ask again; nothing re-runs behind their back), the Events subscriptions stop, the JWKS
+ * refresher stops and the store closes. Exported so a test can inject `exit` and `signals: false`. `extra` is what the
+ * product adds (the Events subscriptions); a test that passes none keeps the skeleton's order.
  */
-function createLifecycle({ server, ctx, exit, signals, timers = [] }) {
+function createLifecycle({ server, ctx, exit, signals, timers = [], extra = [] }) {
     return gracefulStop({
         name: 'Actor', server, deadlineExitCode: 0, exit, signals, deadlineMs: 10_000,
-        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.keys.client.stop(), () => ctx.s.close()],
+        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.keys.client.stop(), () => ctx.s.close(), ...extra],
     });
 }
 
@@ -39,7 +40,11 @@ async function start() {
     const prune = setInterval(() => { store.prune(ctx.s).catch((err) => console.warn('[Actor] prune failed:', err && err.message)); }, PRUNE_EVERY_MS);
     prune.unref();
 
-    createLifecycle({ server, ctx, timers: [prune] });
+    // Subscribe to the two ADR-033 topics at OpenVibe.Events (idempotent; off without ACTOR_EVENTS_URL and
+    // ACTOR_EVENTS_SECRET). The consumer itself is mounted in server/app.js.
+    const subscriptions = require('./events-consumer').startSubscriptions({ config, port: config.port, secret: config.events.secrets[0] || '' });
+    const extra = [() => { if (subscriptions) subscriptions.stop(); }];
+    createLifecycle({ server, ctx, timers: [prune], extra });
     return { server, ctx };
 }
 

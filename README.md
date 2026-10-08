@@ -81,7 +81,6 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 2. Coding through OpenVibe.Codes on hosted Run sandboxes.
 3. More agent platforms behind the same router, bring-your-own keys through OpenVibe.AI, and paid tiers through Billing.
 4. Personal agents (`agt_` principals on the Network): memory people control, schedules and Events triggers, an approval inbox, reachable from Chat and the Frame.
-5. Account export and deletion (ADR-033). Until then, tasks expire after 30 days.
 
 ## Configuration
 
@@ -111,6 +110,29 @@ Tests:
 - [test/tasks.test.js](test/tasks.test.js) runs a task end to end through the real adapters against stand-in providers, Tools and Search. It covers routing per class and mode, the cross-family check, hand-off on an error or a failed check, private mode never sending the text outside, hard budgets and the free tier, idempotency, cancel, the live stream, visibility, cross-site writes, and app tokens with capabilities.
 - The other files cover sign-in (PKCE, state, next=), discovery, the released contracts manifest matching the routes, per-caller limits, readiness, secrets never stored or logged, Actor never fetching a URL from a task, and the home page's size budgets.
 
+## Account export and deletion
+
+A person's account at OpenVibe.Network can be exported and deleted, and every service holding their rows answers its
+part (ADR-033). Actor receives `network.account.export_requested` and `network.account.deleted` at `POST /internal/events`
+(loopback only) — the two tables are mapped in [server/identity/account-data.js](server/identity/account-data.js), and
+the boot-time subscriptions are created by [server/events-consumer.js](server/events-consumer.js):
+
+- **Exported:** the tasks a person asked for (`tasks.json`) and what they spent per UTC day (`spend.json`), pushed to
+  `POST /internal/account-exports/:id/parts` with this service's own token. Nothing here is a secret — Actor stores no
+  token, key or credential.
+- **Erased:** both tables hold the person's own rows, so they are deleted whole and nothing is kept; a task's event log
+  (`task_events`) goes with the task by cascade. Actor then confirms with `POST /internal/account-deletions/:id/confirmations`
+  and the counts.
+- **Anonymized:** nothing. There is no row Actor keeps that was written by this person for another person to read.
+
+A task an app, agent or service ran for this person is not matched: its requester is `app:…`/`agent:…`/`service:…`, and
+Network's deletion event carries only the person's `usr_…`, so only rows requested as `user:usr_…` are erased. The spend
+row that does not name the person (`*`, the operator's daily ceiling) is a separate row and is kept.
+
+Environment: `ACTOR_EVENTS_SECRET` (comma-separated for rotation, 32+ characters each; unset makes the route answer
+503), `ACTOR_EVENTS_URL` (or `EVENTS_URL`) is where the two subscriptions are created at boot (off when unset), and
+`ACTOR_EVENTS_ENDPOINT` overrides the loopback endpoint; `ACTOR_EVENTS_SUBSCRIBE=0` turns the boot-time subscription off.
+
 ## Security (threat notes)
 
 Reporting a vulnerability: [SECURITY.md](SECURITY.md).
@@ -126,6 +148,6 @@ Part of the [OpenVibe network](https://openvibe.network). Built in the open by [
 
 <!-- versions:start -->
 - openvibe-contracts: v0.115.0
-- openvibe-sdk: v0.35.2
+- openvibe-sdk: v0.36.0
 - openvibe-shared: v2.15.0
 <!-- versions:end -->

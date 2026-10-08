@@ -79,6 +79,16 @@ function load(env = process.env) {
         maxRunning: Math.max(1, int(env.ACTOR_MAX_RUNNING, 4)),
         // A task that runs longer than this is stopped and fails (actor.task.timeout).
         taskTimeoutMs: Math.max(10_000, int(env.ACTOR_TASK_TIMEOUT_MS, 180_000)),
+
+        // OpenVibe.Events → this service (server/events-consumer.js). The secret signs a delivery (comma-separated
+        // for rotation, 32+ characters each); unset turns POST /internal/events off (503). The url is where the
+        // network.account.export_requested and network.account.deleted subscriptions are created at boot, off when
+        // unset. Both topics are ADR-033: account export and deletion (server/identity/account-data.js).
+        events: {
+            secrets: String(env.ACTOR_EVENTS_SECRET || '').split(',').map((x) => x.trim()).filter(Boolean),
+            url: trim(env.ACTOR_EVENTS_URL || env.EVENTS_URL || ''),
+            endpoint: env.ACTOR_EVENTS_ENDPOINT || '',
+        },
     };
 }
 
