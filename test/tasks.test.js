@@ -110,7 +110,11 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         assert.ok(!/Runtime answer/.test(task.result.answer));
         const events = await t.get(`/api/v1/tasks/${id}/events`, { as: kim });
         assert.match(events.text, /Check failed/);
-        assert.match(events.text, /Unchecked answer, not delivered/);
+        const refused = [...events.text.matchAll(/^data: (.*)$/gm)].map((m) => JSON.parse(m[1])).filter((e) => e.step === 'text' && e.is_error);
+        assert.ok(refused.some((e) => /Runtime answer/.test(e.text)), 'the refused answer is kept as an error event after its check');
+        const pageHtml = (await t.get(`/tasks/${id}`, { as: kim })).text;
+        assert.match(pageHtml, /See the answer that didn't pass/, 'the task page folds the refused answer away');
+        assert.match(pageHtml, /class="outcome outcome-ok answer"/);
     });
 
     await check('when every agent fails its check the task fails, with no result', async () => {
@@ -137,6 +141,31 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         assert.deepStrictEqual([task.result.checked.by, task.result.checked.cross_family], ['deepseek', false]);
         const deepseekChecks = t.providers.requests.filter((q) => q.path === '/deepseek/chat/completions' && /check an AI agent/.test(JSON.stringify(q.body)));
         assert.ok(deepseekChecks.length === 1 && deepseekChecks[0].body.thinking && deepseekChecks[0].body.thinking.type === 'disabled', 'short calls run with DeepSeek reasoning off');
+    });
+
+    await check('a hand-off never goes to a weaker agent: after the runtime, the open model is out (lacks quality:standard)', async () => {
+        t.providers.reset();
+        t.providers.state.cls = 'answer';
+        t.providers.state.checkOk = (body) => !/Runtime answer/.test(JSON.stringify(body));
+        const id = (await create({ task: 'test', mode: 'balanced' })).json().id;
+        await t.waitFor(id);
+        const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
+        assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
+        assert.strictEqual(task.result.agent, 'openai-agent');
+        assert.ok(task.explanation[1].candidates.some((c) => c.id === 'open-model' && /lacks quality:standard/.test(c.excluded_because)), JSON.stringify(task.explanation[1].candidates));
+    });
+
+    await check('a task that did not finish shows why in plain words and offers a retry in Best mode', async () => {
+        t.providers.reset();
+        t.providers.state.cls = 'research';
+        t.providers.state.checkOk = false;
+        const id = (await create({ task: 'Read about OpenVibe and summarize it' })).json().id;
+        await t.waitFor(id);
+        const pageHtml = (await t.get(`/tasks/${id}`, { as: kim })).text;
+        assert.match(pageHtml, /Actor couldn't finish this/);
+        assert.match(pageHtml, /name="mode" value="best"/);
+        assert.match(pageHtml, /Try again in Best mode/);
+        assert.match(pageHtml, /class="attempt"/);
     });
 
     await check('a budget below the cheapest capable agent fails before anything is paid', async () => {

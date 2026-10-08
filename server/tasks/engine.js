@@ -76,6 +76,9 @@ function createEngine({ config, s, adapters, stream, now = () => Date.now(), log
         timer.unref();
         const explanation = [];
         const tried = new Map();
+        // The quality tier a hand-off may not go below: the tier of the best agent tried so far (catalog quality).
+        let floor = null;
+        const raise = (agent) => { if (agent && agent.quality === 'high') floor = 'high'; else if (agent && agent.quality === 'standard' && floor !== 'high') floor = 'standard'; };
         try {
             await setState(id, 'running', { cost_usd: 0, free_usd: 0 });
             // What kind of task this is. Private mode never sends the text anywhere to find out.
@@ -90,7 +93,7 @@ function createEngine({ config, s, adapters, stream, now = () => Date.now(), log
             await emit(id, { kind: 'output', step: 'plan', text: `This is a "${cls}" task.` });
 
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-                const placement = route({ cls, mode: row.mode, agent: row.agent, budgetUsd: Math.max(0, budgetLeft()), config, tried, now: now() });
+                const placement = route({ cls, mode: row.mode, agent: row.agent, budgetUsd: Math.max(0, budgetLeft()), config, tried, now: now(), floor: row.mode === 'private' ? null : floor });
                 explanation.push(placement);
                 await store.updateTask(s, id, { explanation });
                 if (!placement.selected) {
@@ -112,6 +115,7 @@ function createEngine({ config, s, adapters, stream, now = () => Date.now(), log
                         return await setState(id, 'failed', { error_code: 'actor.budget.exceeded', error_detail: `The task used its whole $${budget.toFixed(3)} budget before an agent finished.`, finished_at: iso() });
                     }
                     tried.set(agentId, why);
+                    raise(agent);
                     continue;
                 }
                 await setState(id, 'verifying', { agentForEvent: agentId });
@@ -125,8 +129,10 @@ function createEngine({ config, s, adapters, stream, now = () => Date.now(), log
                 if (verdict.unavailable) {
                     return await setState(id, 'failed', { error_code: 'actor.check.unavailable', error_detail: `The answer could not be checked (${verdict.reason}), so it was not delivered.`, finished_at: iso() });
                 }
-                await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Unchecked answer, not delivered:\n\n${out.text}`.slice(0, 8000) });
+                // The refused answer, right after its failed check: the task page shows it folded away, never as the answer.
+                await emit(id, { kind: 'output', step: 'text', agent: agentId, text: out.text.slice(0, 8000), is_error: true });
                 tried.set(agentId, `its answer failed the check: ${verdict.reason}`);
+                raise(agent);
                 await setState(id, 'running');
             }
             const last = [...tried.entries()].pop();
