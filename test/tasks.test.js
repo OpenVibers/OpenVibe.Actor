@@ -126,6 +126,19 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         assert.strictEqual(task.error.code, 'actor.agents.exhausted');
     });
 
+    await check('a checker that gives no verdict passes the check to the next one (same family, and the task says so)', async () => {
+        t.providers.reset();
+        t.providers.state.checkerDown = 'openai';
+        const id = (await create({ task: 'Say hello' })).json().id;
+        await t.waitFor(id);
+        const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
+        assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
+        assert.strictEqual(task.result.agent, 'openvibe-runtime');
+        assert.deepStrictEqual([task.result.checked.by, task.result.checked.cross_family], ['deepseek', false]);
+        const deepseekChecks = t.providers.requests.filter((q) => q.path === '/deepseek/chat/completions' && /check an AI agent/.test(JSON.stringify(q.body)));
+        assert.ok(deepseekChecks.length === 1 && deepseekChecks[0].body.thinking && deepseekChecks[0].body.thinking.type === 'disabled', 'short calls run with DeepSeek reasoning off');
+    });
+
     await check('a budget below the cheapest capable agent fails before anything is paid', async () => {
         t.providers.reset();
         t.providers.state.cls = 'web';

@@ -49,9 +49,10 @@ async function classify(task, { chat = null, signal } = {}) {
     try {
         const r = await chat({
             messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: String(task).slice(0, 4000) }],
-            json: true, maxTokens: 30, signal,
+            json: true, maxTokens: 60, signal,
         });
-        const parsed = JSON.parse(String(r.text || '').trim().replace(/^```(?:json)?|```$/g, ''));
+        const m = String(r.text || '').match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(m ? m[0] : '');
         const cls = CLASSES.includes(parsed.class) ? parsed.class : guess;
         return { class: cls, cost_usd: r.cost_usd || 0, by: 'model' };
     } catch {

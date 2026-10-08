@@ -115,9 +115,9 @@ function createEngine({ config, s, adapters, stream, now = () => Date.now(), log
                     continue;
                 }
                 await setState(id, 'verifying', { agentForEvent: agentId });
-                const verdict = await check({ task: row.task, answer: out.text, agentId, mode: row.mode, checkers: adapters.checkers, signal });
+                const verdict = await check({ task: row.task, answer: out.text, sources: out.sources || [], agentId, mode: row.mode, checkers: adapters.checkers, signal });
                 await meter(verdict.cost_usd);
-                await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family: private mode)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
+                await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
                 if (verdict.ok) {
                     const result = { answer: out.text, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };
                     return await setState(id, 'succeeded', { result, finished_at: iso() });

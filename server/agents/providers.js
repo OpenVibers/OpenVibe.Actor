@@ -48,10 +48,14 @@ function priceUsage(rates, { input = 0, cached = 0, output = 0, calls = 0 }) {
     return (Math.max(0, input - cached) * (r.input_usd_per_mtok || 0) + cached * cachedRate + output * (r.output_usd_per_mtok || 0)) / 1e6 + calls * (r.per_call_usd || 0);
 }
 
-function chatClient({ baseUrl, apiKey, model, rates, fetchImpl = globalThis.fetch, timeoutMs = 90_000 }) {
+/**
+ * extraBody: provider-specific fields sent with every call (DeepSeek's `thinking: { type: 'disabled' }` for short
+ * structured calls: its Flash model reasons by default, and a small max_tokens is spent on reasoning with no answer).
+ */
+function chatClient({ baseUrl, apiKey, model, rates, fetchImpl = globalThis.fetch, timeoutMs = 90_000, extraBody = null }) {
     const reasoning = /^(gpt-5|o\d)/i.test(model || '');
     return async function chat({ messages, tools = null, json = false, maxTokens = 1500, signal } = {}) {
-        const body = { model, messages };
+        const body = { model, messages, ...(extraBody || {}) };
         if (reasoning) { body.max_completion_tokens = maxTokens + 1024; body.reasoning_effort = 'minimal'; } else { body.max_tokens = maxTokens; body.temperature = 0.2; }
         if (tools && tools.length) { body.tools = tools; body.tool_choice = 'auto'; }
         if (json) body.response_format = { type: 'json_object' };

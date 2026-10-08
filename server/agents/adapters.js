@@ -37,6 +37,8 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
     const ovTools = toolsOverride || createOpenVibeTools({ config, fetchImpl, log });
 
     const deepseek = p.deepseek.apiKey ? chatClient({ baseUrl: p.deepseek.baseUrl, apiKey: p.deepseek.apiKey, model: p.deepseek.model, rates: rates.deepseek, fetchImpl }) : null;
+    // Classifying and checking are short, structured answers: DeepSeek's reasoning is off for them.
+    const deepseekQuick = p.deepseek.apiKey ? chatClient({ baseUrl: p.deepseek.baseUrl, apiKey: p.deepseek.apiKey, model: p.deepseek.model, rates: rates.deepseek, fetchImpl, extraBody: { thinking: { type: 'disabled' } } }) : null;
     const openaiAgent = p.openai.apiKey ? responsesAgent({ baseUrl: p.openai.baseUrl, apiKey: p.openai.apiKey, model: p.openai.model, rates: rates.openai, fetchImpl }) : null;
     const local = p.local.url && p.local.model ? chatClient({ baseUrl: p.local.url, apiKey: '', model: p.local.model, rates: rates.local, fetchImpl, timeoutMs: 120_000 }) : null;
 
@@ -48,7 +50,8 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
         for (let turn = 1; turn <= MAX_TURNS; turn++) {
             if (budgetLeft() <= 0) throw new ProviderError('the task reached its budget before the runtime finished', { code: 'actor.budget.exceeded' });
             const finalTurn = turn === MAX_TURNS;
-            const r = await deepseek({ messages, tools: finalTurn ? null : tools, maxTokens: 1800, signal });
+            // The model reasons before it answers, inside the same token budget: room for both.
+            const r = await deepseek({ messages, tools: finalTurn ? null : tools, maxTokens: 4000, signal });
             await meter(r.cost_usd);
             messages.push(r.message);
             if (r.text && r.text.trim()) { last = r.text.trim(); }
@@ -92,7 +95,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
 
     /** A cheap model of another family to classify and to check results (null when none is configured). */
     const checkers = {
-        deepseek: deepseek,
+        deepseek: deepseekQuick,
         openai: p.openai.apiKey ? chatClient({ baseUrl: p.openai.baseUrl, apiKey: p.openai.apiKey, model: p.openai.checkModel || 'gpt-5-nano', rates: rates.openaiCheck, fetchImpl }) : null,
         local,
     };

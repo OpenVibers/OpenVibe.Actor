@@ -29,10 +29,11 @@ async function startProviders() {
     const chatReply = (res, message, u = usage(1000, 100)) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ model: 'stand-in', choices: [{ message: { role: 'assistant', ...message }, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }], usage: u })); };
     const userText = (body) => { const m = [...(body.messages || [])].reverse().find((x) => x.role === 'user'); return m ? String(m.content) : ''; };
 
-    function judge(body, res) {
+    function judge(body, res, family) {
         const sys = String(((body.messages || [])[0] || {}).content || '');
         if (/sort one task/.test(sys)) return chatReply(res, { content: JSON.stringify({ class: state.cls }) }, usage(200, 10));
         if (/check an AI agent's answer/.test(sys)) {
+            if (state.checkerDown === family) return chatReply(res, { content: '' }, usage(300, 160));
             const ok = typeof state.checkOk === 'function' ? state.checkOk(body) : state.checkOk;
             return chatReply(res, { content: JSON.stringify({ ok, reason: ok ? 'answers the task' : 'it answers a different question' }) }, usage(300, 20));
         }
@@ -49,7 +50,7 @@ async function startProviders() {
             requests.push({ path: url.pathname, query: url.search, body, auth: req.headers.authorization || null });
 
             if (url.pathname === '/deepseek/chat/completions') {
-                if (body.response_format) return judge(body, res);
+                if (body.response_format) return judge(body, res, 'deepseek');
                 if (state.runtime === 'fail') { res.writeHead(500, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'stand-in model is down' } })); }
                 if (state.runtime === 'hang') { hanging.add(res); return undefined; }
                 const tools = (body.messages || []).filter((m) => m.role === 'tool');
@@ -59,7 +60,7 @@ async function startProviders() {
                 return chatReply(res, { content: `Runtime answer to: ${userText(body)}${tools.length ? `\n\nTool said: ${tools[0].content.slice(0, 300)}` : ''}\n\nSources\n- OpenVibe.Tools mx` });
             }
             if (url.pathname === '/openai/chat/completions') {
-                const j = judge(body, res);
+                const j = judge(body, res, 'openai');
                 if (j !== null) return j;
                 return chatReply(res, { content: 'nano answer' });
             }
@@ -76,7 +77,7 @@ async function startProviders() {
                 }));
             }
             if (url.pathname === '/local/chat/completions') {
-                const j = judge(body, res);
+                const j = judge(body, res, 'local');
                 if (j !== null) return j;
                 if (state.local === 'fail') { res.writeHead(500, { 'content-type': 'application/json' }); return res.end('{}'); }
                 return chatReply(res, { content: `Local answer to: ${userText(body)}` }, usage(100, 50));
@@ -114,7 +115,7 @@ async function startProviders() {
     };
     return {
         url, env, state, requests,
-        reset() { Object.assign(state, { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok' }); requests.length = 0; },
+        reset() { Object.assign(state, { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', checkerDown: null }); requests.length = 0; },
         close: () => new Promise((r) => { for (const res of hanging) { try { res.destroy(); } catch { /* gone */ } } server.close(r); }),
     };
 }
