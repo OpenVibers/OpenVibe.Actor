@@ -9,7 +9,7 @@
   "domain": "openvibe.actor",
   "contracts": "openvibe-contracts v0.115.0",
   "sdk": "openvibe-sdk v0.35.2",
-  "shared": "openvibe-shared v2.14.0",
+  "shared": "openvibe-shared v2.14.1",
   "packages": [
     "openvibe-contracts v0.115.0",
     "openvibe-sdk v0.35.2",
