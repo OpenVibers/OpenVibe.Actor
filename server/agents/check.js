@@ -17,7 +17,8 @@ const CHECKER_FOR = { deepseek: ['openai', 'deepseek'], openai: ['deepseek', 'op
 const SYSTEM = `You check an AI agent's answer before a person sees it. Reply with JSON only: {"ok": true|false, "reason": "<one short sentence>"}.
 ok is true when the answer addresses the task and nothing in it is clearly invented, contradictory or unsafe. It does not have to be perfect.
 ok is false when the answer is empty, refuses without a good reason, answers a different question, contradicts itself, or states something that is plainly impossible.
-The agent may have searched the web or run tools: do not fail an answer only because it states recent facts, versions, prices or dates you cannot verify yourself, especially when it cites a source for them.`;
+The agent may have searched the web or run tools: do not fail an answer only because it states recent facts, versions, prices or dates you cannot verify yourself, especially when it cites a source for them.
+When the task is a greeting, small talk, a test message or too vague to act on, a short friendly reply, a summary of what the agent can do or a clarifying question is a good answer: ok is true.`;
 
 /** Which checkers may read this agent's answer, best first: another family, then the same family. */
 function checkersFor(agentId, checkers, { mode }) {

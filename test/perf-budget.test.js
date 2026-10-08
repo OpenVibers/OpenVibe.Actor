@@ -20,8 +20,8 @@ const BUDGETS = {
     jsRawKB: 264,   // 239.8
     jsBrotliKB: 62.5,   // 56.5
     cssFiles: 2,   // 2 (actor.css + the cached /shared/showcase.css)
-    cssRawKB: 22.5,   // 20.2
-    cssBrotliKB: 5.2,   // 4.7
+    cssRawKB: 26.5,   // 24.2 (the task page's outcome card and timeline)
+    cssBrotliKB: 6,   // 5.4
     externalFiles: 0,   // 0
 };
 

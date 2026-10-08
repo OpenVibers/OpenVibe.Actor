@@ -9,6 +9,10 @@
  *   best     → balanced among agents that offer quality:high; when none can take the task, balanced among the rest,
  *              and the explanation says so (ADR-044 leaves what `best` maps to open; this is the first answer)
  *
+ * A hand-off (escalate: the agent before it failed, or its answer failed the check) never goes to a weaker agent: it
+ * requires the quality tier of the agent that failed (quality:standard after the runtime), so a task is never handed
+ * from a capable model to a smaller one. Private mode has only the open model, so it never escalates.
+ *
  * The answer is a platform.placement-result@1, stored on the task as its explanation. An agent that is down carries
  * the catalog's reason instead of the planner's "health down"; agents already tried on this task are listed with why.
  */
@@ -20,13 +24,13 @@ const { requirementFor } = require('./classify');
 const OBJECTIVE = { cheapest: 'cheapest', balanced: 'balanced', fastest: 'lowest-latency', private: 'private', best: 'balanced' };
 const MODES = Object.keys(OBJECTIVE);
 
-function planOnce({ cls, mode, pinned, budgetUsd, config, tried, now, measured, quality }) {
+function planOnce({ cls, mode, pinned, budgetUsd, config, tried, now, measured, quality, floor = null }) {
     const req = {
         kind: `actor.${cls}`,
         mobility: 'job',
         latency_class: 'interactive',
         objective: OBJECTIVE[mode],
-        capabilities: [requirementFor(cls), ...(quality ? ['quality:high'] : [])],
+        capabilities: [requirementFor(cls), ...(quality ? ['quality:high'] : floor ? [`quality:${floor}`] : [])],
     };
     if (mode === 'private') req.trust = ['first-party'];
     if (budgetUsd != null) req.max_cost_usd = budgetUsd;
@@ -47,11 +51,11 @@ function planOnce({ cls, mode, pinned, budgetUsd, config, tried, now, measured, 
  * route({ cls, mode, agent, budgetUsd, config, tried: Map<id, why>, now, measured }) → platform.placement-result@1
  * (selected is null when nothing can take the task; the reasons say why).
  */
-function route({ cls, mode = 'balanced', agent = null, budgetUsd = null, config, tried = new Map(), now = Date.now(), measured = {} }) {
+function route({ cls, mode = 'balanced', agent = null, budgetUsd = null, config, tried = new Map(), now = Date.now(), measured = {}, floor = null }) {
     const triedIds = new Set(tried.keys());
-    let r = planOnce({ cls, mode, pinned: agent, budgetUsd, config, tried: triedIds, now, measured, quality: mode === 'best' });
+    let r = planOnce({ cls, mode, pinned: agent, budgetUsd, config, tried: triedIds, now, measured, quality: mode === 'best', floor });
     if (mode === 'best' && !r.selected) {
-        const fallback = planOnce({ cls, mode, pinned: agent, budgetUsd, config, tried: triedIds, now, measured, quality: false });
+        const fallback = planOnce({ cls, mode, pinned: agent, budgetUsd, config, tried: triedIds, now, measured, quality: false, floor });
         if (fallback.selected) r = { ...fallback, reasons: ['best mode: no high-quality agent can take this task, so the best of the rest', ...(fallback.reasons || [])] };
     }
     for (const [id, why] of tried) r.candidates.push({ id, eligible: false, excluded_because: `tried first: ${why}`.slice(0, 200) });

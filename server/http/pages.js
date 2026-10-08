@@ -188,10 +188,10 @@ ${a.available ? '' : html`<p class="muted small">${a.reason}</p>`}
         const pageRows = await store.listTasks(s, requesterOf(req), { limit: 30, before });
         const today = await store.spendToday(s, requesterOf(req));
         page(req, res, {
-            title: 'Your tasks', crumbs: [{ label: 'Your tasks' }],
+            title: 'Your tasks', crumbs: [{ label: 'Your tasks' }], styles: [showcase.STYLESHEET],
             body: html`<h1>Your tasks</h1>
 <p class="muted">Today: ${today.tasks} of ${tier.tasksPerDay} free tasks, ${usd(today.usd)} of ${usd(tier.perDayUsd)}. Tasks are kept ${store.RETENTION_DAYS} days.</p>
-<p><a class="sc-btn sc-primary" href="/#task">New task</a></p>
+${taskForm(req)}
 ${table(['Task', 'State', 'Agent', 'Cost', 'Started'], pageRows.rows.map((t) => {
                 const result = t.result ? (typeof t.result === 'string' ? JSON.parse(t.result) : t.result) : null;
                 return [html`<a href="/tasks/${t.id}">${t.task.length > 90 ? `${t.task.slice(0, 89)}…` : t.task}</a>`, badge(t.state, STATE_KIND[t.state]), result ? (catalog.byId(result.agent) || {}).name || result.agent : '—', usd(t.cost_usd == null ? null : Number(t.cost_usd)), time(t.created_at)];
@@ -201,6 +201,12 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
     });
 
     // ── One task ─────────────────────────────────────────────
+    // Read top to bottom: what was asked and where it stands, the outcome (the answer, why it did not finish, or the
+    // live progress), then how it went — one block per agent that tried, its steps, its check, and a refused answer
+    // folded away — and why that agent, folded.
+    const STATE_TEXT = { queued: 'Waiting to start', running: 'Working', verifying: 'Checking the answer', succeeded: 'Done', failed: 'Didn\'t finish', cancelled: 'Cancelled' };
+    const CLASS_TEXT = { answer: 'Answer', lookup: 'Lookup', research: 'Research', web: 'Web search', code: 'Code' };
+
     r.get('/tasks/:id', async (req, res) => {
         const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
         if (!row || row.requester !== requesterOf(req)) {
@@ -209,46 +215,112 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         const t = store.toWire(row, { baseUrl: config.baseUrl });
         const events = await store.eventsAfter(s, row.id, 0);
         const open = store.OPEN.includes(row.state);
+        const cls = (events.find((e) => e.step === 'plan' && !e.agent && /"(\w+)" task/.test(e.text || '')) || { text: '' }).text.match(/"(\w+)"/);
+        const kind = cls ? CLASS_TEXT[cls[1]] || cls[1] : null;
         page(req, res, {
-            title: 'Task', crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: row.id }],
+            title: row.task.length > 60 ? `${row.task.slice(0, 59)}…` : row.task,
+            crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task' }],
             scripts: open ? ['js/task.js'] : [],
+            styles: [showcase.STYLESHEET],
             noReferrer: true,
             body: html`${open ? raw('<noscript><meta http-equiv="refresh" content="4"></noscript>') : ''}
-<article class="task" data-task="${row.id}" data-last="${row.last_seq}" data-open="${open ? '1' : ''}">
+<article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${open ? '1' : ''}">
+<header class="task-head">
+<p class="task-status"><span class="pill pill-${t.state}">${STATE_TEXT[t.state]}</span>${kind ? html`<span class="chip">${kind}</span>` : ''}<span class="chip">${MODE_LABEL[t.mode]}</span><span class="chip" id="task-cost">${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${time(t.created_at)}</p>
 <h1 class="task-text">${row.task}</h1>
-<p class="task-meta">${badge(t.state, STATE_KIND[t.state])} · ${MODE_LABEL[t.mode]} · budget ${usd(t.budget.per_task_usd)} · cost <span id="task-cost">${usd(t.cost ? t.cost.usd : null)}</span> · ${time(t.created_at)}</p>
-${open ? html`<form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form>` : ''}
-${t.result ? resultBlock(t.result) : ''}
-${t.error ? notice(html`<strong>${t.state === 'failed' ? 'It did not finish' : 'Stopped'}.</strong> ${t.error.detail}`, 'warn') : ''}
-${t.state === 'cancelled' && !t.error ? notice('Cancelled. What was spent before the cancel stays spent.') : ''}
-<section class="progress" aria-labelledby="h-steps"><h2 id="h-steps">Steps</h2>
-<ol class="steps-log" id="steps-log">${events.filter((e) => e.kind === 'output').map(stepItem)}</ol>
-${open ? html`<p class="muted small" id="live-note">Working… this page updates as the agent works.</p>` : ''}</section>
+</header>
+${outcome(t, row)}
+<section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
+<div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div>
+${open ? html`<p class="muted small live-note" id="live-note"><span class="dot-pulse" aria-hidden="true"></span> Updating as the agent works.</p>` : ''}
+</section>
 ${t.explanation ? explanationBlock(t.explanation) : ''}
-<p class="muted small">Need it in code? <code>GET /api/v1/tasks/${row.id}</code> (<a href="/docs">API</a>).</p>
+<p class="muted small api-hint">In code: <code>GET /api/v1/tasks/${row.id}</code> · <a href="/docs">API</a></p>
 </article>`,
         });
     });
 
-    function resultBlock(result) {
+    /** The outcome card: the first thing under the task. */
+    function outcome(t, row) {
+        if (t.state === 'succeeded') return resultBlock(t.result, t);
+        const again = html`<form method="post" action="/tasks" class="inline"><input type="hidden" name="task" value="${row.task}"><input type="hidden" name="mode" value="best"><button class="sc-btn sc-primary" type="submit">Try again in Best mode</button></form> <a class="sc-btn" href="/#task">New task</a>`;
+        if (t.state === 'failed') {
+            return html`<section class="outcome outcome-bad" role="status"><h2>Actor couldn't finish this</h2><p>${friendlyError(t.error)}</p><div class="outcome-actions">${again}</div>${t.error ? html`<p class="muted small">Code <code>${t.error.code}</code></p>` : ''}</section>`;
+        }
+        if (t.state === 'cancelled') return html`<section class="outcome" role="status"><h2>Cancelled</h2><p>What was spent before the cancel stays spent.</p><div class="outcome-actions">${again}</div></section>`;
+        return html`<section class="outcome outcome-live" role="status" aria-live="polite"><h2><span class="dot-pulse" aria-hidden="true"></span> <span id="live-state">${STATE_TEXT[t.state]}…</span></h2><p class="muted">This page fills in as the agent works. You can leave and come back: the task keeps running.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
+    }
+
+    /** What went wrong, for a person; the code stays visible underneath for anyone who needs it. */
+    function friendlyError(err) {
+        if (!err) return 'It stopped without saying why.';
+        const plain = {
+            'actor.agents.exhausted': 'No agent gave an answer that passed its check, so nothing unchecked was shown to you. Trying again in Best mode starts with the strongest agent.',
+            'actor.check.unavailable': 'The answer could not be checked, so it was not delivered. Try again in a minute.',
+            'actor.task.timeout': 'It ran too long and was stopped.',
+            'actor.task.interrupted': 'Actor restarted while this was running. Nothing more was charged; ask again.',
+        };
+        return plain[err.code] || err.detail;
+    }
+
+    function resultBlock(result, t) {
         const agent = catalog.byId(result.agent);
-        return html`<section class="answer" aria-labelledby="h-answer"><h2 id="h-answer">Answer</h2>
+        const checked = result.checked || {};
+        return html`<section class="outcome outcome-ok answer" aria-labelledby="h-answer"><h2 id="h-answer" class="sr-only">Answer</h2>
 <div class="prose">${raw(markdown(result.answer, { headingOffset: 2 }))}</div>
-${result.sources && result.sources.length ? html`<h3>Sources</h3><ul class="sources">${result.sources.map((u) => html`<li><a href="${u}" rel="nofollow ugc noopener" target="_blank">${u}</a></li>`)}</ul>` : ''}
-<p class="muted small">By ${agent ? agent.name : result.agent}${result.model ? html` (<code>${result.model}</code>)` : ''} · checked by ${result.checked && result.checked.by}${result.checked && !result.checked.cross_family ? ' (same family)' : ''}${result.checked && result.checked.reason ? `: ${result.checked.reason}` : ''}</p>
+${result.sources && result.sources.length ? html`<div class="sources"><h3>Sources</h3><ul>${result.sources.map((u) => html`<li><a href="${u}" rel="nofollow ugc noopener" target="_blank">${u.replace(/^https?:\/\//, '').slice(0, 90)}</a></li>`)}</ul></div>` : ''}
+<p class="answer-foot"><span>${agent ? agent.name : result.agent}${result.model ? html` · <code>${result.model}</code>` : ''}</span><span>✓ checked by ${checked.by}${checked.cross_family ? ' (another model family)' : ' (same family)'}</span><span>${t.cost ? usd(t.cost.usd) : '$0'}</span></p>
+</section>`;
+    }
+
+    /**
+     * The events grouped by agent: an attempt starts with the plan or hand-off event that names its agent. A text event
+     * marked as an error right after a failed check is the answer that check refused; any other error text is the agent
+     * stopping.
+     */
+    function attemptsOf(events) {
+        const out = [];
+        let cur = null;
+        let lastCheckFailed = false;
+        for (const e of events) {
+            if (e.kind !== 'output') continue;
+            if ((e.step === 'plan' || e.step === 'handoff') && e.agent) {
+                cur = { agent: e.agent, why: e.text, steps: [], refused: null, check: null, stopped: null };
+                out.push(cur);
+                lastCheckFailed = false;
+                continue;
+            }
+            if (!cur) continue;
+            if (e.step === 'check') { cur.check = e; lastCheckFailed = !!e.is_error; continue; }
+            if (e.step === 'text' && e.is_error && lastCheckFailed) { cur.refused = e.text; continue; }
+            if (e.step === 'text' && e.is_error) { cur.stopped = e.text; continue; }
+            cur.steps.push(e);
+        }
+        return out;
+    }
+
+    function attemptBlock(a, i) {
+        const agent = catalog.byId(a.agent);
+        const outcomeBadge = a.check ? (a.check.is_error ? badge('answer refused', 'bad') : badge('passed', 'ok')) : a.stopped ? badge('stopped', 'warn') : '';
+        return html`<section class="attempt" data-agent="${a.agent}">
+<header class="attempt-head"><span class="attempt-n">${i + 1}</span><b>${agent ? agent.name : a.agent}</b>${outcomeBadge}</header>
+<ol class="tl">${a.steps.map(stepItem)}
+${a.stopped ? html`<li class="tl-item tl-err"><span class="tl-k">Stopped</span><span class="tl-v">${a.stopped}</span></li>` : ''}
+${a.check ? html`<li class="tl-item ${a.check.is_error ? 'tl-err' : 'tl-ok'}"><span class="tl-k">Check</span><span class="tl-v">${String(a.check.text || '').replace(/^(Checked|Check failed)( by \w+( \(same family\))?)?: ?/, '')}</span></li>` : ''}
+</ol>
+${a.refused ? html`<details class="refused"><summary>See the answer that didn't pass</summary><div class="prose">${raw(markdown(a.refused, { headingOffset: 3 }))}</div></details>` : ''}
 </section>`;
     }
 
     function stepItem(e) {
-        const label = { plan: 'Plan', text: 'Says', tool_call: 'Uses', tool_result: 'Got', check: 'Check', handoff: 'Hands on' }[e.step] || e.step;
-        const body = e.step === 'tool_call' ? html`<code>${e.tool}</code> ${e.input || ''}` : e.step === 'tool_result' ? html`<code>${e.tool}</code> <span class="muted">${(e.text || '').slice(0, 240)}</span>` : (e.text || '');
-        return html`<li class="step step-${e.step}${e.is_error ? ' err' : ''}"><span class="step-k">${label}</span><span class="step-v">${body}</span></li>`;
+        if (e.step === 'tool_call') return html`<li class="tl-item tl-tool"><span class="tl-k">Used</span><span class="tl-v"><code>${e.tool}</code> ${e.input || ''}</span></li>`;
+        if (e.step === 'tool_result') return html`<li class="tl-item tl-result${e.is_error ? ' tl-err' : ''}"><span class="tl-k">Got</span><span class="tl-v"><span class="muted">${(e.text || '').slice(0, 220)}</span></span></li>`;
+        return html`<li class="tl-item tl-say"><span class="tl-k">Note</span><span class="tl-v">${e.text || ''}</span></li>`;
     }
 
     function explanationBlock(explanation) {
         return html`<details class="why"><summary>Why this agent</summary>
-${explanation.map((p, i) => html`<h3>${i ? `Attempt ${i + 1}` : 'First choice'}: ${p.selected ? (catalog.byId(p.selected) || {}).name || p.selected : 'no agent'} <span class="muted small">(${p.objective})</span></h3>
-${(p.reasons || []).length ? html`<p class="muted">${p.reasons.join('; ')}</p>` : ''}
+${explanation.map((p, i) => html`<h3>${i ? `Hand-off ${i}` : 'First choice'}: ${p.selected ? (catalog.byId(p.selected) || {}).name || p.selected : 'no agent'} <span class="muted small">(${p.objective})</span></h3>
 ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates || []).map((c) => [(catalog.byId(c.id) || {}).name || c.id, c.eligible ? 'yes' : 'no', c.estimated_cost_usd != null ? `~${usd(c.estimated_cost_usd)}` : '—', c.excluded_because || (c.id === p.selected ? 'picked' : '')]))}`)}
 </details>`;
     }
