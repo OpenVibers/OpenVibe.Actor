@@ -235,7 +235,7 @@ ${t.explanation ? explanationBlock(t.explanation) : ''}
         return html`<section class="answer" aria-labelledby="h-answer"><h2 id="h-answer">Answer</h2>
 <div class="prose">${raw(markdown(result.answer, { headingOffset: 2 }))}</div>
 ${result.sources && result.sources.length ? html`<h3>Sources</h3><ul class="sources">${result.sources.map((u) => html`<li><a href="${u}" rel="nofollow ugc noopener" target="_blank">${u}</a></li>`)}</ul>` : ''}
-<p class="muted small">By ${agent ? agent.name : result.agent}${result.model ? html` (<code>${result.model}</code>)` : ''} · checked by ${result.checked && result.checked.by}${result.checked && !result.checked.cross_family ? ' (same family: private mode)' : ''}${result.checked && result.checked.reason ? `: ${result.checked.reason}` : ''}</p>
+<p class="muted small">By ${agent ? agent.name : result.agent}${result.model ? html` (<code>${result.model}</code>)` : ''} · checked by ${result.checked && result.checked.by}${result.checked && !result.checked.cross_family ? ' (same family)' : ''}${result.checked && result.checked.reason ? `: ${result.checked.reason}` : ''}</p>
 </section>`;
     }
 
