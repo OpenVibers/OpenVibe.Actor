@@ -9,7 +9,7 @@
   "domain": "openvibe.actor",
   "contracts": "openvibe-contracts v0.115.0",
   "sdk": "openvibe-sdk v0.36.0",
-  "shared": "openvibe-shared v2.15.0",
+  "shared": "openvibe-shared v2.17.0",
   "packages": [
     "openvibe-contracts v0.115.0",
     "openvibe-sdk v0.36.0",
@@ -48,5 +48,5 @@
     "cross-family answer checks",
     "live task progress"
   ],
-  "updated": "2026-10-08"
+  "updated": "2026-10-09"
 }
