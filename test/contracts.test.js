@@ -3,7 +3,7 @@
  * The released contracts (the pinned openvibe-contracts tag, 0.115.0 or later) describe what Actor does. The
  * released `actor` service manifest and its four capability manifests are checked against the code: the domain,
  * port, health and ready paths, the capabilities (each implemented by exactly the routes in server/http/api.js, each
- * route guarded by the one capability it names), no events, and the shapes Actor answers with (the contracts'
+ * route guarded by the one capability it names), no events but the account ones (ADR-033), and the shapes Actor answers with (the contracts'
  * actor.agent-list-result@1, platform.placement-result@1 and platform.task@1).
  */
 const assert = require('assert');
@@ -100,9 +100,9 @@ function codeRoutes() {
         }
     });
 
-    await check('no events: the manifest produces and consumes none, and the capabilities declare none', () => {
+    await check('events: the manifest produces none and consumes only the two account events (ADR-033); the capabilities declare none', () => {
         assert.deepStrictEqual(manifest.eventsProduced, []);
-        assert.deepStrictEqual(manifest.eventsConsumed, []);
+        assert.deepStrictEqual([...manifest.eventsConsumed].sort(), ['network.account.deleted', 'network.account.export_requested']);
         for (const id of CAPS) assert.deepStrictEqual(contracts.capabilities.get(id).events, [], id);
     });
 
