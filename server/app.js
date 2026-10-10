@@ -27,6 +27,7 @@ const { createEngine } = require('./tasks/engine');
 const { createTaskStream } = require('./tasks/stream');
 const { createPrincipal } = require('./http/principal');
 const { createApi } = require('./http/api');
+const resourceIndex = require('./registry/resource-index');
 const { createPageRoutes } = require('./http/pages');
 const { createActorReadiness } = require('./observability');
 const { createCallerLimits } = require('./http/caller-limits');
@@ -139,6 +140,8 @@ async function createApp(opts = {}) {
 
     // ── API ─────────────────────────────────────────────────
     app.use('/api/v1', rateLimit({ windowMs: 60_000, limit: Number(process.env.ACTOR_API_RATE_LIMIT_PER_MIN) || 240, standardHeaders: true, legacyHeaders: false, handler: (req, res) => contracts.http.sendProblem(res, 429, 'rate_limited', { detail: 'too many requests from this address; retry shortly', ctx: req.ov }) }));
+    // OpenVibe.Services reads Actor's task index through a first-party service token on loopback.
+    app.use('/api/v1/resources', resourceIndex.router(ctx));
     app.use('/api/v1', createApi(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 
