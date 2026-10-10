@@ -113,6 +113,27 @@ const { boot, check, done } = require('./helpers/boot');
             }
         });
 
+        await check('owner narrows to one person\'s tasks, combines with project and kind, pages once each, and is checked', async () => {
+            const mine = await page(`?owner=${user.subject}`);
+            assert.deepStrictEqual(mine.resources.map((x) => x.id), [a, c].sort());
+            assert.ok(mine.resources.every((x) => x.owner && x.owner.id === user.subject));
+            assert.deepStrictEqual((await page(`?owner=${user.subject}&project=${projectA}&kind=actor.task`)).resources.map((x) => x.id), [a]);
+            assert.deepStrictEqual((await page(`?owner=${user.subject}&kind=actor.other`)).resources, []);
+            assert.deepStrictEqual((await page('?owner=agt_01J8ZQ4Y7N3M2K1H0G9F8E7D6C')).resources, [], 'an agent\'s task names no owner');
+            const seen = [];
+            let cursor = null;
+            do {
+                const body = await page(`?owner=${user.subject}&limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+                seen.push(...body.resources.map((x) => x.id));
+                cursor = body.next_cursor;
+            } while (cursor);
+            assert.deepStrictEqual(seen, [a, c].sort());
+            for (const bad of ['svc:live', 'usr_short', 'user:usr_01J8ZQ4Y7N3M2K1H0G9F8E7D6C']) {
+                const response = await t.get(`/api/v1/resources?owner=${encodeURIComponent(bad)}`, auth);
+                assert.deepStrictEqual([response.status, response.json().code], [400, 'resources.bad_query'], bad);
+            }
+        });
+
         await check('one OVRN resolves only a present task in its actual project', async () => {
             const name = `ovrn:actor:${projectA}:task/${a}`;
             const one = await t.get(`/api/v1/resources/${encodeURIComponent(name)}`, auth);
