@@ -36,18 +36,26 @@ async function createTask({ s, config, engine, principal, body }) {
         }
     }
     const retryAfter = untilMidnight(s.now());
-    const mine = await store.spendToday(s, principal.requester);
-    if (mine.tasks >= tier.tasksPerDay) return { status: 429, code: 'actor.allowance.exhausted', detail: `The free tier runs ${tier.tasksPerDay} tasks a day; it resets at midnight UTC.`, retryAfter };
-    if (mine.usd >= perDay) return { status: 429, code: 'actor.budget.day_spent', detail: `Today's tasks already cost $${mine.usd.toFixed(3)} of the $${perDay} daily budget; it resets at midnight UTC.`, retryAfter };
-    const all = await store.spendToday(s, '*');
-    if (all.usd >= config.spendCapUsdPerDay) return { status: 503, code: 'actor.capacity.spent', detail: 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.', retryAfter };
-
-    const row = await store.insertTask(s, {
-        id: s.newId('tsk'), requester: principal.requester, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,
-        budget_task: perTask, budget_day: perDay, idem_key: body.idempotency_key || null, idem_hash: body.idempotency_key ? hash : null, created_at: s.iso(),
+    // Check and insert in one transaction under the day's spend-row locks, counting what open tasks may still spend:
+    // concurrent creations cannot all pass on the same reading and overrun the person's or the operator's cap.
+    const out = await s.tx(async () => {
+        const { mine, all } = await store.lockSpendToday(s, principal.requester);
+        if (mine.tasks >= tier.tasksPerDay) return { status: 429, code: 'actor.allowance.exhausted', detail: `The free tier runs ${tier.tasksPerDay} tasks a day; it resets at midnight UTC.`, retryAfter };
+        if (mine.usd >= perDay || mine.usd + mine.reserved + perTask > perDay + 1e-9) {
+            return { status: 429, code: 'actor.budget.day_spent', detail: `Today's tasks cost $${mine.usd.toFixed(3)} and running ones may use $${mine.reserved.toFixed(3)} of the $${perDay} daily budget; it resets at midnight UTC.`, retryAfter };
+        }
+        if (all.usd >= config.spendCapUsdPerDay || all.usd + all.reserved + perTask > config.spendCapUsdPerDay + 1e-9) {
+            return { status: 503, code: 'actor.capacity.spent', detail: 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.', retryAfter };
+        }
+        const row = await store.insertTask(s, {
+            id: s.newId('tsk'), requester: principal.requester, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,
+            budget_task: perTask, budget_day: perDay, idem_key: body.idempotency_key || null, idem_hash: body.idempotency_key ? hash : null, created_at: s.iso(),
+        });
+        return { status: 201, task: row };
     });
-    engine.submit(row.id);
-    return { status: 201, task: row };
+    // The engine starts the task only once its row has committed.
+    if (out.status === 201) engine.submit(out.task.id);
+    return out;
 }
 
 module.exports = { createTask, untilMidnight };

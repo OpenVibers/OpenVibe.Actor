@@ -77,6 +77,25 @@ async function addSpend(s, requester, usd, { tasks = 0 } = {}) {
     }
 }
 
+/**
+ * Lock today's spend rows for a check-then-insert (the global '*' row first, then the person's, so two creations
+ * never deadlock) and read them with what open tasks may still spend (their per-task budgets: spend accrues as a
+ * task runs, so a check that only saw accrued spend would let concurrent tasks overrun the caps). Inside a
+ * transaction. → { mine: { usd, tasks, reserved }, all: { usd, reserved } }
+ */
+async function lockSpendToday(s, requester) {
+    const day = dayOf(s.now());
+    await s.db.query(`INSERT INTO spend_daily (requester, day, usd, tasks) VALUES ('*', $1, 0, 0), ($2, $1, 0, 0) ON CONFLICT (requester, day) DO NOTHING`, [day, requester]);
+    const all = await s.db.maybe(`SELECT usd FROM spend_daily WHERE requester = '*' AND day = $1 FOR UPDATE`, [day]);
+    const mine = await s.db.maybe('SELECT usd, tasks FROM spend_daily WHERE requester = $1 AND day = $2 FOR UPDATE', [requester, day]);
+    const open = await s.db.maybe(`SELECT COALESCE(sum(budget_task), 0) AS all_reserved, COALESCE(sum(budget_task) FILTER (WHERE requester = $1), 0) AS mine_reserved
+        FROM tasks WHERE state = ANY($2)`, [requester, OPEN]);
+    return {
+        mine: { usd: Number(mine.usd), tasks: Number(mine.tasks), reserved: Number(open.mine_reserved) },
+        all: { usd: Number(all.usd), reserved: Number(open.all_reserved) },
+    };
+}
+
 async function spendToday(s, requester) {
     const row = await s.db.maybe('SELECT usd, tasks FROM spend_daily WHERE requester = $1 AND day = $2', [requester, dayOf(s.now())]);
     return { usd: row ? Number(row.usd) : 0, tasks: row ? Number(row.tasks) : 0 };
@@ -124,4 +143,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, addSpend, spendToday, failInterrupted, prune, toWire, subjectRef, dayOf, OPEN, RETENTION_DAYS };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, addSpend, spendToday, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, OPEN, RETENTION_DAYS };
