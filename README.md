@@ -41,7 +41,7 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 
 | Route | Capability | |
 |---|---|---|
-| `POST /api/v1/tasks` | `actor.task.create` | `actor.task-create-request@1` → `platform.task@1` (201, queued) |
+| `POST /api/v1/tasks` | `actor.task.create` | `actor.task-create-request@1` → `platform.task@1` (201, queued; with `webhooks`, the answer carries `webhook_secret` once) |
 | `GET /api/v1/tasks/:id` | `actor.task.read` | the task |
 | `GET /api/v1/tasks/:id/events` | `actor.task.read` | server-sent events, `actor.task-event@1`, resumable with `Last-Event-ID` |
 | `POST /api/v1/tasks/:id/cancel` | `actor.task.create` | stop it |
@@ -58,6 +58,12 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 - **An app, agent or service:** a token for audience `openvibe.actor` that holds the route's capability, granted on OpenVibe.Services. Its tasks belong to the token's project.
 
 **What a caller can see:** a task is visible only to its requester, or to tokens of its project. Anyone else gets 404, the same answer as a task that doesn't exist.
+
+**Webhooks:** a task may register up to 8 https endpoints, each with the state changes to deliver (`webhooks: [{ url, events }]`, the names of `state`).
+- **Signing:** the answer that creates the task carries `webhook_secret`, minted for that task. It is in no read or list, never exported, and erased once the task has ended and its deliveries are done. Each delivery is `actor.task-webhook@1` (`{ type: "actor.task.state", delivery_id, state, task }`, the task as it was then), signed like an Events delivery (`X-OpenVibe-Timestamp` + `X-OpenVibe-Signature-V2`), so a receiver checks it with openvibe-sdk/events `verifyDeliveryV2(rawBody, headers, secret)`. The delivery id stays the same across retries; dedupe on it.
+- **Outcomes:** 2xx is delivered; 410, or a URL refused at send time, ends the delivery; anything else is retried after 10 s, 1 min, 5 min, 30 min, 2 h, 6 h and 12 h, then fails.
+- **Where Actor may connect:** a webhook URL is the one address a caller chooses (`server/net/webhook-post.js`): https on port 443 or 8443, no credentials, public addresses only. It is checked at creation (`actor.webhook.refused`) and again at send time through openvibe-shared/egress, so a name that later resolves to a private address is refused. Redirects are never followed.
+- **Not yet:** a project secret named by reference (`secret_ref`) is refused until project secrets exist.
 
 **Errors:** RFC 9457 problems. The codes are on [openvibe.actor/docs](https://openvibe.actor/docs#errors).
 
@@ -193,7 +199,7 @@ Reporting a vulnerability: [SECURITY.md](SECURITY.md).
 Part of the [OpenVibe network](https://openvibe.network). Built in the open by [OpenVibers](https://github.com/OpenVibers).
 
 <!-- versions:start -->
-- openvibe-contracts: v0.129.0
+- openvibe-contracts: v0.133.0
 - openvibe-sdk: v0.38.0
 - openvibe-shared: v3.0.1
 <!-- versions:end -->

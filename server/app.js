@@ -24,6 +24,8 @@ const { createSso } = require('./auth/sso');
 const catalog = require('./agents/catalog');
 const { createAdapters } = require('./agents/adapters');
 const { createEngine } = require('./tasks/engine');
+const { createWebhooks } = require('./tasks/webhooks');
+const { createWebhookPoster } = require('./net/webhook-post');
 const { createTaskStream } = require('./tasks/stream');
 const { createPrincipal } = require('./http/principal');
 const { createApi } = require('./http/api');
@@ -42,7 +44,8 @@ const VERSION = require('../package.json').version;
 /**
  * opts: config, store, now (clock), fetchImpl (Network), providerFetch (model providers and OpenVibe services), log,
  * limitsNow, callerLimits (false: count nobody, tests only), valkey, adapters (tests: stand-in agents),
- * accountSend (a stand-in for Network's internal routes; tests only)
+ * accountSend (a stand-in for Network's internal routes; tests only), webhookPost (a stand-in for the guarded webhook
+ * poster; tests only)
  */
 async function createApp(opts = {}) {
     const config = opts.config || configLib.load();
@@ -54,9 +57,14 @@ async function createApp(opts = {}) {
     const sso = createSso({ config, keys, fetchImpl, now: s.now, log });
     const stream = createTaskStream({ log });
     const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: opts.providerFetch || globalThis.fetch, log });
-    const engine = createEngine({ config, s, adapters, stream, now: s.now, log });
+    // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.
+    const webhooks = createWebhooks({
+        s, config, now: s.now, log,
+        post: opts.webhookPost || createWebhookPoster({ userAgent: `OpenVibe.Actor/${VERSION} (+https://openvibe.actor/docs#webhooks)`, timeoutMs: config.webhooks.timeoutMs }),
+    });
+    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log });
     const principal = createPrincipal({ config, keys });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, principal, log };
+    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, log };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;

@@ -19,7 +19,7 @@ const PRUNE_EVERY_MS = 6 * 60 * 60_000;
 function createLifecycle({ server, ctx, exit, signals, timers = [], extra = [] }) {
     return gracefulStop({
         name: 'Actor', server, deadlineExitCode: 0, exit, signals, deadlineMs: 10_000,
-        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.keys.client.stop(), () => ctx.s.close(), ...extra],
+        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.webhooks.stop(), () => ctx.keys.client.stop(), () => ctx.s.close(), ...extra],
     });
 }
 
@@ -29,6 +29,10 @@ async function start() {
     // A task a stopped process left open did not finish: it is recorded so, never re-run.
     const interrupted = await store.failInterrupted(ctx.s);
     if (interrupted.length) console.warn(`[Actor] ${interrupted.length} task(s) interrupted by the last stop were marked failed`);
+    // Their webhooks hear `failed` like any other end; deliveries a stop left half-sent go out again (same delivery id).
+    for (const id of interrupted) await ctx.webhooks.enqueue(id, 'failed').catch((err) => console.warn('[Actor] webhook enqueue failed:', id, err && err.message));
+    await ctx.webhooks.recover();
+    ctx.webhooks.start();
 
     const server = app.listen(config.port, config.host, () => {
         const available = require('./agents/catalog').list(config).filter((a) => a.available).map((a) => a.id);

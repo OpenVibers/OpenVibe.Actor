@@ -108,6 +108,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             'server/agents/providers.js': 'the configured provider base URLs (DeepSeek, OpenAI, the open model) with the operator\'s keys',
             'server/agents/tools.js': 'the configured OpenVibe.Tools and OpenVibe.Search bases; ids come from Tools\' catalog, a page URL goes to Tools as input',
             'server/events-consumer.js': 'OpenVibe.Events: the configured events.url (ACTOR_EVENTS_URL), to create the two ADR-033 subscriptions at boot',
+            'server/net/webhook-post.js': 'a task\'s webhook URL (plan T17), the one caller-chosen address: https on 443/8443 to public addresses only, checked at creation and at send time through openvibe-shared/egress safeLookup, never a redirect (test/webhooks.test.js)',
         };
         const root = path.join(__dirname, '..');
         const found = [];

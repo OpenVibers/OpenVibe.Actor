@@ -22,9 +22,10 @@ function subjectRef(requester) {
 
 async function insertTask(s, t) {
     await s.db.query(
-        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12)`,
-        [t.id, t.requester, t.project_id || null, t.task, t.mode, t.agent || null, t.budget_task, t.budget_day, t.idem_key || null, t.idem_hash || null, t.created_at, t.via || null]);
+        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14)`,
+        [t.id, t.requester, t.project_id || null, t.task, t.mode, t.agent || null, t.budget_task, t.budget_day, t.idem_key || null, t.idem_hash || null, t.created_at, t.via || null,
+            t.webhooks && t.webhooks.length ? JSON.stringify(t.webhooks) : null, t.webhook_secret || null]);
     await addSpend(s, t.requester, 0, { tasks: 1 });
     return getTask(s, t.id);
 }
@@ -144,7 +145,10 @@ function toWire(row, { baseUrl }) {
     };
     if (row.project_id) t.project_id = row.project_id;
     if (t.explanation && !t.explanation.length) t.explanation = null;
+    // What the task registered; the signing secret is never part of the task as read (only the creating answer has it).
+    const hooks = parse(row.webhooks);
+    if (hooks && hooks.length) t.webhooks = hooks.map((h) => ({ url: h.url, events: h.events }));
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, addSpend, spendToday, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, OPEN, RETENTION_DAYS };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, addSpend, spendToday, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS };

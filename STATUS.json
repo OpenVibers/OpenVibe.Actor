@@ -7,11 +7,11 @@
   "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
   "port": 4950,
   "domain": "openvibe.actor",
-  "contracts": "openvibe-contracts v0.129.0",
+  "contracts": "openvibe-contracts v0.133.0",
   "sdk": "openvibe-sdk v0.38.0",
   "shared": "openvibe-shared v3.0.1",
   "packages": [
-    "openvibe-contracts v0.129.0",
+    "openvibe-contracts v0.133.0",
     "openvibe-sdk v0.38.0",
     "openvibe-shared v3.0.1"
   ],
@@ -46,7 +46,8 @@
     "other platforms' agents",
     "private mode on OpenVibe hardware",
     "cross-family answer checks",
-    "live task progress"
+    "live task progress",
+    "task webhooks (signed per task, retried with backoff, public https endpoints only)"
   ],
   "updated": "2026-10-10"
 }

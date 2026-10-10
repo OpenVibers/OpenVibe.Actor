@@ -22,7 +22,7 @@ const { check } = require('../agents/check');
 
 const MAX_ATTEMPTS = 2;
 
-function createEngine({ config, s, adapters, stream, now = () => Date.now(), log = console }) {
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
     let stopped = false;
@@ -39,6 +39,13 @@ function createEngine({ config, s, adapters, stream, now = () => Date.now(), log
         const ended = ['succeeded', 'failed', 'cancelled'].includes(state);
         await emit(id, { kind: ended ? 'end' : 'state', state, ...(agentForEvent ? { agent: agentForEvent } : {}) });
         if (ended) stream.end(id);
+        // Webhooks that asked for this state hear it; a delivery never holds the task up or fails it.
+        if (webhooks && row && row.webhooks) {
+            try {
+                await webhooks.enqueue(id, state);
+                if (ended) await webhooks.forgetSecretIfDone(id);
+            } catch (err) { log.warn('[Actor] webhook enqueue failed:', id, err && err.message); }
+        }
         return row;
     }
 

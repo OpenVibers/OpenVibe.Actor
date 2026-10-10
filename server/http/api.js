@@ -5,7 +5,8 @@
  *
  *   GET  /agents                 actor.agent.read (public)   the agent systems, their rate cards and availability
  *   POST /route                  actor.agent.read (public)   which agent a task would go to, and why (nothing runs)
- *   POST /tasks                  actor.task.create           give Actor a task (actor.task-create-request@1 → platform.task@1)
+ *   POST /tasks                  actor.task.create           give Actor a task (actor.task-create-request@1 → platform.task@1;
+ *                                                           with webhooks, the answer carries webhook_secret once)
  *   GET  /tasks                  actor.task.list             your tasks, newest first
  *   GET  /tasks/:id              actor.task.read             one task
  *   GET  /tasks/:id/events       actor.task.read             its live stream (actor.task-event@1, Last-Event-ID)
@@ -26,7 +27,7 @@ const { createTask } = require('../tasks/create');
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 function createApi(ctx) {
-    const { config, s, engine, stream, principal, limits } = ctx;
+    const { config, s, engine, stream, principal, limits, webhooks } = ctx;
     const r = asyncRouter();
     const problem = (req, res, status, code, detail, extra) => contracts.http.sendProblem(res, status, code, { detail, ctx: req.ov, extra });
 
@@ -60,13 +61,14 @@ function createApi(ctx) {
     const wire = (row) => store.toWire(row, { baseUrl: config.baseUrl });
 
     r.post('/tasks', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), async (req, res) => {
-        const out = await createTask({ s, config, engine, principal: req.principal, body: req.body || {} });
+        const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: req.body || {} });
         if (out.code) {
             if (out.retryAfter) res.set('Retry-After', String(out.retryAfter));
             return problem(req, res, out.status, out.code, out.detail);
         }
         if (out.status === 201) res.set('Location', `/api/v1/tasks/${out.task.id}`);
-        return res.status(out.status).json(wire(out.task));
+        // The signing secret, to its creator only, in this answer (and an idempotent repeat of it) and never again.
+        return res.status(out.status).json({ ...wire(out.task), ...(out.task.webhook_secret ? { webhook_secret: out.task.webhook_secret } : {}) });
     });
 
     r.get('/tasks', principal.requireCapability('actor.task.list'), limits.reads('actor.task.list'), async (req, res) => {
