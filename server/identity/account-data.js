@@ -10,8 +10,10 @@
  *                                     service's token.
  *   network.account.deleted           both go, and Actor confirms with counts.
  *
- * A task an app, agent or service ran for this person is NOT matched: its requester is `app:…`/`agent:…`/`service:…`,
- * and Network's deletion event carries only the person's `usr_…`, so only rows requested as `user:usr_…` are erased.
+ * A task an app, agent or service ran as itself is NOT matched: its requester is `app:…`/`agent:…`/`service:…`, and
+ * Network's deletion event carries only the person's `usr_…`, so only rows requested as `user:usr_…` are erased. A task
+ * a first-party service started FOR the person (X-OV-Subject; `via` names the service) is requested as `user:usr_…`:
+ * it is theirs, exported and erased with the rest.
  * task_events holds no person column at all — its task_id REFERENCES tasks(id) ON DELETE CASCADE — so a task's event
  * log goes with the task and task_events is not in the map. Nothing here is a secret: no token, key or credential is
  * stored, so every column of both tables may be exported.

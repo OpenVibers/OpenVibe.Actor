@@ -265,6 +265,44 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         assert.strictEqual(read.json().state, 'succeeded');
     });
 
+    await check('a first-party service may act for a person (X-OV-Subject): the task is theirs, the service sees only what it started', async () => {
+        const { serviceAuth } = contracts;
+        const now = Math.floor(Date.now() / 1000);
+        const mint = (sub, actorType, cap, extra = {}) => serviceAuth.signServiceToken({ iss: t.network.url, sub, actor_type: actorType, aud: ['openvibe.actor'], cap, ns: [], iat: now, exp: now + 300, jti: `tok_${crypto.randomBytes(6).toString('hex')}`, ...extra }, t.network.privatePem);
+        const watch = mint('svc:watch', 'service', ['actor.task.create', 'actor.task.read', 'actor.task.list']);
+        const owner = t.network.addUser('watcher');
+        t.providers.reset();
+        const ok = await t.get('/api/v1/tasks', { bearer: watch, headers: { 'X-OV-Subject': owner.subject }, json: { task: 'Your watch fired: look into it', idempotency_key: 'watch.run_1.0' } });
+        assert.strictEqual(ok.status, 201, ok.text);
+        assert.deepStrictEqual(ok.json().requester, { type: 'user', id: owner.subject }, 'the person\'s task');
+        valid(ok.json());
+        const row = await require('../server/tasks/store').getTask(t.ctx.s, ok.json().id);
+        assert.strictEqual(row.via, 'service:watch', 'and it records who started it');
+        const again = await t.get('/api/v1/tasks', { bearer: watch, headers: { 'X-OV-Subject': owner.subject }, json: { task: 'Your watch fired: look into it', idempotency_key: 'watch.run_1.0' } });
+        assert.deepStrictEqual([again.status, again.json().id], [200, ok.json().id], 'a retried delivery is the same task');
+        await t.waitFor(ok.json().id);
+
+        // The person sees it among their own; the service sees only what it started, not the person's other tasks.
+        const mine = await t.get('/api/v1/tasks', { as: owner });
+        assert.ok(mine.json().tasks.some((x) => x.id === ok.json().id));
+        const own = await t.get('/api/v1/tasks', { as: owner, json: { task: 'something of my own' }, headers: SAME });
+        assert.strictEqual(own.status, 201);
+        await t.waitFor(own.json().id);
+        const listed = await t.get('/api/v1/tasks', { bearer: watch, headers: { 'X-OV-Subject': owner.subject } });
+        assert.deepStrictEqual(listed.json().tasks.map((x) => x.id), [ok.json().id]);
+        assert.strictEqual((await t.get(`/api/v1/tasks/${own.json().id}`, { bearer: watch, headers: { 'X-OV-Subject': owner.subject } })).status, 404);
+        assert.strictEqual((await t.get(`/api/v1/tasks/${own.json().id}/cancel`, { bearer: watch, headers: { 'X-OV-Subject': owner.subject }, method: 'POST' })).status, 404, 'nor cancel it');
+
+        // Only a first-party service may name a person, and only a person.
+        const app = mint('app:app_01JAB2C3D4E5F6G7H8J9K0MNPT', 'app', ['actor.task.create'], { project_id: 'prj_01JAB2C3D4E5F6G7H8J9K0MNPR', env: 'production', ns: ['prj_01JAB2C3D4E5F6G7H8J9K0MNPR'] });
+        let r = await t.get('/api/v1/tasks', { bearer: app, headers: { 'X-OV-Subject': owner.subject }, json: { task: 'x' } });
+        assert.deepStrictEqual([r.status, r.json().code], [403, 'subject.not_delegated']);
+        r = await t.get('/api/v1/tasks', { bearer: watch, headers: { 'X-OV-Subject': 'svc:live' }, json: { task: 'x' } });
+        assert.deepStrictEqual([r.status, r.json().code], [400, 'subject.invalid']);
+        r = await t.get('/api/v1/tasks', { bearer: mint('svc:watch', 'service', ['actor.task.read']), headers: { 'X-OV-Subject': owner.subject }, json: { task: 'x' } });
+        assert.strictEqual(r.status, 403, 'the capability is still the service\'s to hold');
+    });
+
     await check('the free tier: tasks a day are counted and refused past the limit with Retry-After', async () => {
         const u = t.network.addUser('busy');
         const limit = t.config.allowance.tasksPerDay;

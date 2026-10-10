@@ -48,7 +48,7 @@ async function createTask({ s, config, engine, principal, body }) {
             return { status: 503, code: 'actor.capacity.spent', detail: 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.', retryAfter };
         }
         const row = await store.insertTask(s, {
-            id: s.newId('tsk'), requester: principal.requester, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,
+            id: s.newId('tsk'), requester: principal.requester, via: principal.via || null, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,
             budget_task: perTask, budget_day: perDay, idem_key: body.idempotency_key || null, idem_hash: body.idempotency_key ? hash : null, created_at: s.iso(),
         });
         return { status: 201, task: row };

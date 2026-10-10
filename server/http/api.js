@@ -49,7 +49,8 @@ function createApi(ctx) {
     });
 
     // ── Tasks ────────────────────────────────────────────────
-    const owns = (p, row) => row && (row.requester === p.requester || (p.project && row.project_id === p.project));
+    // A delegated caller (a service acting for the person) owns only the person's tasks it started itself.
+    const owns = (p, row) => row && ((row.requester === p.requester && (!p.via || row.via === p.via)) || (p.project && row.project_id === p.project));
     async function load(req, res) {
         if (!TASK_ID.test(req.params.id)) { problem(req, res, 404, 'actor.task.not_found', 'No such task.'); return null; }
         const row = await store.getTask(s, req.params.id);
@@ -71,7 +72,7 @@ function createApi(ctx) {
     r.get('/tasks', principal.requireCapability('actor.task.list'), limits.reads('actor.task.list'), async (req, res) => {
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
         const before = typeof req.query.before === 'string' && TASK_ID.test(req.query.before) ? req.query.before : null;
-        const page = await store.listTasks(s, req.principal.requester, { limit, before });
+        const page = await store.listTasks(s, req.principal.requester, { limit, before, via: req.principal.via || null });
         res.json({ tasks: page.rows.map(wire), next: page.next });
     });
 
