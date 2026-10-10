@@ -178,13 +178,14 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         assert.strictEqual(t.providers.requests.filter((q) => q.path === '/openai/responses').length, 0);
     });
 
-    await check('a budget above the free tier is refused, never lowered; an unknown field or a webhook is refused', async () => {
+    await check('a budget above the free tier is refused, never lowered; an unknown field or a webhook secret by reference is refused', async () => {
         const over = await create({ task: 'x', budget: { per_task_usd: 5 } });
         assert.strictEqual(over.status, 422);
         assert.strictEqual(over.json().code, 'actor.budget.over_tier');
-        const hooks = await create({ task: 'x', webhooks: [{ url: 'https://example.com', events: ['succeeded'] }] });
+        const hooks = await create({ task: 'x', webhooks: [{ url: 'https://example.com', events: ['succeeded'], secret_ref: 'HOOK_KEY' }] });
         assert.strictEqual(hooks.status, 422);
         assert.strictEqual(hooks.json().code, 'actor.task.invalid');
+        assert.strictEqual((await create({ task: 'x', surprise: true })).json().code, 'actor.task.invalid');
         assert.strictEqual((await create({ task: '   ' })).status, 422);
     });
 

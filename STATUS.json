@@ -46,7 +46,8 @@
     "other platforms' agents",
     "private mode on OpenVibe hardware",
     "cross-family answer checks",
-    "live task progress"
+    "live task progress",
+    "task webhooks (signed per task, retried with backoff, public https endpoints only)"
   ],
   "updated": "2026-10-10"
 }

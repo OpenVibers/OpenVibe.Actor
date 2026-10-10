@@ -214,6 +214,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         }
         const t = store.toWire(row, { baseUrl: config.baseUrl });
         const events = await store.eventsAfter(s, row.id, 0);
+        const deliveries = row.webhooks ? await ctx.webhooks.forTask(row.id) : [];
         const open = store.OPEN.includes(row.state);
         const cls = (events.find((e) => e.step === 'plan' && !e.agent && /"(\w+)" task/.test(e.text || '')) || { text: '' }).text.match(/"(\w+)"/);
         const kind = cls ? CLASS_TEXT[cls[1]] || cls[1] : null;
@@ -235,10 +236,21 @@ ${outcome(t, row)}
 ${open ? html`<p class="muted small live-note" id="live-note"><span class="dot-pulse" aria-hidden="true"></span> Updating as the agent works.</p>` : ''}
 </section>
 ${t.explanation ? explanationBlock(t.explanation) : ''}
+${deliveries.length ? deliveriesBlock(deliveries) : ''}
 <p class="muted small api-hint">In code: <code>GET /api/v1/tasks/${row.id}</code> · <a href="/docs">API</a></p>
 </article>`,
         });
     });
+
+    /** The task's webhook deliveries: where, which state, and how it went (the receiver's answer code only). */
+    const DELIVERY_TEXT = { pending: 'Waiting to retry', sending: 'Sending', delivered: 'Delivered', failed: 'Not delivered' };
+    function deliveriesBlock(rows) {
+        return html`<details class="deliveries"><summary>Webhooks (${rows.length})</summary>
+${table(['State', 'Endpoint', 'Delivery', 'Attempts'], rows.map((d) => [
+            html`<code>${d.state}</code>`, html`<code class="small">${d.url}</code>`,
+            html`${DELIVERY_TEXT[d.status] || d.status}${d.last_status ? html` <span class="muted small">(${d.last_status})</span>` : ''}`, String(d.attempts),
+        ]))}</details>`;
+    }
 
     /** The outcome card: the first thing under the task. */
     function outcome(t, row) {
@@ -395,7 +407,7 @@ data: {"task_id":"tsk_…","seq":3,"kind":"output","agent":"openvibe-runtime","s
 <li><strong>An app or agent</strong>: a Network token for audience <code>openvibe.actor</code> with the <code>actor.task.*</code> capability the route needs, granted on <a href="https://openvibe.services">OpenVibe.Services</a>. Tasks belong to the app's project.</li>
 <li><strong>Anyone</strong>: <code>GET /api/v1/agents</code> and <code>POST /api/v1/route</code> need no token.</li></ul>
 ${table(['Route', 'Capability', 'What it does'], [
-                [html`<code>POST /api/v1/tasks</code>`, html`<code>actor.task.create</code>`, html`Create a task: <code>{ task, mode?, budget?: { per_task_usd, per_day_usd }, agent?, idempotency_key? }</code>. Answers 201 with the task (queued).`],
+                [html`<code>POST /api/v1/tasks</code>`, html`<code>actor.task.create</code>`, html`Create a task: <code>{ task, mode?, budget?: { per_task_usd, per_day_usd }, agent?, idempotency_key?, webhooks?: [{ url, events }] }</code>. Answers 201 with the task (queued); with webhooks, also its <code>webhook_secret</code>, this once (<a href="#webhooks">webhooks</a>).`],
                 [html`<code>GET /api/v1/tasks/:id</code>`, html`<code>actor.task.read</code>`, 'The task: state, result, cost, explanation, error.'],
                 [html`<code>GET /api/v1/tasks/:id/events</code>`, html`<code>actor.task.read</code>`, html`Server-sent events (<code>actor.task-event@1</code>): <code>state</code>, <code>output</code> (each step), <code>end</code>. Resumes with <code>Last-Event-ID</code>.`],
                 [html`<code>POST /api/v1/tasks/:id/cancel</code>`, html`<code>actor.task.create</code>`, 'Stop it. What was spent stays spent.'],
@@ -404,12 +416,18 @@ ${table(['Route', 'Capability', 'What it does'], [
                 [html`<code>POST /api/v1/route</code>`, 'public', html`<code>{ task, mode? }</code> → which agent would take it and why, for every candidate. Nothing runs and nothing is charged.`],
             ])}
 ${raw(showcase.code({ title: 'Create a task, then watch it', samples: [{ label: 'Create', lang: 'bash', code: create }, { label: 'Watch', lang: 'bash', code: watch }] }))}
+<h2 id="webhooks">Webhooks</h2>
+<p>Give a task up to 8 HTTPS endpoints and the state changes each wants (<code>queued</code>, <code>running</code>, <code>verifying</code>, <code>succeeded</code>, <code>failed</code>, <code>cancelled</code>). Actor POSTs <a href="https://openvibe.services/docs/contracts/actor.task-webhook@1"><code>actor.task-webhook@1</code></a> to each: <code>{ type: "actor.task.state", delivery_id, state, task }</code>, with the task as it was at that moment.</p>
+<ul><li><strong>Signed per task.</strong> The answer that creates the task carries <code>webhook_secret</code>, and nothing else ever shows it. Each delivery has <code>X-OpenVibe-Timestamp</code> and <code>X-OpenVibe-Signature-V2</code>, exactly like an OpenVibe.Events delivery, so <code>verifyDeliveryV2(rawBody, headers, secret)</code> from <code>openvibe-sdk/events</code> checks it (and the five-minute window).</li>
+<li><strong>Retried.</strong> A 2xx answer is delivered. 410 Gone ends it. Anything else is retried after 10 s, 1 min, 5 min, 30 min, 2 h, 6 h and 12 h. <code>delivery_id</code> (also <code>X-OpenVibe-Delivery-Id</code>) is the same on every attempt: dedupe on it.</li>
+<li><strong>Public endpoints only.</strong> HTTPS on port 443 or 8443, no credentials in the URL, and only public addresses, checked when the task is created and again when each delivery is sent. Redirects are not followed.</li></ul>
 <h2 id="limits">Limits and money</h2>
 <p>The free tier: ${tier.tasksPerDay} tasks a day, up to ${usd(tier.perTaskUsd)} a task and ${usd(tier.perDayUsd)} a day (<a href="/limits.json">limits.json</a>). A budget above the tier is refused (<code>actor.budget.over_tier</code>), never lowered. A task whose cheapest capable agent would cost more than its budget fails before running (<code>actor.budget.exceeded</code>). <code>cost.usd</code> is what each model call and web search really cost at the <a href="/agents">published prices</a>.</p>
 <h2 id="errors">Errors</h2>
 <p>Every refusal is RFC 9457 <code>application/problem+json</code> with a stable <code>code</code>. A task that fails says why in <code>error</code>:</p>
 ${table(['Code', 'Meaning'], [
                 [html`<code>actor.task.invalid</code>`, 'The request does not match actor.task-create-request@1.'],
+                [html`<code>actor.webhook.refused</code>`, 'A webhook URL Actor will not deliver to: not HTTPS on 443/8443, credentials in it, or not a public address.'],
                 [html`<code>actor.budget.over_tier</code>`, 'The budget is above what the free tier allows.'],
                 [html`<code>actor.allowance.exhausted</code> / <code>actor.budget.day_spent</code>`, 'Today\'s free tasks or budget are used; Retry-After says when it resets.'],
                 [html`<code>actor.capacity.spent</code>`, 'Actor\'s free capacity for everyone is used up for today.'],

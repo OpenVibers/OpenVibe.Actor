@@ -79,6 +79,11 @@ function load(env = process.env) {
         maxRunning: Math.max(1, int(env.ACTOR_MAX_RUNNING, 4)),
         // A task that runs longer than this is stopped and fails (actor.task.timeout).
         taskTimeoutMs: Math.max(10_000, int(env.ACTOR_TASK_TIMEOUT_MS, 180_000)),
+        // Task webhooks (server/tasks/webhooks.js): how often due deliveries are sent, and how long one may take.
+        webhooks: {
+            intervalMs: Math.max(1000, int(env.ACTOR_WEBHOOK_INTERVAL_MS, 5000)),
+            timeoutMs: Math.max(1000, int(env.ACTOR_WEBHOOK_TIMEOUT_MS, 10_000)),
+        },
 
         // OpenVibe.Events → this service (server/events-consumer.js). The secret signs a delivery (comma-separated
         // for rotation, 32+ characters each); unset turns POST /internal/events off (503). The url is where the
