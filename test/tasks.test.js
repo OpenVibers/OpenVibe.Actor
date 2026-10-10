@@ -276,6 +276,23 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         assert.ok(Number(r.headers.get('retry-after')) > 0);
     });
 
+    await check('tasks still running count against the daily budget, so creating many at once cannot overrun it', async () => {
+        const store = require('../server/tasks/store');
+        const u = t.network.addUser('burst');
+        const who = `user:${u.subject}`;
+        const { perTaskUsd, perDayUsd } = t.config.allowance;
+        const fit = Math.floor(perDayUsd / perTaskUsd + 1e-9);
+        // `fit` tasks are open (queued) with nothing spent yet: their budgets are reserved.
+        for (let i = 0; i < fit; i++) {
+            await store.insertTask(t.ctx.s, { id: t.ctx.s.newId('tsk'), requester: who, task: `open ${i}`, mode: 'balanced', budget_task: perTaskUsd, budget_day: perDayUsd, created_at: t.ctx.s.iso() });
+        }
+        assert.strictEqual((await store.spendToday(t.ctx.s, who)).usd, 0, 'nothing has accrued yet');
+        const r = await create({ task: 'one too many' }, { as: u });
+        assert.strictEqual(r.status, 429, r.text);
+        assert.strictEqual(r.json().code, 'actor.budget.day_spent');
+        await t.ctx.s.db.query("UPDATE tasks SET state = 'cancelled' WHERE requester = $1", [who]);
+    });
+
     await check('the operator\'s daily ceiling over everyone stops new tasks', async () => {
         const store = require('../server/tasks/store');
         await store.addSpend(t.ctx.s, 'user:usr_01JAB2C3D4E5F6G7H8J9K0MNPZ', t.config.spendCapUsdPerDay);
