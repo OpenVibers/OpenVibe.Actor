@@ -48,6 +48,10 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 | `GET /api/v1/tasks` | `actor.task.list` | `actor.task-list-result@1` |
 | `GET /api/v1/agents` | public | `actor.agent-list-result@1` |
 | `POST /api/v1/route` | public | dry run: which agent and why (heuristic class; nothing runs or is charged) |
+| `GET /api/v1/resources` | `actor.resource.read` (service token) | `common.resource-list-result@1` for `actor.task`; filters: `project`, `kind`, `cursor`, `limit` |
+| `GET /api/v1/resources/:ovrn` | `actor.resource.read` (service token) | one `common.resource-summary@1` for a project-owned task |
+
+The resource index is for OpenVibe.Services on loopback and is blocked at the public nginx vhost. It lists task summaries under the `actor.task` kind; only a service token with `actor.resource.read` can read it. A task without a project has no OVRN and cannot be fetched by name.
 
 **Who can call it:**
 - **A person:** their Network token as a Bearer, or this site's session. A write made with the session must come from openvibe.actor itself (fetch metadata or Origin).

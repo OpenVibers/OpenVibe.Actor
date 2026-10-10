@@ -1,8 +1,8 @@
 'use strict';
 /**
  * The released contracts (the pinned openvibe-contracts tag, 0.115.0 or later) describe what Actor does. The
- * released `actor` service manifest and its four capability manifests are checked against the code: the domain,
- * port, health and ready paths, the capabilities (each implemented by exactly the routes in server/http/api.js, each
+ * released `actor` service manifest and its five capability manifests are checked against the code: the domain,
+ * port, health and ready paths, the capabilities (routes in server/http/api.js and server/registry/resource-index.js, each
  * route guarded by the one capability it names), no events but the account ones (ADR-033), and the shapes Actor answers with (the contracts'
  * actor.agent-list-result@1, platform.placement-result@1 and platform.task@1).
  */
@@ -13,16 +13,19 @@ const contracts = require('openvibe-contracts');
 const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
-const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read'];
+const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read'];
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
+const INDEX_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-index.js'), 'utf8');
 
-/** `METHOD /api/v1/path` for every route api.js registers, with the capability its guard names (null: public). */
+/** `METHOD /api/v1/path` for every API and resource index route, with its capability guard (null: public). */
 function codeRoutes() {
     const out = new Map();
-    for (const m of API_SRC.matchAll(/^\s*r\.(get|post)\('([^']+)'(.*)$/gm)) {
-        const guard = m[3].match(/requireCapability\('([a-z.]+)'\)/);
-        const read = m[3].match(/limits\.reads\('([a-z.]+)'\)/);
-        out.set(`${m[1].toUpperCase()} /api/v1${m[2]}`, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });
+    for (const [source, prefix] of [[API_SRC, '/api/v1'], [INDEX_SRC, '/api/v1/resources']]) {
+        for (const m of source.matchAll(/^\s*r\.(get|post)\('([^']+)'(.*)$/gm)) {
+            const guard = m[3].match(/requireCapability\('([a-z.]+)'\)/);
+            const read = m[3].match(/limits\.reads\('([a-z.]+)'\)/);
+            out.set(`${m[1].toUpperCase()} ${prefix}${m[2] === '/' ? '' : m[2]}`, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });
+        }
     }
     return out;
 }
@@ -60,35 +63,45 @@ function codeRoutes() {
         } finally { await t.close(); }
     });
 
-    await check('the manifest lists exactly the four capabilities, all active, owned by actor, and the code guards exactly those', () => {
+    await check('the manifest lists five capabilities, the resource read planned, owned by actor, and the code guards all five', () => {
         assert.deepStrictEqual([...manifest.capabilities].sort(), [...CAPS].sort());
         for (const id of CAPS) {
             const c = contracts.capabilities.get(id);
             assert.ok(c, `${id} not released`);
-            assert.strictEqual(c.status, 'active', id);
+            assert.strictEqual(c.status, id === 'actor.resource.read' ? 'planned' : 'active', id);
             assert.strictEqual(c.owner, 'actor', id);
         }
         const principalSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'principal.js'), 'utf8');
         const listed = principalSrc.match(/const CAPABILITIES = \[([^\]]+)\]/)[1].match(/'([a-z.]+)'/g).map((s) => s.slice(1, -1));
         assert.deepStrictEqual([...listed].sort(), [...CAPS].sort(), 'principal.js accepts exactly Actor\'s capabilities');
+        const appSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'app.js'), 'utf8');
+        assert.match(appSrc, /app\.use\('\/api\/v1\/resources', resourceIndex\.router\(ctx\)\)/);
     });
 
     await check('every capability is implemented by routes that exist, and every route is some capability\'s', () => {
         const declared = new Set();
         for (const id of CAPS) {
             const impl = contracts.capabilities.get(id).implementedBy;
-            assert.ok(impl && impl.length > 0, `${id} implementedBy is empty`);
-            for (const r of impl) {
+            // The released resource capability is planned, so its manifest has no implementedBy yet.
+            const expected = id === 'actor.resource.read'
+                ? ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn']
+                : impl;
+            if (id === 'actor.resource.read') assert.deepStrictEqual(impl, []);
+            else assert.ok(impl && impl.length > 0, `${id} implementedBy is empty`);
+            for (const r of expected) {
                 declared.add(r);
-                assert.ok(routes.has(r), `${id} says ${r}, but api.js registers no such route`);
+                assert.ok(routes.has(r), `${id} says ${r}, but the code registers no such route`);
             }
         }
-        for (const r of routes.keys()) assert.ok(declared.has(r), `api.js registers ${r}, which no capability lists`);
+        for (const r of routes.keys()) assert.ok(declared.has(r), `the code registers ${r}, which no capability lists`);
     });
 
     await check('each guarded route requires the capability that lists it; the agent reads are public', () => {
         for (const id of CAPS) {
-            for (const r of contracts.capabilities.get(id).implementedBy) {
+            const implemented = id === 'actor.resource.read'
+                ? ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn']
+                : contracts.capabilities.get(id).implementedBy;
+            for (const r of implemented) {
                 const route = routes.get(r);
                 if (id === 'actor.agent.read') {
                     assert.strictEqual(route.guard, null, `${r} must stay public`);

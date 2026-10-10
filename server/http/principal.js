@@ -20,7 +20,7 @@ const { serviceAuth, capabilities, http, ids } = require('openvibe-contracts');
 
 const PRINCIPAL_SUB = /^(svc|app|mod|agent):/;
 const PROJECT_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
-const CAPABILITIES = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read'];
+const CAPABILITIES = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read'];
 
 function decodePayload(token) {
     const parts = String(token || '').split('.');
