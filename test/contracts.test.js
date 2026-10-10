@@ -14,6 +14,7 @@ const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
 const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read'];
+const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 const INDEX_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-index.js'), 'utf8');
 
@@ -63,12 +64,14 @@ function codeRoutes() {
         } finally { await t.close(); }
     });
 
-    await check('the manifest lists five capabilities, the resource read planned, owned by actor, and the code guards all five', () => {
+    await check('the manifest lists five capabilities, owned by actor, and the code guards all five', () => {
         assert.deepStrictEqual([...manifest.capabilities].sort(), [...CAPS].sort());
         for (const id of CAPS) {
             const c = contracts.capabilities.get(id);
             assert.ok(c, `${id} not released`);
-            assert.strictEqual(c.status, id === 'actor.resource.read' ? 'planned' : 'active', id);
+            // actor.resource.read was planned in contracts 0.129.0 and is active from 0.130.0.
+            if (id === 'actor.resource.read') assert.ok(['planned', 'active'].includes(c.status), id);
+            else assert.strictEqual(c.status, 'active', id);
             assert.strictEqual(c.owner, 'actor', id);
         }
         const principalSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'principal.js'), 'utf8');
@@ -82,11 +85,9 @@ function codeRoutes() {
         const declared = new Set();
         for (const id of CAPS) {
             const impl = contracts.capabilities.get(id).implementedBy;
-            // The released resource capability is planned, so its manifest has no implementedBy yet.
-            const expected = id === 'actor.resource.read'
-                ? ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn']
-                : impl;
-            if (id === 'actor.resource.read') assert.deepStrictEqual(impl, []);
+            // A planned resource capability lists no routes; an active one lists exactly the index's two.
+            const expected = id === 'actor.resource.read' ? INDEX_ROUTES : impl;
+            if (id === 'actor.resource.read') assert.ok(impl.length === 0 || JSON.stringify([...impl].sort()) === JSON.stringify(INDEX_ROUTES), `${id} implementedBy: ${impl}`);
             else assert.ok(impl && impl.length > 0, `${id} implementedBy is empty`);
             for (const r of expected) {
                 declared.add(r);
@@ -98,9 +99,7 @@ function codeRoutes() {
 
     await check('each guarded route requires the capability that lists it; the agent reads are public', () => {
         for (const id of CAPS) {
-            const implemented = id === 'actor.resource.read'
-                ? ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn']
-                : contracts.capabilities.get(id).implementedBy;
+            const implemented = id === 'actor.resource.read' ? INDEX_ROUTES : contracts.capabilities.get(id).implementedBy;
             for (const r of implemented) {
                 const route = routes.get(r);
                 if (id === 'actor.agent.read') {
