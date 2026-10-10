@@ -3,6 +3,9 @@
 /**
  * Actor's authority resource index (ADR-048, plan T13 step 8 phase 2). OpenVibe.Services reads
  * actor.task summaries here with a first-party service token carrying actor.resource.read.
+ * GET /?project=&kind=&owner=&cursor=&limit=: `owner` (usr_…/agt_…) answers only that subject's tasks, the ones whose
+ * summary names them (requester user:usr_…; a task an agent or a service asked for names no owner, so an agt_ owner
+ * matches nothing). A malformed filter is a 400.
  */
 const contracts = require('openvibe-contracts');
 const { asyncRouter } = require('../http/router');
@@ -11,6 +14,7 @@ const SERVICE = 'actor';
 const TASK_KIND = 'actor.task';
 const PROJECT_ID_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_REQUESTER_RE = /^user:(usr_[0-9A-HJKMNP-TV-Z]{26})$/;
+const SUBJECT_RE = /^(usr|agt)_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK_ID_RE = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
@@ -45,6 +49,8 @@ function filtersOf(query) {
     const project = query.project === undefined ? null : query.project;
     if (project !== null && (typeof project !== 'string' || !PROJECT_ID_RE.test(project))) return { error: 'project must be a prj_ id' };
     const kind = typeof query.kind === 'string' && query.kind !== '' ? query.kind : null;
+    const owner = query.owner === undefined || query.owner === '' ? null : query.owner;
+    if (owner !== null && (typeof owner !== 'string' || !SUBJECT_RE.test(owner))) return { error: 'owner must be a usr_ or agt_ subject id' };
     let limit = DEFAULT_LIMIT;
     if (typeof query.limit === 'string' && query.limit !== '') {
         if (!/^\d+$/.test(query.limit) || Number(query.limit) < 1 || Number(query.limit) > MAX_LIMIT) return { error: `limit must be an integer 1-${MAX_LIMIT}` };
@@ -55,7 +61,7 @@ function filtersOf(query) {
         cursor = decodeCursor(query.cursor);
         if (!cursor) return { error: 'cursor is not one this index issued' };
     }
-    return { project, kind, limit, cursor };
+    return { project, kind, owner, limit, cursor };
 }
 
 const COLUMNS = 'id, requester, project_id, task, state, created_at';
@@ -77,10 +83,12 @@ function router({ s, principal }) {
         const f = filtersOf(req.query);
         if (f.error) return problem(req, res, 400, 'resources.bad_query', f.error);
         if (f.kind && f.kind !== TASK_KIND) return res.json({ resources: [], next_cursor: null });
+        if (f.owner && !f.owner.startsWith('usr_')) return res.json({ resources: [], next_cursor: null });
 
         const where = [];
         const args = [];
         if (f.project) { args.push(f.project); where.push(`project_id = $${args.length}`); }
+        if (f.owner) { args.push(`user:${f.owner}`); where.push(`requester = $${args.length}`); }
         if (f.cursor) { args.push(f.cursor[1]); where.push(`id > $${args.length}`); }
         args.push(f.limit + 1);
         const sql = `SELECT ${COLUMNS} FROM tasks ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id ASC LIMIT $${args.length}`;
