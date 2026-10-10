@@ -36,6 +36,11 @@ const HOOK = 'https://hooks.example.com/openvibe/actor';
     const tick = () => t.ctx.webhooks.tick();
     const deliveries = (taskId) => t.ctx.s.db.many('SELECT * FROM webhook_deliveries WHERE task_id = $1 ORDER BY created_at, id', [taskId]);
     const secretOf = (taskId) => t.ctx.s.db.value('SELECT webhook_secret FROM tasks WHERE id = $1', [taskId]);
+    // The engine queues a delivery just after it records the state: wait for the rows before sending.
+    async function queued(taskId, n) {
+        for (let i = 0; i < 200; i++) { if ((await deliveries(taskId)).length >= n) return; await new Promise((res) => setTimeout(res, 20)); }
+        throw new Error(`${taskId}: ${n} deliveries never queued`);
+    }
 
     let first;
     await check('the creating answer carries the signing secret once; reads and lists show the webhooks but never the secret', async () => {
@@ -55,6 +60,7 @@ const HOOK = 'https://hooks.example.com/openvibe/actor';
 
     await check('each delivery is signed like an Events delivery, carries the task as it was, and validates', async () => {
         await t.waitFor(first.id);
+        await queued(first.id, 2);
         await tick();
         assert.deepStrictEqual(sent.map((d) => d.url), [HOOK, HOOK]);
         for (const d of sent) {
@@ -89,8 +95,9 @@ const HOOK = 'https://hooks.example.com/openvibe/actor';
         assert.strictEqual(b.json().webhook_secret, a.json().webhook_secret);
         assert.strictEqual((await create({ ...body, webhooks: [{ url: `${HOOK}/other`, events: ['failed'] }] })).status, 409, 'other webhooks are another body');
         await t.waitFor(a.json().id);
-        await tick();
+        for (let i = 0; i < 200 && await secretOf(a.json().id); i++) await new Promise((res) => setTimeout(res, 20));
         assert.strictEqual(await secretOf(a.json().id), null, 'no delivery for its end state: the secret goes when it ends');
+        assert.deepStrictEqual(await deliveries(a.json().id), []);
     });
 
     await check('a failing receiver is retried on the backoff with the same delivery id; 2xx then delivers it', async () => {
@@ -98,6 +105,7 @@ const HOOK = 'https://hooks.example.com/openvibe/actor';
         sent.length = 0;
         const r = (await create({ task: 'Who handles mail for openvibe.network?', webhooks: [{ url: HOOK, events: ['succeeded'] }] })).json();
         await t.waitFor(r.id);
+        await queued(r.id, 1);
         answers = [500, Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })];
         await tick();
         let [d] = await deliveries(r.id);
@@ -123,6 +131,7 @@ const HOOK = 'https://hooks.example.com/openvibe/actor';
         t.providers.reset();
         const r = (await create({ task: 'Who handles mail for openvibe.network?', webhooks: [{ url: `${HOOK}/a`, events: ['succeeded'] }, { url: `${HOOK}/b`, events: ['succeeded'] }, { url: `${HOOK}/c`, events: ['succeeded'] }] })).json();
         await t.waitFor(r.id);
+        await queued(r.id, 3);
         answers = [410, new WebhookRefused('hooks.example.com is not a public address')];
         for (let i = 0; i < 20; i++) answers.push(503);
         await tick();
@@ -150,6 +159,7 @@ const HOOK = 'https://hooks.example.com/openvibe/actor';
         await new Promise((res) => setTimeout(res, 150));
         await t.get(`/api/v1/tasks/${r.id}/cancel`, { as: kim, method: 'POST', headers: SAME });
         await t.waitFor(r.id, ['cancelled']);
+        await queued(r.id, 1);
         await tick();
         assert.deepStrictEqual(sent.map((x) => JSON.parse(x.body).state), ['cancelled']);
         assert.strictEqual(JSON.parse(sent[0].body).task.cancel.requested_by.id, kim.subject);
