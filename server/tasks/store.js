@@ -22,9 +22,9 @@ function subjectRef(requester) {
 
 async function insertTask(s, t) {
     await s.db.query(
-        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11)`,
-        [t.id, t.requester, t.project_id || null, t.task, t.mode, t.agent || null, t.budget_task, t.budget_day, t.idem_key || null, t.idem_hash || null, t.created_at]);
+        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12)`,
+        [t.id, t.requester, t.project_id || null, t.task, t.mode, t.agent || null, t.budget_task, t.budget_day, t.idem_key || null, t.idem_hash || null, t.created_at, t.via || null]);
     await addSpend(s, t.requester, 0, { tasks: 1 });
     return getTask(s, t.id);
 }
@@ -32,10 +32,14 @@ async function insertTask(s, t) {
 const getTask = (s, id) => s.db.maybe('SELECT * FROM tasks WHERE id = $1', [id]);
 const byIdempotency = (s, requester, key) => s.db.maybe('SELECT * FROM tasks WHERE requester = $1 AND idem_key = $2', [requester, key]);
 
-async function listTasks(s, requester, { limit = 20, before = null } = {}) {
-    const rows = before
-        ? await s.db.many('SELECT * FROM tasks WHERE requester = $1 AND id < $2 ORDER BY id DESC LIMIT $3', [requester, before, limit + 1])
-        : await s.db.many('SELECT * FROM tasks WHERE requester = $1 ORDER BY id DESC LIMIT $2', [requester, limit + 1]);
+/** A requester's tasks, newest first; `via` narrows to the ones that service started for them. */
+async function listTasks(s, requester, { limit = 20, before = null, via = null } = {}) {
+    const where = ['requester = $1'];
+    const args = [requester];
+    if (via) { args.push(via); where.push(`via = $${args.length}`); }
+    if (before) { args.push(before); where.push(`id < $${args.length}`); }
+    args.push(limit + 1);
+    const rows = await s.db.many(`SELECT * FROM tasks WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT $${args.length}`, args);
     const page = rows.slice(0, limit);
     return { rows: page, next: rows.length > limit ? page[page.length - 1].id : null };
 }

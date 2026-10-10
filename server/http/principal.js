@@ -9,6 +9,14 @@
  *                                                                           a Network app, agent or service token for
  *                                                                           audience openvibe.actor; each route names
  *                                                                           ONE capability it needs (actor.task.*)
+ *   { kind: 'app', requester: 'user:usr_…', via: 'service:x', project: null, claims }
+ *                                                                           a first-party service acting for a person
+ *                                                                           who asked it to (X-OV-Subject: their watch's
+ *                                                                           actor-task action): the task is the
+ *                                                                           person's (their allowance, their list) and
+ *                                                                           records the service; the service still needs
+ *                                                                           the route's capability and sees only the
+ *                                                                           tasks it started
  *   { kind: 'anonymous' }
  *
  * A request that presents a token is judged on that token alone: a bad one is refused, never downgraded to the
@@ -53,6 +61,15 @@ function createPrincipal({ config, keys }) {
                 const r = serviceAuth.verifyServiceToken(token, { publicKey, issuer: config.networkIssuer, audience: config.audience });
                 if (!r.ok) return { error: [401, r.code || 'token.invalid', r.reason || 'the token does not verify'] };
                 const project = typeof r.claims.project_id === 'string' && PROJECT_RE.test(r.claims.project_id) ? r.claims.project_id : null;
+                const named = req.get('x-ov-subject');
+                if (named !== undefined) {
+                    // Only a first-party service may act for a person; a developer app or an agent acts as itself (an
+                    // app's person is its token's on_behalf_of, never a header).
+                    const sub = String(r.claims.sub);
+                    if (!sub.startsWith('svc:') || r.claims.actor_type !== 'service') return { error: [403, 'subject.not_delegated', 'only a first-party service may act for a person (X-OV-Subject)'] };
+                    if (!ids.isSubjectId('user', named)) return { error: [400, 'subject.invalid', 'X-OV-Subject must be a usr_… subject id'] };
+                    return { principal: { kind: 'app', requester: `user:${named}`, via: requesterOfSub(sub), project: null, claims: r.claims } };
+                }
                 return { principal: { kind: 'app', requester: requesterOfSub(r.claims.sub), project, claims: r.claims } };
             }
             // A person's own Network token (the same kind this site's session holds).
