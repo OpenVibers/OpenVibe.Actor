@@ -80,7 +80,7 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
         const hero = showcase.hero({
             eyebrow: 'OpenVibe.Actor · your agent for everything · alpha',
             title: 'Ask once.', accent: 'The right agent does it.',
-            lede: 'Give Actor a task in plain words. It picks the agent that fits: OpenVibe\'s own, acting through every OpenVibe service, or another platform\'s, like OpenAI\'s web agent. It runs the task, has a second model check the answer, and shows you what it cost and why that agent. Like OpenRouter, for agents.',
+            lede: 'Give Actor a task in plain words. It picks the agent that fits: OpenVibe\'s own, acting through OpenVibe Search and Tools, or another platform\'s, like OpenAI\'s web agent. It runs the task, has a second model check the answer, and shows you what it cost and why that agent. Like OpenRouter, for agents.',
             actions: signedIn(req) ? [{ label: 'Give it a task', href: '#task', primary: true }, { label: 'Your tasks', href: '/tasks' }] : [{ label: 'Sign in to start', href: '/auth/login?next=%2F', primary: true }, { label: 'See the agents', href: '/agents' }],
             note: `Open source (AGPL-3.0). Free tier: ${tier.tasksPerDay} tasks a day, up to ${usd(tier.perTaskUsd)} each. The list below says exactly what works today.`,
             aside: { html: String(routerCard(agents)) },
@@ -101,7 +101,7 @@ ${raw(showcase.features({
                     { icon: 'ov:network', title: 'Search the OpenVibe network', text: 'Streams, clips, pastes, posts and wiki pages across every OpenVibe site.' },
                     { icon: 'ov:text', title: 'Write and explain', text: 'Drafts, summaries, explanations, plans: the cheapest agent that does it well.' },
                     { icon: 'ov:host', title: 'Private mode', text: 'An open model on OpenVibe\'s own server answers, and nothing leaves OpenVibe.' },
-                    { icon: 'ov:check', title: 'Checked before you see it', text: 'A model of another family reads every answer first; a failed check goes to the next agent.' },
+                    { icon: 'ov:check', title: 'Checked before you see it', text: 'A second model reads every answer first, from another model family where one is available (private mode checks on OpenVibe\'s own model); a failed check goes to the next agent.' },
                 ],
             }))}
 ${raw(showcase.steps({
