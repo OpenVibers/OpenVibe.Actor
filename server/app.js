@@ -31,6 +31,7 @@ const { createPrincipal } = require('./http/principal');
 const { createApi } = require('./http/api');
 const resourceIndex = require('./registry/resource-index');
 const { createPageRoutes } = require('./http/pages');
+const { createAgentPages } = require('./http/agent-pages');
 const { createActorReadiness } = require('./observability');
 const { createCallerLimits } = require('./http/caller-limits');
 const accountDataLib = require('./identity/account-data');
@@ -155,6 +156,7 @@ async function createApp(opts = {}) {
 
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.ACTOR_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));
+    app.use(createAgentPages(ctx));
     app.use(createPageRoutes(ctx));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/">giving Actor a task</a>, <a href="/agents">the agents</a> or <a href="/docs">the API</a>.</p>` }));
 

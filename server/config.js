@@ -75,6 +75,10 @@ function load(env = process.env) {
             perDayUsd: num(env.ACTOR_FREE_PER_DAY_USD, 0.25),
         },
         spendCapUsdPerDay: num(env.ACTOR_MAX_COST_USD_PER_DAY, 2),
+        agents: {
+            maxPerOwner: Math.max(1, int(env.ACTOR_AGENTS_MAX_PER_OWNER, 10)),
+            tickMax: Math.max(1, int(env.ACTOR_AGENTS_TICK_MAX, 5)),
+        },
         // Tasks running at once in this process; more wait queued.
         maxRunning: Math.max(1, int(env.ACTOR_MAX_RUNNING, 4)),
         // A task that runs longer than this is stopped and fails (actor.task.timeout).

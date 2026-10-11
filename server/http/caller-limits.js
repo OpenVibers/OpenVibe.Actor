@@ -28,6 +28,8 @@ function caller(req) {
 /** The writes and the expensive reads, each with its numbers per caller (a minute, an hour). */
 const BUDGETS = {
     'actor.task.create': { minute: 6, hour: 60 },
+    'actor.agent.run': { minute: 6, hour: 60 },
+    'actor.agent.manage': { minute: 30, hour: 600 },
     'actor.route': { minute: 30, hour: 600 },
     'actor.task.stream': { minute: 30, hour: 600 },
 };

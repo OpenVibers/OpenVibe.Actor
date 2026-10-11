@@ -46,7 +46,11 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 | `GET /api/v1/tasks/:id/events` | `actor.task.read` | server-sent events, `actor.task-event@1`, resumable with `Last-Event-ID` |
 | `POST /api/v1/tasks/:id/cancel` | `actor.task.create` | stop it |
 | `GET /api/v1/tasks` | `actor.task.list` | `actor.task-list-result@1` |
-| `GET /api/v1/agents` | public | `actor.agent-list-result@1` |
+| `GET /api/v1/me/agents` | public | `actor.agent-list-result@1` |
+| `GET/POST /api/v1/me/agents` (signed in) | `actor.agent.manage` for a token | list or create your personal agents; signed-out GET keeps the public catalog |
+| `GET/PATCH/DELETE /api/v1/me/agents/:id` | `actor.agent.manage` for a token | read, edit or delete one personal agent |
+| `GET/POST /api/v1/me/agents/:id/memory`, `PATCH/DELETE /api/v1/me/agents/:id/memory/:mem`, `DELETE /api/v1/me/agents/:id/memory` | `actor.agent.manage` for a token | control its memory |
+| `POST /api/v1/me/agents/:id/run`, `GET /api/v1/me/agents/:id/runs` | `actor.agent.run` for a token | run now or list its tasks |
 | `POST /api/v1/route` | public | dry run: which agent and why (heuristic class; nothing runs or is charged) |
 | `GET /api/v1/resources` | `actor.resource.read` (service token) | `common.resource-list-result@1` for `actor.task`; filters: `project`, `kind`, `cursor`, `limit` |
 | `GET /api/v1/resources/:ovrn` | `actor.resource.read` (service token) | one `common.resource-summary@1` for a project-owned task |
@@ -106,6 +110,7 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 ## Capabilities
 
 - **Required on this API:** `actor.task.create` (create a task, cancel one), `actor.task.read` (one task, its live stream), `actor.task.list` (list your tasks). A person acting for themself needs no capability; an app, agent or service token for audience `openvibe.actor` needs the one the route names, granted on OpenVibe.Services. A **first-party service** (`svc:`) may act for a person who asked it to by naming them in `X-OV-Subject` (OpenVibe.Watch's actor-task action): the task is the person's (their allowance, their list, their export and deletion) and records the service as `via`; the service still needs the route's capability, and it reads, lists and cancels only the tasks it started. A developer app or an agent never names a person this way (`403 subject.not_delegated`). `actor.agent.read` is the code's name for the catalog and the dry run, which are public.
+- **Personal agents:** `actor.agent.manage` guards management and memory, and `actor.agent.run` guards runs and their list for a token. Browser sessions and a person's own token work as task calls do. The new capability manifests are pending in OpenVibe.Contracts.
 - **Held on other services:** a client-credentials token for audience `openvibe.events`, scope `events.subscription.manage`, creates the two ADR-033 subscriptions at OpenVibe.Events; the same `actor` principal's token pushes account export parts and deletion confirmations to OpenVibe.Network's internal routes.
 - **Not held:** the runtime presents no grant to OpenVibe.Search or OpenVibe.Tools — it uses only what any anonymous caller may call.
 
@@ -114,7 +119,7 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 1. Browser and desktop agents on OpenVibe's own cheap servers (Run workers with a headless browser and a virtual desktop), watchable live and taken over by the owner.
 2. Coding through OpenVibe.Codes on hosted Run sandboxes.
 3. More agent platforms behind the same router, bring-your-own keys through OpenVibe.AI, and paid tiers through Billing.
-4. Personal agents (`agt_` principals on the Network): memory people control, schedules and Events triggers, an approval inbox, reachable from Chat and the Frame.
+4. Personal agents v1 are in this worktree: named instructions, memory people control, hourly/daily/weekly schedules and ordinary task runs. Events triggers, an approval inbox, Chat and Frame access come later.
 
 ## Configuration
 
@@ -169,10 +174,10 @@ part (ADR-033). Actor receives `network.account.export_requested` and `network.a
 (loopback only) — the two tables are mapped in [server/identity/account-data.js](server/identity/account-data.js), and
 the boot-time subscriptions are created by [server/events-consumer.js](server/events-consumer.js):
 
-- **Exported:** the tasks a person asked for (`tasks.json`) and what they spent per UTC day (`spend.json`), pushed to
+- **Exported:** the tasks a person asked for (`tasks.json`), what they spent per UTC day (`spend.json`), their agents (`agents.json`) and every memory note (`agent-memory.json`), pushed to
   `POST /internal/account-exports/:id/parts` with this service's own token. Nothing here is a secret — Actor stores no
   token, key or credential.
-- **Erased:** both tables hold the person's own rows, so they are deleted whole and nothing is kept; a task's event log
+- **Erased:** all four tables hold the person's own rows, so they are deleted whole and nothing is kept; a task's event log
   (`task_events`) goes with the task by cascade. Actor then confirms with `POST /internal/account-deletions/:id/confirmations`
   and the counts.
 - **Anonymized:** nothing. There is no row Actor keeps that was written by this person for another person to read.

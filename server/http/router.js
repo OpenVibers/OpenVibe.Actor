@@ -8,7 +8,7 @@ const express = require('express');
 
 function asyncRouter() {
     const r = express.Router();
-    for (const method of ['get', 'post']) {
+    for (const method of ['get', 'post', 'patch', 'delete']) {
         const orig = r[method].bind(r);
         r[method] = (path, ...handlers) => orig(path, ...handlers.map((h) => (h.length === 4 ? h : (req, res, next) => {
             try {

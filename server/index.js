@@ -43,12 +43,14 @@ async function start() {
     // Tasks older than the retention window (tasks/store.js RETENTION_DAYS) go, with their events.
     const prune = setInterval(() => { store.prune(ctx.s).catch((err) => console.warn('[Actor] prune failed:', err && err.message)); }, PRUNE_EVERY_MS);
     prune.unref();
+    const agentTick = setInterval(() => { require('./agents/personal').tick(ctx).catch((err) => console.warn('[Actor] agent tick failed:', err && err.message)); }, 60_000);
+    agentTick.unref();
 
     // Subscribe to the two ADR-033 topics at OpenVibe.Events (idempotent; off without ACTOR_EVENTS_URL and
     // ACTOR_EVENTS_SECRET). The consumer itself is mounted in server/app.js.
     const subscriptions = require('./events-consumer').startSubscriptions({ config, port: config.port, secret: config.events.secrets[0] || '' });
     const extra = [() => { if (subscriptions) subscriptions.stop(); }];
-    createLifecycle({ server, ctx, timers: [prune], extra });
+    createLifecycle({ server, ctx, timers: [prune, agentTick], extra });
     return { server, ctx };
 }
 
