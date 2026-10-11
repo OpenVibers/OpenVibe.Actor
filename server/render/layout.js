@@ -65,7 +65,7 @@ function renderPage(o) {
     };
     // This site's own account links live in the shared navbar's account menu (the page's account
     // bar below is only for visitors without JavaScript).
-    if (signedIn) nav.menu = { before: [{ label: 'Your tasks', href: '/tasks', icon: 'fa-list-check' }] };
+    if (signedIn) nav.menu = { before: [{ label: 'Your tasks', href: '/tasks', icon: 'fa-list-check' }, { label: 'Your agents', href: '/me/agents', icon: 'fa-robot' }] };
     const footer = { service: 'actor', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' };
     const account = signedIn
         ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`
@@ -92,6 +92,7 @@ function renderPage(o) {
 ${appIcon.headTags({ site: 'actor' })}
 <link rel="stylesheet" href="${asset('css/actor.css')}">
 ${(o.styles || []).map((name) => `<link rel="stylesheet" href="${esc(ovServe.url(name))}">`).join('\n')}
+${(o.css || []).map((rel) => `<link rel="stylesheet" href="${asset(rel)}">`).join('\n')}
 ${render(scripts)}
 <meta name="ov-boost" content="actor@${esc(RELEASE)}">
 <script src="${ovServe.url('boost.js')}" data-main="#main" defer></script>`,

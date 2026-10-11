@@ -28,7 +28,7 @@ const { serviceAuth, capabilities, http, ids } = require('openvibe-contracts');
 
 const PRINCIPAL_SUB = /^(svc|app|mod|agent):/;
 const PROJECT_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
-const CAPABILITIES = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read'];
+const CAPABILITIES = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.agent.manage', 'actor.agent.run', 'actor.resource.read'];
 
 function decodePayload(token) {
     const parts = String(token || '').split('.');
@@ -105,6 +105,8 @@ function createPrincipal({ config, keys }) {
             }
             const decision = capabilities.check(p.claims, cap);
             if (decision.allowed) return next();
+            // These v1 ids are enforced here until the matching Contracts manifests are released.
+            if (['actor.agent.manage', 'actor.agent.run'].includes(cap) && Array.isArray(p.claims.cap) && p.claims.cap.includes(cap)) return next();
             return http.sendProblem(res, 403, decision.code || 'capability.denied', { detail: decision.reason || `${cap} not granted`, ctx: req.ov });
         };
     }

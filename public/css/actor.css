@@ -138,3 +138,4 @@ button.sc-btn.sc-primary { border: 0; }
   .outcome { padding: 14px; }
 }
 @media (prefers-reduced-motion: reduce) { .tl-item, .dot-pulse { animation: none; } .mode span { transition: none; } }
+

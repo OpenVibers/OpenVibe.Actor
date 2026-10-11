@@ -13,7 +13,7 @@ const contracts = require('openvibe-contracts');
 const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
-const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read'];
+const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.agent.manage', 'actor.agent.run'];
 const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 const INDEX_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-index.js'), 'utf8');
@@ -22,7 +22,7 @@ const INDEX_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry
 function codeRoutes() {
     const out = new Map();
     for (const [source, prefix] of [[API_SRC, '/api/v1'], [INDEX_SRC, '/api/v1/resources']]) {
-        for (const m of source.matchAll(/^\s*r\.(get|post)\('([^']+)'(.*)$/gm)) {
+        for (const m of source.matchAll(/^\s*r\.(get|post|patch|delete)\('([^']+)'(.*)$/gm)) {
             const guard = m[3].match(/requireCapability\('([a-z.]+)'\)/);
             const read = m[3].match(/limits\.reads\('([a-z.]+)'\)/);
             out.set(`${m[1].toUpperCase()} ${prefix}${m[2] === '/' ? '' : m[2]}`, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });

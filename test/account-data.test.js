@@ -11,6 +11,7 @@ const { boot, check, done } = require('./helpers/boot');
 const { createNetworkSender } = require('openvibe-sdk/account-data');
 const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const taskStore = require('../server/tasks/store');
+const personal = require('../server/agents/personal');
 
 const A = 'usr_01JZ0000000000000000000AAA';
 const B = 'usr_01JZ0000000000000000000BBB';
@@ -64,6 +65,10 @@ async function makeTask(t, subject, title) {
         try {
             await makeTask(t, A, 'person-a');
             await makeTask(t, B, 'person-b');
+            const ownAgent = (await personal.create(t.ctx.s, t.config, `user:${A}`, { name: 'A helper', instructions: 'Help A.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
+            await personal.addMemory(t.ctx.s, `user:${A}`, ownAgent.id, 'A private note.');
+            const otherAgent = (await personal.create(t.ctx.s, t.config, `user:${B}`, { name: 'B helper', instructions: 'Help B.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
+            await personal.addMemory(t.ctx.s, `user:${B}`, otherAgent.id, 'B private note.');
 
             const res = await t.get('/internal/events', { method: 'POST', body: bodyOf(exportEvent), headers: { 'Content-Type': 'application/json', ...signDeliveryHeaders(bodyOf(exportEvent), SECRET) } });
             assert.strictEqual(res.status, 200);
@@ -73,7 +78,9 @@ async function makeTask(t, subject, title) {
             assert.ok(part, 'the part was pushed to Network');
             assert.strictEqual(part.auth, 'Bearer tok_actor', 'with this service\'s own token');
             assert.strictEqual(part.body.subject, A);
-            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['spend.json', 'tasks.json']);
+            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['agent-memory.json', 'agents.json', 'spend.json', 'tasks.json']);
+            assert.strictEqual(part.body.files.find((f) => f.name === 'agents.json').content[0].name, 'A helper');
+            assert.strictEqual(part.body.files.find((f) => f.name === 'agent-memory.json').content[0].text, 'A private note.');
             const tasks = part.body.files.find((f) => f.name === 'tasks.json').content;
             assert.strictEqual(tasks.length, 1);
             assert.strictEqual(tasks[0].task, 'person-a');
@@ -94,6 +101,8 @@ async function makeTask(t, subject, title) {
         try {
             const aTask = await makeTask(t, A, 'person-a');
             await makeTask(t, B, 'person-b');
+            const agent = (await personal.create(t.ctx.s, t.config, `user:${A}`, { name: 'Erase me', instructions: 'Help A.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
+            await personal.addMemory(t.ctx.s, `user:${A}`, agent.id, 'Erase this.');
             const db = t.ctx.s.db;
             const count = async (sql, args = []) => await db.value(sql, args);
 
@@ -103,13 +112,15 @@ async function makeTask(t, subject, title) {
             assert.strictEqual(await count('SELECT count(*)::int FROM tasks WHERE requester = $1', [`user:${A}`]), 0, 'the person\'s tasks are gone');
             assert.strictEqual(await count('SELECT count(*)::int FROM task_events WHERE task_id = $1', [aTask]), 0, 'their events went with them (cascade)');
             assert.strictEqual(await count('SELECT count(*)::int FROM spend_daily WHERE requester = $1', [`user:${A}`]), 0, 'their spend rows are gone');
+            assert.strictEqual(await count('SELECT count(*)::int FROM actor_agents WHERE owner = $1', [`user:${A}`]), 0);
+            assert.strictEqual(await count('SELECT count(*)::int FROM actor_agent_memory WHERE owner = $1', [`user:${A}`]), 0);
             assert.strictEqual(await count('SELECT count(*)::int FROM tasks WHERE requester = $1', [`user:${B}`]), 1, 'someone else\'s task stays');
             assert.strictEqual(await count('SELECT count(*)::int FROM spend_daily WHERE requester = $1', [`user:${B}`]), 1, 'someone else\'s spend stays');
             assert.strictEqual(await count("SELECT count(*)::int FROM spend_daily WHERE requester = '*'"), 1, 'the operator\'s `*` ceiling row is kept');
 
             const confirmation = stub.calls.find((c) => c.url === `/internal/account-deletions/${DEL}/confirmations`);
             assert.ok(confirmation, 'the confirmation was sent');
-            assert.deepStrictEqual(confirmation.body.erased, { tasks: 1, spend_daily: 1 });
+            assert.deepStrictEqual(confirmation.body.erased, { tasks: 1, spend_daily: 1, actor_agent_memory: 1, actor_agents: 1 });
             assert.deepStrictEqual(confirmation.body.retained, {});
             assert.ok(!Number.isNaN(Date.parse(confirmation.body.completed_at)));
 

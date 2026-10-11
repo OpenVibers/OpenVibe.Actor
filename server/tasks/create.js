@@ -18,7 +18,7 @@ function untilMidnight(nowMs) {
     return Math.ceil((Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1) - n.getTime()) / 1000);
 }
 
-async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null }) {
+async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null }) {
     const v = contracts.validate('actor.task-create-request@1', body);
     if (!v.valid) return { status: 422, code: 'actor.task.invalid', detail: (v.errors || []).map((e) => `${e.path || e.instancePath || ''} ${e.message}`.trim()).join('; ').slice(0, 500) || 'invalid request' };
     const tier = config.allowance;
@@ -54,6 +54,10 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         }
         if (all.usd >= config.spendCapUsdPerDay || all.usd + all.reserved + perTask > config.spendCapUsdPerDay + 1e-9) {
             return { status: 503, code: 'actor.capacity.spent', detail: 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.', retryAfter };
+        }
+        if (beforeInsert) {
+            const refused = await beforeInsert();
+            if (refused) return refused;
         }
         const row = await store.insertTask(s, {
             id: s.newId('tsk'), requester: principal.requester, via: principal.via || null, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,

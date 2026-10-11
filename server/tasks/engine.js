@@ -130,7 +130,19 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await meter(verdict.cost_usd);
                 await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
                 if (verdict.ok) {
-                    const result = { answer: out.text, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };
+                    let answer = out.text;
+                    if (row.via && /^agent:agt_/.test(row.via)) {
+                        const match = answer.match(/(?:^|\n)REMEMBER: ([^\n]*)[ \t]*$/);
+                        if (match) {
+                            answer = answer.slice(0, match.index).trimEnd();
+                            const note = match[1].trim();
+                            if (note && note.length <= 300) {
+                                const personal = require('../agents/personal');
+                                await personal.addMemory(s, row.requester, row.via.slice(6), note, 'agent');
+                            }
+                        }
+                    }
+                    const result = { answer, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };
                     return await setState(id, 'succeeded', { result, finished_at: iso() });
                 }
                 if (verdict.unavailable) {
