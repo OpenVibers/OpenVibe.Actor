@@ -138,13 +138,14 @@ ${table(['Piece', 'State'], [
                 ['OpenAI\'s web agent as one of the routed agents', 'Live.'],
                 ['Private mode on an open model on OpenVibe\'s server', 'Live: short answers, no tools yet.'],
                 ['A second-family check on every answer, and hand-off on failure', 'Live.'],
-                [html`The API (<a href="/docs">docs</a>): tasks, the live stream, the agents and a dry-run router`, 'Live, for people and for apps with actor.task.* grants from OpenVibe.Services.'],
+                [html`The API (<a href="/docs">docs</a>): tasks, the live stream, <a href="/docs#webhooks">signed webhooks</a>, the agents and a dry-run router`, 'Live, for people and for apps with actor.task.* grants from OpenVibe.Services.'],
+                [html`Tasks a watch hands over when its condition fires (<a href="https://openvibe.watch">OpenVibe.Watch</a>)`, 'Live: the task is yours, with your allowance; Watch sees only the tasks it started.'],
                 ['Coding tasks through OpenVibe.Codes', html`Next: hosted coding runs need OpenVibe.Run sandboxes. Today, <a href="https://openvibe.codes/start">run openvibe-codes</a> on your machine.`],
                 ['Browser and desktop agents on OpenVibe\'s own cheap servers, that you can watch and take over', 'Next, on OpenVibe.Run workers.'],
                 ['More agent platforms, bring-your-own keys, paid tiers through OpenVibe.Billing', 'Planned.'],
                 ['Personal agents: memory you control, schedules, approvals, reachable from chat', 'Planned.'],
             ])}</section>
-${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream and the router are an API. Apps get actor.task.* grants on OpenVibe.Services.', actions: [{ label: 'Read the API', href: '/docs', primary: true }, { label: 'See the agents', href: '/agents' }] }))}`,
+${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, its webhooks and the router are an API. Apps get actor.task.* grants on OpenVibe.Services.', actions: [{ label: 'Read the API', href: '/docs', primary: true }, { label: 'See the agents', href: '/agents' }] }))}`,
         }, status);
     }
 
