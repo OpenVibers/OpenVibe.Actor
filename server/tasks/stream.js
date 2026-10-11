@@ -5,6 +5,9 @@
  * every stored event after its Last-Event-ID (or ?after=), then each new one as the engine publishes it; the stream
  * closes after the `end` event. Events are stored before they are published (tasks/store.js appendEvent), and a reader
  * subscribes before reading its backlog, so nothing falls between the two; a seq it already has is never sent twice.
+ * Events published while the backlog is still being read wait until the backlog is written (sending one first would
+ * mark every older seq as already sent: a reader got only the `end` event, seq 9, on PostgreSQL in CI), and an `end`
+ * that comes meanwhile closes the stream only after the backlog.
  * The stream is best-effort; the task record is the truth.
  */
 
@@ -13,10 +16,16 @@ const HEARTBEAT_MS = 15_000;
 function createTaskStream({ log = console } = {}) {
     const subs = new Map();     // task id → Set<{ res, last }>
 
-    function write(sub, event) {
+    function send(sub, event) {
         if (event.seq <= sub.last) return;
         sub.last = event.seq;
         try { sub.res.write(`id: ${event.seq}\nevent: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`); } catch (err) { log.warn('[Actor] stream write failed:', err && err.message); }
+    }
+
+    // A reader still reading its backlog keeps live events aside; serve() sends them, in seq order, after the backlog.
+    function write(sub, event) {
+        if (sub.ready) send(sub, event);
+        else sub.pending.push(event);
     }
 
     function publish(taskId, event) {
@@ -26,7 +35,10 @@ function createTaskStream({ log = console } = {}) {
     function end(taskId) {
         const set = subs.get(taskId);
         subs.delete(taskId);
-        for (const sub of set || []) { try { sub.res.end(); } catch { /* gone */ } }
+        for (const sub of set || []) {
+            if (!sub.ready) { sub.ended = true; continue; }   // serve() closes it once its backlog is out
+            try { sub.res.end(); } catch { /* gone */ }
+        }
     }
 
     /**
@@ -37,7 +49,7 @@ function createTaskStream({ log = console } = {}) {
         res.status(200).set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
         res.flushHeaders();
         res.write(': stream open\n\n');
-        const sub = { res, last: after };
+        const sub = { res, last: after, ready: false, pending: [], ended: false };
         let set = subs.get(taskId);
         if (!set) { set = new Set(); subs.set(taskId, set); }
         set.add(sub);
@@ -49,8 +61,11 @@ function createTaskStream({ log = console } = {}) {
             if (s) { s.delete(sub); if (!s.size) subs.delete(taskId); }
         };
         req.on('close', leave);
-        for (const e of await readBacklog()) write(sub, e);
-        if (await isEnded()) { leave(); res.end(); }
+        for (const e of await readBacklog()) send(sub, e);
+        sub.ready = true;
+        for (const e of sub.pending.sort((a, b) => a.seq - b.seq)) send(sub, e);
+        sub.pending = [];
+        if (sub.ended || await isEnded()) { leave(); res.end(); }
     }
 
     const status = () => ({ streams: [...subs.values()].reduce((n, s) => n + s.size, 0) });
