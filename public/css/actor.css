@@ -77,7 +77,9 @@ button.sc-btn.sc-primary { border: 0; }
 /* ── The agents ── */
 .agent-cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 .agent-card { padding: 16px; border-radius: 16px; border: 1px solid var(--border, #1f2d47); background: var(--bg-secondary, #101828); }
-.agent-card.off { opacity: .78; }
+/* An agent that is off: a dashed outline and no fill, never faded text (opacity took it below WCAG AA contrast). */
+.agent-card.off { border-style: dashed; background: transparent; }
+.agent-card .muted { color: var(--text-secondary, #96a7c2); }
 .agent-card header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .agent-card p { margin: .5rem 0 0; font-size: 14px; line-height: 1.5; }
 
