@@ -55,6 +55,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
         const computers = tools.some((d) => d.function && d.function.name === 'computer_run');
         const messages = [{ role: 'system', content: RUNTIME_SYSTEM(robots, computers) }, { role: 'user', content: task }];
         let last = '';
+        const evidence = [];   // what each tool answered, for the check (agents/check.js)
         for (let turn = 1; turn <= MAX_TURNS; turn++) {
             if (budgetLeft() <= 0) throw new ProviderError('the task reached its budget before the runtime finished', { code: 'actor.budget.exceeded' });
             const finalTurn = turn === MAX_TURNS;
@@ -63,7 +64,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
             await meter(r.cost_usd);
             messages.push(r.message);
             if (r.text && r.text.trim()) { last = r.text.trim(); }
-            if (!r.toolCalls.length) return { text: last, sources: [], model: r.model };
+            if (!r.toolCalls.length) return { text: last, sources: [], model: r.model, evidence };
             if (r.text && r.text.trim()) await emit({ step: 'text', text: r.text.trim().slice(0, 2000) });
             for (const call of r.toolCalls) {
                 const name = call.function && call.function.name;
@@ -71,13 +72,14 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
                 try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { args = {}; }
                 await emit({ step: 'tool_call', tool: name, input: summarize(args) });
                 const out = await ovTools.call(name, args, { signal, requester });
+                evidence.push({ tool: name, result: out.slice(0, 2000) });
                 const isError = /^\{"error"/.test(out);
                 await emit({ step: 'tool_result', tool: name, text: out.slice(0, 600), is_error: isError });
                 messages.push({ role: 'tool', tool_call_id: call.id, content: out });
             }
         }
         if (!last) throw new ProviderError('the runtime used all its turns without an answer', { code: 'actor.agent.no_answer' });
-        return { text: last, sources: [], model: p.deepseek.model };
+        return { text: last, sources: [], model: p.deepseek.model, evidence };
     }
 
     async function openai({ task, mode, signal, emit, meter, budgetLeft }) {
