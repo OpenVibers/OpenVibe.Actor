@@ -22,6 +22,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const id = create.headers.get('location').split('/').pop();
             const own = await t.get(`/me/agents/${id}`, { as: a });
             assert.match(own.text, /Run now/);
+            assert.ok(own.text.includes(`https://openvibe.watch/watches/new?template=event&amp;agent_id=${id}`), 'a link to wake it from Watch');
             assert.match(own.text, /Forget everything/);
             assert.strictEqual((await t.get(`/me/agents/${id}/memory`, { as: a, form: { text: 'Remember this.' }, headers: SAME })).status, 303);
             const withNote = await t.get(`/me/agents/${id}`, { as: a });
