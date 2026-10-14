@@ -158,7 +158,7 @@ ${computersCard(pcs)}
 ${robotsCard(rovers)}
 <section class="cn-card cn-full" aria-labelledby="cn-elsewhere"><h2 id="cn-elsewhere">Across OpenVibe</h2>
 <ul class="cn-links">
-<li><a href="https://openvibe.services/projects">Your projects and resources</a><span class="cn-meta">OpenVibe.Services: suspend, resume or delete what you own</span></li>
+<li><a href="https://openvibe.services/projects">Your projects and resources</a><span class="cn-meta">OpenVibe.Services: stop, delete, suspend or resume what your projects hold</span></li>
 <li><a href="https://openvibe.watch">Your watches</a><span class="cn-meta">OpenVibe.Watch: wake an agent when something changes</span></li>
 <li><a href="https://openvibe.codes/run">Coding on your machine</a><span class="cn-meta">OpenVibe.Codes: tasks on your own computer</span></li>
 </ul></section>
