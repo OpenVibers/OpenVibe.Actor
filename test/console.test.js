@@ -55,6 +55,7 @@ const approvals = require('../server/agents/approvals');
             const running = await task(owner, 'Check the certificate of example.com', 'running');
             await task(owner, 'Summarise the Node.js release notes', 'succeeded');
             await task(`user:${bo.subject}`, 'Bo\'s private task', 'running');
+            await store.addSpend(t.ctx.s, owner, 0.0012);
             await approvals.request(t.ctx.s, { owner, kind: 'codes.task', summary: 'Fix the failing build in ada/site', payload: { task: 'fix it' } });
             await personal.create(t.ctx.s, t.config, owner, { name: 'Morning briefing', instructions: 'Summarise what shipped.', mode: 'balanced', budget_per_run_usd: 0.02, daily_runs_max: 1, schedule: 'daily', schedule_at: '08:00', status: 'active' });
             const r = await t.get('/console', { as: ada });
@@ -73,6 +74,8 @@ const approvals = require('../server/agents/approvals');
             assert.match(h, /desk-pc[\s\S]*Ask first · terminal, files/);
             assert.match(h, /Desk rover[\s\S]*battery 80%/);
             assert.match(h, /openvibe\.services\/projects/);
+            assert.match(h, /Last 7 days: <b>\$0\.0012<\/b>, 2 tasks/, 'the week: what the two tasks spent today');
+            assert.strictEqual((h.match(/class="cn-bar"/g) || []).length, 7);
             assert.deepStrictEqual(asked.filter((a) => a[1] !== ada.subject), [], 'Bot is asked as the person only');
         });
 

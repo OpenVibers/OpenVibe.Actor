@@ -45,6 +45,14 @@
 .cn-stat b { color: var(--text-primary, #e6edf7); font-size: 1.25rem; font-variant-numeric: tabular-nums; }
 .cn-meter { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--text-secondary, #96a7c2) 20%, transparent); overflow: hidden; }
 .cn-meter span { display: block; height: 100%; border-radius: inherit; background: var(--accent, #3b82f6); }
+.cn-week { margin: .35rem 0 0; }
+.cn-week figcaption { font-size: 13px; color: var(--text-secondary, #96a7c2); }
+.cn-week figcaption b { color: var(--text-primary, #e6edf7); font-variant-numeric: tabular-nums; }
+.cn-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 72px; margin-top: .45rem; }
+.cn-bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; height: 100%; }
+.cn-bar i { display: block; width: 100%; max-width: 22px; border-radius: 4px 4px 2px 2px; background: color-mix(in srgb, var(--accent, #3b82f6) 70%, transparent); }
+.cn-bar:last-child i { background: var(--accent, #3b82f6); }
+.cn-bar small { font-size: 11px; color: var(--text-secondary, #96a7c2); }
 
 @media (max-width: 60rem) { .cn-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 40rem) {
