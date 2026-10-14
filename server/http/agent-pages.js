@@ -6,6 +6,7 @@ const { sameOrigin } = require('./principal');
 const { html, raw, time } = require('../render/html');
 const { send } = require('../render/layout');
 const personal = require('../agents/personal');
+const approvals = require('../agents/approvals');
 
 function createAgentPages(ctx) {
     const { config, s } = ctx;
@@ -53,8 +54,10 @@ function createAgentPages(ctx) {
     r.get('/me/agents', async (req, res) => {
         if (!signed(req)) return login(req, res);
         const agents = await personal.list(s, owner(req));
+        const waiting = await approvals.pendingCount(s, owner(req));
         page(req, res, 'Your agents', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · personal agents · alpha</p><h1>Your agents</h1>
-<p class="pa-lede">An agent is a task you set up once: standing instructions, a memory you can read and edit, and a schedule. Every run is an ordinary Actor task, with the same routing, checks, costs and limits.</p></header>
+<p class="pa-lede">An agent is a task you set up once: standing instructions, a memory you can read and edit, and a schedule. Every run is an ordinary Actor task, with the same routing, checks, costs and limits.</p>
+<p><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> · what your agents asked to do while you were away.</p></header>
 ${agents.length ? html`<ul class="pa-cards">${agents.map((a) => html`<li class="pa-card"><a href="/me/agents/${a.id}"><strong>${a.name}</strong></a>
 <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span>
 <span class="pa-when">${when(a)}</span>${a.last_run_at ? html`<span class="pa-when">Last run ${time(a.last_run_at)}</span>` : ''}</li>`)}</ul>`
@@ -67,6 +70,37 @@ ${agents.length ? html`<ul class="pa-cards">${agents.map((a) => html`<li class="
         if (!out.row) return page(req, res, 'Create agent', html`<h1>Create agent</h1><p>${out.error || 'Agent limit reached.'}</p><form method="post" action="/me/agents">${form(req.body)}<button type="submit">Create</button></form>`, out.limit ? 429 : 422);
         res.redirect(303, `/me/agents/${out.row.id}`);
     });
+    // The approval inbox (agents/approvals.js): what an agent asked to do while its owner was away.
+    const APPROVAL_STATE = { pending: ['Waiting for you', 'pill-running'], approved: ['Approved', 'pill-succeeded'], declined: ['Declined', 'pill-failed'], expired: ['Expired', 'pill-failed'] };
+    const approvalPill = (a) => html`<span class="pill ${APPROVAL_STATE[a.state][1]}">${APPROVAL_STATE[a.state][0]}</span>`;
+    r.get('/me/approvals', async (req, res) => {
+        if (!signed(req)) return login(req, res);
+        const rows = await approvals.list(s, owner(req));
+        page(req, res, 'Approvals', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · approvals</p><h1>Approvals</h1>
+<p class="pa-lede">When one of your agents runs while you are away and its work would act for you outside Actor (a coding task on your own machine), it asks here first. Nothing runs until you approve. A request you leave expires after ${String(approvals.EXPIRES_DAYS)} days.</p></header>
+${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-card"><a href="/me/approvals/${a.id}"><strong>${a.summary}</strong></a> ${approvalPill(a)}<span class="pa-when">Asked ${time(a.created_at)}</span></li>`)}</ul>`
+        : html`<p class="pa-empty">Nothing to approve. Your agents have not asked for anything yet.</p>`}
+<p><a href="/me/agents">Your agents</a></p>`);
+    });
+    r.get('/me/approvals/:id', async (req, res) => {
+        if (!signed(req)) return login(req, res);
+        const a = await approvals.get(s, owner(req), req.params.id);
+        if (!a) return page(req, res, 'Request not found', html`<h1>Request not found</h1><p><a href="/me/approvals">Approvals</a></p>`, 404);
+        const p = typeof a.payload === 'string' ? JSON.parse(a.payload) : a.payload;
+        page(req, res, 'Approval', html`<p class="pa-eyebrow"><a href="/me/approvals">Approvals</a></p><h1>${a.summary}</h1>
+<p>${approvalPill(a)} <span class="pa-when">Asked ${time(a.created_at)}${a.agent_id ? html` by <a href="/me/agents/${a.agent_id}">your agent</a>` : ''}${a.task_id ? html` in <a href="/tasks/${a.task_id}">this run</a>` : ''}</span></p>
+<section class="pa-panel"><h2>What it would do</h2><p>Start a coding task on your own machine through <a href="https://openvibe.codes/run">OpenVibe.Codes</a> with this request. You get the summary, the changed files and the patch; it pushes nowhere unless the request asks for a branch and your machine holds a GitHub token.</p>
+<pre class="pa-pre">${String(p.task || '').slice(0, 8000)}</pre></section>
+${a.state === 'pending' ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">Approve and start it</button> <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>`
+        : a.result_task_id ? html`<p>Started as <a href="/tasks/${a.result_task_id}">this task</a>.</p>` : ''}`);
+    });
+    r.post('/me/approvals/:id', async (req, res) => {
+        if (!write(req, res)) return;
+        const out = await approvals.decide(ctx, owner(req), req.params.id, String((req.body || {}).decision || ''));
+        if (out.error) return page(req, res, 'Not done', html`<h1>Not done</h1><p>${out.error}</p><p><a href="/me/approvals">Approvals</a></p>`, out.status);
+        res.redirect(303, out.task ? `/tasks/${out.task.id}` : `/me/approvals/${req.params.id}`);
+    });
+
     r.get('/me/agents/:id', async (req, res) => {
         if (!signed(req)) return login(req, res);
         const a = await find(req, res); if (!a) return;

@@ -31,3 +31,5 @@
 .pa-btn:hover { border-color: var(--accent-light, #60a5fa); }
 .pa-btn.pa-primary { border: 0; background: var(--accent-strong, #2563eb); color: var(--on-accent-strong, #fff); }
 .pa-btn.pa-primary:hover { filter: brightness(1.08); }
+.pa-pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color, rgba(255,255,255,.15)); font-size: 13px; }
+.pa-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
