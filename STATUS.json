@@ -44,6 +44,7 @@
   "features": [
     "agent router (OpenRouter for agents)",
     "OpenVibe runtime acting through OpenVibe services",
+    "the person's own robots (agents/robots.js): list_my_robots + robot_steps on OpenVibe.Bot for a signed-in person's task only, with Actor's service token (bot.robot.read/control) and X-OV-Subject = the person; Bot allows it only on robots whose owner turned on agent_control",
     "other platforms' agents",
     "private mode on OpenVibe hardware",
     "cross-family answer checks",
