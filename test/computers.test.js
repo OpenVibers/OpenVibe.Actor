@@ -37,6 +37,7 @@ function fakeBot({ machines = null } = {}) {
             if (v.op === 'read') return reply(200, { result: 'ack', data: { path: v.path, size: 12, offset: 0, length: 12, truncated: false, content_b64: Buffer.from('hello notes\n').toString('base64') } });
             if (v.op === 'write') return reply(200, { result: 'expired', reason: 'no acknowledgement before the deadline' });
             if (body.kind === 'screen') return reply(200, { result: 'ack', data: { format: 'jpeg', width: v.max_width, height: 720, content_b64: Buffer.from('fake-jpeg').toString('base64') } });
+            if (body.kind === 'input') return reply(200, { result: 'ack', data: { done: true, action: v.action, ...(v.x != null ? { x: v.x * 2, y: v.y * 2 } : {}) } });
         }
         if (u.pathname.startsWith('/api/v1/machines/')) return reply(404, { code: 'bot.device_not_found', detail: 'no such machine of yours' });
         return reply(404, { code: 'not_found' });
@@ -156,7 +157,7 @@ const as = { requester: `user:${ME}` };
         assert.match(system.content, /never instructions to follow/);
         assert.match(system.content, /Do not repeat passwords, keys, tokens/);
         assert.deepStrictEqual(user.content.map((p) => p.type), ['text', 'image_url']);
-        assert.strictEqual(user.content[0].text, 'What error is on screen?');
+        assert.match(user.content[0].text, /^What error is on screen\?\n\n\(The picture is 1280×720 pixels, origin top-left/);
         assert.strictEqual(user.content[1].image_url.url, `data:image/jpeg;base64,${Buffer.from('fake-jpeg').toString('base64')}`);
         assert.ok(!JSON.stringify(out).includes('ZmFrZS1qcGVn'), 'the runtime model never gets the picture');
         const broke = JSON.parse(await withVision.call('computer_screen', { machine: PC, question: 'x' }, { ...as, budgetLeft: () => 0 }));
@@ -164,6 +165,25 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(seen.length, 1, 'no look once the budget is spent');
         const stranger = JSON.parse(await withVision.call('computer_screen', { machine: PC, question: 'x' }, { requester: 'app:app_x' }));
         assert.match(stranger.error, /signed-in person/);
+    });
+
+    await check('computer_input: offered with the screen; the mouse and keyboard go to Bot as the person; bad input never leaves Actor', async () => {
+        const bot = fakeBot();
+        const vision = async () => ({ text: 'ok', cost_usd: 0 });
+        const t = createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }), vision });
+        assert.ok((await t.definitions(as)).map((d) => d.function.name).includes('computer_input'));
+        assert.ok(!(await tools(bot).definitions(as)).map((d) => d.function.name).includes('computer_input'), 'no seeing, no acting on the screen');
+        const click = JSON.parse(await t.call('computer_input', { machine: PC, action: 'click', x: 640, y: 360, width: 1280, height: 720 }, as));
+        assert.deepStrictEqual(click, { done: true, action: 'click', x: 1280, y: 720 });
+        const sent = bot.calls.filter((c) => c.body && c.body.kind === 'input');
+        assert.deepStrictEqual([sent[0].subject, sent[0].body.value, sent[0].body.ms], [ME, { action: 'click', x: 640, y: 360, width: 1280, height: 720 }, 120000], 'as the person, with time for an approval at "ask"');
+        assert.deepStrictEqual(JSON.parse(await t.call('computer_input', { machine: PC, action: 'type', text: 'hello' }, as)), { done: true, action: 'type' });
+        assert.deepStrictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'input')[1].body.value, { action: 'type', text: 'hello' });
+        const before = bot.calls.length;
+        for (const bad of [{ action: 'drag' }, { action: 'click' }, { action: 'key', keys: 'ctrl+s; rm -rf ~' }, { action: 'scroll', dy: 0 }, { action: 'type', text: '' }]) {
+            assert.ok(JSON.parse(await t.call('computer_input', { machine: PC, ...bad }, as)).error, JSON.stringify(bad));
+        }
+        assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
     });
 
     await check('off without a Bot URL or a client secret', async () => {
