@@ -83,5 +83,19 @@ const tokens = { authHeaders: async () => ({ Authorization: 'Bearer svc-token' }
         assert.ok(!(await t.definitions({ requester: `user:${ME}` })).some((d) => d.function.name === 'robot_steps'));
     });
 
+    await check('a robot task is its own class, routed to the runtime, never refused as code', async () => {
+        const { heuristic, CLASSES } = require('../server/agents/classify');
+        const { route } = require('../server/agents/router');
+        const catalog = require('../server/agents/catalog');
+        assert.ok(CLASSES.includes('robot'));
+        assert.strictEqual(heuristic(`Using my robot "Desk rover" (${OPEN}) on OpenVibe.Bot: drive it forward for 1 second, then stop`), 'robot');
+        assert.strictEqual(heuristic('drive my rover in a square and turn its headlights green'), 'robot');
+        assert.strictEqual(heuristic('Write a python script that reads a CSV'), 'code');
+        assert.strictEqual(heuristic('fix the bug in my robot code ```js\nx()\n```'), 'code', 'code in the task is still code');
+        assert.ok(catalog.byId('openvibe-runtime').can.includes('task:robot'));
+        const placed = route({ cls: 'robot', config: { providers: { deepseek: { apiKey: 'k' }, openai: { apiKey: '' }, local: { url: '', model: '' } } } });
+        assert.strictEqual(placed.selected, 'openvibe-runtime', JSON.stringify(placed.candidates));
+    });
+
     done();
 })();
