@@ -122,10 +122,19 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(v.ok, true);
         const [system, user] = seen[0];
         assert.match(system.content, /person's own computer through OpenVibe\.Bot/);
-        assert.match(user.content, /Tool results the agent received \(real\):\ncomputer_run: \{"exit_code":0,"stdout":"Linux/);
+        assert.match(user.content, /=== Tool results the agent received \(real, returned by OpenVibe services\) ===\ncomputer_run: \{"exit_code":0,"stdout":"Linux/);
+        assert.match(system.content, /never expected to be JSON/);
         assert.ok(user.content.length < 6000 + 6000 + 2000, 'the evidence is capped');
         await checkAnswer({ task: 't', answer: 'a', agentId: 'openvibe-runtime', mode: 'balanced', checkers: { openai: chat } });
         assert.doesNotMatch(seen[1][1].content, /Tool results/, 'no tools, no section');
+        const { checkersFor } = require('../server/agents/check');
+        const strong = async () => ({ text: '{"ok":true}' });
+        const both = { openai: chat, deepseek: chat, openaiGrounded: strong };
+        const grounded = checkersFor('openvibe-runtime', both, { mode: 'balanced', grounded: true });
+        assert.deepStrictEqual(grounded.map((c) => [c.family, c.cross]), [['openai', true], ['deepseek', false]], 'still another family first');
+        assert.strictEqual(grounded[0].chat, strong, 'grounded: OpenAI\'s stronger checker');
+        assert.strictEqual(checkersFor('openvibe-runtime', both, { mode: 'balanced' })[0].chat, chat, 'otherwise the cheapest');
+        assert.deepStrictEqual(checkersFor('openvibe-runtime', { ...both, local: chat }, { mode: 'private', grounded: true }).map((c) => c.family), ['local'], 'private stays on OpenVibe hardware');
     });
 
     await check('off without a Bot URL or a client secret', async () => {

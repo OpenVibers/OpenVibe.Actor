@@ -155,6 +155,7 @@ const RATES = {
     deepseek: { input_usd_per_mtok: 0.30, cached_usd_per_mtok: 0.006, output_usd_per_mtok: 1.20 },
     openai: { input_usd_per_mtok: 0.25, cached_usd_per_mtok: 0.025, output_usd_per_mtok: 2.00, per_call_usd: 0.01 },
     openaiCheck: { input_usd_per_mtok: 0.05, cached_usd_per_mtok: 0.005, output_usd_per_mtok: 0.40 },
+    openaiGroundedCheck: { input_usd_per_mtok: 0.25, cached_usd_per_mtok: 0.025, output_usd_per_mtok: 2.00 },
     local: { input_usd_per_mtok: 0, output_usd_per_mtok: 0 },
 };
 
