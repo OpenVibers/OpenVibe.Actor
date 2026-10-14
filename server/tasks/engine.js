@@ -144,7 +144,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     continue;
                 }
                 await setState(id, 'verifying', { agentForEvent: agentId });
-                const verdict = await check({ task: row.task, answer: out.text, sources: out.sources || [], agentId, mode: row.mode, checkers: adapters.checkers, signal });
+                const verdict = await check({ task: row.task, answer: out.text, sources: out.sources || [], evidence: out.evidence || [], agentId, mode: row.mode, checkers: adapters.checkers, signal });
                 await meter(verdict.cost_usd);
                 await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
                 if (verdict.ok) {

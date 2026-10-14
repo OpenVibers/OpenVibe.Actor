@@ -20,6 +20,8 @@ ok is true when the answer addresses the task and nothing in it is clearly inven
 ok is false when the answer is empty, refuses without a good reason, answers a different question, contradicts itself, or states something that is plainly impossible.
 The agent may have searched the web or run tools: do not fail an answer only because it states recent facts, versions, prices or dates you cannot verify yourself, especially when it cites a source for them.
 The agent may have made the person's own robot act through OpenVibe.Bot: an answer that reports what the robot did, or why it stopped or was refused, addresses the task.
+The agent may have used the person's own computer through OpenVibe.Bot (listed or read files, ran a program, wrote a file): an answer that reports what it found, what a program printed, or why the computer refused, addresses the task.
+When the tool results the agent received are given below, they are real: judge the answer against them, and fail it only when it contradicts them or claims what they do not show.
 The agent may have run a coding task on the person's own machine through OpenVibe.Codes: an answer that reports what changed (a summary, the files, a patch), or that the machine is still working on it with a link to follow it, addresses the task.
 When the task is a greeting, small talk, a test message or too vague to act on, a short friendly reply, a summary of what the agent can do or a clarifying question is a good answer: ok is true.`;
 
@@ -35,16 +37,27 @@ const checkerFor = (agentId, checkers, opts) => checkersFor(agentId, checkers, o
  * Ask each checker in turn until one gives a verdict: a checker that answers nothing usable (a provider error, no JSON)
  * passes the turn to the next; only when none gives a verdict is the result unavailable (and never delivered).
  */
-async function check({ task, answer, sources = [], agentId, mode, checkers, signal }) {
+async function check({ task, answer, sources = [], evidence = [], agentId, mode, checkers, signal }) {
     const list = checkersFor(agentId, checkers, { mode });
     if (!list.length) return { ok: false, unavailable: true, reason: 'no model is available to check this answer', cost_usd: 0 };
     let cost = 0;
     let last = 'no checker gave a verdict';
     const cited = sources.length ? `\n\nSources the agent cites:\n${sources.slice(0, 10).join('\n')}` : '';
+    // What the agent's tools answered (the runtime's own calls, never the model's words): the check reads the answer
+    // against them instead of guessing whether a reported fact was invented. At most 6000 characters in all.
+    let room = 6000;
+    const seen = [];
+    for (const e of evidence) {
+        if (room <= 0) break;
+        const line = `${e.tool}: ${String(e.result || '').slice(0, Math.min(1500, room))}`;
+        room -= line.length;
+        seen.push(line);
+    }
+    const tools = seen.length ? `\n\nTool results the agent received (real):\n${seen.join('\n')}` : '';
     for (const c of list) {
         try {
             const r = await c.chat({
-                messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: `Task:\n${String(task).slice(0, 6000)}\n\nAnswer:\n${String(answer).slice(0, 12000)}${cited}` }],
+                messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: `Task:\n${String(task).slice(0, 6000)}\n\nAnswer:\n${String(answer).slice(0, 12000)}${cited}${tools}` }],
                 json: true, maxTokens: 160, signal,
             });
             cost += r.cost_usd || 0;

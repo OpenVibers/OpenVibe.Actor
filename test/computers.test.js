@@ -113,6 +113,21 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(placed.selected, 'openvibe-runtime', JSON.stringify(placed.candidates));
     });
 
+    await check('the answer check reads the tool results the agent received, capped', async () => {
+        const { check: checkAnswer } = require('../server/agents/check');
+        const seen = [];
+        const chat = async ({ messages }) => { seen.push(messages); return { text: '{"ok":true,"reason":"matches the tool results"}', cost_usd: 0 }; };
+        const evidence = [{ tool: 'computer_run', result: '{"exit_code":0,"stdout":"Linux\\n"}' }, ...Array.from({ length: 10 }, (_, i) => ({ tool: 'computer_read', result: 'x'.repeat(2000) + i }))];
+        const v = await checkAnswer({ task: 'run uname -s on my computer', answer: 'uname printed Linux.', evidence, agentId: 'openvibe-runtime', mode: 'balanced', checkers: { openai: chat } });
+        assert.strictEqual(v.ok, true);
+        const [system, user] = seen[0];
+        assert.match(system.content, /person's own computer through OpenVibe\.Bot/);
+        assert.match(user.content, /Tool results the agent received \(real\):\ncomputer_run: \{"exit_code":0,"stdout":"Linux/);
+        assert.ok(user.content.length < 6000 + 6000 + 2000, 'the evidence is capped');
+        await checkAnswer({ task: 't', answer: 'a', agentId: 'openvibe-runtime', mode: 'balanced', checkers: { openai: chat } });
+        assert.doesNotMatch(seen[1][1].content, /Tool results/, 'no tools, no section');
+    });
+
     await check('off without a Bot URL or a client secret', async () => {
         assert.strictEqual(createComputers({ config: { ...config, services: { ...config.services, botUrl: '' } } }).enabled, false);
         assert.strictEqual(createComputers({ config: { ...config, oauth: { clientId: 'actor', clientSecret: '' } } }).enabled, false);
