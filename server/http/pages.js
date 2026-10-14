@@ -100,6 +100,7 @@ ${raw(showcase.features({
                     { icon: 'ov:dns', title: 'Look up any domain or site', text: 'DNS, mail records, SPF and DMARC, certificates, headers, WHOIS: the runtime runs OpenVibe.Tools for real answers.' },
                     { icon: 'ov:network', title: 'Search the OpenVibe network', text: 'Streams, clips, pastes, posts and wiki pages across every OpenVibe site.' },
                     { icon: 'ov:text', title: 'Write and explain', text: 'Drafts, summaries, explanations, plans: the cheapest agent that does it well.' },
+                    { icon: 'ov:code', title: 'Work on your own computer', text: 'List and read files, run programs and write files on your computer, at the level you set there: at "ask", nothing runs until you approve it on the computer.' },
                     { icon: 'ov:host', title: 'Private mode', text: 'An open model on OpenVibe\'s own server answers, and nothing leaves OpenVibe.' },
                     { icon: 'ov:check', title: 'Checked before you see it', text: 'A second model reads every answer first, from another model family where one is available (private mode checks on OpenVibe\'s own model); a failed check goes to the next agent.' },
                 ],
@@ -143,6 +144,8 @@ ${table(['Piece', 'State'], [
                 [html`Your own agents (<a href="/me/agents">Your agents</a>): instructions, memory you can read and edit, a schedule (hourly, daily or weekly), a budget per run and a daily cap`, 'Live.'],
                 [html`Your own robots on <a href="https://openvibe.bot">OpenVibe.Bot</a>: see them and drive the ones you opened to your agent, through Bot's limits and e-stop`, 'Live: turn on "Let my OpenVibe.Actor agent drive this robot" on the robot\'s panel.'],
                 [html`Coding tasks on your own machine, through <a href="https://openvibe.codes/run">OpenVibe.Codes</a>: name the repository and what to change, and get the summary, the files and the patch`, html`Live: add the machine on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a> and start one task on openvibe.codes/run first. The model use is on your machine's own keys.`],
+                [html`Your own computers, through <a href="https://openvibe.bot/docs/computers">OpenVibe.Bot</a>: list and read files, run programs and write files there, as you, at the level you set on the computer`, html`Live: install OpenVibe Node with <code>--computer ask</code> and turn on "Let my agent use this computer" on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>. At <code>ask</code>, you approve each run or write on the computer.`],
+                [html`<a href="/console">The Console</a>: what runs now, what waits for you, today's spend, your agents, computers and robots, and one box to start a task`, 'Live, for signed-in people.'],
             ])}</section>
 ${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, its webhooks and the router are an API. Apps get actor.task.* grants on OpenVibe.Services.', actions: [{ label: 'Read the API', href: '/docs', primary: true }, { label: 'See the agents', href: '/agents' }] }))}`,
         }, status);
