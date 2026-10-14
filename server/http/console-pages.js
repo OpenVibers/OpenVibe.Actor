@@ -68,6 +68,16 @@ function createConsolePages(ctx, { robots = null, computers = null } = {}) {
 <span class="cn-meta">${agent ? html`${agent} · ` : ''}${t.cost_usd == null ? '' : html`${usd(Number(t.cost_usd))} · `}${time(t.created_at)}</span></li>`;
     };
 
+    /** The last seven days of spend as bars (a table for screen readers), tallest day = full height. */
+    function weekChart(days) {
+        const top = Math.max(...days.map((d) => d.usd), 0);
+        const total = days.reduce((n, d) => n + d.usd, 0);
+        const label = (d) => new Date(`${d.day}T00:00:00Z`).toLocaleDateString('en', { weekday: 'short', timeZone: 'UTC' });
+        return html`<figure class="cn-week"><figcaption>Last 7 days: <b>${usd(total)}</b>, ${String(days.reduce((n, d) => n + d.tasks, 0))} tasks</figcaption>
+<div class="cn-bars" aria-hidden="true">${days.map((d) => html`<span class="cn-bar" title="${label(d)}: ${usd(d.usd)}, ${String(d.tasks)} tasks"><i style="height:${String(top > 0 ? Math.max(4, Math.round((d.usd / top) * 100)) : 4)}%"></i><small>${label(d).slice(0, 2)}</small></span>`)}</div>
+<table class="cn-sr"><caption>Spend by day</caption><tbody>${days.map((d) => html`<tr><th scope="row">${d.day}</th><td>${usd(d.usd)}</td><td>${String(d.tasks)} tasks</td></tr>`)}</tbody></table></figure>`;
+    }
+
     function computersCard(result) {
         const body = !bot.computers.enabled ? html`<p class="cn-empty">Not connected to OpenVibe.Bot on this server.</p>`
             : !result.ok ? html`<p class="cn-empty">${result.why}</p>`
@@ -101,9 +111,10 @@ ${c.waiting_for_approval ? html`<span class="pill pill-running">${String(c.waiti
         }
         const requester = `user:${req.viewer.subject}`;
         const subject = req.viewer.subject;
-        const [tasks, today, asked, agents, pcs, rovers] = await Promise.all([
+        const [tasks, today, week, asked, agents, pcs, rovers] = await Promise.all([
             store.listTasks(s, requester, { limit: 30 }),
             store.spendToday(s, requester),
+            store.spendDays(s, requester, 7),
             approvals.list(s, requester),
             personal.list(s, requester),
             bot.computers.enabled ? fromBot((o) => bot.computers.mine(subject, o)) : { ok: false },
@@ -133,6 +144,7 @@ ${nWaiting ? '' : html`<p class="cn-empty">Nothing waits for you.</p>`}
 <div class="cn-meter" role="progressbar" aria-label="Free tasks used today" aria-valuemin="0" aria-valuemax="${String(tier.tasksPerDay)}" aria-valuenow="${String(today.tasks)}"><span style="width:${String(pct(today.tasks, tier.tasksPerDay))}%"></span></div>
 <p class="cn-stat"><b>${usd(today.usd)}</b> of ${usd(tier.perDayUsd)}</p>
 <div class="cn-meter" role="progressbar" aria-label="Spent today" aria-valuemin="0" aria-valuemax="${String(tier.perDayUsd)}" aria-valuenow="${String(today.usd)}"><span style="width:${String(pct(today.usd, tier.perDayUsd))}%"></span></div>
+${weekChart(week)}
 <p class="cn-more"><a href="/tasks">Your tasks</a></p></section>
 <section class="cn-card cn-wide" aria-labelledby="cn-recent"><h2 id="cn-recent">Recent tasks</h2>
 ${recent.length ? html`<ul class="cn-tasks">${recent.map(taskRow)}</ul>` : html`<p class="cn-empty">No finished task yet. Give Actor one above.</p>`}

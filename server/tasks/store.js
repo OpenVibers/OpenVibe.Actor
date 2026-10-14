@@ -106,6 +106,15 @@ async function spendToday(s, requester) {
     return { usd: row ? Number(row.usd) : 0, tasks: row ? Number(row.tasks) : 0 };
 }
 
+/** The last `days` days of a requester's spend, oldest first, each day present (0 when nothing ran). */
+async function spendDays(s, requester, days = 7) {
+    const today = Date.parse(`${dayOf(s.now())}T00:00:00Z`);
+    const keys = Array.from({ length: days }, (_, i) => dayOf(today - (days - 1 - i) * 86_400_000));
+    const rows = await s.db.many('SELECT day, usd, tasks FROM spend_daily WHERE requester = $1 AND day = ANY($2)', [requester, keys]);
+    const by = new Map(rows.map((r) => [String(r.day).slice(0, 10), r]));
+    return keys.map((day) => ({ day, usd: by.has(day) ? Number(by.get(day).usd) : 0, tasks: by.has(day) ? Number(by.get(day).tasks) : 0 }));
+}
+
 /** At boot: a task a stopped process left open did not finish, and is not re-run behind the person's back. */
 async function failInterrupted(s) {
     const rows = await s.db.many(
@@ -151,4 +160,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, addSpend, spendToday, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS };
