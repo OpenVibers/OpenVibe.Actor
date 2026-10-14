@@ -37,6 +37,8 @@ const TABLES = [
     { table: 'spend_daily', subject: 'requester', value: (usr) => `user:${usr}`, file: 'spend.json' },
     { table: 'actor_agent_memory', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-memory.json' },
     { table: 'actor_agents', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agents.json' },
+    // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
+    { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
 ];
 
 /** The account-data handle for Actor's store (server/db.js createStore). */

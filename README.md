@@ -49,6 +49,7 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 | `GET /api/v1/me/agents` | public | `actor.agent-list-result@1` |
 | `GET/POST /api/v1/me/agents` (signed in) | `actor.agent.manage` for a token | list or create your personal agents; signed-out GET keeps the public catalog |
 | `GET/PATCH/DELETE /api/v1/me/agents/:id` | `actor.agent.manage` for a token | read, edit or delete one personal agent |
+| `GET /me/approvals`, `GET/POST /me/approvals/:id` (signed in) | the person | the approval inbox ([server/agents/approvals.js](server/agents/approvals.js)): when one of the person's own agents runs while they are away and would start a coding task on their machine (the `codes` agent), the run asks instead and ends with a link; nothing reaches Codes until the person approves, which starts it as their own task (declining runs nothing; a request expires after 7 days). In the account export (`approvals.json`) and deletion. |
 | `GET/POST /api/v1/me/agents/:id/memory`, `PATCH/DELETE /api/v1/me/agents/:id/memory/:mem`, `DELETE /api/v1/me/agents/:id/memory` | `actor.agent.manage` for a token | control its memory |
 | `POST /api/v1/me/agents/:id/run`, `GET /api/v1/me/agents/:id/runs` | `actor.agent.run` for a token | run now or list its tasks |
 | `POST /api/v1/route` | public | dry run: which agent and why (heuristic class; nothing runs or is charged) |

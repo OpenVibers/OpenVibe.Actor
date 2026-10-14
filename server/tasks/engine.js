@@ -19,6 +19,8 @@ const catalog = require('../agents/catalog');
 const { classify, heuristic } = require('../agents/classify');
 const { route, whyNone } = require('../agents/router');
 const { check } = require('../agents/check');
+const approvals = require('../agents/approvals');
+const { repoIn: codesRepoIn } = require('../agents/codes');
 
 const MAX_ATTEMPTS = 2;
 
@@ -110,6 +112,22 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 }
                 const agentId = placement.selected;
                 const agent = catalog.byId(agentId);
+                // The approval inbox (agents/approvals.js): a person's own agent, running while they are away, asks
+                // before it starts a coding task on their machine. Nothing runs until they approve.
+                if (agentId === 'codes' && /^agent:agt_/.test(String(row.via || '')) && codesRepoIn(row.task)) {
+                    const ask = await approvals.request(s, {
+                        owner: row.requester, agentId: row.via.slice(6), taskId: id, kind: 'codes.task',
+                        summary: `Start a coding task on your machine in ${codesRepoIn(row.task)}`, payload: { task: row.task },
+                    });
+                    const url = `${config.baseUrl}/me/approvals/${ask.id}`;
+                    await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Your agent wants to start a coding task on your own machine. Nothing runs until you approve it: ${url}` });
+                    const result = {
+                        answer: `Your agent asked to start a coding task on your own machine (OpenVibe.Codes) in ${codesRepoIn(row.task)}. Nothing has run: approve or decline it at ${url}. The request expires in ${approvals.EXPIRES_DAYS} days.`,
+                        sources: [url], agent: agentId, model: null, class: cls, approval: { id: ask.id, url },
+                        checked: { by: 'none', cross_family: false, reason: 'Nothing was run: its owner decides first.' },
+                    };
+                    return await setState(id, 'succeeded', { result, finished_at: iso() });
+                }
                 await emit(id, { kind: 'output', step: attempt > 1 ? 'handoff' : 'plan', agent: agentId, text: `${agent.name} takes it${placement.reasons && placement.reasons[0] ? `: ${placement.reasons[0]}` : ''}.` });
                 let out;
                 try {
