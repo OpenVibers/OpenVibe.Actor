@@ -32,6 +32,7 @@ const { createApi } = require('./http/api');
 const resourceIndex = require('./registry/resource-index');
 const { createPageRoutes } = require('./http/pages');
 const { createAgentPages } = require('./http/agent-pages');
+const { createConsolePages } = require('./http/console-pages');
 const { createActorReadiness } = require('./observability');
 const { createCallerLimits } = require('./http/caller-limits');
 const accountDataLib = require('./identity/account-data');
@@ -46,7 +47,7 @@ const VERSION = require('../package.json').version;
  * opts: config, store, now (clock), fetchImpl (Network), providerFetch (model providers and OpenVibe services), log,
  * limitsNow, callerLimits (false: count nobody, tests only), valkey, adapters (tests: stand-in agents),
  * accountSend (a stand-in for Network's internal routes; tests only), webhookPost (a stand-in for the guarded webhook
- * poster; tests only)
+ * poster; tests only), bot ({ robots, computers }: stand-ins for the Console's OpenVibe.Bot reads; tests only)
  */
 async function createApp(opts = {}) {
     const config = opts.config || configLib.load();
@@ -157,6 +158,7 @@ async function createApp(opts = {}) {
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.ACTOR_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));
     app.use(createAgentPages(ctx));
+    app.use(createConsolePages(ctx, opts.bot || {}));
     app.use(createPageRoutes(ctx));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/">giving Actor a task</a>, <a href="/agents">the agents</a> or <a href="/docs">the API</a>.</p>` }));
 

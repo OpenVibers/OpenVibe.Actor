@@ -22,6 +22,7 @@ const NETWORK_URL = 'https://openvibe.network';
 const SITE_NAME = 'OpenVibe.Actor';
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
 const NAV = [
+    { label: 'Console', href: '/console' },
     { label: 'Your tasks', href: '/tasks' },
     { label: 'Agents', href: '/agents' },
     { label: 'API', href: '/docs' },
@@ -65,7 +66,7 @@ function renderPage(o) {
     };
     // This site's own account links live in the shared navbar's account menu (the page's account
     // bar below is only for visitors without JavaScript).
-    if (signedIn) nav.menu = { before: [{ label: 'Your tasks', href: '/tasks', icon: 'fa-list-check' }, { label: 'Your agents', href: '/me/agents', icon: 'fa-robot' }] };
+    if (signedIn) nav.menu = { before: [{ label: 'Console', href: '/console', icon: 'fa-gauge' }, { label: 'Your tasks', href: '/tasks', icon: 'fa-list-check' }, { label: 'Your agents', href: '/me/agents', icon: 'fa-robot' }] };
     const footer = { service: 'actor', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' };
     const account = signedIn
         ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`
