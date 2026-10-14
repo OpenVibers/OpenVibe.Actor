@@ -16,20 +16,27 @@ const FAMILY = { 'openvibe-runtime': 'deepseek', 'openai-agent': 'openai', 'open
 const CHECKER_FOR = { deepseek: ['openai', 'deepseek'], openai: ['deepseek', 'openai'], local: ['local'], codes: ['deepseek', 'openai'] };
 
 const SYSTEM = `You check an AI agent's answer before a person sees it. Reply with JSON only: {"ok": true|false, "reason": "<one short sentence>"}.
+Only your own reply is JSON. The answer is prose meant to be read by a person (often Markdown) and is never expected to be JSON; tool results are JSON because services return JSON.
 ok is true when the answer addresses the task and nothing in it is clearly invented, contradictory or unsafe. It does not have to be perfect.
 ok is false when the answer is empty, refuses without a good reason, answers a different question, contradicts itself, or states something that is plainly impossible.
 The agent may have searched the web or run tools: do not fail an answer only because it states recent facts, versions, prices or dates you cannot verify yourself, especially when it cites a source for them.
 The agent may have made the person's own robot act through OpenVibe.Bot: an answer that reports what the robot did, or why it stopped or was refused, addresses the task.
 The agent may have used the person's own computer through OpenVibe.Bot (listed or read files, ran a program, wrote a file): an answer that reports what it found, what a program printed, or why the computer refused, addresses the task.
-When the tool results the agent received are given below, they are real: judge the answer against them, and fail it only when it contradicts them or claims what they do not show.
+When the tool results the agent received are given, they are real. Compare every fact in the answer that a tool result covers (a file's contents, a program's output, names, counts, numbers): if any of them differs from the tool result, ok is false and the reason names it. Otherwise do not fail the answer for acting on the person's systems: the tool results show it did.
 The agent may have run a coding task on the person's own machine through OpenVibe.Codes: an answer that reports what changed (a summary, the files, a patch), or that the machine is still working on it with a link to follow it, addresses the task.
 When the task is a greeting, small talk, a test message or too vague to act on, a short friendly reply, a summary of what the agent can do or a clarifying question is a good answer: ok is true.`;
 
-/** Which checkers may read this agent's answer, best first: another family, then the same family. */
-function checkersFor(agentId, checkers, { mode }) {
+/**
+ * Which checkers may read this agent's answer, best first: another family, then the same family. An answer backed by
+ * tool results is checked by comparing the two, which OpenAI's smallest model did not do (it passed an answer that
+ * misquoted a file it had been shown, 2026-10-14): for those, OpenAI's stronger checker (`openaiGrounded`, gpt-5-mini by
+ * default) reads it when one is configured, so the check stays cross-family.
+ */
+function checkersFor(agentId, checkers, { mode, grounded = false }) {
     const family = FAMILY[agentId];
     const order = mode === 'private' ? ['local'] : (CHECKER_FOR[family] || []);
-    return order.filter((f) => checkers[f]).map((f) => ({ family: f, chat: checkers[f], cross: f !== family }));
+    const pick = (f) => (grounded && f === 'openai' && checkers.openaiGrounded ? checkers.openaiGrounded : checkers[f]);
+    return order.filter((f) => pick(f)).map((f) => ({ family: f, chat: pick(f), cross: f !== family }));
 }
 const checkerFor = (agentId, checkers, opts) => checkersFor(agentId, checkers, opts)[0] || null;
 
@@ -38,7 +45,7 @@ const checkerFor = (agentId, checkers, opts) => checkersFor(agentId, checkers, o
  * passes the turn to the next; only when none gives a verdict is the result unavailable (and never delivered).
  */
 async function check({ task, answer, sources = [], evidence = [], agentId, mode, checkers, signal }) {
-    const list = checkersFor(agentId, checkers, { mode });
+    const list = checkersFor(agentId, checkers, { mode, grounded: evidence.length > 0 });
     if (!list.length) return { ok: false, unavailable: true, reason: 'no model is available to check this answer', cost_usd: 0 };
     let cost = 0;
     let last = 'no checker gave a verdict';
@@ -53,11 +60,11 @@ async function check({ task, answer, sources = [], evidence = [], agentId, mode,
         room -= line.length;
         seen.push(line);
     }
-    const tools = seen.length ? `\n\nTool results the agent received (real):\n${seen.join('\n')}` : '';
+    const tools = seen.length ? `\n\n=== Tool results the agent received (real, returned by OpenVibe services) ===\n${seen.join('\n')}\n=== End of tool results ===` : '';
     for (const c of list) {
         try {
             const r = await c.chat({
-                messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: `Task:\n${String(task).slice(0, 6000)}\n\nAnswer:\n${String(answer).slice(0, 12000)}${cited}${tools}` }],
+                messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: `=== Task ===\n${String(task).slice(0, 6000)}\n\n=== The agent's answer (prose to the person) ===\n${String(answer).slice(0, 12000)}\n=== End of answer ===${cited}${tools}` }],
                 json: true, maxTokens: 160, signal,
             });
             cost += r.cost_usd || 0;

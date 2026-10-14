@@ -108,6 +108,8 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
     const checkers = {
         deepseek: deepseekQuick,
         openai: p.openai.apiKey ? chatClient({ baseUrl: p.openai.baseUrl, apiKey: p.openai.apiKey, model: p.openai.checkModel || 'gpt-5-nano', rates: rates.openaiCheck, fetchImpl }) : null,
+        // An answer backed by tool results: compared against them by a model that does it reliably (agents/check.js).
+        openaiGrounded: p.openai.apiKey ? chatClient({ baseUrl: p.openai.baseUrl, apiKey: p.openai.apiKey, model: p.openai.groundedCheckModel || 'gpt-5-mini', rates: rates.openaiGroundedCheck, fetchImpl }) : null,
         local,
     };
 
