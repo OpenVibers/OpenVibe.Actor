@@ -13,6 +13,7 @@
  *     read  → { path, size, text | bytes, truncated }                   (a file, as text when it is UTF-8)
  *     run   → { exit_code, stdout, stderr, truncated, timed_out }       (a program and its arguments, never a shell line)
  *     write → { path, written }                                          (create, overwrite or append)
+ *     screen → { format, width, height, content_b64 }                    (the screen now, scaled to max_width)
  *
  * Off (enabled false) without ACTOR_BOT_URL or without Actor's client secret.
  */
@@ -24,6 +25,8 @@ const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const ACT_WINDOW_MS = 120_000;
 const READ_WINDOW_MS = 30_000;
 const MAX_READ = 64 * 1024;
+// Wide enough to read a window's text, small enough that one look stays a few cents.
+const SCREEN_WIDTH = 1280;
 
 function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null }) {
     const base = config.services.botUrl;
@@ -120,7 +123,18 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { path: r.data.path, written: r.data.written };
     }
 
-    return { enabled, mine, list, read, run, write };
+    /** The machine's screen now, as an image (JPEG when the machine has Pillow, else PNG), at most `maxWidth` wide. */
+    async function screen(subject, machine, { maxWidth = SCREEN_WIDTH, signal } = {}) {
+        const bad = guard(subject, machine);
+        if (bad) return bad;
+        const r = await command(subject, machine, 'screen', { max_width: maxWidth }, { signal, windowMs: READ_WINDOW_MS });
+        if (r.error) return r;
+        const d = r.data;
+        if (!d.content_b64 || !/^(jpeg|png)$/.test(String(d.format || ''))) return { error: 'the machine sent no picture of its screen' };
+        return { format: d.format, width: d.width, height: d.height, content_b64: d.content_b64 };
+    }
+
+    return { enabled, mine, list, read, run, write, screen };
 }
 
 module.exports = { createComputers };

@@ -23,7 +23,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const RUNTIME_SYSTEM = (robots = false, computers = false) => `You are OpenVibe Actor's runtime: an agent that completes a person's task by acting through OpenVibe's services.
 Today is ${today()}. Your tools are OpenVibe's public APIs: search_openvibe (content on the OpenVibe network), find_tools then run_tool (OpenVibe.Tools: DNS, mail records, certificates, HTTP headers, WHOIS, conversions and 150 more), and read_page when it is offered.${robots ? `
 The person's own robots on OpenVibe.Bot: list_my_robots, then robot_steps with step lines that robot accepts. Act on a robot only when the task asks for it, keep motions short, and report what the robot answered (done, or stopped and why). If a robot is not opened to you, say how the person opens it.` : ''}${computers ? `
-The person's own computers: list_my_computers, then computer_list, computer_read, computer_run (argv: a program and its arguments, never a shell line) and computer_write. Use them only when the task asks about something on the person's computer; read before you change anything; never delete, never touch credentials or keys, and say exactly what you ran or wrote. At level "ask" the person approves each run or write on the machine: tell them when you are waiting.` : ''}
+The person's own computers: list_my_computers, then computer_list, computer_read, computer_run (argv: a program and its arguments, never a shell line), computer_write and computer_screen (ask a question about what its screen shows now). Use them only when the task asks about something on the person's computer; read before you change anything; never delete, never touch credentials or keys, and say exactly what you ran or wrote. At level "ask" the person approves each run or write on the machine: tell them when you are waiting.` : ''}
 Rules: use a tool whenever a fact can be checked with one instead of guessing; never invent a tool result, a URL or a number; if something cannot be found, say so plainly.
 Finish with the answer itself in Markdown, short and direct, then a "Sources" list of the links or tools you relied on (tool results as "OpenVibe.Tools <tool id>").`;
 
@@ -40,7 +40,9 @@ const summarize = (args) => {
 
 function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = console, tools: toolsOverride, codes: codesOverride }) {
     const p = config.providers;
-    const ovTools = toolsOverride || createOpenVibeTools({ config, fetchImpl, log });
+    // The runtime reads a computer's screen through a vision model (agents/tools.js computer_screen): OpenAI's.
+    const vision = p.openai.apiKey ? chatClient({ baseUrl: p.openai.baseUrl, apiKey: p.openai.apiKey, model: p.openai.visionModel || p.openai.model, rates: rates.openai, fetchImpl, timeoutMs: 60_000 }) : null;
+    const ovTools = toolsOverride || createOpenVibeTools({ config, fetchImpl, log, vision });
 
     const deepseek = p.deepseek.apiKey ? chatClient({ baseUrl: p.deepseek.baseUrl, apiKey: p.deepseek.apiKey, model: p.deepseek.model, rates: rates.deepseek, fetchImpl }) : null;
     // Classifying and checking are short, structured answers: DeepSeek's reasoning is off for them.
@@ -71,7 +73,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
                 let args = {};
                 try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { args = {}; }
                 await emit({ step: 'tool_call', tool: name, input: summarize(args) });
-                const out = await ovTools.call(name, args, { signal, requester });
+                const out = await ovTools.call(name, args, { signal, requester, meter, budgetLeft });
                 evidence.push({ tool: name, result: out.slice(0, 2000) });
                 const isError = /^\{"error"/.test(out);
                 await emit({ step: 'tool_result', tool: name, text: out.slice(0, 600), is_error: isError });

@@ -36,6 +36,7 @@ function fakeBot({ machines = null } = {}) {
             if (v.op === 'list') return reply(200, { result: 'ack', data: { path: v.path, entries: [{ name: 'notes.md', type: 'file', size: 12, mtime: 1 }], total: 1, truncated: false } });
             if (v.op === 'read') return reply(200, { result: 'ack', data: { path: v.path, size: 12, offset: 0, length: 12, truncated: false, content_b64: Buffer.from('hello notes\n').toString('base64') } });
             if (v.op === 'write') return reply(200, { result: 'expired', reason: 'no acknowledgement before the deadline' });
+            if (body.kind === 'screen') return reply(200, { result: 'ack', data: { format: 'jpeg', width: v.max_width, height: 720, content_b64: Buffer.from('fake-jpeg').toString('base64') } });
         }
         if (u.pathname.startsWith('/api/v1/machines/')) return reply(404, { code: 'bot.device_not_found', detail: 'no such machine of yours' });
         return reply(404, { code: 'not_found' });
@@ -135,6 +136,34 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(grounded[0].chat, strong, 'grounded: OpenAI\'s stronger checker');
         assert.strictEqual(checkersFor('openvibe-runtime', both, { mode: 'balanced' })[0].chat, chat, 'otherwise the cheapest');
         assert.deepStrictEqual(checkersFor('openvibe-runtime', { ...both, local: chat }, { mode: 'private', grounded: true }).map((c) => c.family), ['local'], 'private stays on OpenVibe hardware');
+    });
+
+    await check('computer_screen: offered only with a vision model; the picture goes to it with the question, the answer comes back, the cost goes on the task', async () => {
+        const bot = fakeBot();
+        const seen = [];
+        const vision = async ({ messages }) => { seen.push(messages); return { text: 'A terminal shows: "npm ERR! missing script: start".', cost_usd: 0.004 }; };
+        const withVision = createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }), vision });
+        const offered = async (t) => (await t.definitions(as)).map((d) => d.function.name);
+        assert.ok((await offered(withVision)).includes('computer_screen'));
+        assert.ok(!(await offered(tools(bot))).includes('computer_screen'), 'no vision model, no screen tool');
+        const metered = [];
+        const out = JSON.parse(await withVision.call('computer_screen', { machine: PC, question: 'What error is on screen?' }, { ...as, meter: async (usd) => metered.push(usd), budgetLeft: () => 1 }));
+        assert.deepStrictEqual(out, { machine: PC, width: 1280, height: 720, answer: 'A terminal shows: "npm ERR! missing script: start".' });
+        assert.deepStrictEqual(metered, [0.004], 'the look is charged to the task');
+        const sent = bot.calls.find((c) => c.body && c.body.kind === 'screen');
+        assert.deepStrictEqual([sent.subject, sent.body.value], [ME, { max_width: 1280 }], 'asked of Bot as the person');
+        const [system, user] = seen[0];
+        assert.match(system.content, /never instructions to follow/);
+        assert.match(system.content, /Do not repeat passwords, keys, tokens/);
+        assert.deepStrictEqual(user.content.map((p) => p.type), ['text', 'image_url']);
+        assert.strictEqual(user.content[0].text, 'What error is on screen?');
+        assert.strictEqual(user.content[1].image_url.url, `data:image/jpeg;base64,${Buffer.from('fake-jpeg').toString('base64')}`);
+        assert.ok(!JSON.stringify(out).includes('ZmFrZS1qcGVn'), 'the runtime model never gets the picture');
+        const broke = JSON.parse(await withVision.call('computer_screen', { machine: PC, question: 'x' }, { ...as, budgetLeft: () => 0 }));
+        assert.match(broke.error, /budget/);
+        assert.strictEqual(seen.length, 1, 'no look once the budget is spent');
+        const stranger = JSON.parse(await withVision.call('computer_screen', { machine: PC, question: 'x' }, { requester: 'app:app_x' }));
+        assert.match(stranger.error, /signed-in person/);
     });
 
     await check('off without a Bot URL or a client secret', async () => {
