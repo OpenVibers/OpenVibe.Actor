@@ -66,7 +66,8 @@ async function createApp(opts = {}) {
     });
     const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log });
     const principal = createPrincipal({ config, keys });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, log };
+    const projects = opts.projects || require('./identity/projects').createProjects({ config });
+    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;
@@ -151,6 +152,7 @@ async function createApp(opts = {}) {
     // ── API ─────────────────────────────────────────────────
     app.use('/api/v1', rateLimit({ windowMs: 60_000, limit: Number(process.env.ACTOR_API_RATE_LIMIT_PER_MIN) || 240, standardHeaders: true, legacyHeaders: false, handler: (req, res) => contracts.http.sendProblem(res, 429, 'rate_limited', { detail: 'too many requests from this address; retry shortly', ctx: req.ov }) }));
     // OpenVibe.Services reads Actor's task index through a first-party service token on loopback.
+    app.use('/api/v1/resources', require('./registry/resource-control').router(ctx));
     app.use('/api/v1/resources', resourceIndex.router(ctx));
     app.use('/api/v1', createApi(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));

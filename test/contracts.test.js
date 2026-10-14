@@ -13,15 +13,16 @@ const contracts = require('openvibe-contracts');
 const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
-const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.agent.manage', 'actor.agent.run'];
+const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run'];
 const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 const INDEX_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-index.js'), 'utf8');
+const CONTROL_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-control.js'), 'utf8');
 
 /** `METHOD /api/v1/path` for every API and resource index route, with its capability guard (null: public). */
 function codeRoutes() {
     const out = new Map();
-    for (const [source, prefix] of [[API_SRC, '/api/v1'], [INDEX_SRC, '/api/v1/resources']]) {
+    for (const [source, prefix] of [[API_SRC, '/api/v1'], [INDEX_SRC, '/api/v1/resources'], [CONTROL_SRC, '/api/v1/resources']]) {
         for (const m of source.matchAll(/^\s*r\.(get|post|patch|delete)\('([^']+)'(.*)$/gm)) {
             const guard = m[3].match(/requireCapability\('([a-z.]+)'\)/);
             const read = m[3].match(/limits\.reads\('([a-z.]+)'\)/);
@@ -64,7 +65,7 @@ function codeRoutes() {
         } finally { await t.close(); }
     });
 
-    await check('the manifest lists five capabilities, owned by actor, and the code guards all five', () => {
+    await check('the manifest lists the capabilities Actor owns, and the code guards each', () => {
         assert.deepStrictEqual([...manifest.capabilities].sort(), [...CAPS].sort());
         for (const id of CAPS) {
             const c = contracts.capabilities.get(id);
@@ -79,6 +80,7 @@ function codeRoutes() {
         assert.deepStrictEqual([...listed].sort(), [...CAPS].sort(), 'principal.js accepts exactly Actor\'s capabilities');
         const appSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'app.js'), 'utf8');
         assert.match(appSrc, /app\.use\('\/api\/v1\/resources', resourceIndex\.router\(ctx\)\)/);
+        assert.match(appSrc, /app\.use\('\/api\/v1\/resources', require\('\.\/registry\/resource-control'\)\.router\(ctx\)\)/);
     });
 
     await check('every capability is implemented by routes that exist, and every route is some capability\'s', () => {
