@@ -9,12 +9,13 @@
  *   research  read the pages it names, or OpenVibe's content    → task:research
  *   answer    write or explain from what a model knows          → task:answer
  *   robot     make the person's own OpenVibe.Bot robot act       → task:robot
+ *   computer  use the person's own computer (files, programs)   → task:computer
  *
  * heuristic(task) is free and is what private mode and the public dry run use. classify() asks a cheap model when one
  * is configured, and falls back to the heuristic on any failure; its cost is part of the task's.
  */
 
-const CLASSES = ['answer', 'lookup', 'research', 'web', 'code', 'robot'];
+const CLASSES = ['answer', 'lookup', 'research', 'web', 'code', 'robot', 'computer'];
 
 const CODE = /\b(code|function|bug|stack ?trace|refactor|unit tests?|pull request|repo(sitory)?|compile|typescript|javascript|python|golang|rust|java|sql query|regex|script|api endpoint|implement)\b|```/i;
 const LOOKUP = /\b(dns|mx|spf|dkim|dmarc|whois|rdap|nameservers?|ssl|tls|certificate|headers?|redirects?|ip address|asn|geoip|reverse dns|ptr|ttl|robots\.txt|sitemap|uptime|ping|traceroute|port \d+|hosting provider|registrar)\b/i;
@@ -22,11 +23,16 @@ const DOMAINISH = /\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b|\b\d{1,3}(?:\.\d{1,3}){3}\b/i;
 const WEB = /\b(latest|today|tonight|yesterday|this week|this month|current(ly)?|right now|news|price of|stock|weather|score|election|released?|recent(ly)?|202\d|trending|search the web|look up online|compare prices)\b/i;
 const URL = /https?:\/\/\S+/i;
 const ROBOT = /\b(my robots?|the robot|robot_steps|rob_[0-9A-HJKMNP-TV-Z]{26}|openvibe\.bot|rover|cozmo)\b/i;
+// The person's own computer through OpenVibe.Bot (agents/computers.js). A task that names a repository to change is
+// coding (OpenVibe.Codes runs it on the person's machine), not this.
+const COMPUTER = /\b(my (own )?(computers?|laptop|desktop|pc|workstation|server|machine)|on my (computer|laptop|desktop|pc|machine)|list_my_computers|computer_(run|read|list|write)|dev_[0-9A-HJKMNP-TV-Z]{26})\b/i;
+const REPO = /github\.com|gitlab\.com|codeberg\.org|\brepo(sitory)?\b|pull request/i;
 const RESEARCH = /\b(summari[sz]e|read|according to|sources?|cite|citations?|brief|report on|research)\b/i;
 
 function heuristic(task) {
     const t = String(task || '');
     if (ROBOT.test(t) && !/```/.test(t)) return 'robot';
+    if (COMPUTER.test(t) && !REPO.test(t) && !/```/.test(t)) return 'computer';
     if (CODE.test(t)) return 'code';
     if (LOOKUP.test(t) && DOMAINISH.test(t)) return 'lookup';
     if (URL.test(t)) return 'research';
@@ -35,13 +41,14 @@ function heuristic(task) {
     return 'answer';
 }
 
-const SYSTEM = `You sort one task for an agent router. Reply with JSON only: {"class": "<one of answer|lookup|research|web|code>"}.
+const SYSTEM = `You sort one task for an agent router. Reply with JSON only: {"class": "<one of answer|lookup|research|web|code|robot|computer>"}.
 answer: writing, explaining, advice, maths, anything a capable model can do from what it knows.
 lookup: facts about a specific domain, website, IP address or server (DNS, mail records, certificates, headers, ownership, robots.txt).
 research: read the specific web pages it links to, or OpenVibe's own content, and report.
 web: needs searching the live web: anything recent or changing (news, prices, releases, schedules, people's current roles).
 code: write, change, debug or review source code.
-robot: make the person's own robot on OpenVibe.Bot do something or report on it (drive, turn, speak, lights, show a face, its sensors or battery). Commanding a robot is never code.`;
+robot: make the person's own robot on OpenVibe.Bot do something or report on it (drive, turn, speak, lights, show a face, its sensors or battery). Commanding a robot is never code.
+computer: use the person's own computer through OpenVibe.Bot: list or read its files, run a program there, write a file there, or report what is on it. Using their computer is never code, unless the task names a repository to change.`;
 
 /**
  * classify(task, { chat }) → { class, cost_usd, by }. `chat` is a provider client (server/agents/providers.js) or

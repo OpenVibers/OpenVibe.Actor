@@ -99,6 +99,20 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(bot.calls.length, before);
     });
 
+    await check('a task on the person\'s computer is its own class, routed to the runtime; a repository is still code', async () => {
+        const { heuristic, CLASSES } = require('../server/agents/classify');
+        const { route } = require('../server/agents/router');
+        const catalog = require('../server/agents/catalog');
+        assert.ok(CLASSES.includes('computer'));
+        assert.strictEqual(heuristic('On my own computer named desk-pc: list /home/me and run uname -s'), 'computer');
+        assert.strictEqual(heuristic('What files are on my laptop in ~/Documents?'), 'computer');
+        assert.strictEqual(heuristic('In https://github.com/ada/site fix the failing bug on my machine'), 'code', 'a repository to change goes to Codes');
+        assert.strictEqual(heuristic('Explain what a mutex is'), 'answer');
+        assert.ok(catalog.byId('openvibe-runtime').can.includes('task:computer'));
+        const placed = route({ cls: 'computer', config: { providers: { deepseek: { apiKey: 'k' }, openai: { apiKey: '' }, local: { url: '', model: '' } } } });
+        assert.strictEqual(placed.selected, 'openvibe-runtime', JSON.stringify(placed.candidates));
+    });
+
     await check('off without a Bot URL or a client secret', async () => {
         assert.strictEqual(createComputers({ config: { ...config, services: { ...config.services, botUrl: '' } } }).enabled, false);
         assert.strictEqual(createComputers({ config: { ...config, oauth: { clientId: 'actor', clientSecret: '' } } }).enabled, false);
