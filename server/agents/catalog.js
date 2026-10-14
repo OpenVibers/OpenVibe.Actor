@@ -39,9 +39,9 @@ const AGENTS = [
         // The runtime is OpenVibe's code, but its model runs at DeepSeek: the task's text leaves OpenVibe.
         trust: 'external',
         quality: 'standard',
-        can: ['task:answer', 'task:lookup', 'task:research', 'tool:openvibe-search', 'tool:openvibe-tools'],
+        can: ['task:answer', 'task:lookup', 'task:research', 'task:robot', 'tool:openvibe-search', 'tool:openvibe-tools', 'tool:openvibe-bot'],
         rate_card: { input_usd_per_mtok: 0.30, output_usd_per_mtok: 1.20, source: DEEPSEEK_PRICES, verified_at: VERIFIED },
-        blurb: 'OpenVibe\'s own agent: a DeepSeek model that acts through OpenVibe services — search across the network, 160+ tools (DNS, mail, certificates, headers, conversions) and a page reader.',
+        blurb: 'OpenVibe\'s own agent: a DeepSeek model that acts through OpenVibe services — search across the network, 160+ tools (DNS, mail, certificates, headers, conversions), a page reader, and your own robots on OpenVibe.Bot when you let it drive them.',
     },
     {
         id: 'openai-agent',

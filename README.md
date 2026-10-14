@@ -23,7 +23,7 @@ Actor is OpenVibe's own general agent and the router for agent work: it takes a 
 
 | Agent | Kind | Can do | Trust | Price |
 |---|---|---|---|---|
-| OpenVibe runtime | openvibe-runtime | answer, lookup, research | external (the model runs at DeepSeek) | DeepSeek Flash, $0.30 in / $1.20 out per 1M tokens (peak; off-peak is half, Actor charges peak) |
+| OpenVibe runtime | openvibe-runtime | answer, lookup, research, robot | external (the model runs at DeepSeek) | DeepSeek Flash, $0.30 in / $1.20 out per 1M tokens (peak; off-peak is half, Actor charges peak) |
 | OpenAI agent | agent-platform | answer, research, web | external | gpt-5-mini, $0.25 / $2.00 per 1M, plus $0.01 a web search |
 | Open model on OpenVibe | open-model | answer | first-party | free (OpenVibe's own server; `openvibe-llm` on the host) |
 | OpenVibe.Codes | codes | code | first-party | listed, not hosted yet: coding runs need OpenVibe.Run sandboxes; use `openvibe-codes` on your machine |

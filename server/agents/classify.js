@@ -8,22 +8,25 @@
  *   lookup    facts about a domain, address or site             → task:lookup
  *   research  read the pages it names, or OpenVibe's content    → task:research
  *   answer    write or explain from what a model knows          → task:answer
+ *   robot     make the person's own OpenVibe.Bot robot act       → task:robot
  *
  * heuristic(task) is free and is what private mode and the public dry run use. classify() asks a cheap model when one
  * is configured, and falls back to the heuristic on any failure; its cost is part of the task's.
  */
 
-const CLASSES = ['answer', 'lookup', 'research', 'web', 'code'];
+const CLASSES = ['answer', 'lookup', 'research', 'web', 'code', 'robot'];
 
 const CODE = /\b(code|function|bug|stack ?trace|refactor|unit tests?|pull request|repo(sitory)?|compile|typescript|javascript|python|golang|rust|java|sql query|regex|script|api endpoint|implement)\b|```/i;
 const LOOKUP = /\b(dns|mx|spf|dkim|dmarc|whois|rdap|nameservers?|ssl|tls|certificate|headers?|redirects?|ip address|asn|geoip|reverse dns|ptr|ttl|robots\.txt|sitemap|uptime|ping|traceroute|port \d+|hosting provider|registrar)\b/i;
 const DOMAINISH = /\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b|\b\d{1,3}(?:\.\d{1,3}){3}\b/i;
 const WEB = /\b(latest|today|tonight|yesterday|this week|this month|current(ly)?|right now|news|price of|stock|weather|score|election|released?|recent(ly)?|202\d|trending|search the web|look up online|compare prices)\b/i;
 const URL = /https?:\/\/\S+/i;
+const ROBOT = /\b(my robots?|the robot|robot_steps|rob_[0-9A-HJKMNP-TV-Z]{26}|openvibe\.bot|rover|cozmo)\b/i;
 const RESEARCH = /\b(summari[sz]e|read|according to|sources?|cite|citations?|brief|report on|research)\b/i;
 
 function heuristic(task) {
     const t = String(task || '');
+    if (ROBOT.test(t) && !/```/.test(t)) return 'robot';
     if (CODE.test(t)) return 'code';
     if (LOOKUP.test(t) && DOMAINISH.test(t)) return 'lookup';
     if (URL.test(t)) return 'research';
@@ -37,7 +40,8 @@ answer: writing, explaining, advice, maths, anything a capable model can do from
 lookup: facts about a specific domain, website, IP address or server (DNS, mail records, certificates, headers, ownership, robots.txt).
 research: read the specific web pages it links to, or OpenVibe's own content, and report.
 web: needs searching the live web: anything recent or changing (news, prices, releases, schedules, people's current roles).
-code: write, change, debug or review code.`;
+code: write, change, debug or review source code.
+robot: make the person's own robot on OpenVibe.Bot do something or report on it (drive, turn, speak, lights, show a face, its sensors or battery). Commanding a robot is never code.`;
 
 /**
  * classify(task, { chat }) → { class, cost_usd, by }. `chat` is a provider client (server/agents/providers.js) or

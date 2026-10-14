@@ -107,7 +107,7 @@ ${raw(showcase.features({
 ${raw(showcase.steps({
                 title: 'How a task finds its agent',
                 items: [
-                    { title: 'Sort the task', text: 'An answer, a lookup, research, a live web search or code: that decides what an agent must be able to do.' },
+                    { title: 'Sort the task', text: 'An answer, a lookup, research, a live web search, code or your own robot: that decides what an agent must be able to do.' },
                     { title: 'Hard limits first', text: 'An agent that cannot do it, that private mode does not trust, that is down or that would cost more than your budget is out, and the task says why.' },
                     { title: 'Then your mode', text: 'Cheapest, Balanced, Best, Fastest or Private picks among the rest, through the same placement engine every OpenVibe service uses.' },
                     { title: 'Run, check, deliver', text: 'The agent works while you watch its steps; another model checks the answer; you get the answer, its sources, the cost and the explanation.' },
