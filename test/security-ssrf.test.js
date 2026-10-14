@@ -107,6 +107,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             'server/auth/sso.js': 'Network OAuth token and revoke (configured networkInternalUrl)',
             'server/agents/providers.js': 'the configured provider base URLs (DeepSeek, OpenAI, the open model) with the operator\'s keys',
             'server/agents/codes.js': 'the configured OpenVibe.Codes base (ACTOR_CODES_URL) with Actor\'s own service token; the subject must be usr_<ULID> and every task id tsk_<ULID> before it goes in a path; the repository named in the task is data for the person\'s own machine, never fetched here (test/codes.test.js)',
+            'server/agents/computers.js': 'the configured OpenVibe.Bot base (ACTOR_BOT_URL) with Actor\'s own service token (bot.computer.control); the machine id must be dev_<ULID> and the subject usr_<ULID> before anything is sent; a path or program is data for the person\'s own machine, never fetched here (test/computers.test.js)',
             'server/agents/robots.js': 'the configured OpenVibe.Bot base (ACTOR_BOT_URL) with Actor\'s own service token; the robot id must be rob_<ULID> and the subject usr_<ULID> before anything is sent (test/robots.test.js)',
             'server/agents/tools.js': 'the configured OpenVibe.Tools and OpenVibe.Search bases; ids come from Tools\' catalog, a page URL goes to Tools as input',
             'server/events-consumer.js': 'OpenVibe.Events: the configured events.url (ACTOR_EVENTS_URL), to create the two ADR-033 subscriptions at boot',

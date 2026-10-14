@@ -12,12 +12,19 @@
  *   list_my_robots()            OpenVibe.Bot: the person's own robots, and for each one they opened to their agent its
  *                               state and the step lines it takes (agents/robots.js) — a signed-in person's task only
  *   robot_steps(robot, steps)   OpenVibe.Bot: run step lines on one of those robots, as the person, through Bot's gate
+ *   list_my_computers()         OpenVibe.Bot: the person's own computers open to their agent (agents/computers.js), with
+ *                               the level the person set on each machine
+ *   computer_list / computer_read / computer_run / computer_write
+ *                               a folder, a file, a program (argv, never a shell line) or a write on one of them, as the
+ *                               person, through Bot; at level "ask" each run or write waits for the person's approval
+ *                               on the machine itself
  *
  * Tools' own guard decides what a tool may fetch (public addresses only, per-target limits); Actor adds nothing to
  * what an anonymous caller could already do, and every result is clipped before it goes back to the model.
  */
 
 const { createRobots } = require('./robots');
+const { createComputers } = require('./computers');
 
 const CATALOG_TTL_MS = 10 * 60_000;
 const RESULT_CHARS = 6000;
@@ -28,9 +35,10 @@ const json = (v) => clip(JSON.stringify(v));
 /** The person a task is for, when it is a signed-in person ('user:usr_…' → 'usr_…'), else null. */
 const personOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
 
-function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null }) {
+function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null }) {
     const { searchUrl, toolsUrl } = config.services;
     const bot = robots || createRobots({ config, fetchImpl });
+    const pcs = computers || createComputers({ config, fetchImpl });
     let catalog = null;
     let catalogAt = 0;
     const schemas = new Map();
@@ -111,6 +119,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
             defs.push({ type: 'function', function: { name: 'read_page', description: 'Read a public web page as text (title, description, main text, links). Use it for URLs the task gives or that a result links to.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } });
         }
         if (bot.enabled && personOf(requester)) defs.push(...ROBOT_DEFS);
+        if (pcs.enabled && personOf(requester)) defs.push(...COMPUTER_DEFS);
         return defs;
     }
 
@@ -123,6 +132,15 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                 if (name === 'list_my_robots') return json(await bot.mine(person, { signal }));
                 return json(await bot.steps(person, a.robot, a.steps, { signal }));
             }
+            if (COMPUTER_TOOLS.has(name)) {
+                const person = personOf(requester);
+                if (!pcs.enabled || !person) return json({ error: 'computers are only for a signed-in person\'s task' });
+                if (name === 'list_my_computers') return json(await pcs.mine(person, { signal }));
+                if (name === 'computer_list') return json(await pcs.list(person, a.machine, a.path, { signal }));
+                if (name === 'computer_read') return json(await pcs.read(person, a.machine, a.path, { offset: a.offset, signal }));
+                if (name === 'computer_run') return json(await pcs.run(person, a.machine, a.argv, { cwd: a.cwd, timeoutS: a.timeout_s, signal }));
+                return json(await pcs.write(person, a.machine, a.path, a.text, { mode: a.mode || 'create', signal }));
+            }
             if (name === 'search_openvibe') return json(await searchOpenVibe(a.query, { signal }));
             if (name === 'find_tools') return json(await findTools(a.need, { signal }));
             if (name === 'run_tool') return json(await runTool(String(a.tool || ''), a.input, { signal }));
@@ -134,12 +152,22 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         }
     }
 
-    return { definitions, call, tools, findTools, runTool, searchOpenVibe, robots: bot };
+    return { definitions, call, tools, findTools, runTool, searchOpenVibe, robots: bot, computers: pcs };
 }
 
 const ROBOT_DEFS = [
     { type: 'function', function: { name: 'list_my_robots', description: 'List the robots the person owns on OpenVibe.Bot. For each robot they opened to their agent: whether it is online, the e-stop, battery, sensor readings and the step lines it accepts. A robot not opened to the agent says how the person can open it.', parameters: { type: 'object', properties: {} } } },
     { type: 'function', function: { name: 'robot_steps', description: 'Make one of the person\'s robots act, by step lines it accepts (from list_my_robots), for example ["forward 1", "left 0.5", "say Hello", "headlights #00ff00", "wait 1", "stop"]. At most 20 steps and 30 seconds per call. Answers "done" or "stopped: <why>" once they end.', parameters: { type: 'object', properties: { robot: { type: 'string', description: 'the robot id (rob_…)' }, steps: { type: 'array', items: { type: 'string' } } }, required: ['robot', 'steps'] } } },
 ];
+
+const machine = { type: 'string', description: 'the machine id (dev_…) from list_my_computers' };
+const COMPUTER_DEFS = [
+    { type: 'function', function: { name: 'list_my_computers', description: 'List the person\'s own computers open to their agent on OpenVibe.Bot: online or not, the level the person set on the machine (observe: read only; ask: each run or write waits for their approval on the machine; trusted; full), what it offers (terminal, files) and its folders.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'computer_list', description: 'List a folder on one of the person\'s computers (an absolute path inside its folders).', parameters: { type: 'object', properties: { machine, path: { type: 'string' } }, required: ['machine', 'path'] } } },
+    { type: 'function', function: { name: 'computer_read', description: 'Read a file on one of the person\'s computers, as text (64 KB at a time; offset reads further).', parameters: { type: 'object', properties: { machine, path: { type: 'string' }, offset: { type: 'integer' } }, required: ['machine', 'path'] } } },
+    { type: 'function', function: { name: 'computer_run', description: 'Run a program on one of the person\'s computers: argv is the program and its arguments, for example ["git", "status"] (never a shell line). Answers its exit code and output. At level "ask" it waits for the person to approve it on the machine.', parameters: { type: 'object', properties: { machine, argv: { type: 'array', items: { type: 'string' } }, cwd: { type: 'string' }, timeout_s: { type: 'integer' } }, required: ['machine', 'argv'] } } },
+    { type: 'function', function: { name: 'computer_write', description: 'Write a text file on one of the person\'s computers (mode create, overwrite or append). At level "ask" it waits for the person to approve it on the machine.', parameters: { type: 'object', properties: { machine, path: { type: 'string' }, text: { type: 'string' }, mode: { type: 'string', enum: ['create', 'overwrite', 'append'] } }, required: ['machine', 'path', 'text'] } } },
+];
+const COMPUTER_TOOLS = new Set(COMPUTER_DEFS.map((d) => d.function.name));
 
 module.exports = { createOpenVibeTools, personOf };
