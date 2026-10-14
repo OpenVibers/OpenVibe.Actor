@@ -14,6 +14,7 @@
  *     run   → { exit_code, stdout, stderr, truncated, timed_out }       (a program and its arguments, never a shell line)
  *     write → { path, written }                                          (create, overwrite or append)
  *     screen → { format, width, height, content_b64 }                    (the screen now, scaled to max_width)
+ *     input → { done, action, x?, y? }                                  (mouse, scroll, typing or a key, as the person)
  *
  * Off (enabled false) without ACTOR_BOT_URL or without Actor's client secret.
  */
@@ -27,6 +28,8 @@ const READ_WINDOW_MS = 30_000;
 const MAX_READ = 64 * 1024;
 // Wide enough to read a window's text, small enough that one look stays a few cents.
 const SCREEN_WIDTH = 1280;
+const INPUT_ACTIONS = new Set(['move', 'click', 'double_click', 'right_click', 'scroll', 'type', 'key']);
+const POINT_ACTIONS = new Set(['move', 'click', 'double_click', 'right_click']);
 
 function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null }) {
     const base = config.services.botUrl;
@@ -68,7 +71,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (!r.ok) return problem(r, 'your computers');
         const machines = ((r.data && r.data.machines) || []).filter((m) => m.computer).map((m) => ({
             id: m.id, name: m.name, online: m.online, level: m.computer.level,
-            can: ['terminal', 'files', 'screen'].filter((k) => m.computer[k]),
+            can: ['terminal', 'files', 'screen', 'input'].filter((k) => m.computer[k]),
             folders: (m.computer.files && m.computer.files.roots) || [],
             ...(m.computer.waiting ? { waiting_for_approval: m.computer.waiting } : {}),
         }));
@@ -134,7 +137,43 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { format: d.format, width: d.width, height: d.height, content_b64: d.content_b64 };
     }
 
-    return { enabled, mine, list, read, run, write, screen };
+    /**
+     * Mouse, scroll, typing or one key on the machine (contracts 0.171.0 `input`): an acting command, so at level "ask"
+     * it waits for the owner's approval there. x, y are measured in a screen picture of width × height (computer_screen's).
+     */
+    async function input(subject, machine, args, { signal } = {}) {
+        const bad = guard(subject, machine);
+        if (bad) return bad;
+        const a = args && typeof args === 'object' ? args : {};
+        if (!INPUT_ACTIONS.has(a.action)) return { error: `action is one of ${[...INPUT_ACTIONS].join(', ')}` };
+        const value = { action: a.action };
+        const int = (v) => Number.isInteger(v) ? v : (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
+        if (POINT_ACTIONS.has(a.action) || (a.action === 'scroll' && a.x != null)) {
+            const x = int(a.x), y = int(a.y);
+            if (x == null || y == null || x < 0 || y < 0) return { error: `${a.action} needs x and y (pixels in the screen picture)` };
+            Object.assign(value, { x, y });
+            const w = int(a.width), h = int(a.height);
+            if (w && h) Object.assign(value, { width: w, height: h });
+        }
+        if (a.action === 'scroll') {
+            const dy = int(a.dy);
+            if (!dy || Math.abs(dy) > 20) return { error: 'scroll needs dy: clicks, -20 (up) to 20 (down), not 0' };
+            value.dy = dy;
+        }
+        if (a.action === 'type') {
+            if (typeof a.text !== 'string' || !a.text || a.text.length > 2000) return { error: 'type needs text (1 to 2000 characters)' };
+            value.text = a.text;
+        }
+        if (a.action === 'key') {
+            if (typeof a.keys !== 'string' || !/^[A-Za-z0-9_+-]{1,64}$/.test(a.keys) || a.keys.startsWith('-')) return { error: 'key needs keys: one key or chord, for example Return, Escape, ctrl+s' };
+            value.keys = a.keys;
+        }
+        const r = await command(subject, machine, 'input', value, { signal, windowMs: ACT_WINDOW_MS });
+        if (r.error) return r;
+        return { done: !!r.data.done, action: r.data.action || a.action, ...(r.data.x != null ? { x: r.data.x, y: r.data.y } : {}) };
+    }
+
+    return { enabled, mine, list, read, run, write, screen, input };
 }
 
 module.exports = { createComputers };
