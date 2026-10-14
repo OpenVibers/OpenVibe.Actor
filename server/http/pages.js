@@ -142,7 +142,7 @@ ${table(['Piece', 'State'], [
                 [html`Tasks a watch hands over when its condition fires (<a href="https://openvibe.watch">OpenVibe.Watch</a>)`, 'Live: the task is yours, with your allowance; Watch sees only the tasks it started.'],
                 [html`Your own agents (<a href="/me/agents">Your agents</a>): instructions, memory you can read and edit, a schedule (hourly, daily or weekly), a budget per run and a daily cap`, 'Live.'],
                 [html`Your own robots on <a href="https://openvibe.bot">OpenVibe.Bot</a>: see them and drive the ones you opened to your agent, through Bot's limits and e-stop`, 'Live: turn on "Let my OpenVibe.Actor agent drive this robot" on the robot\'s panel.'],
-                ['Coding tasks', html`They go to OpenVibe.Codes: <a href="https://openvibe.codes/start">run openvibe-codes</a> on your machine.`],
+                [html`Coding tasks on your own machine, through <a href="https://openvibe.codes/run">OpenVibe.Codes</a>: name the repository and what to change, and get the summary, the files and the patch`, html`Live: add the machine on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a> and start one task on openvibe.codes/run first. The model use is on your machine's own keys.`],
             ])}</section>
 ${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, its webhooks and the router are an API. Apps get actor.task.* grants on OpenVibe.Services.', actions: [{ label: 'Read the API', href: '/docs', primary: true }, { label: 'See the agents', href: '/agents' }] }))}`,
         }, status);

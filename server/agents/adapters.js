@@ -10,9 +10,11 @@
  *                      signed-in person's task also gets their own robots (agents/robots.js)
  *   openai-agent       OpenAI's Responses agent with its hosted web search
  *   open-model         the open model on OpenVibe's own server, one call, no tools
+ *   codes              OpenVibe.Codes: the person's coding task on their own machine (agents/codes.js)
  */
 const { chatClient, responsesAgent, ProviderError } = require('./providers');
 const { createOpenVibeTools } = require('./tools');
+const { createCodes } = require('./codes');
 
 const MAX_TURNS = 10;
 
@@ -34,7 +36,7 @@ const summarize = (args) => {
     return String(v).slice(0, 300);
 };
 
-function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = console, tools: toolsOverride }) {
+function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = console, tools: toolsOverride, codes: codesOverride }) {
     const p = config.providers;
     const ovTools = toolsOverride || createOpenVibeTools({ config, fetchImpl, log });
 
@@ -94,7 +96,8 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
         return { text: r.text.trim(), sources: [], model: r.model };
     }
 
-    const run = { 'openvibe-runtime': runtime, 'openai-agent': openai, 'open-model': openModel };
+    const codes = codesOverride || createCodes({ config, fetchImpl });
+    const run = { 'openvibe-runtime': runtime, 'openai-agent': openai, 'open-model': openModel, codes: codes.adapter };
 
     /** A cheap model of another family to classify and to check results (null when none is configured). */
     const checkers = {

@@ -11,14 +11,16 @@
  * empty answer or one about something else fails.
  */
 
-const FAMILY = { 'openvibe-runtime': 'deepseek', 'openai-agent': 'openai', 'open-model': 'local' };
-const CHECKER_FOR = { deepseek: ['openai', 'deepseek'], openai: ['deepseek', 'openai'], local: ['local'] };
+// codes: the person's own machine wrote it (any of Codes' agents), so either family reads it.
+const FAMILY = { 'openvibe-runtime': 'deepseek', 'openai-agent': 'openai', 'open-model': 'local', codes: 'codes' };
+const CHECKER_FOR = { deepseek: ['openai', 'deepseek'], openai: ['deepseek', 'openai'], local: ['local'], codes: ['deepseek', 'openai'] };
 
 const SYSTEM = `You check an AI agent's answer before a person sees it. Reply with JSON only: {"ok": true|false, "reason": "<one short sentence>"}.
 ok is true when the answer addresses the task and nothing in it is clearly invented, contradictory or unsafe. It does not have to be perfect.
 ok is false when the answer is empty, refuses without a good reason, answers a different question, contradicts itself, or states something that is plainly impossible.
 The agent may have searched the web or run tools: do not fail an answer only because it states recent facts, versions, prices or dates you cannot verify yourself, especially when it cites a source for them.
 The agent may have made the person's own robot act through OpenVibe.Bot: an answer that reports what the robot did, or why it stopped or was refused, addresses the task.
+The agent may have run a coding task on the person's own machine through OpenVibe.Codes: an answer that reports what changed (a summary, the files, a patch), or that the machine is still working on it with a link to follow it, addresses the task.
 When the task is a greeting, small talk, a test message or too vague to act on, a short friendly reply, a summary of what the agent can do or a clarifying question is a good answer: ok is true.`;
 
 /** Which checkers may read this agent's answer, best first: another family, then the same family. */
