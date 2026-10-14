@@ -140,10 +140,9 @@ ${table(['Piece', 'State'], [
                 ['A second-family check on every answer, and hand-off on failure', 'Live.'],
                 [html`The API (<a href="/docs">docs</a>): tasks, the live stream, <a href="/docs#webhooks">signed webhooks</a>, the agents and a dry-run router`, 'Live, for people and for apps with actor.task.* grants from OpenVibe.Services.'],
                 [html`Tasks a watch hands over when its condition fires (<a href="https://openvibe.watch">OpenVibe.Watch</a>)`, 'Live: the task is yours, with your allowance; Watch sees only the tasks it started.'],
-                ['Coding tasks through OpenVibe.Codes', html`Next: hosted coding runs need OpenVibe.Run sandboxes. Today, <a href="https://openvibe.codes/start">run openvibe-codes</a> on your machine.`],
-                ['Browser and desktop agents on OpenVibe\'s own cheap servers, that you can watch and take over', 'Next, on OpenVibe.Run workers.'],
-                ['More agent platforms, bring-your-own keys, paid tiers through OpenVibe.Billing', 'Planned.'],
-                ['Personal agents: memory you control, schedules, approvals, reachable from chat', 'Planned.'],
+                [html`Your own agents (<a href="/me/agents">Your agents</a>): instructions, memory you can read and edit, a schedule (hourly, daily or weekly), a budget per run and a daily cap`, 'Live.'],
+                [html`Your own robots on <a href="https://openvibe.bot">OpenVibe.Bot</a>: see them and drive the ones you opened to your agent, through Bot's limits and e-stop`, 'Live: turn on "Let my OpenVibe.Actor agent drive this robot" on the robot\'s panel.'],
+                ['Coding tasks', html`They go to OpenVibe.Codes: <a href="https://openvibe.codes/start">run openvibe-codes</a> on your machine.`],
             ])}</section>
 ${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, its webhooks and the router are an API. Apps get actor.task.* grants on OpenVibe.Services.', actions: [{ label: 'Read the API', href: '/docs', primary: true }, { label: 'See the agents', href: '/agents' }] }))}`,
         }, status);
