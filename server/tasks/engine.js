@@ -113,7 +113,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await emit(id, { kind: 'output', step: attempt > 1 ? 'handoff' : 'plan', agent: agentId, text: `${agent.name} takes it${placement.reasons && placement.reasons[0] ? `: ${placement.reasons[0]}` : ''}.` });
                 let out;
                 try {
-                    out = await adapters.run[agentId]({ task: row.task, cls, mode: row.mode, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }) });
+                    out = await adapters.run[agentId]({ task: row.task, requester: row.requester, cls, mode: row.mode, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }) });
                 } catch (err) {
                     if (signal.aborted) throw err;
                     const why = (err && err.message) || String(err);

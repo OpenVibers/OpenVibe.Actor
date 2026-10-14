@@ -65,6 +65,9 @@ function load(env = process.env) {
         services: {
             searchUrl: trim(env.ACTOR_SEARCH_URL || 'https://search.openvibe.network'),
             toolsUrl: trim(env.ACTOR_TOOLS_URL || 'https://openvibe.tools'),
+            // OpenVibe.Bot: the person's own robots (list_my_robots, robot_steps). Empty turns the robot tools off.
+            botUrl: trim(env.ACTOR_BOT_URL != null ? env.ACTOR_BOT_URL : 'http://127.0.0.1:4630'),
+            botPublicUrl: trim(env.ACTOR_BOT_PUBLIC_URL || 'https://openvibe.bot'),
         },
 
         // What one person may spend without paying (plan T17: "free tier from the bounded allowance"), and the

@@ -9,10 +9,15 @@
  *   run_tool(tool, input)       OpenVibe.Tools' run API (POST /api/v1/tools/<id>/run): DNS, mail records, certificates,
  *                               headers, WHOIS, conversions, hashes, … — only tools the catalog marks callable by anyone
  *   read_page(url)              OpenVibe.Tools' page reader, when Tools offers it: a web page as text
+ *   list_my_robots()            OpenVibe.Bot: the person's own robots, and for each one they opened to their agent its
+ *                               state and the step lines it takes (agents/robots.js) — a signed-in person's task only
+ *   robot_steps(robot, steps)   OpenVibe.Bot: run step lines on one of those robots, as the person, through Bot's gate
  *
  * Tools' own guard decides what a tool may fetch (public addresses only, per-target limits); Actor adds nothing to
  * what an anonymous caller could already do, and every result is clipped before it goes back to the model.
  */
+
+const { createRobots } = require('./robots');
 
 const CATALOG_TTL_MS = 10 * 60_000;
 const RESULT_CHARS = 6000;
@@ -20,8 +25,12 @@ const RESULT_CHARS = 6000;
 const clip = (s, n = RESULT_CHARS) => (s.length > n ? `${s.slice(0, n)}\n…(clipped)` : s);
 const json = (v) => clip(JSON.stringify(v));
 
-function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console }) {
+/** The person a task is for, when it is a signed-in person ('user:usr_…' → 'usr_…'), else null. */
+const personOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
+
+function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null }) {
     const { searchUrl, toolsUrl } = config.services;
+    const bot = robots || createRobots({ config, fetchImpl });
     let catalog = null;
     let catalogAt = 0;
     const schemas = new Map();
@@ -91,7 +100,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     }
 
     /** The function definitions the runtime's model sees, and the dispatcher that runs one call. */
-    async function definitions({ signal } = {}) {
+    async function definitions({ signal, requester = null } = {}) {
         const list = await tools({ signal });
         const defs = [
             { type: 'function', function: { name: 'search_openvibe', description: 'Search everything published on the OpenVibe network (streams, clips, pastes, community posts, wiki pages, blog posts, threads). Returns titles, summaries and links.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
@@ -101,12 +110,19 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         if (list.some((t) => t.id === 'read')) {
             defs.push({ type: 'function', function: { name: 'read_page', description: 'Read a public web page as text (title, description, main text, links). Use it for URLs the task gives or that a result links to.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } });
         }
+        if (bot.enabled && personOf(requester)) defs.push(...ROBOT_DEFS);
         return defs;
     }
 
-    async function call(name, args, { signal } = {}) {
+    async function call(name, args, { signal, requester = null } = {}) {
         const a = args && typeof args === 'object' ? args : {};
         try {
+            if (name === 'list_my_robots' || name === 'robot_steps') {
+                const person = personOf(requester);
+                if (!bot.enabled || !person) return json({ error: 'robots are only for a signed-in person\'s task' });
+                if (name === 'list_my_robots') return json(await bot.mine(person, { signal }));
+                return json(await bot.steps(person, a.robot, a.steps, { signal }));
+            }
             if (name === 'search_openvibe') return json(await searchOpenVibe(a.query, { signal }));
             if (name === 'find_tools') return json(await findTools(a.need, { signal }));
             if (name === 'run_tool') return json(await runTool(String(a.tool || ''), a.input, { signal }));
@@ -118,7 +134,12 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         }
     }
 
-    return { definitions, call, tools, findTools, runTool, searchOpenVibe };
+    return { definitions, call, tools, findTools, runTool, searchOpenVibe, robots: bot };
 }
 
-module.exports = { createOpenVibeTools };
+const ROBOT_DEFS = [
+    { type: 'function', function: { name: 'list_my_robots', description: 'List the robots the person owns on OpenVibe.Bot. For each robot they opened to their agent: whether it is online, the e-stop, battery, sensor readings and the step lines it accepts. A robot not opened to the agent says how the person can open it.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'robot_steps', description: 'Make one of the person\'s robots act, by step lines it accepts (from list_my_robots), for example ["forward 1", "left 0.5", "say Hello", "headlights #00ff00", "wait 1", "stop"]. At most 20 steps and 30 seconds per call. Answers "done" or "stopped: <why>" once they end.', parameters: { type: 'object', properties: { robot: { type: 'string', description: 'the robot id (rob_…)' }, steps: { type: 'array', items: { type: 'string' } } }, required: ['robot', 'steps'] } } },
+];
+
+module.exports = { createOpenVibeTools, personOf };

@@ -6,7 +6,8 @@
  * task's cost and the person's spend are true even when a run is cancelled half-way. `budgetLeft()` is checked
  * before every paid call; an adapter that would go over stops and says so.
  *
- *   openvibe-runtime   DeepSeek with OpenVibe's services as tools (agents/tools.js), up to MAX_TURNS model calls
+ *   openvibe-runtime   DeepSeek with OpenVibe's services as tools (agents/tools.js), up to MAX_TURNS model calls; a
+ *                      signed-in person's task also gets their own robots (agents/robots.js)
  *   openai-agent       OpenAI's Responses agent with its hosted web search
  *   open-model         the open model on OpenVibe's own server, one call, no tools
  */
@@ -17,8 +18,9 @@ const MAX_TURNS = 10;
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-const RUNTIME_SYSTEM = () => `You are OpenVibe Actor's runtime: an agent that completes a person's task by acting through OpenVibe's services.
-Today is ${today()}. Your tools are OpenVibe's public APIs: search_openvibe (content on the OpenVibe network), find_tools then run_tool (OpenVibe.Tools: DNS, mail records, certificates, HTTP headers, WHOIS, conversions and 150 more), and read_page when it is offered.
+const RUNTIME_SYSTEM = (robots = false) => `You are OpenVibe Actor's runtime: an agent that completes a person's task by acting through OpenVibe's services.
+Today is ${today()}. Your tools are OpenVibe's public APIs: search_openvibe (content on the OpenVibe network), find_tools then run_tool (OpenVibe.Tools: DNS, mail records, certificates, HTTP headers, WHOIS, conversions and 150 more), and read_page when it is offered.${robots ? `
+The person's own robots on OpenVibe.Bot: list_my_robots, then robot_steps with step lines that robot accepts. Act on a robot only when the task asks for it, keep motions short, and report what the robot answered (done, or stopped and why). If a robot is not opened to you, say how the person opens it.` : ''}
 Rules: use a tool whenever a fact can be checked with one instead of guessing; never invent a tool result, a URL or a number; if something cannot be found, say so plainly.
 Finish with the answer itself in Markdown, short and direct, then a "Sources" list of the links or tools you relied on (tool results as "OpenVibe.Tools <tool id>").`;
 
@@ -28,7 +30,7 @@ Never invent facts, numbers or links; if something cannot be found, say so.`;
 
 const summarize = (args) => {
     const a = args || {};
-    const v = a.query || a.need || a.url || (a.tool ? `${a.tool} ${JSON.stringify(a.input || {})}` : JSON.stringify(a));
+    const v = a.query || a.need || a.url || (a.tool ? `${a.tool} ${JSON.stringify(a.input || {})}` : a.robot ? `${a.robot}: ${[].concat(a.steps || []).join(', ')}` : JSON.stringify(a));
     return String(v).slice(0, 300);
 };
 
@@ -42,10 +44,11 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
     const openaiAgent = p.openai.apiKey ? responsesAgent({ baseUrl: p.openai.baseUrl, apiKey: p.openai.apiKey, model: p.openai.model, rates: rates.openai, fetchImpl }) : null;
     const local = p.local.url && p.local.model ? chatClient({ baseUrl: p.local.url, apiKey: '', model: p.local.model, rates: rates.local, fetchImpl, timeoutMs: 120_000 }) : null;
 
-    async function runtime({ task, signal, emit, meter, budgetLeft }) {
+    async function runtime({ task, requester = null, signal, emit, meter, budgetLeft }) {
         if (!deepseek) throw new ProviderError('the runtime has no model configured', { code: 'actor.agent.unavailable' });
-        const tools = await ovTools.definitions({ signal });
-        const messages = [{ role: 'system', content: RUNTIME_SYSTEM() }, { role: 'user', content: task }];
+        const tools = await ovTools.definitions({ signal, requester });
+        const robots = tools.some((d) => d.function && d.function.name === 'robot_steps');
+        const messages = [{ role: 'system', content: RUNTIME_SYSTEM(robots) }, { role: 'user', content: task }];
         let last = '';
         for (let turn = 1; turn <= MAX_TURNS; turn++) {
             if (budgetLeft() <= 0) throw new ProviderError('the task reached its budget before the runtime finished', { code: 'actor.budget.exceeded' });
@@ -62,7 +65,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
                 let args = {};
                 try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { args = {}; }
                 await emit({ step: 'tool_call', tool: name, input: summarize(args) });
-                const out = await ovTools.call(name, args, { signal });
+                const out = await ovTools.call(name, args, { signal, requester });
                 const isError = /^\{"error"/.test(out);
                 await emit({ step: 'tool_result', tool: name, text: out.slice(0, 600), is_error: isError });
                 messages.push({ role: 'tool', tool_call_id: call.id, content: out });
