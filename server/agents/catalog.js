@@ -76,8 +76,9 @@ const AGENTS = [
         trust: 'first-party',
         quality: 'high',
         can: ['task:code'],
-        rate_card: { input_usd_per_mtok: 0.30, output_usd_per_mtok: 1.20, source: 'https://openvibe.codes/harnesses', verified_at: VERIFIED },
-        blurb: 'Coding work goes to OpenVibe.Codes, the coding-agent harness (Claude Code, Codex, OpenCode, DeepSeek and more). Hosted coding runs come with OpenVibe.Run; today, run openvibe-codes on your own machine.',
+        // The model use is on the person's own machine and keys: nothing for Actor to meter.
+        rate_card: { input_usd_per_mtok: 0, output_usd_per_mtok: 0, source: 'https://openvibe.codes/run', verified_at: VERIFIED },
+        blurb: 'Coding work goes to OpenVibe.Codes and runs on your own machine (add it on openvibe.bot/machines, then start one task on openvibe.codes/run). Name the repository; you get the summary, the changed files and the patch. The model use is on your machine\'s own keys, so Actor charges nothing for it.',
     },
 ];
 
@@ -87,7 +88,10 @@ function availability(agent, config) {
     if (agent.providerKey === 'deepseek') return p.deepseek && p.deepseek.apiKey ? { available: true } : { available: false, reason: 'no DeepSeek key is configured on this server' };
     if (agent.providerKey === 'openai') return p.openai && p.openai.apiKey ? { available: true } : { available: false, reason: 'no OpenAI key is configured on this server' };
     if (agent.providerKey === 'local') return p.local && p.local.url && p.local.model ? { available: true } : { available: false, reason: 'no open model is running on this server' };
-    if (agent.providerKey === 'codes') return { available: false, reason: 'hosted coding runs need OpenVibe.Run sandboxes, which are not open yet; run openvibe-codes on your own machine (openvibe.codes/start)' };
+    if (agent.providerKey === 'codes') {
+        const s = config.services || {};
+        return s.codesUrl && config.oauth && config.oauth.clientSecret ? { available: true } : { available: false, reason: 'OpenVibe.Codes is not connected to this server' };
+    }
     return { available: false, reason: 'no adapter' };
 }
 
