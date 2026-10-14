@@ -55,8 +55,9 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 | `POST /api/v1/route` | public | dry run: which agent and why (heuristic class; nothing runs or is charged) |
 | `GET /api/v1/resources` | `actor.resource.read` (service token) | `common.resource-list-result@1` for `actor.task`; filters: `project`, `kind`, `cursor`, `limit` |
 | `GET /api/v1/resources/:ovrn` | `actor.resource.read` (service token) | one `common.resource-summary@1` for a project-owned task |
+| `POST /api/v1/resources/control` | `actor.resource.control` (service token) | `common.resource-control-request@1` → `-result@1`: `stop` cancels a task (queued: done at once; running: pending until its step returns) |
 
-The resource index is for OpenVibe.Services on loopback and is blocked at the public nginx vhost. It lists task summaries under the `actor.task` kind; only a service token with `actor.resource.read` can read it. A task without a project has no OVRN and cannot be fetched by name.
+The resource index is for OpenVibe.Services on loopback and is blocked at the public nginx vhost. It lists task summaries under the `actor.task` kind; only a service token with `actor.resource.read` can read it. A task without a project has no OVRN and cannot be fetched by name. The control route acts for the person in `on_behalf_of`: the person who asked for the task, or an admin or owner of its project (asked of Network with `network.project.member.read`), so a project's admins can stop what its apps started. Repeats with the same `idempotency_key` return the first answer (`actor_control_log`).
 
 **Who can call it:**
 - **A person:** their Network token as a Bearer, or this site's session. A write made with the session must come from openvibe.actor itself (fetch metadata or Origin).
