@@ -77,6 +77,7 @@ function whyNone(result, { cls, mode, budgetUsd }) {
         return { code: 'actor.budget.exceeded', detail: `The cheapest agent that can take this task would cost about $${cheapest.toFixed(3)}, over this task's $${Number(budgetUsd).toFixed(3)} budget. Raise the budget or ask something simpler.` };
     }
     if (mode === 'private') return { code: 'actor.no_agent', detail: `Private mode keeps the task on OpenVibe's own hardware, and no agent there can take a "${cls}" task yet (the open model answers simple questions only).` };
+    if (cls === 'computer') return { code: 'actor.no_agent', detail: 'Tasks on your own computer go to the OpenVibe runtime, which uses the computers you opened to it on OpenVibe.Bot. It is not available right now; try again later.' };
     if (cls === 'robot') return { code: 'actor.no_agent', detail: 'Robot tasks go to the OpenVibe runtime, which acts on your own robots on OpenVibe.Bot. It is not available right now; try again later.' };
     if (cls === 'code') return { code: 'actor.no_agent', detail: 'Coding tasks go to OpenVibe.Codes, which runs them on your own machine, and it is not connected right now. You can start one yourself at https://openvibe.codes/run' };
     const down = cands.filter((c) => !c.eligible).map((c) => `${c.id}: ${c.excluded_because}`).join('; ');

@@ -107,7 +107,7 @@ ${raw(showcase.features({
 ${raw(showcase.steps({
                 title: 'How a task finds its agent',
                 items: [
-                    { title: 'Sort the task', text: 'An answer, a lookup, research, a live web search, code or your own robot: that decides what an agent must be able to do.' },
+                    { title: 'Sort the task', text: 'An answer, a lookup, research, a live web search, code, your own robot or your own computer: that decides what an agent must be able to do.' },
                     { title: 'Hard limits first', text: 'An agent that cannot do it, that private mode does not trust, that is down or that would cost more than your budget is out, and the task says why.' },
                     { title: 'Then your mode', text: 'Cheapest, Balanced, Best, Fastest or Private picks among the rest, through the same placement engine every OpenVibe service uses.' },
                     { title: 'Run, check, deliver', text: 'The agent works while you watch its steps; another model checks the answer; you get the answer, its sources, the cost and the explanation.' },
@@ -205,7 +205,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
     // live progress), then how it went — one block per agent that tried, its steps, its check, and a refused answer
     // folded away — and why that agent, folded.
     const STATE_TEXT = { queued: 'Waiting to start', running: 'Working', verifying: 'Checking the answer', succeeded: 'Done', failed: 'Didn\'t finish', cancelled: 'Cancelled' };
-    const CLASS_TEXT = { answer: 'Answer', lookup: 'Lookup', research: 'Research', web: 'Web search', code: 'Code' };
+    const CLASS_TEXT = { answer: 'Answer', lookup: 'Lookup', research: 'Research', web: 'Web search', code: 'Code', robot: 'Your robot', computer: 'Your computer' };
 
     r.get('/tasks/:id', async (req, res) => {
         const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
