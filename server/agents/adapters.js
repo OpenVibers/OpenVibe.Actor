@@ -20,9 +20,10 @@ const MAX_TURNS = 10;
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-const RUNTIME_SYSTEM = (robots = false) => `You are OpenVibe Actor's runtime: an agent that completes a person's task by acting through OpenVibe's services.
+const RUNTIME_SYSTEM = (robots = false, computers = false) => `You are OpenVibe Actor's runtime: an agent that completes a person's task by acting through OpenVibe's services.
 Today is ${today()}. Your tools are OpenVibe's public APIs: search_openvibe (content on the OpenVibe network), find_tools then run_tool (OpenVibe.Tools: DNS, mail records, certificates, HTTP headers, WHOIS, conversions and 150 more), and read_page when it is offered.${robots ? `
-The person's own robots on OpenVibe.Bot: list_my_robots, then robot_steps with step lines that robot accepts. Act on a robot only when the task asks for it, keep motions short, and report what the robot answered (done, or stopped and why). If a robot is not opened to you, say how the person opens it.` : ''}
+The person's own robots on OpenVibe.Bot: list_my_robots, then robot_steps with step lines that robot accepts. Act on a robot only when the task asks for it, keep motions short, and report what the robot answered (done, or stopped and why). If a robot is not opened to you, say how the person opens it.` : ''}${computers ? `
+The person's own computers: list_my_computers, then computer_list, computer_read, computer_run (argv: a program and its arguments, never a shell line) and computer_write. Use them only when the task asks about something on the person's computer; read before you change anything; never delete, never touch credentials or keys, and say exactly what you ran or wrote. At level "ask" the person approves each run or write on the machine: tell them when you are waiting.` : ''}
 Rules: use a tool whenever a fact can be checked with one instead of guessing; never invent a tool result, a URL or a number; if something cannot be found, say so plainly.
 Finish with the answer itself in Markdown, short and direct, then a "Sources" list of the links or tools you relied on (tool results as "OpenVibe.Tools <tool id>").`;
 
@@ -32,7 +33,8 @@ Never invent facts, numbers or links; if something cannot be found, say so.`;
 
 const summarize = (args) => {
     const a = args || {};
-    const v = a.query || a.need || a.url || (a.tool ? `${a.tool} ${JSON.stringify(a.input || {})}` : a.robot ? `${a.robot}: ${[].concat(a.steps || []).join(', ')}` : JSON.stringify(a));
+    const v = a.query || a.need || a.url || (a.tool ? `${a.tool} ${JSON.stringify(a.input || {})}` : a.robot ? `${a.robot}: ${[].concat(a.steps || []).join(', ')}`
+        : a.machine ? `${a.machine}: ${Array.isArray(a.argv) ? a.argv.join(' ') : a.path || ''}` : JSON.stringify(a));
     return String(v).slice(0, 300);
 };
 
@@ -50,7 +52,8 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
         if (!deepseek) throw new ProviderError('the runtime has no model configured', { code: 'actor.agent.unavailable' });
         const tools = await ovTools.definitions({ signal, requester });
         const robots = tools.some((d) => d.function && d.function.name === 'robot_steps');
-        const messages = [{ role: 'system', content: RUNTIME_SYSTEM(robots) }, { role: 'user', content: task }];
+        const computers = tools.some((d) => d.function && d.function.name === 'computer_run');
+        const messages = [{ role: 'system', content: RUNTIME_SYSTEM(robots, computers) }, { role: 'user', content: task }];
         let last = '';
         for (let turn = 1; turn <= MAX_TURNS; turn++) {
             if (budgetLeft() <= 0) throw new ProviderError('the task reached its budget before the runtime finished', { code: 'actor.budget.exceeded' });

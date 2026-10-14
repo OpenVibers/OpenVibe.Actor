@@ -1,0 +1,108 @@
+'use strict';
+// The person's own computers as runtime tools (plan T14/T17, agents/computers.js): only a signed-in person's task sees
+// them; Actor calls OpenVibe.Bot's machine API with its own token and X-OV-Subject naming that person; a program is
+// argv (never a shell line); the machine's refusal (its level, "ask" unanswered) comes back to the model as an error;
+// with no computer open the tool says how the person opens one.
+const assert = require('assert');
+const { createOpenVibeTools } = require('../server/agents/tools');
+const { createComputers } = require('../server/agents/computers');
+const { createRobots } = require('../server/agents/robots');
+const { check, done } = require('./helpers/boot');
+
+const ME = 'usr_01M4W5JBFEG3QG9ER8W1A2K0RX';
+const PC = 'dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9';
+const config = {
+    networkInternalUrl: 'http://network.test', oauth: { clientId: 'actor', clientSecret: 'actor-secret' },
+    services: { searchUrl: 'http://search.test', toolsUrl: 'http://tools.test', botUrl: 'http://bot.test', botPublicUrl: 'https://openvibe.bot' },
+};
+
+/** A fake OpenVibe.Bot machine API: one computer open to the agent at level "ask"; records every call. */
+function fakeBot({ machines = null } = {}) {
+    const calls = [];
+    const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    const fetchImpl = async (url, init = {}) => {
+        const u = new URL(url);
+        const headers = init.headers || {};
+        const body = init.body ? JSON.parse(init.body) : null;
+        calls.push({ method: init.method || 'GET', path: u.pathname + u.search, subject: headers['X-OV-Subject'], auth: headers.Authorization, body });
+        if (u.host === 'tools.test') return reply(200, { tools: [] });
+        if (u.pathname === '/api/v1/machines') {
+            return reply(200, { machines: machines || [{ id: PC, name: 'desk-pc', online: true, agent_computer: true, computer: { level: 'ask', terminal: { level: 'ask' }, files: { level: 'ask', roots: ['/home/me'] }, screen: null, waiting: 0 } }] });
+        }
+        if (u.pathname === `/api/v1/machines/${PC}/commands`) {
+            const v = body.value;
+            if (body.kind === 'exec' && v.argv[0] === 'git') return reply(200, { machine_id: PC, id: 'op', result: 'ack', data: { exit_code: 0, stdout: 'On branch main\n', stderr: '', truncated: false, timed_out: false } });
+            if (body.kind === 'exec') return reply(200, { machine_id: PC, id: 'op', result: 'nack', reason: 'the owner denied it on the machine' });
+            if (v.op === 'list') return reply(200, { result: 'ack', data: { path: v.path, entries: [{ name: 'notes.md', type: 'file', size: 12, mtime: 1 }], total: 1, truncated: false } });
+            if (v.op === 'read') return reply(200, { result: 'ack', data: { path: v.path, size: 12, offset: 0, length: 12, truncated: false, content_b64: Buffer.from('hello notes\n').toString('base64') } });
+            if (v.op === 'write') return reply(200, { result: 'expired', reason: 'no acknowledgement before the deadline' });
+        }
+        if (u.pathname.startsWith('/api/v1/machines/')) return reply(404, { code: 'bot.device_not_found', detail: 'no such machine of yours' });
+        return reply(404, { code: 'not_found' });
+    };
+    return { calls, fetchImpl };
+}
+const tokens = { authHeaders: async () => ({ Authorization: 'Bearer svc-token' }) };
+const tools = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }) });
+const as = { requester: `user:${ME}` };
+
+(async () => {
+    await check('only a signed-in person\'s task gets the computer tools', async () => {
+        const bot = fakeBot();
+        const t = tools(bot);
+        const names = async (requester) => (await t.definitions({ requester })).map((d) => d.function.name);
+        for (const n of ['list_my_computers', 'computer_list', 'computer_read', 'computer_run', 'computer_write']) assert.ok((await names(`user:${ME}`)).includes(n), n);
+        for (const r of ['app:app_x', 'agent:agt_x', 'service:live', null]) assert.ok(!(await names(r)).includes('computer_run'), String(r));
+        const refused = JSON.parse(await t.call('computer_run', { machine: PC, argv: ['id'] }, { requester: 'app:app_x' }));
+        assert.match(refused.error, /signed-in person/);
+        assert.ok(!bot.calls.some((c) => c.path.includes('/machines')), 'nothing reached Bot for an app');
+    });
+
+    await check('list_my_computers: the open computers with their level and folders; none says how to open one', async () => {
+        const bot = fakeBot();
+        const list = JSON.parse(await tools(bot).call('list_my_computers', {}, as));
+        assert.deepStrictEqual(list.computers, [{ id: PC, name: 'desk-pc', online: true, level: 'ask', can: ['terminal', 'files'], folders: ['/home/me'] }]);
+        assert.match(list.note, /approve/);
+        assert.ok(bot.calls.every((c) => c.subject === ME && c.auth === 'Bearer svc-token'), 'as the person, with Actor\'s token');
+        const none = JSON.parse(await tools(fakeBot({ machines: [] })).call('list_my_computers', {}, as));
+        assert.deepStrictEqual(none.computers, []);
+        assert.match(none.note, /https:\/\/openvibe\.bot\/machines.*--computer.*Let my agent use this computer/);
+    });
+
+    await check('files and programs go to Bot as the person; refusals and an unanswered approval come back as errors', async () => {
+        const bot = fakeBot();
+        const t = tools(bot);
+        const ls = JSON.parse(await t.call('computer_list', { machine: PC, path: '/home/me' }, as));
+        assert.deepStrictEqual(ls, { path: '/home/me', entries: [{ name: 'notes.md', type: 'file', size: 12 }], truncated: false });
+        const file = JSON.parse(await t.call('computer_read', { machine: PC, path: '/home/me/notes.md' }, as));
+        assert.strictEqual(file.text, 'hello notes\n');
+        const git = JSON.parse(await t.call('computer_run', { machine: PC, argv: ['git', 'status'], cwd: '/home/me' }, as));
+        assert.deepStrictEqual([git.exit_code, git.stdout], [0, 'On branch main\n']);
+        const sent = bot.calls.find((c) => c.method === 'POST' && c.body.kind === 'exec');
+        assert.deepStrictEqual([sent.path, sent.subject, sent.body.value], [`/api/v1/machines/${PC}/commands`, ME, { argv: ['git', 'status'], cwd: '/home/me' }]);
+        assert.ok(sent.body.ms >= 120000, 'room for the person to approve it on the machine');
+        const denied = JSON.parse(await t.call('computer_run', { machine: PC, argv: ['rm', 'x'] }, as));
+        assert.strictEqual(denied.error, 'the owner denied it on the machine');
+        const late = JSON.parse(await t.call('computer_write', { machine: PC, path: '/home/me/a.txt', text: 'hi' }, as));
+        assert.match(late.error, /nobody approved it there/);
+        const written = bot.calls.find((c) => c.body && c.body.value && c.body.value.op === 'write');
+        assert.deepStrictEqual([written.body.value.content_b64, written.body.value.mode], [Buffer.from('hi').toString('base64'), 'create']);
+    });
+
+    await check('bad input never leaves Actor', async () => {
+        const bot = fakeBot();
+        const t = tools(bot);
+        const before = bot.calls.length;
+        assert.match(JSON.parse(await t.call('computer_run', { machine: PC, argv: 'rm -rf /' }, as)).error, /never a shell line/);
+        assert.match(JSON.parse(await t.call('computer_run', { machine: '../admin', argv: ['id'] }, as)).error, /machine id/);
+        assert.match(JSON.parse(await t.call('computer_write', { machine: PC, path: '/x', text: 'y', mode: 'delete' }, as)).error, /mode/);
+        assert.strictEqual(bot.calls.length, before);
+    });
+
+    await check('off without a Bot URL or a client secret', async () => {
+        assert.strictEqual(createComputers({ config: { ...config, services: { ...config.services, botUrl: '' } } }).enabled, false);
+        assert.strictEqual(createComputers({ config: { ...config, oauth: { clientId: 'actor', clientSecret: '' } } }).enabled, false);
+    });
+
+    done();
+})().catch((e) => { console.error(e); process.exit(1); });
