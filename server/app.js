@@ -60,8 +60,10 @@ async function createApp(opts = {}) {
     const stream = createTaskStream({ log });
     const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: opts.providerFetch || globalThis.fetch, log });
     // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.
+    // A webhook naming a project secret (ADR-056) is signed by OpenVibe.Network (server/net/secret-signer.js).
+    const signer = opts.secretSigner || require('./net/secret-signer').createSecretSigner({ config, fetchImpl });
     const webhooks = createWebhooks({
-        s, config, now: s.now, log,
+        s, config, now: s.now, log, signer,
         post: opts.webhookPost || createWebhookPoster({ userAgent: `OpenVibe.Actor/${VERSION} (+https://openvibe.actor/docs#webhooks)`, timeoutMs: config.webhooks.timeoutMs }),
     });
     const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log });

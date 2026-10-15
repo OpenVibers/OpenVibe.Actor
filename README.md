@@ -69,7 +69,13 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 - **Signing:** the answer that creates the task carries `webhook_secret`, minted for that task. It is in no read or list, never exported, and erased once the task has ended and its deliveries are done. Each delivery is `actor.task-webhook@1` (`{ type: "actor.task.state", delivery_id, state, task }`, the task as it was then), signed like an Events delivery (`X-OpenVibe-Timestamp` + `X-OpenVibe-Signature-V2`), so a receiver checks it with openvibe-sdk/events `verifyDeliveryV2(rawBody, headers, secret)`. The delivery id stays the same across retries; dedupe on it.
 - **Outcomes:** 2xx is delivered; 410, or a URL refused at send time, ends the delivery; anything else is retried after 10 s, 1 min, 5 min, 30 min, 2 h, 6 h and 12 h, then fails.
 - **Where Actor may connect:** a webhook URL is the one address a caller chooses (`server/net/webhook-post.js`): https on port 443 or 8443, no credentials, public addresses only. It is checked at creation (`actor.webhook.refused`) and again at send time through openvibe-shared/egress, so a name that later resolves to a private address is refused. Redirects are never followed.
-- **Not yet:** a project secret named by reference (`secret_ref`) is refused until project secrets exist.
+- **A project secret instead (ADR-056):** a webhook may name one (`secret_ref`, a lower-case name) when the task is made
+  by a project's app or agent token. The secret is looked up in the task's project and environment, and the project must
+  have granted it to `actor` for `sign` (on openvibe.services, the project's Secrets page). OpenVibe.Network then signs
+  each delivery over `"<t>.<raw body>"` in the same two headers, so the receiver's check is the same and Actor never
+  holds the value. No `webhook_secret` is minted when every webhook names one. A secret Network refuses (missing, or not
+  granted) fails that delivery at once; Network unreachable is retried on the usual backoff. A person's own task cannot
+  name one (422 `actor.webhook.secret_unavailable`).
 
 **Errors:** RFC 9457 problems. The codes are on [openvibe.actor/docs](https://openvibe.actor/docs#errors).
 

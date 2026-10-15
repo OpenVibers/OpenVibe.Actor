@@ -9,6 +9,11 @@
  *   410, or a refused URL    failed at once (the receiver is gone, or the URL is not a public address any more)
  *   anything else            retried: 10 s, 1 min, 5 min, 30 min, 2 h, 6 h, 12 h, then failed (about a day)
  *
+ * A webhook that names a project secret (secret_ref, ADR-056) is signed by OpenVibe.Network instead, in the same headers:
+ * Actor sends Network "<t>.<raw body>" and puts the signature it answers in X-OpenVibe-Signature-V2, so the receiver's
+ * check is the same and Actor never holds the value. A secret that does not exist or is not granted to actor fails that
+ * delivery at once; Network being unreachable is retried like any other failure.
+ *
  * A delivery never delays or changes the task. Once a task has ended and none of its deliveries is pending, its secret
  * is erased. The delivery id is stable across attempts (dedupe on it). One Actor process sends: rows are claimed with
  * FOR UPDATE SKIP LOCKED all the same, and a row a crash left 'sending' is pending again at the next start.
@@ -17,6 +22,7 @@ const crypto = require('crypto');
 const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const store = require('./store');
 const { WebhookRefused } = require('../net/webhook-post');
+const { SecretRefused } = require('../net/secret-signer');
 
 const BACKOFF_MS = [10_000, 60_000, 300_000, 1_800_000, 7_200_000, 21_600_000, 43_200_000];
 const BATCH = 20;
@@ -24,7 +30,7 @@ const BATCH = 20;
 /** A fresh per-task secret: whsec_ + 32 random bytes, base64url (43 characters). */
 const mintSecret = () => `whsec_${crypto.randomBytes(32).toString('base64url')}`;
 
-function createWebhooks({ s, config, post, now = () => Date.now(), log = console }) {
+function createWebhooks({ s, config, post, signer = null, now = () => Date.now(), log = console }) {
     let timer = null;
     let running = null;
 
@@ -38,8 +44,8 @@ function createWebhooks({ s, config, post, now = () => Date.now(), log = console
         for (const h of wanted) {
             const id = s.newId('whd');
             const body = { type: 'actor.task.state', delivery_id: id, state, task };
-            await s.db.query(`INSERT INTO webhook_deliveries (id, task_id, url, state, body, status, attempts, next_at, created_at)
-                VALUES ($1, $2, $3, $4, $5::jsonb, 'pending', 0, $6, $7)`, [id, taskId, h.url, state, JSON.stringify(body), now(), s.iso()]);
+            await s.db.query(`INSERT INTO webhook_deliveries (id, task_id, url, state, body, status, attempts, next_at, created_at, secret_ref, secret_env)
+                VALUES ($1, $2, $3, $4, $5::jsonb, 'pending', 0, $6, $7, $8, $9)`, [id, taskId, h.url, state, JSON.stringify(body), now(), s.iso(), h.secret_ref || null, h.secret_ref ? h.environment : null]);
         }
         return wanted.length;
     }
@@ -62,13 +68,39 @@ function createWebhooks({ s, config, post, now = () => Date.now(), log = console
             AND NOT EXISTS (SELECT 1 FROM webhook_deliveries WHERE task_id = $1 AND status IN ('pending', 'sending'))`, [taskId]);
     }
 
+    /** The signature headers: the task's own secret, or Network's signature with the project secret the webhook names. */
+    async function signatureHeaders(d, body) {
+        if (!d.secret_ref) {
+            const secret = await s.db.value('SELECT webhook_secret FROM tasks WHERE id = $1', [d.task_id]);
+            return secret ? signDeliveryHeaders(body, secret, { now: now() }) : null;
+        }
+        const project = await s.db.value('SELECT project_id FROM tasks WHERE id = $1', [d.task_id]);
+        if (!project || !signer) throw new SecretRefused('the task has no project to look the secret up in');
+        const t = Math.floor(now() / 1000);
+        const { signature } = await signer.sign({ project_id: project, environment: d.secret_env, name: d.secret_ref, message: `${t}.${body}` });
+        return { 'X-OpenVibe-Timestamp': String(t), 'X-OpenVibe-Signature-V2': `t=${t},v2=${signature}` };
+    }
+
+    /** Try again on the backoff, or give up once it is spent. */
+    async function retryLater(d, attempts, lastStatus, why) {
+        if (attempts > BACKOFF_MS.length) return finish(d, 'failed', { lastStatus, error: why, attempts });
+        await s.db.query(`UPDATE webhook_deliveries SET status = 'pending', attempts = $2, next_at = $3, last_status = $4, last_error = $5 WHERE id = $1`,
+            [d.id, attempts, now() + BACKOFF_MS[attempts - 1], lastStatus, why]);
+        return undefined;
+    }
+
     async function sendOne(d) {
         const attempts = Number(d.attempts) + 1;
-        const secret = await s.db.value('SELECT webhook_secret FROM tasks WHERE id = $1', [d.task_id]);
-        if (!secret) return finish(d, 'failed', { error: 'the task has no signing secret any more', attempts });
         const body = JSON.stringify(store.parseJson(d.body));
+        let signed;
+        try { signed = await signatureHeaders(d, body); } catch (err) {
+            if (err instanceof SecretRefused) return finish(d, 'failed', { error: err.message.slice(0, 300), attempts });
+            // Network could not sign just now: the same backoff as a receiver that did not answer.
+            return retryLater(d, attempts, null, `signing with the project secret: ${String(err.message || err).slice(0, 250)}`);
+        }
+        if (!signed) return finish(d, 'failed', { error: 'the task has no signing secret any more', attempts });
         const headers = {
-            ...signDeliveryHeaders(body, secret, { now: now() }),
+            ...signed,
             'X-OpenVibe-Delivery-Id': d.id,
             'X-OpenVibe-Task-Id': d.task_id,
             'X-OpenVibe-Task-State': d.state,
@@ -82,10 +114,7 @@ function createWebhooks({ s, config, post, now = () => Date.now(), log = console
             return finish(d, 'failed', { lastStatus: res ? res.status : null, error: error ? error.message : 'the receiver answered 410 Gone', attempts });
         }
         const why = error ? String(error.message || error).slice(0, 300) : `HTTP ${res.status}`;
-        if (attempts > BACKOFF_MS.length) return finish(d, 'failed', { lastStatus: res ? res.status : null, error: why, attempts });
-        await s.db.query(`UPDATE webhook_deliveries SET status = 'pending', attempts = $2, next_at = $3, last_status = $4, last_error = $5 WHERE id = $1`,
-            [d.id, attempts, now() + BACKOFF_MS[attempts - 1], res ? res.status : null, why]);
-        return undefined;
+        return retryLater(d, attempts, res ? res.status : null, why);
     }
 
     /** One pass over what is due. One pass at a time. */

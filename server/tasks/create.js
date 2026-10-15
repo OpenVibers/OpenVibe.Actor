@@ -30,10 +30,17 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     if (body.agent && !catalog.byId(body.agent)) return { status: 422, code: 'actor.agent.unknown', detail: `no agent "${body.agent}"; GET /api/v1/agents lists them` };
     // Webhooks (plan T17): each URL must be one Actor may deliver to (https, port 443/8443, a public address); the
     // send-time check repeats it against what the name resolves to then.
-    const webhooks = (body.webhooks || []).map((h) => ({ url: h.url, events: h.events }));
+    // A webhook may name a project secret (ADR-056, secret_ref): Network signs its deliveries with it. The secret lives in
+    // the task's project and environment, so the task must come from a project's app or agent token.
+    const env = principal.claims && ['sandbox', 'production'].includes(principal.claims.env) ? principal.claims.env : null;
+    const webhooks = (body.webhooks || []).map((h) => ({ url: h.url, events: h.events, ...(h.secret_ref ? { secret_ref: h.secret_ref, environment: env } : {}) }));
     for (const h of webhooks) {
         try { checkWebhookUrl(h.url); } catch (err) { return { status: 422, code: 'actor.webhook.refused', detail: `${h.url.slice(0, 200)}: ${err.message}` }; }
+        if (h.secret_ref && (!principal.project || !env)) {
+            return { status: 422, code: 'actor.webhook.secret_unavailable', detail: `secret_ref names a project secret: make the task with a project's app or agent token (it carries project_id and env); this one has ${principal.project ? 'no env' : 'no project'}.` };
+        }
     }
+    const ownSecret = webhooks.some((h) => !h.secret_ref);
 
     const hash = crypto.createHash('sha256').update(JSON.stringify({ task: body.task, mode: body.mode || 'balanced', budget: [perTask, perDay], agent: body.agent || null, ...(webhooks.length ? { webhooks } : {}) })).digest('hex');
     if (body.idempotency_key) {
@@ -62,7 +69,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         const row = await store.insertTask(s, {
             id: s.newId('tsk'), requester: principal.requester, via: principal.via || null, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,
             budget_task: perTask, budget_day: perDay, idem_key: body.idempotency_key || null, idem_hash: body.idempotency_key ? hash : null, created_at: s.iso(),
-            webhooks, webhook_secret: webhooks.length ? mintSecret() : null,
+            webhooks, webhook_secret: ownSecret ? mintSecret() : null,
         });
         return { status: 201, task: row };
     });
