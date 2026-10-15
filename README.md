@@ -92,6 +92,7 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 ## Owns
 
 - Tasks, their event logs and daily spend (`migrations/0001_tasks.sql`). Tasks are kept 30 days, then pruned with their events. Nothing stored is a credential, a key or a token.
+- Request telemetry (`migrations/0010_telemetry.sql`): each HTTP request is aggregated by route template, method and status class, never by raw URL. Once a minute one `http.request` sample per key, plus the active-requests, p95 latency and event-loop-lag gauges, is written to this service's own `telemetry_samples` table (openvibe-sdk 0.46 telemetry, the `platform.telemetry-sample@1` shape); rows older than 14 days are deleted daily. `/shared` files, static assets, health, readiness and `/metrics` are not counted. `server/app.js` builds the collector (`createHttpTelemetry`) and mounts its middleware; `server/index.js` flushes it every minute and on stop, and runs the 14-day retention.
 - The agent catalog and its rate cards; the routing policy over them (placement itself is `openvibe-sdk/placement`).
 
 ## Does not own
