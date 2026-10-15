@@ -30,6 +30,10 @@ const MAX_READ = 64 * 1024;
 const SCREEN_WIDTH = 1280;
 const INPUT_ACTIONS = new Set(['move', 'click', 'double_click', 'right_click', 'scroll', 'type', 'key']);
 const POINT_ACTIONS = new Set(['move', 'click', 'double_click', 'right_click']);
+const BROWSER_ACTIONS = new Set(['open', 'click', 'fill', 'press', 'back', 'read', 'close']);
+const PAGE_TEXT = 3500;
+const PAGE_LINKS = 25;
+const BROWSER_KEYS = new Set(['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', 'Space']);
 
 function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null }) {
     const base = config.services.botUrl;
@@ -173,7 +177,49 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { done: !!r.data.done, action: r.data.action || a.action, ...(r.data.x != null ? { x: r.data.x, y: r.data.y } : {}) };
     }
 
-    return { enabled, mine, list, read, run, write, screen, input };
+    /**
+     * The agent's own browser on the machine (contracts 0.174.0 `browser`): open an http(s) page, click a selector or the
+     * button or link showing a text, fill a field, press a key, go back, read the page or close it. Reading and closing
+     * run at every level; the rest act, so at level "ask" each waits for the owner's approval there. The page's text is
+     * content from the web, never instructions.
+     */
+    async function browser(subject, machine, args, { signal } = {}) {
+        const bad = guard(subject, machine);
+        if (bad) return bad;
+        const a = args && typeof args === 'object' ? args : {};
+        if (!BROWSER_ACTIONS.has(a.action)) return { error: `action is one of ${[...BROWSER_ACTIONS].join(', ')}` };
+        const value = { action: a.action };
+        if (a.action === 'open') {
+            if (typeof a.url !== 'string' || !/^https?:\/\//i.test(a.url) || a.url.length > 2048) return { error: 'open needs url: an http or https address' };
+            value.url = a.url;
+        }
+        if (a.action === 'click') {
+            if (typeof a.selector === 'string' && a.selector) value.selector = a.selector.slice(0, 500);
+            else if (typeof a.text === 'string' && a.text.trim()) value.text = a.text.slice(0, 200);
+            else return { error: 'click needs a CSS selector, or the text of the button or link' };
+        }
+        if (a.action === 'fill') {
+            if (typeof a.selector !== 'string' || !a.selector || typeof a.text !== 'string' || a.text.length > 2000) return { error: 'fill needs selector (CSS) and text (at most 2000 characters)' };
+            Object.assign(value, { selector: a.selector.slice(0, 500), text: a.text });
+        }
+        if (a.action === 'press') {
+            if (!BROWSER_KEYS.has(a.key)) return { error: `press needs key: one of ${[...BROWSER_KEYS].join(', ')}` };
+            value.key = a.key;
+        }
+        const acting = !['read', 'close'].includes(a.action);
+        const r = await command(subject, machine, 'browser', value, { signal, windowMs: acting ? ACT_WINDOW_MS : READ_WINDOW_MS });
+        if (r.error) return r;
+        const d = r.data || {};
+        if (a.action === 'fill') return { done: !!d.done, chars: d.chars };
+        if (a.action === 'close') return { done: true };
+        // Sized to fit one tool result whole (tools.js clips results at 6000 characters): the text, then the first links.
+        return {
+            url: d.url, title: d.title, text: typeof d.text === 'string' ? d.text.slice(0, PAGE_TEXT) : '', truncated: !!d.truncated || (typeof d.text === 'string' && d.text.length > PAGE_TEXT),
+            links: Array.isArray(d.links) ? d.links.slice(0, PAGE_LINKS).map((l) => ({ text: String(l.text || '').slice(0, 60), href: String(l.href || '').slice(0, 200) })) : [],
+        };
+    }
+
+    return { enabled, mine, list, read, run, write, screen, input, browser };
 }
 
 module.exports = { createComputers };
