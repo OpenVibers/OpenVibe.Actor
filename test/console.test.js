@@ -128,6 +128,21 @@ const approvals = require('../server/agents/approvals');
             assert.match((await t.get('/console', { as: ada })).text, /href="\/me\/spend"/, 'the console links it');
         });
 
+        await check('?ask= and ?from= fill the command box (the Frame\'s "Ask Actor"); nothing runs; other sites\' addresses are dropped', async () => {
+            const before = (await t.ctx.s.db.maybe('SELECT count(*)::int AS n FROM tasks')).n;
+            const q = `?ask=${encodeURIComponent('Summarise <this> & explain')}&from=${encodeURIComponent('https://openvibe.wiki/s/openvibe/actor')}`;
+            const r = await t.get(`/console${q}`, { as: ada });
+            assert.strictEqual(r.status, 200);
+            assert.ok(r.text.includes('autofocus placeholder=') || r.text.includes(' autofocus '), 'the box takes the focus');
+            assert.ok(r.text.includes('>Summarise &lt;this&gt; &amp; explain\n\n(On this page: https://openvibe.wiki/s/openvibe/actor)</textarea>'), 'escaped, with the page it came from');
+            const foreign = await t.get(`/console?ask=hi&from=${encodeURIComponent('https://evil.example/x')}`, { as: ada });
+            assert.ok(foreign.text.includes('>hi</textarea>'), 'another site\'s address is not carried');
+            assert.ok((await t.get('/console', { as: ada })).text.includes('"></textarea>'), 'without ?ask= the box is empty');
+            assert.strictEqual((await t.ctx.s.db.maybe('SELECT count(*)::int AS n FROM tasks')).n, before, 'nothing ran');
+            const out = await t.get(`/console?ask=${encodeURIComponent('hello there')}`);
+            assert.ok(out.text.includes(`/auth/login?next=${encodeURIComponent('/console?ask=hello%20there')}`), 'signed out: sign-in comes back to the filled box');
+        });
+
         await check('nothing running: no refresh; nothing waiting says so', async () => {
             const r = await t.get('/console', { as: bo });
             assert.strictEqual(r.status, 200);

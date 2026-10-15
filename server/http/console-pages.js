@@ -51,11 +51,29 @@ function createConsolePages(ctx, { robots = null, computers = null } = {}) {
         } catch { return { ok: false, why: 'OpenVibe.Bot did not answer in time.' }; }
     }
 
-    function commandBox() {
+    /**
+     * What the command box starts with: ?ask= (the OpenVibe Frame's "Ask Actor", any site: the text the person had
+     * selected), at most 2000 characters, and ?from= (the page they were on: an https address on an OpenVibe site)
+     * as a line after it. Only ever text in the box: nothing runs until they press Run it.
+     */
+    function prefill(req) {
+        const ask = typeof req.query.ask === 'string' ? req.query.ask.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, 2000) : '';
+        let from = '';
+        if (typeof req.query.from === 'string' && req.query.from.length <= 500) {
+            try {
+                const u = new URL(req.query.from);
+                if (u.protocol === 'https:' && /(^|\.)(openvibe\.[a-z]+|openre\.stream)$/.test(u.hostname)) from = u.href;
+            } catch { from = ''; }
+        }
+        if (!ask && !from) return '';
+        return from ? `${ask}${ask ? '\n\n' : ''}(On this page: ${from})` : ask;
+    }
+
+    function commandBox(start = '') {
         return html`<form class="cn-command" method="post" action="/tasks" aria-labelledby="cn-command-h">
 <h2 id="cn-command-h" class="cn-sr">Give Actor a task</h2>
 <label class="cn-sr" for="cn-task">What should Actor do?</label>
-<textarea id="cn-task" name="task" rows="2" maxlength="20000" required placeholder="Tell Actor what to do: “check my site's certificate”, “what changed in my repo today?”, “drive my rover to the door”"></textarea>
+<textarea id="cn-task" name="task" rows="${start ? '4' : '2'}" maxlength="20000" required${start ? raw(' autofocus') : ''} placeholder="Tell Actor what to do: “check my site's certificate”, “what changed in my repo today?”, “drive my rover to the door”">${start}</textarea>
 <div class="cn-command-row"><label class="cn-mode">Mode <select name="mode">${MODES.map((m) => html`<option value="${m}"${m === 'balanced' ? raw(' selected') : ''}>${MODE_LABEL[m]}</option>`)}</select></label>
 <button class="cn-run" type="submit">Run it</button></div>
 </form>`;
@@ -120,7 +138,7 @@ ${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${pages}/
                 title: 'Console', crumbs: [{ label: 'Console' }],
                 body: html`<header class="cn-head"><p class="cn-eyebrow">OpenVibe.Actor · console</p><h1>Console</h1>
 <p class="cn-lede">One place for everything your agents do: the tasks running now, what waits for your approval, your agents, your own computers and robots, and what it all cost today.</p></header>
-<p><a class="cn-run" href="/auth/login?next=%2Fconsole">Sign in to open your console</a></p>`,
+<p><a class="cn-run" href="/auth/login?next=${encodeURIComponent(req.originalUrl.startsWith('/console') && req.originalUrl.length <= 500 ? req.originalUrl : '/console')}">Sign in to open your console</a></p>`,
             });
         }
         const requester = `user:${req.viewer.subject}`;
@@ -144,7 +162,7 @@ ${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${pages}/
             scripts: live.length ? ['js/console.js'] : [],
             body: html`${live.length ? raw('<noscript><meta http-equiv="refresh" content="10"></noscript>') : ''}<header class="cn-head"${live.length ? raw(' data-live="10"') : ''}><p class="cn-eyebrow">OpenVibe.Actor · console · alpha</p><h1>Console</h1>
 <p class="cn-lede">What your agents, computers and robots are doing, and one box to tell them what to do next.</p></header>
-${commandBox()}
+${commandBox(prefill(req))}
 <div class="cn-grid">
 <section class="cn-card cn-wide" aria-labelledby="cn-now"><h2 id="cn-now">Now${live.length ? html` <span class="cn-count">${String(live.length)}</span>` : ''}</h2>
 ${live.length ? html`<ul class="cn-tasks">${live.map(taskRow)}</ul><p class="cn-note">This page refreshes every 10 seconds while something runs.</p>` : html`<p class="cn-empty">Nothing is running.</p>`}</section>
