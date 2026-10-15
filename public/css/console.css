@@ -36,6 +36,10 @@
 .cn-meta { color: var(--text-secondary, #96a7c2); font-size: 13px; }
 .cn-list li, .cn-links li { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .55rem; padding: .45rem 0; border-top: 1px solid var(--border-color, rgba(255,255,255,.08)); }
 .cn-list li:first-child, .cn-links li:first-child { border-top: 0; }
+/* A row with a status dot: the dot keeps its own column, so a long name wraps beside it, never under it. */
+.cn-list li:has(> .cn-dot) { display: grid; grid-template-columns: 8px minmax(0, 1fr); column-gap: .55rem; row-gap: .15rem; align-items: center; }
+.cn-list li:has(> .cn-dot) > :not(.cn-dot) { grid-column: 2; justify-self: start; overflow-wrap: anywhere; }
+.cn-list li:has(> .cn-dot) > .cn-dot { grid-row: 1; }
 .cn-list a, .cn-links a { color: var(--text-primary, #e6edf7); }
 .cn-links li { flex-direction: column; align-items: flex-start; }
 .cn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary, #96a7c2); opacity: .5; flex: none; }
