@@ -38,6 +38,11 @@ function fakeBot({ machines = null } = {}) {
             if (v.op === 'write') return reply(200, { result: 'expired', reason: 'no acknowledgement before the deadline' });
             if (body.kind === 'screen') return reply(200, { result: 'ack', data: { format: 'jpeg', width: v.max_width, height: 720, content_b64: Buffer.from('fake-jpeg').toString('base64') } });
             if (body.kind === 'input') return reply(200, { result: 'ack', data: { done: true, action: v.action, ...(v.x != null ? { x: v.x * 2, y: v.y * 2 } : {}) } });
+            if (body.kind === 'browser') {
+                if (v.action === 'fill') return reply(200, { result: 'ack', data: { done: true, selector: v.selector, chars: v.text.length } });
+                if (v.action === 'close') return reply(200, { result: 'ack', data: { done: true } });
+                return reply(200, { result: 'ack', data: { url: v.url || 'https://example.org/next', title: 'Example', text: 'x'.repeat(9000), truncated: false, links: Array.from({ length: 50 }, (_, i) => ({ text: `l${i}`, href: `https://example.org/${i}` })) } });
+            }
         }
         if (u.pathname.startsWith('/api/v1/machines/')) return reply(404, { code: 'bot.device_not_found', detail: 'no such machine of yours' });
         return reply(404, { code: 'not_found' });
@@ -182,6 +187,25 @@ const as = { requester: `user:${ME}` };
         const before = bot.calls.length;
         for (const bad of [{ action: 'drag' }, { action: 'click' }, { action: 'key', keys: 'ctrl+s; rm -rf ~' }, { action: 'scroll', dy: 0 }, { action: 'type', text: '' }]) {
             assert.ok(JSON.parse(await t.call('computer_input', { machine: PC, ...bad }, as)).error, JSON.stringify(bad));
+        }
+        assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
+    });
+
+    await check('computer_browser: offered without vision; acting waits long enough for an approval, reading does not; bad input never leaves Actor', async () => {
+        const bot = fakeBot();
+        const t = tools(bot);
+        assert.ok((await t.definitions(as)).map((d) => d.function.name).includes('computer_browser'), 'pages answer as text: no vision needed');
+        const page = JSON.parse(await t.call('computer_browser', { machine: PC, action: 'open', url: 'https://example.org/' }, as));
+        assert.deepStrictEqual([page.title, page.text.length, page.truncated, page.links.length], ['Example', 3500, true, 25], 'sized to fit one tool result whole');
+        const sent = bot.calls.filter((c) => c.body && c.body.kind === 'browser');
+        assert.deepStrictEqual([sent[0].subject, sent[0].body.value, sent[0].body.ms], [ME, { action: 'open', url: 'https://example.org/' }, 120000]);
+        assert.deepStrictEqual(JSON.parse(await t.call('computer_browser', { machine: PC, action: 'fill', selector: '#q', text: 'hello' }, as)), { done: true, chars: 5 });
+        await t.call('computer_browser', { machine: PC, action: 'read' }, as);
+        assert.strictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'browser').at(-1).body.ms, 30000, 'reading never waits for an approval');
+        assert.deepStrictEqual(JSON.parse(await t.call('computer_browser', { machine: PC, action: 'click', text: 'Next' }, as)).title, 'Example');
+        const before = bot.calls.length;
+        for (const bad of [{ action: 'eval' }, { action: 'open', url: 'file:///etc/passwd' }, { action: 'open' }, { action: 'click' }, { action: 'fill', text: 'x' }, { action: 'press', key: 'ctrl+alt+Delete' }]) {
+            assert.ok(JSON.parse(await t.call('computer_browser', { machine: PC, ...bad }, as)).error, JSON.stringify(bad));
         }
         assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
     });
