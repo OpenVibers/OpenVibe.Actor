@@ -148,6 +148,17 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 4. Personal agents v1 are in this worktree: named instructions, memory people control, hourly/daily/weekly schedules and ordinary task runs. An approval inbox (a coding task an agent wants to start waits for its owner) and Watch triggers (a watch hands its
 task to an agent when its condition fires) are built, and so is asking Actor from chat (`@actor …`). Frame access comes later.
 
+## Run your own
+
+A self-hosted Actor ([docs/self-host.md](docs/self-host.md)): `npm run selfhost:init`, then
+`docker compose -f docker-compose.selfhost.yml --profile ollama up -d`.
+- One owner signs in with a password, and the API takes their own token.
+- One process, with its database on disk (PGlite) unless `DATABASE_URL` is set.
+- The OpenVibe runtime runs on any OpenAI-compatible model (`ACTOR_RUNTIME_URL`), at the operator's price, listed as
+  user-owned. With no other model family, it checks its own answers and says so.
+- OpenVibe's public Search and Tools are used anonymously, or not at all.
+- The parts that need an OpenVibe service identity are off: Bot, Codes, chat asks and Network-signed webhooks.
+
 ## Configuration
 
 See [.env.example](.env.example). Required in production:

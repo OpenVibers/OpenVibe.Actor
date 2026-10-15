@@ -8,7 +8,8 @@
     "start": "node server/index.js",
     "dev": "NODE_ENV=development node server/index.js",
     "test": "node test/run.js",
-    "test:pg": "ACTOR_TEST_STORE=pg node test/run.js"
+    "test:pg": "ACTOR_TEST_STORE=pg node test/run.js",
+    "selfhost:init": "node scripts/selfhost-init.js"
   },
   "keywords": [
     "openvibe",

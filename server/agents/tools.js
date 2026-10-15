@@ -65,6 +65,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
 
     /** Tools' catalog: only tools with an API that run at once and that anyone may call. */
     async function tools({ signal } = {}) {
+        if (!toolsUrl) return [];
         if (catalog && now() - catalogAt < CATALOG_TTL_MS) return catalog;
         try {
             const r = await getJson(`${toolsUrl}/api/v1/tools`, { signal });
@@ -121,10 +122,11 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     /** The function definitions the runtime's model sees, and the dispatcher that runs one call. */
     async function definitions({ signal, requester = null } = {}) {
         const list = await tools({ signal });
+        // A self-hosted Actor may leave OpenVibe.Search or OpenVibe.Tools unset (ACTOR_SEARCH_URL / ACTOR_TOOLS_URL empty):
+        // the runtime is then offered only the tools it can reach.
         const defs = [
-            { type: 'function', function: { name: 'search_openvibe', description: 'Search everything published on the OpenVibe network (streams, clips, pastes, community posts, wiki pages, blog posts, threads). Returns titles, summaries and links.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
-            { type: 'function', function: { name: 'find_tools', description: 'Find OpenVibe.Tools tools for a need (for example "mx records", "ssl certificate", "whois", "http headers", "base64", "hash"). Returns each tool id with its input schema and an example.', parameters: { type: 'object', properties: { need: { type: 'string' } }, required: ['need'] } } },
-            { type: 'function', function: { name: 'run_tool', description: 'Run one OpenVibe.Tools tool by id with its input object (use find_tools first to see the input).', parameters: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool', 'input'] } } },
+            ...(searchUrl ? [{ type: 'function', function: { name: 'search_openvibe', description: 'Search everything published on the OpenVibe network (streams, clips, pastes, community posts, wiki pages, blog posts, threads). Returns titles, summaries and links.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } }] : []),
+            ...(toolsUrl ? [{ type: 'function', function: { name: 'find_tools', description: 'Find OpenVibe.Tools tools for a need (for example "mx records", "ssl certificate", "whois", "http headers", "base64", "hash"). Returns each tool id with its input schema and an example.', parameters: { type: 'object', properties: { need: { type: 'string' } }, required: ['need'] } } }, { type: 'function', function: { name: 'run_tool', description: 'Run one OpenVibe.Tools tool by id with its input object (use find_tools first to see the input).', parameters: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool', 'input'] } } }] : []),
         ];
         if (list.some((t) => t.id === 'read')) {
             defs.push({ type: 'function', function: { name: 'read_page', description: 'Read a public web page as text (title, description, main text, links). Use it for URLs the task gives or that a result links to.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } });

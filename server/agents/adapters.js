@@ -50,8 +50,14 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
     const openaiAgent = p.openai.apiKey ? responsesAgent({ baseUrl: p.openai.baseUrl, apiKey: p.openai.apiKey, model: p.openai.model, rates: rates.openai, fetchImpl }) : null;
     const local = p.local.url && p.local.model ? chatClient({ baseUrl: p.local.url, apiKey: '', model: p.local.model, rates: rates.local, fetchImpl, timeoutMs: 120_000 }) : null;
 
+    // The runtime's model: the operator's own (ACTOR_RUNTIME_URL, catalog.runtimeOverride) when set, else DeepSeek's.
+    const own = p.runtime && p.runtime.url && p.runtime.model ? p.runtime : null;
+    const ownRates = own ? { input_usd_per_mtok: own.inputUsdPerMtok, cached_usd_per_mtok: own.inputUsdPerMtok, output_usd_per_mtok: own.outputUsdPerMtok } : null;
+    const runtimeModel = own ? chatClient({ baseUrl: own.url, apiKey: own.apiKey, model: own.model, rates: ownRates, fetchImpl, timeoutMs: 180_000 }) : deepseek;
+    const runtimeModelName = own ? own.model : p.deepseek.model;
+
     async function runtime({ task, requester = null, signal, emit, meter, budgetLeft }) {
-        if (!deepseek) throw new ProviderError('the runtime has no model configured', { code: 'actor.agent.unavailable' });
+        if (!runtimeModel) throw new ProviderError('the runtime has no model configured', { code: 'actor.agent.unavailable' });
         const tools = await ovTools.definitions({ signal, requester });
         const robots = tools.some((d) => d.function && d.function.name === 'robot_steps');
         const computers = tools.some((d) => d.function && d.function.name === 'computer_run');
@@ -62,7 +68,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
             if (budgetLeft() <= 0) throw new ProviderError('the task reached its budget before the runtime finished', { code: 'actor.budget.exceeded' });
             const finalTurn = turn === MAX_TURNS;
             // The model reasons before it answers, inside the same token budget: room for both.
-            const r = await deepseek({ messages, tools: finalTurn ? null : tools, maxTokens: 4000, signal });
+            const r = await runtimeModel({ messages, tools: finalTurn ? null : tools, maxTokens: 4000, signal });
             await meter(r.cost_usd);
             messages.push(r.message);
             if (r.text && r.text.trim()) { last = r.text.trim(); }
@@ -81,7 +87,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
             }
         }
         if (!last) throw new ProviderError('the runtime used all its turns without an answer', { code: 'actor.agent.no_answer' });
-        return { text: last, sources: [], model: p.deepseek.model, evidence };
+        return { text: last, sources: [], model: runtimeModelName, evidence };
     }
 
     async function openai({ task, mode, signal, emit, meter, budgetLeft }) {
@@ -113,6 +119,9 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
         // An answer backed by tool results: compared against them by a model that does it reliably (agents/check.js).
         openaiGrounded: p.openai.apiKey ? chatClient({ baseUrl: p.openai.baseUrl, apiKey: p.openai.apiKey, model: p.openai.groundedCheckModel || 'gpt-5-mini', rates: rates.openaiGroundedCheck, fetchImpl }) : null,
         local,
+        // The operator's own runtime model checks the runtime's answers when no other family is configured
+        // (agents/check.js: same family, so it says so).
+        runtime: own ? chatClient({ baseUrl: own.url, apiKey: own.apiKey, model: own.model, rates: ownRates, fetchImpl, timeoutMs: 120_000 }) : null,
     };
 
     return { run, checkers, tools: ovTools };

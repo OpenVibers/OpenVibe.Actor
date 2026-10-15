@@ -13,7 +13,8 @@
 
 // codes: the person's own machine wrote it (any of Codes' agents), so either family reads it.
 const FAMILY = { 'openvibe-runtime': 'deepseek', 'openai-agent': 'openai', 'open-model': 'local', codes: 'codes' };
-const CHECKER_FOR = { deepseek: ['openai', 'deepseek'], openai: ['deepseek', 'openai'], local: ['local'], codes: ['deepseek', 'openai'] };
+// `runtime`: the OpenVibe runtime on the operator's own model (ACTOR_RUNTIME_URL) — another family first, else itself.
+const CHECKER_FOR = { deepseek: ['openai', 'deepseek'], openai: ['deepseek', 'openai'], local: ['local'], codes: ['deepseek', 'openai'], runtime: ['openai', 'deepseek', 'runtime'] };
 
 const SYSTEM = `You check an AI agent's answer before a person sees it. Reply with JSON only: {"ok": true|false, "reason": "<one short sentence>"}.
 Only your own reply is JSON. The answer is prose meant to be read by a person (often Markdown) and is never expected to be JSON; tool results are JSON because services return JSON.
@@ -33,7 +34,7 @@ When the task is a greeting, small talk, a test message or too vague to act on, 
  * default) reads it when one is configured, so the check stays cross-family.
  */
 function checkersFor(agentId, checkers, { mode, grounded = false }) {
-    const family = FAMILY[agentId];
+    const family = agentId === 'openvibe-runtime' && checkers.runtime ? 'runtime' : FAMILY[agentId];
     const order = mode === 'private' ? ['local'] : (CHECKER_FOR[family] || []);
     const pick = (f) => (grounded && f === 'openai' && checkers.openaiGrounded ? checkers.openaiGrounded : checkers[f]);
     return order.filter((f) => pick(f)).map((f) => ({ family: f, chat: pick(f), cross: f !== family }));

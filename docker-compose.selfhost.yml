@@ -1,0 +1,23 @@
+# A self-hosted OpenVibe.Actor with a local model (docs/self-host.md).
+#   npm run selfhost:init -- --name you --url http://localhost:4950
+#   docker compose -f docker-compose.selfhost.yml --profile ollama up -d
+#   docker compose -f docker-compose.selfhost.yml exec ollama ollama pull qwen2.5:7b-instruct
+# Without the ollama profile, point ACTOR_RUNTIME_URL in .env.selfhost at a model server you already run.
+services:
+  actor:
+    build: .
+    env_file: .env.selfhost
+    ports:
+      - "127.0.0.1:4950:4950"
+    volumes:
+      - actor-data:/data
+    restart: unless-stopped
+  ollama:
+    image: ollama/ollama
+    profiles: ["ollama"]
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+volumes:
+  actor-data: {}
+  ollama-models: {}

@@ -156,7 +156,7 @@ ${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, i
         const shown = agents.filter((a) => a.id !== 'codes');
         return html`<figure class="router-card" aria-label="How Actor picked an agent for a sample task">
 <figcaption><span class="muted small">Sample task · Balanced</span><b>“Who handles the mail for openvibe.network, and is DMARC set up?”</b></figcaption>
-<ol>${shown.map((a, i) => html`<li class="${i === 0 ? 'pick' : ''}"><span class="rc-name">${a.name}</span><span class="rc-cost">~${usd(catalog.typicalCost(a.id))}</span><span class="rc-why">${i === 0 ? 'can run the DNS tools; cheapest that can' : a.can.includes('task:lookup') ? 'can do it, costs more' : 'cannot run lookups'}</span></li>`)}</ol>
+<ol>${shown.map((a, i) => html`<li class="${i === 0 ? 'pick' : ''}"><span class="rc-name">${a.name}</span><span class="rc-cost">~${usd(catalog.typicalCost(a.id, config))}</span><span class="rc-why">${i === 0 ? 'can run the DNS tools; cheapest that can' : a.can.includes('task:lookup') ? 'can do it, costs more' : 'cannot run lookups'}</span></li>`)}</ol>
 <p class="rc-foot">Checked by a second model before you see it.</p></figure>`;
     }
 

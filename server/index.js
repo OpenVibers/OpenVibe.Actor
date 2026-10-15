@@ -41,7 +41,8 @@ async function start() {
         console.log(`[Actor] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (db ${ctx.s.db.store}); agents available: ${available.join(', ') || 'none'}`);
     });
     server.keepAliveTimeout = 65_000;
-    ctx.keys.client.start();
+    // The Network's signing keys, for its tokens: a self-hosted Actor takes none.
+    if (!config.selfHosted.on) ctx.keys.client.start();
     // Tasks older than the retention window (tasks/store.js RETENTION_DAYS) go, with their events.
     const prune = setInterval(() => { store.prune(ctx.s).catch((err) => console.warn('[Actor] prune failed:', err && err.message)); }, PRUNE_EVERY_MS);
     prune.unref();
