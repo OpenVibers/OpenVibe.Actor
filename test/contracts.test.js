@@ -114,9 +114,9 @@ function codeRoutes() {
         }
     });
 
-    await check('events: the manifest produces none and consumes only the two account events (ADR-033); the capabilities declare none', () => {
+    await check('events: the manifest produces none and consumes the two account events (ADR-033) and chat messages (asks from chat); the capabilities declare none', () => {
         assert.deepStrictEqual(manifest.eventsProduced, []);
-        assert.deepStrictEqual([...manifest.eventsConsumed].sort(), ['network.account.deleted', 'network.account.export_requested']);
+        assert.deepStrictEqual([...manifest.eventsConsumed].sort(), ['chat.message.created', 'network.account.deleted', 'network.account.export_requested']);
         for (const id of CAPS) assert.deepStrictEqual(contracts.capabilities.get(id).events, [], id);
     });
 

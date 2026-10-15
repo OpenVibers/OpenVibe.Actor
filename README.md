@@ -119,7 +119,14 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
   - Reading, screenshots and closing run at every level; the rest wait for approval at `ask`. Below `full` the machine
     refuses addresses on its own network.
   - Approvals can come from the Node's tray or notification buttons, as well as `openvibe-node approve` (Node v0.11.0).
-- **OpenVibe.Events** (`ACTOR_EVENTS_URL`): the two ADR-033 subscriptions created at boot, and delivery to the loopback `/internal/events`.
+- **OpenVibe.Events** (`ACTOR_EVENTS_URL`): the two ADR-033 subscriptions created at boot, plus `chat.message.created` while asking from chat is on, and delivery to the loopback `/internal/events`.
+- **OpenVibe.Chat** (`ACTOR_CHAT_URL`, default `http://127.0.0.1:4400`): **ask Actor from chat** ([server/chat/asks.js](server/chat/asks.js)).
+  - **Who and where:** a signed-in person writes `@actor <task>` in the global chat or their own channel's chat. Guests, relayed external chatters (`source_platform`) and other people's channels are ignored.
+  - **How it runs:** the message becomes their task, on their free tier, with `via: chat`. The answer is posted where everyone reads it, so the task uses public tools only. The engine refuses a robot, computer or coding task (`actor.task.not_public`), and the runtime is never given the person's robots or computers.
+  - **The reply:** the first lines of the answer and the task's page, posted in the same room as "OpenVibe Actor", answering the message. It goes through Chat's service API (`chat.message.send`, audience `openvibe.chat`) and is retried with backoff for up to an hour.
+  - **Limits:** 5 asks an hour per person and 60 across everyone (`ACTOR_CHAT_ASKS_PER_HOUR`, `ACTOR_CHAT_ASKS_ALL_PER_HOUR`). Past a limit, one reply says so and further asks are dropped quietly.
+  - **Data:** `actor_chat_asks` (migration 0009) is part of the person's export and erasure.
+  - `ACTOR_CHAT_ASKS=0` turns it off.
 - **The model providers**: DeepSeek (`ACTOR_DEEPSEEK_API_KEY`, `api.deepseek.com`), OpenAI (`ACTOR_OPENAI_API_KEY`, `api.openai.com/v1`) for the web-search agent and the cross-family check, and an OpenAI-compatible local server (`ACTOR_LOCAL_LLM_URL`) for private mode.
 
 **Data:** PostgreSQL (openvibe-sdk/db, `DATABASE_URL` / `DATABASE_DIRECT_URL`) holds tasks, their events and daily spend; Valkey (`VALKEY_URL`) holds the shared per-caller limit counters. A provider or service without its key or URL is listed unavailable, never invented.
@@ -139,7 +146,7 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 2. Coding through OpenVibe.Codes on hosted Run sandboxes.
 3. More agent platforms behind the same router, bring-your-own keys through OpenVibe.AI, and paid tiers through Billing.
 4. Personal agents v1 are in this worktree: named instructions, memory people control, hourly/daily/weekly schedules and ordinary task runs. An approval inbox (a coding task an agent wants to start waits for its owner) and Watch triggers (a watch hands its
-task to an agent when its condition fires) are built. Chat and Frame access come later.
+task to an agent when its condition fires) are built, and so is asking Actor from chat (`@actor …`). Frame access comes later.
 
 ## Configuration
 

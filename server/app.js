@@ -25,6 +25,9 @@ const catalog = require('./agents/catalog');
 const { createAdapters } = require('./agents/adapters');
 const { createEngine } = require('./tasks/engine');
 const { createWebhooks } = require('./tasks/webhooks');
+const { createChatClient } = require('./chat/client');
+const { createChatAsks } = require('./chat/asks');
+const { createTask } = require('./tasks/create');
 const { createWebhookPoster } = require('./net/webhook-post');
 const { createTaskStream } = require('./tasks/stream');
 const { createPrincipal } = require('./http/principal');
@@ -69,7 +72,11 @@ async function createApp(opts = {}) {
     const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log });
     const principal = createPrincipal({ config, keys });
     const projects = opts.projects || require('./identity/projects').createProjects({ config });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log };
+    // Ask Actor from chat (chat/asks.js): chat.message.created through the events consumer below, replies through Chat.
+    const chatClient = opts.chatClient || createChatClient({ config, fetchImpl });
+    const chatAsks = createChatAsks({ s, config, chat: chatClient, now: s.now, log,
+        createTask: (args) => createTask({ s, config, engine, webhooks, ...args }) });
+    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;
@@ -138,7 +145,9 @@ async function createApp(opts = {}) {
     // network.account.export_requested and network.account.deleted (ADR-033), answered by the SDK's consumer. It
     // reads the raw body itself, so it is mounted before any body parser (there is none above it), and nginx answers
     // 404 for /internal/ so this is reachable only on 127.0.0.1.
-    app.use('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, log }));
+    // chat.message.created goes to chat/asks.js (ask Actor from chat); anything else is acknowledged and ignored.
+    app.use('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, log,
+        onEvent: (ev) => (ev.event_type === 'chat.message.created' ? chatAsks.onEvent(ev) : 'ignored:type') }));
 
     // ── Static assets (content-hashed ?v= → immutable) ──────
     app.use('/shared', require('openvibe-shared/serve').handler());
