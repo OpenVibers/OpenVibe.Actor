@@ -2,7 +2,7 @@
 /**
  * Request telemetry (openvibe-sdk/service, plan T1 step 10): app.js builds one collector for service 'actor' with a
  * PostgreSQL sink, a page hit five times flushes as ONE aggregated http.request sample (route template, 2xx, count 5),
- * /metrics and /shared files make none, and the 30-day retention deletes only older rows.
+ * /metrics and /shared files make none, and the 14-day retention deletes only older rows.
  */
 const assert = require('assert');
 const { pruneTelemetry } = require('openvibe-sdk/telemetry');
@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 
 (async () => {
-    await check('index.js flushes the collector every 15 s and clears that tick before the last flush on stop', () => {
+    await check('index.js flushes the collector every minute and clears that tick before the last flush on stop', () => {
         const index = fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 'utf8');
         assert.match(index, /ctx\.telemetryTick = setInterval\(\(\) => \{ ctx\.telemetry\.flush\(\)/);
         assert.match(index, /clearInterval\(ctx\.telemetryTick\); if \(ctx\.retention\) await ctx\.retention\.stop\(\); if \(ctx\.telemetry\) await ctx\.telemetry\.stop\(\);/);
@@ -38,13 +38,13 @@ const path = require('path');
             assert.deepStrictEqual(requests(), []);
         });
 
-        await check('the table exists and the retention deletes rows older than 30 days, keeping newer ones', async () => {
+        await check('the table exists and the retention deletes rows older than 14 days, keeping newer ones', async () => {
             const db = t.ctx.s.db;
             await db.query("DELETE FROM telemetry_samples");
             const insert = (days) => db.query("INSERT INTO telemetry_samples (at, service, operation) VALUES (now() - make_interval(days => $1), 'actor', 'http.request')", [days]);
-            await insert(45);
+            await insert(20);
             await insert(1);
-            assert.strictEqual(await pruneTelemetry({ db }), 1);
+            assert.strictEqual(await pruneTelemetry({ db, olderThanDays: 14 }), 1);
             assert.strictEqual((await db.query('SELECT count(*)::int AS n FROM telemetry_samples')).rows[0].n, 1);
         });
     } finally { await t.close(); }
