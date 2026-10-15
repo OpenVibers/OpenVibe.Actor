@@ -97,7 +97,8 @@ function createConsolePages(ctx, { robots = null, computers = null } = {}) {
                 : !result.value.computers.length ? html`<p class="cn-empty">No computer is open to your agent. Add one on <a href="${pages}/machines">openvibe.bot/machines</a> with <code>--computer ask</code>, then turn on “Let my agent use this computer”.</p>`
                     : html`<ul class="cn-list">${result.value.computers.map((c) => html`<li><span class="cn-dot${c.online ? ' on' : ''}" aria-hidden="true"></span><b>${c.name || c.id}</b>
 <span class="cn-meta">${c.online ? 'Online' : 'Offline'} · ${LEVEL_TEXT[c.level] || 'On'}${c.can.length ? html` · ${c.can.join(', ')}` : ''}</span>
-${c.waiting_for_approval ? html`<span class="pill pill-running">${String(c.waiting_for_approval)} waiting on the machine</span>` : ''}</li>`)}</ul>`;
+${c.waiting_for_approval ? html`<span class="pill pill-running">${String(c.waiting_for_approval)} waiting on the machine</span>` : ''}
+${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${pages}/machines/${encodeURIComponent(c.id)}/screen">Watch the screen</a>` : ''}</li>`)}</ul>`;
         return html`<section class="cn-card" aria-labelledby="cn-computers"><h2 id="cn-computers">Your computers</h2>${body}
 <p class="cn-more"><a href="${pages}/machines">Machines on OpenVibe.Bot</a></p></section>`;
     }

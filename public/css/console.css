@@ -81,3 +81,4 @@
   .cn-command-row { justify-content: space-between; }
   .cn-command textarea { min-height: 5.4rem; }
 }
+.cn-list .cn-link { font-size: 13px; color: var(--accent, #60a5fa); }

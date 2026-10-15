@@ -20,7 +20,8 @@ const approvals = require('../server/agents/approvals');
             mine: async (subject) => {
                 asked.push(['computers', subject]);
                 if (botMode === 'fail') return { error: 'Bot answered 503 for your computers' };
-                return { computers: [{ id: 'dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9', name: 'desk-pc', online: true, level: 'ask', can: ['terminal', 'files'], folders: ['/home/ada'], waiting_for_approval: 2 }] };
+                return { computers: [{ id: 'dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9', name: 'desk-pc', online: true, level: 'ask', can: ['terminal', 'files', 'screen'], folders: ['/home/ada'], waiting_for_approval: 2 },
+                    { id: 'dev_01M4W5JBFDG2TJ8C4FRDMCWBZA', name: 'old-laptop', online: false, level: 'observe', can: ['files', 'screen'], folders: [] }] };
             },
         },
         robots: {
@@ -71,7 +72,9 @@ const approvals = require('../server/agents/approvals');
             assert.match(h, /2 on your computers/);
             assert.match(h, /cn-count">3</, 'one approval here and two on the machine');
             assert.match(h, /Morning briefing/);
-            assert.match(h, /desk-pc[\s\S]*Ask first · terminal, files/);
+            assert.match(h, /desk-pc[\s\S]*Ask first · terminal, files, screen/);
+            assert.match(h, /href="https:\/\/[^"]+\/machines\/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9\/screen">Watch the screen</, 'an online computer with a screen links its live screen on Bot');
+            assert.ok(!h.includes('dev_01M4W5JBFDG2TJ8C4FRDMCWBZA/screen'), 'never for one that is offline');
             assert.match(h, /Desk rover[\s\S]*battery 80%/);
             assert.match(h, /openvibe\.services\/projects/);
             assert.match(h, /Last 7 days: <b>\$0\.0012<\/b>, 2 tasks/, 'the week: what the two tasks spent today');
