@@ -156,7 +156,7 @@ function toWire(row, { baseUrl }) {
     if (t.explanation && !t.explanation.length) t.explanation = null;
     // What the task registered; the signing secret is never part of the task as read (only the creating answer has it).
     const hooks = parse(row.webhooks);
-    if (hooks && hooks.length) t.webhooks = hooks.map((h) => ({ url: h.url, events: h.events }));
+    if (hooks && hooks.length) t.webhooks = hooks.map((h) => ({ url: h.url, events: h.events, ...(h.secret_ref ? { secret_ref: h.secret_ref } : {}) }));
     return t;
 }
 

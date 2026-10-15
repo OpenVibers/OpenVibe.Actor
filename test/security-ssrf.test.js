@@ -112,6 +112,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             'server/identity/projects.js': 'Network\'s internal membership read (configured networkInternalUrl) with Actor\'s own service token (network.project.member.read); the project and subject ids are path-encoded and come from a parsed OVRN and a checked usr_ id (test/resource-control.test.js)',
             'server/agents/tools.js': 'the configured OpenVibe.Tools and OpenVibe.Search bases; ids come from Tools\' catalog, a page URL goes to Tools as input',
             'server/events-consumer.js': 'OpenVibe.Events: the configured events.url (ACTOR_EVENTS_URL), to create the two ADR-033 subscriptions at boot',
+            'server/net/secret-signer.js': 'OpenVibe.Network: the configured networkInternalUrl (OV_NETWORK_INTERNAL_URL), POST /internal/secrets/use to sign a webhook delivery with a project secret (ADR-056); the body is the timestamp and the delivery, never a URL',
             'server/net/webhook-post.js': 'a task\'s webhook URL (plan T17), the one caller-chosen address: https on 443/8443 to public addresses only, checked at creation and at send time through openvibe-shared/egress safeLookup, never a redirect (test/webhooks.test.js)',
         };
         const root = path.join(__dirname, '..');
