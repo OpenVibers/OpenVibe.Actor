@@ -138,7 +138,8 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 1. Browser and desktop agents on OpenVibe's own cheap servers (Run workers with a headless browser and a virtual desktop), watchable live and taken over by the owner.
 2. Coding through OpenVibe.Codes on hosted Run sandboxes.
 3. More agent platforms behind the same router, bring-your-own keys through OpenVibe.AI, and paid tiers through Billing.
-4. Personal agents v1 are in this worktree: named instructions, memory people control, hourly/daily/weekly schedules and ordinary task runs. Events triggers, an approval inbox, Chat and Frame access come later.
+4. Personal agents v1 are in this worktree: named instructions, memory people control, hourly/daily/weekly schedules and ordinary task runs. An approval inbox (a coding task an agent wants to start waits for its owner) and Watch triggers (a watch hands its
+task to an agent when its condition fires) are built. Chat and Frame access come later.
 
 ## Configuration
 
