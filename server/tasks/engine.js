@@ -24,6 +24,9 @@ const { repoIn: codesRepoIn } = require('../agents/codes');
 
 const MAX_ATTEMPTS = 2;
 
+// What a task asked in a public chat may be (chat/asks.js): nothing that uses the person's own computers, robots or code.
+const PUBLIC_CLASSES = ['answer', 'lookup', 'research', 'web'];
+
 function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
@@ -100,6 +103,12 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 cls = c.class;
             }
             await emit(id, { kind: 'output', step: 'plan', text: `This is a "${cls}" task.` });
+            // Asked in a public chat (chat/asks.js): the answer is posted where everyone reads it, so only what needs
+            // nothing of the person's own — never their computers, robots or code on their machine.
+            const fromChat = row.via === 'chat';
+            if (fromChat && !PUBLIC_CLASSES.includes(cls)) {
+                return await setState(id, 'failed', { error_code: 'actor.task.not_public', error_detail: 'Asked in a public chat, Actor uses public tools only: ask on openvibe.actor to use your own computers, robots or code.', finished_at: iso() });
+            }
 
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
                 const placement = route({ cls, mode: row.mode, agent: row.agent, budgetUsd: Math.max(0, budgetLeft()), config, tried, now: now(), floor: row.mode === 'private' ? null : floor });
@@ -131,7 +140,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await emit(id, { kind: 'output', step: attempt > 1 ? 'handoff' : 'plan', agent: agentId, text: `${agent.name} takes it${placement.reasons && placement.reasons[0] ? `: ${placement.reasons[0]}` : ''}.` });
                 let out;
                 try {
-                    out = await adapters.run[agentId]({ task: row.task, requester: row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }) });
+                    // From chat the runtime is never offered the person's own robots or computers (no requester for its tools).
+                    out = await adapters.run[agentId]({ task: row.task, requester: fromChat ? null : row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }) });
                 } catch (err) {
                     if (signal.aborted) throw err;
                     const why = (err && err.message) || String(err);

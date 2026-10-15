@@ -19,7 +19,7 @@ const PRUNE_EVERY_MS = 6 * 60 * 60_000;
 function createLifecycle({ server, ctx, exit, signals, timers = [], extra = [] }) {
     return gracefulStop({
         name: 'Actor', server, deadlineExitCode: 0, exit, signals, deadlineMs: 10_000,
-        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.webhooks.stop(), () => ctx.keys.client.stop(), () => ctx.s.close(), ...extra],
+        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.webhooks.stop(), () => ctx.chatAsks.stop(), () => ctx.keys.client.stop(), () => ctx.s.close(), ...extra],
     });
 }
 
@@ -33,6 +33,8 @@ async function start() {
     for (const id of interrupted) await ctx.webhooks.enqueue(id, 'failed').catch((err) => console.warn('[Actor] webhook enqueue failed:', id, err && err.message));
     await ctx.webhooks.recover();
     ctx.webhooks.start();
+    // Replies to "@actor …" in chat (chat/asks.js), posted once their task has ended.
+    ctx.chatAsks.start();
 
     const server = app.listen(config.port, config.host, () => {
         const available = require('./agents/catalog').list(config).filter((a) => a.available).map((a) => a.id);
@@ -48,7 +50,8 @@ async function start() {
 
     // Subscribe to the two ADR-033 topics at OpenVibe.Events (idempotent; off without ACTOR_EVENTS_URL and
     // ACTOR_EVENTS_SECRET). The consumer itself is mounted in server/app.js.
-    const subscriptions = require('./events-consumer').startSubscriptions({ config, port: config.port, secret: config.events.secrets[0] || '' });
+    const subscriptions = require('./events-consumer').startSubscriptions({ config, port: config.port, secret: config.events.secrets[0] || '',
+        topics: config.chat.asks ? ['chat.message.created'] : [] });
     const extra = [() => { if (subscriptions) subscriptions.stop(); }];
     createLifecycle({ server, ctx, timers: [prune, agentTick], extra });
     return { server, ctx };

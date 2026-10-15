@@ -95,6 +95,17 @@ function load(env = process.env) {
             timeoutMs: Math.max(1000, int(env.ACTOR_WEBHOOK_TIMEOUT_MS, 10_000)),
         },
 
+        // Ask Actor from chat (server/chat/asks.js): "@actor …" in OpenVibe's global chat or the person's own channel,
+        // taken from chat.message.created and answered in the same room through Chat's service API (url, loopback in
+        // production). ACTOR_CHAT_ASKS=0 turns it off; the limits are per person and across everyone, per hour.
+        chat: {
+            asks: env.ACTOR_CHAT_ASKS !== '0',
+            url: trim(env.ACTOR_CHAT_URL != null ? env.ACTOR_CHAT_URL : 'http://127.0.0.1:4400'),
+            perHour: Math.max(1, int(env.ACTOR_CHAT_ASKS_PER_HOUR, 5)),
+            allPerHour: Math.max(1, int(env.ACTOR_CHAT_ASKS_ALL_PER_HOUR, 60)),
+            replyIntervalMs: Math.max(200, int(env.ACTOR_CHAT_REPLY_INTERVAL_MS, 2000)),
+        },
+
         // OpenVibe.Events → this service (server/events-consumer.js). The secret signs a delivery (comma-separated
         // for rotation, 32+ characters each); unset turns POST /internal/events off (503). The url is where the
         // network.account.export_requested and network.account.deleted subscriptions are created at boot, off when

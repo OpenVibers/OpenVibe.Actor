@@ -39,6 +39,8 @@ const TABLES = [
     { table: 'actor_agents', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agents.json' },
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
+    // What they asked Actor in chat (chat/asks.js): the message it answered, the room, the task it became.
+    { table: 'actor_chat_asks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'chat-asks.json' },
 ];
 
 /** The account-data handle for Actor's store (server/db.js createStore). */
