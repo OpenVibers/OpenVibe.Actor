@@ -136,7 +136,7 @@ ${commandBox()}
 ${live.length ? html`<ul class="cn-tasks">${live.map(taskRow)}</ul><p class="cn-note">This page refreshes every 10 seconds while something runs.</p>` : html`<p class="cn-empty">Nothing is running.</p>`}</section>
 <section class="cn-card${nWaiting ? ' cn-attn' : ''}" aria-labelledby="cn-waiting"><h2 id="cn-waiting">Waiting for you${nWaiting ? html` <span class="cn-count">${String(nWaiting)}</span>` : ''}</h2>
 ${waiting.length ? html`<ul class="cn-list">${waiting.slice(0, 4).map((a) => html`<li><a href="/me/approvals/${a.id}"><b>${clip(a.summary, 80)}</b></a><span class="cn-meta">Asked ${time(a.created_at)}</span></li>`)}</ul>` : ''}
-${onMachines ? html`<p class="cn-note">${String(onMachines)} on your computers: answer them there with <code>openvibe-node approvals</code>.</p>` : ''}
+${onMachines ? html`<p class="cn-note">${String(onMachines)} on your computers: answer them there, in the Node's tray, with a notification's Approve button, or with <code>openvibe-node approvals</code>.</p>` : ''}
 ${nWaiting ? '' : html`<p class="cn-empty">Nothing waits for you.</p>`}
 <p class="cn-more"><a href="/me/approvals">All approvals</a></p></section>
 <section class="cn-card" aria-labelledby="cn-today"><h2 id="cn-today">Today</h2>
@@ -159,6 +159,7 @@ ${robotsCard(rovers)}
 <section class="cn-card cn-full" aria-labelledby="cn-elsewhere"><h2 id="cn-elsewhere">Across OpenVibe</h2>
 <ul class="cn-links">
 <li><a href="https://openvibe.services/projects">Your projects and resources</a><span class="cn-meta">OpenVibe.Services: stop, delete, suspend or resume what your projects hold</span></li>
+<li><a href="https://openvibe.services/projects/mine">What you own yourself</a><span class="cn-meta">OpenVibe.Services: stop or resume a robot, archive a chat room, suspend a stream, delete a paste</span></li>
 <li><a href="https://openvibe.watch">Your watches</a><span class="cn-meta">OpenVibe.Watch: wake an agent when something changes</span></li>
 <li><a href="https://openvibe.codes/run">Coding on your machine</a><span class="cn-meta">OpenVibe.Codes: tasks on your own computer</span></li>
 </ul></section>
