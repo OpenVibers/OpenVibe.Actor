@@ -6,6 +6,7 @@
  */
 const { createApp } = require('./app');
 const { gracefulStop } = require('openvibe-sdk/service');
+const { startTelemetryRetention } = require('openvibe-sdk/telemetry');
 const store = require('./tasks/store');
 
 const PRUNE_EVERY_MS = 6 * 60 * 60_000;
@@ -19,7 +20,7 @@ const PRUNE_EVERY_MS = 6 * 60 * 60_000;
 function createLifecycle({ server, ctx, exit, signals, timers = [], extra = [] }) {
     return gracefulStop({
         name: 'Actor', server, deadlineExitCode: 0, exit, signals, deadlineMs: 10_000,
-        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.webhooks.stop(), () => ctx.chatAsks.stop(), () => ctx.keys.client.stop(), () => ctx.s.close(), ...extra],
+        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.webhooks.stop(), () => ctx.chatAsks.stop(), () => ctx.keys.client.stop(), async () => { if (ctx.retention) await ctx.retention.stop(); if (ctx.telemetry) await ctx.telemetry.stop(); }, () => ctx.s.close(), ...extra],
     });
 }
 
@@ -41,6 +42,8 @@ async function start() {
         console.log(`[Actor] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (db ${ctx.s.db.store}); agents available: ${available.join(', ') || 'none'}`);
     });
     server.keepAliveTimeout = 65_000;
+    // telemetry_samples rows older than 30 days go: a minute after start, then daily (openvibe-sdk/telemetry).
+    ctx.retention = startTelemetryRetention({ db: ctx.s.db, log: ctx.log || console });
     // The Network's signing keys, for its tokens: a self-hosted Actor takes none.
     if (!config.selfHosted.on) ctx.keys.client.start();
     // Tasks older than the retention window (tasks/store.js RETENTION_DAYS) go, with their events.
