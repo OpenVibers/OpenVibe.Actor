@@ -21,6 +21,7 @@ const catalog = require('../agents/catalog');
 const { MODES } = require('../agents/router');
 const { createRobots } = require('../agents/robots');
 const { createComputers } = require('../agents/computers');
+const feed = require('../agents/feed');
 
 const LIVE = new Set(['queued', 'running', 'verifying']);
 const STATE_TEXT = { queued: 'Waiting', running: 'Working', verifying: 'Checking', succeeded: 'Done', failed: 'Didn\'t finish', cancelled: 'Cancelled' };
@@ -68,15 +69,27 @@ function createConsolePages(ctx, { robots = null, computers = null } = {}) {
 <span class="cn-meta">${agent ? html`${agent} · ` : ''}${t.cost_usd == null ? '' : html`${usd(Number(t.cost_usd))} · `}${time(t.created_at)}</span></li>`;
     };
 
-    /** The last seven days of spend as bars (a table for screen readers), tallest day = full height. */
-    function weekChart(days) {
+    /**
+     * Days of spend as bars (a table for screen readers), tallest day = full height. A week labels each day; a month
+     * labels every fifth day by its date.
+     */
+    function spendChart(days, { caption, month = false } = {}) {
         const top = Math.max(...days.map((d) => d.usd), 0);
         const total = days.reduce((n, d) => n + d.usd, 0);
-        const label = (d) => new Date(`${d.day}T00:00:00Z`).toLocaleDateString('en', { weekday: 'short', timeZone: 'UTC' });
-        return html`<figure class="cn-week"><figcaption>Last 7 days: <b>${usd(total)}</b>, ${String(days.reduce((n, d) => n + d.tasks, 0))} tasks</figcaption>
-<div class="cn-bars" aria-hidden="true">${days.map((d) => html`<span class="cn-bar" title="${label(d)}: ${usd(d.usd)}, ${String(d.tasks)} tasks"><i style="height:${String(top > 0 ? Math.max(4, Math.round((d.usd / top) * 100)) : 4)}%"></i><small>${label(d).slice(0, 2)}</small></span>`)}</div>
+        const date = (d) => new Date(`${d.day}T00:00:00Z`);
+        const label = (d, i) => (month
+            ? (i % 5 === (days.length - 1) % 5 ? String(date(d).getUTCDate()) : '')
+            : date(d).toLocaleDateString('en', { weekday: 'short', timeZone: 'UTC' }).slice(0, 2));
+        const name = (d) => date(d).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+        return html`<figure class="cn-week${month ? ' cn-month' : ''}"><figcaption>${caption}: <b>${usd(total)}</b>, ${String(days.reduce((n, d) => n + d.tasks, 0))} tasks</figcaption>
+<div class="cn-bars" aria-hidden="true"${month ? raw(` style="grid-template-columns:repeat(${days.length},1fr)"`) : ''}>${days.map((d, i) => html`<span class="cn-bar" title="${name(d)}: ${usd(d.usd)}, ${String(d.tasks)} tasks"><i style="height:${String(top > 0 ? Math.max(4, Math.round((d.usd / top) * 100)) : 4)}%"></i><small>${label(d, i)}</small></span>`)}</div>
 <table class="cn-sr"><caption>Spend by day</caption><tbody>${days.map((d) => html`<tr><th scope="row">${d.day}</th><td>${usd(d.usd)}</td><td>${String(d.tasks)} tasks</td></tr>`)}</tbody></table></figure>`;
     }
+
+    /** One line of the events feed. */
+    const eventRow = (e) => html`<li class="cn-event cn-event-${e.kind}"><span class="cn-ev-dot cn-ev-${e.state}" aria-hidden="true"></span>
+<a href="${e.href}">${clip(e.text, 120)}</a>
+<span class="cn-meta">${e.by ? html`${e.by} · ` : ''}${e.cost != null ? html`${usd(e.cost)} · ` : ''}${time(e.at)}</span></li>`;
 
     function computersCard(result) {
         const body = !bot.computers.enabled ? html`<p class="cn-empty">Not connected to OpenVibe.Bot on this server.</p>`
@@ -121,7 +134,7 @@ ${c.waiting_for_approval ? html`<span class="pill pill-running">${String(c.waiti
             bot.robots.enabled ? fromBot((o) => bot.robots.mine(subject, o)) : { ok: false },
         ]);
         const live = tasks.rows.filter((t) => LIVE.has(t.state));
-        const recent = tasks.rows.filter((t) => !LIVE.has(t.state)).slice(0, 6);
+        const events = await feed.lately(s, requester, { approvals: asked, agents, limit: 8 });
         const waiting = asked.filter((a) => a.state === 'pending');
         const onMachines = pcs.ok ? pcs.value.computers.reduce((n, c) => n + (c.waiting_for_approval || 0), 0) : 0;
         const nWaiting = waiting.length + onMachines;
@@ -144,11 +157,11 @@ ${nWaiting ? '' : html`<p class="cn-empty">Nothing waits for you.</p>`}
 <div class="cn-meter" role="progressbar" aria-label="Free tasks used today" aria-valuemin="0" aria-valuemax="${String(tier.tasksPerDay)}" aria-valuenow="${String(today.tasks)}"><span style="width:${String(pct(today.tasks, tier.tasksPerDay))}%"></span></div>
 <p class="cn-stat"><b>${usd(today.usd)}</b> of ${usd(tier.perDayUsd)}</p>
 <div class="cn-meter" role="progressbar" aria-label="Spent today" aria-valuemin="0" aria-valuemax="${String(tier.perDayUsd)}" aria-valuenow="${String(today.usd)}"><span style="width:${String(pct(today.usd, tier.perDayUsd))}%"></span></div>
-${weekChart(week)}
-<p class="cn-more"><a href="/tasks">Your tasks</a></p></section>
-<section class="cn-card cn-wide" aria-labelledby="cn-recent"><h2 id="cn-recent">Recent tasks</h2>
-${recent.length ? html`<ul class="cn-tasks">${recent.map(taskRow)}</ul>` : html`<p class="cn-empty">No finished task yet. Give Actor one above.</p>`}
-<p class="cn-more"><a href="/tasks">All your tasks</a></p></section>
+${spendChart(week, { caption: 'Last 7 days' })}
+<p class="cn-more"><a href="/me/spend">Last 30 days</a> · <a href="/tasks">Your tasks</a></p></section>
+<section class="cn-card cn-wide" aria-labelledby="cn-lately"><h2 id="cn-lately">Lately</h2>
+${events.length ? html`<ul class="cn-events">${events.map(eventRow)}</ul>` : html`<p class="cn-empty">Nothing has happened yet. Give Actor a task above.</p>`}
+<p class="cn-more"><a href="/tasks">All your tasks</a> · <a href="/me/approvals">All approvals</a></p></section>
 <section class="cn-card" aria-labelledby="cn-agents"><h2 id="cn-agents">Your agents</h2>
 ${agents.length ? html`<ul class="cn-list">${agents.slice(0, 5).map((a) => html`<li><span class="cn-dot${a.status === 'paused' ? '' : ' on'}" aria-hidden="true"></span><a href="/me/agents/${a.id}"><b>${a.name}</b></a>
 <span class="cn-meta">${a.status === 'paused' ? 'Paused' : a.schedule === 'off' ? 'Runs when you run it' : `Every ${a.schedule === 'hourly' ? 'hour' : a.schedule === 'daily' ? 'day' : 'week'}`}${a.last_run_at ? html` · last ran ${time(a.last_run_at)}` : ''}</span></li>`)}</ul>`
@@ -164,6 +177,27 @@ ${robotsCard(rovers)}
 <li><a href="https://openvibe.codes/run">Coding on your machine</a><span class="cn-meta">OpenVibe.Codes: tasks on your own computer</span></li>
 </ul></section>
 </div>`,
+        });
+    });
+
+    // ── Costs over time: the last 30 days (what Actor keeps) ──
+    r.get('/me/spend', async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req)) return res.redirect(302, '/auth/login?next=%2Fme%2Fspend');
+        const requester = `user:${req.viewer.subject}`;
+        const days = await store.spendDays(s, requester, store.RETENTION_DAYS);
+        const used = days.filter((d) => d.tasks > 0 || d.usd > 0);
+        const total = days.reduce((n, d) => n + d.usd, 0);
+        const busiest = used.reduce((b, d) => (!b || d.usd > b.usd ? d : b), null);
+        page(req, res, {
+            title: 'Spend', crumbs: [{ label: 'Console', href: '/console' }, { label: 'Spend' }],
+            body: html`<header class="cn-head"><p class="cn-eyebrow">OpenVibe.Actor · console</p><h1>Spend</h1>
+<p class="cn-lede">What your tasks and agents cost, day by day, over the last ${String(store.RETENTION_DAYS)} days (Actor keeps no more).</p></header>
+<section class="cn-card" aria-labelledby="cn-spend-h"><h2 id="cn-spend-h">Last ${String(store.RETENTION_DAYS)} days</h2>
+${spendChart(days, { caption: `Last ${store.RETENTION_DAYS} days`, month: true })}
+<p class="cn-stat">${used.length ? html`<b>${usd(total / used.length)}</b> on an average day with tasks · busiest ${busiest.day}, <b>${usd(busiest.usd)}</b>` : 'Nothing has run in this time.'}</p>
+<p class="cn-note">Today's limit is ${usd(tier.perDayUsd)} and ${String(tier.tasksPerDay)} tasks on the free tier.</p>
+<p class="cn-more"><a href="/console">Back to the console</a> · <a href="/tasks">Your tasks</a></p></section>`,
         });
     });
 

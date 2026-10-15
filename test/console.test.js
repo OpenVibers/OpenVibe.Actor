@@ -91,6 +91,40 @@ const approvals = require('../server/agents/approvals');
             botMode = 'ok';
         });
 
+        await check('Lately: finished tasks with the agent that ran them, approvals asked and answered, newest first', async () => {
+            const dee = t.network.addUser('dee');
+            const who = `user:${dee.subject}`;
+            const agent = await personal.create(t.ctx.s, t.config, who, { name: 'Price watcher', instructions: 'Check prices.', mode: 'balanced', budget_per_run_usd: 0.02, daily_runs_max: 1, schedule: 'off', status: 'active' });
+            const at = (min) => new Date(Date.now() - min * 60_000).toISOString();
+            const ins = async (text, state, finished, via = null) => {
+                const id = t.ctx.s.newId('tsk');
+                await store.insertTask(t.ctx.s, { id, requester: who, task: text, mode: 'balanced', budget_task: 0.05, budget_day: 0.5, created_at: at(finished + 1) });
+                await store.updateTask(t.ctx.s, id, { state, finished_at: at(finished), cost_usd: 0.003, ...(via ? { via } : {}) });
+            };
+            await ins('Old check', 'failed', 30);
+            await ins('Compare the three laptop prices', 'succeeded', 5, `agent:${agent.row.id}`);
+            const asked = await approvals.request(t.ctx.s, { owner: who, kind: 'codes.task', summary: 'Open a pull request on dee/site', payload: { task: 'pr' } });
+            await t.ctx.s.db.query("UPDATE actor_approvals SET state = 'declined', decided_at = $2, created_at = $3 WHERE id = $1", [asked.id || asked.approval.id, at(1), at(10)]);
+            const r = await t.get('/console', { as: dee });
+            const h = r.text;
+            assert.match(h, /<h2 id="cn-lately">Lately<\/h2>/);
+            const order = ['You declined: Open a pull request on dee/site', 'Done: Compare the three laptop prices', 'Asked for your approval: Open a pull request', 'Didn&#39;t finish: Old check'].map((x) => h.indexOf(x));
+            assert.ok(order.every((i) => i > 0), JSON.stringify(order));
+            assert.deepStrictEqual([...order].sort((a, b) => a - b), order, 'newest first');
+            assert.match(h, /Price watcher · \$0\.0030/, 'the agent that ran it, and what it cost');
+            assert.ok(!h.includes('Check the certificate of example.com'), 'only this person\'s');
+        });
+
+        await check('/me/spend: the last 30 days as bars and a table, for the signed-in person only', async () => {
+            const r = await t.get('/me/spend', { as: ada });
+            assert.strictEqual(r.status, 200);
+            assert.match(r.text, /<h1>Spend<\/h1>/);
+            assert.match(r.text, /Last 30 days: <b>\$0\.0012<\/b>, 2 tasks/);
+            assert.strictEqual((r.text.match(/class="cn-bar"/g) || []).length, 30);
+            assert.strictEqual((await t.get('/me/spend')).status, 302, 'signed out: sign in first');
+            assert.match((await t.get('/console', { as: ada })).text, /href="\/me\/spend"/, 'the console links it');
+        });
+
         await check('nothing running: no refresh; nothing waiting says so', async () => {
             const r = await t.get('/console', { as: bo });
             assert.strictEqual(r.status, 200);

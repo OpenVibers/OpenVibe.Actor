@@ -57,6 +57,19 @@
 .cn-bar i { display: block; width: 100%; max-width: 22px; border-radius: 4px 4px 2px 2px; background: color-mix(in srgb, var(--accent, #3b82f6) 70%, transparent); }
 .cn-bar:last-child i { background: var(--accent, #3b82f6); }
 .cn-bar small { font-size: 11px; color: var(--text-secondary, #96a7c2); }
+.cn-month .cn-bars { gap: 2px; height: 120px; }
+.cn-month .cn-bar small { display: block; height: 1.3em; line-height: 1.3em; }
+/* The events feed: a coloured dot for how each ended, the text, then who, cost and when. */
+.cn-events { list-style: none; margin: 0; padding: 0; display: grid; }
+.cn-event { display: grid; grid-template-columns: 8px minmax(0, 1fr); column-gap: .6rem; row-gap: .1rem; align-items: center; padding: .45rem 0; border-top: 1px solid var(--border-color, rgba(255,255,255,.08)); }
+.cn-event:first-child { border-top: 0; }
+.cn-event > a, .cn-event > .cn-meta { grid-column: 2; overflow-wrap: anywhere; }
+.cn-event > a { color: var(--text-primary, #e6edf7); }
+.cn-ev-dot { grid-row: 1; width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary, #96a7c2); }
+.cn-ev-succeeded, .cn-ev-approved { background: var(--success, #22c55e); }
+.cn-ev-failed, .cn-ev-declined { background: var(--danger, #ef4444); }
+.cn-ev-pending { background: var(--accent, #3b82f6); }
+.cn-ev-expired, .cn-ev-cancelled { background: var(--text-secondary, #96a7c2); opacity: .6; }
 
 @media (max-width: 60rem) { .cn-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 40rem) {
