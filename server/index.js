@@ -20,7 +20,7 @@ const PRUNE_EVERY_MS = 6 * 60 * 60_000;
 function createLifecycle({ server, ctx, exit, signals, timers = [], extra = [] }) {
     return gracefulStop({
         name: 'Actor', server, deadlineExitCode: 0, exit, signals, deadlineMs: 10_000,
-        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.webhooks.stop(), () => ctx.chatAsks.stop(), () => ctx.keys.client.stop(), async () => { if (ctx.retention) await ctx.retention.stop(); if (ctx.telemetry) await ctx.telemetry.stop(); }, () => ctx.s.close(), ...extra],
+        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.webhooks.stop(), () => ctx.chatAsks.stop(), () => ctx.keys.client.stop(), async () => { clearInterval(ctx.telemetryTick); if (ctx.retention) await ctx.retention.stop(); if (ctx.telemetry) await ctx.telemetry.stop(); }, () => ctx.s.close(), ...extra],
     });
 }
 
@@ -44,6 +44,10 @@ async function start() {
     server.keepAliveTimeout = 65_000;
     // telemetry_samples rows older than 30 days go: a minute after start, then daily (openvibe-sdk/telemetry).
     ctx.retention = startTelemetryRetention({ db: ctx.s.db, log: ctx.log || console });
+    // The request collector aggregates in memory and has no timer of its own (openvibe-sdk 0.46 createHttpTelemetry):
+    // this tick writes each 15-second interval's samples; the stop clears it and flushes once more.
+    ctx.telemetryTick = setInterval(() => { ctx.telemetry.flush().catch(() => {}); }, 15_000);
+    ctx.telemetryTick.unref();
     // The Network's signing keys, for its tokens: a self-hosted Actor takes none.
     if (!config.selfHosted.on) ctx.keys.client.start();
     // Tasks older than the retention window (tasks/store.js RETENTION_DAYS) go, with their events.

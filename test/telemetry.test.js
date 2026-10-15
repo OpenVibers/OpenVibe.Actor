@@ -7,8 +7,16 @@
 const assert = require('assert');
 const { pruneTelemetry } = require('openvibe-sdk/telemetry');
 const { boot, check, done } = require('./helpers/boot');
+const fs = require('fs');
+const path = require('path');
 
 (async () => {
+    await check('index.js flushes the collector every 15 s and clears that tick before the last flush on stop', () => {
+        const index = fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 'utf8');
+        assert.match(index, /ctx\.telemetryTick = setInterval\(\(\) => \{ ctx\.telemetry\.flush\(\)/);
+        assert.match(index, /clearInterval\(ctx\.telemetryTick\); if \(ctx\.retention\) await ctx\.retention\.stop\(\); if \(ctx\.telemetry\) await ctx\.telemetry\.stop\(\);/);
+    });
+
     const samples = [];
     const t = await boot({ telemetrySink: async (batch) => { samples.push(...batch); } });
     const requests = () => samples.filter((s) => s.operation === 'http.request');
