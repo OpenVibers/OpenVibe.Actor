@@ -76,6 +76,11 @@ function load(env = process.env) {
             // (0 for a model on their own hardware); it also checks its own answers when no other family is configured.
             runtime: {
                 url: trim(env.ACTOR_RUNTIME_URL || ''), model: env.ACTOR_RUNTIME_MODEL || '', apiKey: env.ACTOR_RUNTIME_API_KEY || '',
+                // OpenVibe's hosted models instead of a key: an OpenVibe developer app's credentials (its project pays);
+                // the runtime then asks for the app's five-minute token itself (agents/app-token.js).
+                openvibeApp: env.ACTOR_RUNTIME_OPENVIBE_CLIENT_ID && env.ACTOR_RUNTIME_OPENVIBE_CLIENT_SECRET
+                    ? { clientId: env.ACTOR_RUNTIME_OPENVIBE_CLIENT_ID, clientSecret: env.ACTOR_RUNTIME_OPENVIBE_CLIENT_SECRET, networkUrl: trim(env.ACTOR_RUNTIME_OPENVIBE_NETWORK_URL || 'https://openvibe.network') }
+                    : null,
                 inputUsdPerMtok: Math.max(0, num(env.ACTOR_RUNTIME_INPUT_USD_PER_MTOK, 0)), outputUsdPerMtok: Math.max(0, num(env.ACTOR_RUNTIME_OUTPUT_USD_PER_MTOK, 0)),
             },
         },

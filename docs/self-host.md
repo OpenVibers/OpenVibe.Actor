@@ -41,9 +41,39 @@ you own first.
 | `DATA_DIR` | where the database lives (PGlite in `DATA_DIR/pglite`); set `DATABASE_URL` and `DATABASE_DIRECT_URL` for PostgreSQL instead |
 | `ACTOR_RUNTIME_URL`, `ACTOR_RUNTIME_MODEL`, `ACTOR_RUNTIME_API_KEY` | the runtime's model: any OpenAI-compatible `/v1` endpoint |
 | `ACTOR_RUNTIME_INPUT_USD_PER_MTOK`, `…_OUTPUT_…` | its price per million tokens (0 on your own hardware), used for budgets and costs |
+| `ACTOR_RUNTIME_OPENVIBE_CLIENT_ID`, `…_CLIENT_SECRET` | instead of a key: an OpenVibe app, for OpenVibe's hosted models (below) |
 | `ACTOR_SEARCH_URL`, `ACTOR_TOOLS_URL` | OpenVibe's public Search and Tools, used anonymously; empty means the runtime is not offered them |
 | `ACTOR_DEEPSEEK_API_KEY`, `ACTOR_OPENAI_API_KEY` | optional: more agents, and another model family to check answers |
 | `ACTOR_FREE_*`, `ACTOR_MAX_COST_USD_PER_DAY` | your own daily limits |
+
+## OpenVibe's hosted models (burst)
+
+Your Actor can run its runtime on OpenVibe's hosted models (`ai.openvibe.services`) instead of, or until you have, a
+model of your own. Your OpenVibe project pays for the runs and sees them; nothing else about your Actor changes.
+
+1. Make an app in one of your OpenVibe projects, signed in to OpenVibe (your Network token as `Authorization: Bearer`):
+   `POST https://openvibe.network/api/v1/projects/<project>/apps` with `{ "name": "My Actor", "environment": "sandbox" }`.
+   The answer has the app's `id` (its client id, `app_…`) and `credential.client_secret`, shown once.
+2. Give it `ai.app.run`: `POST https://openvibe.network/api/v1/projects/<project>/apps/<app>/grants` with
+   `{ "capability": "ai.app.run" }`. A sandbox app gets it at once and runs on OpenVibe's free and local capacity only;
+   a production app's allowance is set by OpenVibe.
+3. Set, and restart:
+
+   ```
+   ACTOR_RUNTIME_URL=https://ai.openvibe.services/v1
+   ACTOR_RUNTIME_MODEL=default
+   ACTOR_RUNTIME_OPENVIBE_CLIENT_ID=app_…
+   ACTOR_RUNTIME_OPENVIBE_CLIENT_SECRET=…
+   ```
+
+- **Tokens.** The runtime asks OpenVibe for the app's five-minute token itself: a new one shortly before the last one
+  expires, and once more if the model answers 401. Revoking the app or its credential on OpenVibe stops it within
+  five minutes.
+- **Models and cost.** OpenVibe's router picks the model for `default` by price and health, and only from providers
+  that support tool calls when the runtime sends tools. Each call's cost is what OpenVibe's answer says it cost
+  (`x_openvibe.cost_usd`), so leave the `…_USD_PER_MTOK` prices at 0.
+- **What it is not.** The app acts for your project, not as a person. Your robots and computers on OpenVibe.Bot and
+  coding on OpenVibe.Codes still need a person's OpenVibe sign-in, which a self-hosted Actor does not have yet.
 
 ## How it differs from openvibe.actor
 
@@ -57,7 +87,8 @@ you own first.
 - **What is off.** Your robots and computers on OpenVibe.Bot, coding on OpenVibe.Codes, asking from OpenVibe chat, task
   webhooks signed by Network, and account export through Network all need an OpenVibe service identity.
 - **Data.** Tasks, their logs and your daily spend stay in your database. Nothing is sent to OpenVibe except the
-  Search and Tools calls the runtime makes, when you leave those URLs set.
+  Search and Tools calls the runtime makes, when you leave those URLs set, and the runtime's model calls when it runs
+  on OpenVibe's hosted models.
 
 ## Updating
 

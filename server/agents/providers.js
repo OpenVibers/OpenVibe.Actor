@@ -20,15 +20,28 @@ class ProviderError extends Error {
 
 const clip = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n - 1)}…` : String(s || ''));
 
-async function post(fetchImpl, url, apiKey, body, { signal, timeoutMs }) {
+/**
+ * apiKey is a string, or a token function (agents/app-token.js: an OpenVibe app's five-minute token), asked before
+ * the call; a 401 with a token function refreshes it once and asks again.
+ */
+async function post(fetchImpl, url, apiKey, body, { signal, timeoutMs }, retried = false) {
     const timeout = AbortSignal.timeout(timeoutMs);
     const sig = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    let key = apiKey;
+    if (typeof apiKey === 'function') {
+        try { key = await apiKey(); } catch (err) { throw new ProviderError(err.message || 'no token for the model provider', { code: 'actor.provider.error' }); }
+    }
     let res;
     try {
-        res = await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) }, body: JSON.stringify(body), signal: sig });
+        res = await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) }, body: JSON.stringify(body), signal: sig });
     } catch (err) {
         if (signal && signal.aborted) throw new ProviderError('cancelled', { code: 'actor.task.cancelled' });
         throw new ProviderError(err && err.name === 'TimeoutError' ? 'the model did not answer in time' : 'the model provider could not be reached', { code: 'actor.provider.unreachable' });
+    }
+    if (res.status === 401 && typeof apiKey === 'function' && typeof apiKey.refresh === 'function' && !retried) {
+        await res.text().catch(() => '');
+        apiKey.refresh();
+        return post(fetchImpl, url, apiKey, body, { signal, timeoutMs }, true);
     }
     const text = await res.text();
     let json = null;
@@ -72,7 +85,9 @@ function chatClient({ baseUrl, apiKey, model, rates, fetchImpl = globalThis.fetc
             finish: choice.finish_reason || null,
             model: j.model || model,
             usage,
-            cost_usd: priceUsage(rates, usage),
+            // OpenVibe's hosted models (ai.openvibe.services) say what the run cost; any other endpoint is priced
+            // at the operator's rate card.
+            cost_usd: j.x_openvibe && Number.isFinite(j.x_openvibe.cost_usd) ? j.x_openvibe.cost_usd : priceUsage(rates, usage),
         };
     };
 }

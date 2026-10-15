@@ -13,6 +13,7 @@
  *   codes              OpenVibe.Codes: the person's coding task on their own machine (agents/codes.js)
  */
 const { chatClient, responsesAgent, ProviderError } = require('./providers');
+const { appTokenSource } = require('./app-token');
 const { createOpenVibeTools } = require('./tools');
 const { createCodes } = require('./codes');
 
@@ -53,7 +54,8 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
     // The runtime's model: the operator's own (ACTOR_RUNTIME_URL, catalog.runtimeOverride) when set, else DeepSeek's.
     const own = p.runtime && p.runtime.url && p.runtime.model ? p.runtime : null;
     const ownRates = own ? { input_usd_per_mtok: own.inputUsdPerMtok, cached_usd_per_mtok: own.inputUsdPerMtok, output_usd_per_mtok: own.outputUsdPerMtok } : null;
-    const runtimeModel = own ? chatClient({ baseUrl: own.url, apiKey: own.apiKey, model: own.model, rates: ownRates, fetchImpl, timeoutMs: 180_000 }) : deepseek;
+    const ownKey = own && own.openvibeApp && !own.apiKey ? appTokenSource({ ...own.openvibeApp, fetchImpl }) : (own && own.apiKey);
+    const runtimeModel = own ? chatClient({ baseUrl: own.url, apiKey: ownKey, model: own.model, rates: ownRates, fetchImpl, timeoutMs: 180_000 }) : deepseek;
     const runtimeModelName = own ? own.model : p.deepseek.model;
 
     async function runtime({ task, requester = null, signal, emit, meter, budgetLeft }) {
