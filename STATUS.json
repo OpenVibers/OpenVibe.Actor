@@ -7,11 +7,11 @@
   "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
   "port": 4950,
   "domain": "openvibe.actor",
-  "contracts": "openvibe-contracts v0.183.0",
+  "contracts": "openvibe-contracts v0.186.0",
   "sdk": "openvibe-sdk v0.44.0",
   "shared": "openvibe-shared v4.2.0",
   "packages": [
-    "openvibe-contracts v0.183.0",
+    "openvibe-contracts v0.186.0",
     "openvibe-sdk v0.44.0",
     "openvibe-shared v4.2.0"
   ],
