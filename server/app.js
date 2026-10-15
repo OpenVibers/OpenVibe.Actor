@@ -26,6 +26,19 @@ const { createAdapters } = require('./agents/adapters');
 const { createEngine } = require('./tasks/engine');
 const { createWebhooks } = require('./tasks/webhooks');
 const { createChatClient } = require('./chat/client');
+const { createLocalSignIn } = require('./auth/local');
+const { ids: contractIds } = require('openvibe-contracts');
+
+/** A self-hosted Actor needs its owner and its secrets (scripts/selfhost-init.js writes them); it refuses to start without. */
+function checkSelfHosted(config) {
+    const sh = config.selfHosted;
+    const missing = [];
+    if (!contractIds.isSubjectId('user', sh.ownerSubject)) missing.push('ACTOR_OWNER_SUBJECT (a usr_… id)');
+    if (!/^scrypt\$/.test(sh.passwordHash)) missing.push('ACTOR_OWNER_PASSWORD_HASH');
+    if (String(sh.ownerToken).length < 32) missing.push('ACTOR_OWNER_TOKEN (32+ characters)');
+    if (String(sh.sessionSecret).length < 32) missing.push('ACTOR_SESSION_SECRET (32+ characters)');
+    if (missing.length) throw new Error(`ACTOR_SELF_HOSTED=1 needs ${missing.join(', ')}: run \`npm run selfhost:init\` (docs/self-host.md)`);
+}
 const { createChatAsks } = require('./chat/asks');
 const { createTask } = require('./tasks/create');
 const { createWebhookPoster } = require('./net/webhook-post');
@@ -59,7 +72,9 @@ async function createApp(opts = {}) {
     const s = opts.store || await openStore(config, { now: opts.now, log });
 
     const keys = createKeyStore({ config, fetchImpl, log });
-    const sso = createSso({ config, keys, fetchImpl, now: s.now, log });
+    // A self-hosted Actor signs its one owner in itself (auth/local.js); otherwise OpenVibe.Network does (auth/sso.js).
+    if (config.selfHosted.on) checkSelfHosted(config);
+    const sso = config.selfHosted.on ? createLocalSignIn({ config, now: s.now }) : createSso({ config, keys, fetchImpl, now: s.now, log });
     const stream = createTaskStream({ log });
     const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: opts.providerFetch || globalThis.fetch, log });
     // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.

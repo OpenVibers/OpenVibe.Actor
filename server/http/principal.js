@@ -25,6 +25,7 @@
  * A person acting for themself needs no capability; an app, agent or service needs the one the route names.
  */
 const { serviceAuth, capabilities, http, ids } = require('openvibe-contracts');
+const { sameSecret } = require('../auth/local');
 
 const PRINCIPAL_SUB = /^(svc|app|mod|agent):/;
 const PROJECT_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -50,8 +51,14 @@ function sameOrigin(req, baseUrl) {
 }
 
 function createPrincipal({ config, keys }) {
+    const sh = config.selfHosted || {};
     async function resolve(req) {
         const header = String(req.headers.authorization || '');
+        // A self-hosted Actor (auth/local.js) has one owner and no Network: its API token is the only Bearer it takes.
+        if (sh.on && header.startsWith('Bearer ')) {
+            if (!sameSecret(header.slice(7).trim(), sh.ownerToken)) return { error: [401, 'token.invalid', 'this Actor takes its owner\'s token (ACTOR_OWNER_TOKEN) only'] };
+            return { principal: { kind: 'user', requester: `user:${sh.ownerSubject}`, project: null, viaSession: false } };
+        }
         if (header.startsWith('Bearer ')) {
             const token = header.slice(7).trim();
             const payload = decodePayload(token);

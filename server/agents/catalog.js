@@ -82,9 +82,30 @@ const AGENTS = [
     },
 ];
 
+/** The runtime's own model when ACTOR_RUNTIME_URL names one (config.providers.runtime), else null (DeepSeek's). */
+function runtimeOverride(config) {
+    const r = config && config.providers && config.providers.runtime;
+    return r && r.url && r.model ? r : null;
+}
+
+/**
+ * The agent as this server runs it: the OpenVibe runtime on an operator's own model has that model's price (its
+ * endpoint is the rate card's source) and is user-owned; every other agent is as listed.
+ */
+function effective(agent, config) {
+    const r = agent.id === 'openvibe-runtime' ? runtimeOverride(config) : null;
+    if (!r) return agent;
+    return {
+        ...agent, trust: 'user-owned',
+        rate_card: { input_usd_per_mtok: r.inputUsdPerMtok, output_usd_per_mtok: r.outputUsdPerMtok, source: r.url, verified_at: VERIFIED },
+        blurb: `OpenVibe's own agent on this server's model (${r.model}): it acts through OpenVibe services — search across the network and the tools — and the task's text goes only to that model.`,
+    };
+}
+
 /** Is the agent usable with this configuration? { available, reason }. */
 function availability(agent, config) {
     const p = config.providers || {};
+    if (agent.id === 'openvibe-runtime' && runtimeOverride(config)) return { available: true };
     if (agent.providerKey === 'deepseek') return p.deepseek && p.deepseek.apiKey ? { available: true } : { available: false, reason: 'no DeepSeek key is configured on this server' };
     if (agent.providerKey === 'openai') return p.openai && p.openai.apiKey ? { available: true } : { available: false, reason: 'no OpenAI key is configured on this server' };
     if (agent.providerKey === 'local') return p.local && p.local.url && p.local.model ? { available: true } : { available: false, reason: 'no open model is running on this server' };
@@ -97,13 +118,15 @@ function availability(agent, config) {
 
 /** The model an agent runs with this configuration (for the listing and the task's explanation). */
 function modelOf(agent, config) {
+    if (agent.id === 'openvibe-runtime' && runtimeOverride(config)) return runtimeOverride(config).model;
     const p = (config.providers || {})[agent.providerKey];
     return p && p.model ? p.model : undefined;
 }
 
 /** What one task of this agent typically costs, at its rate card (USD). */
-function typicalCost(agentId) {
-    const a = AGENTS.find((x) => x.id === agentId);
+function typicalCost(agentId, config = null) {
+    const found = AGENTS.find((x) => x.id === agentId);
+    const a = found && config ? effective(found, config) : found;
     const t = TYPICAL[agentId];
     if (!a || !t) return 0;
     const r = a.rate_card;
@@ -112,7 +135,8 @@ function typicalCost(agentId) {
 
 /** GET /api/v1/agents: actor.agent-list-result@1. */
 function list(config) {
-    return AGENTS.map((a) => {
+    return AGENTS.map((listed) => {
+        const a = effective(listed, config);
         const av = availability(a, config);
         const row = { id: a.id, name: a.name, kind: a.kind, provider: a.provider, trust: a.trust, can: [...a.can], rate_card: { ...a.rate_card }, typical_latency_ms: TYPICAL[a.id].latencyMs, available: av.available };
         const model = modelOf(a, config);
@@ -126,7 +150,8 @@ function list(config) {
  * One platform.resource-offer@1 per agent for openvibe-sdk/placement. `quality:<tier>` is an offer capability so
  * best mode can require it; an unavailable agent is health down with its reason kept for the explanation.
  */
-function toOffer(agent, config, { now = Date.now(), measured = {} } = {}) {
+function toOffer(listed, config, { now = Date.now(), measured = {} } = {}) {
+    const agent = effective(listed, config);
     const av = availability(agent, config);
     const t = TYPICAL[agent.id];
     const quality = agent.quality === 'high' ? ['quality:high', 'quality:standard'] : agent.quality === 'standard' ? ['quality:standard'] : [];
@@ -139,7 +164,7 @@ function toOffer(agent, config, { now = Date.now(), measured = {} } = {}) {
         capabilities: [...agent.can, ...quality],
         capacity: {},
         health: av.available ? { status: 'up' } : { status: 'down', reason: av.reason },
-        pricing: { model: 'per-operation', unit: 'task', marginal_usd_per_unit: typicalCost(agent.id) },
+        pricing: { model: 'per-operation', unit: 'task', marginal_usd_per_unit: typicalCost(agent.id, config) },
         latency_ms: { run_p95: measured[agent.id] || t.latencyMs },
         updated_at: new Date(now).toISOString(),
     };
@@ -159,4 +184,4 @@ const RATES = {
     local: { input_usd_per_mtok: 0, output_usd_per_mtok: 0 },
 };
 
-module.exports = { AGENTS, TYPICAL, RATES, availability, list, toOffer, typicalCost, modelOf, byId, VERIFIED };
+module.exports = { AGENTS, TYPICAL, RATES, availability, list, toOffer, typicalCost, modelOf, byId, effective, runtimeOverride, VERIFIED };

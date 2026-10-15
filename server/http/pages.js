@@ -147,6 +147,7 @@ ${table(['Piece', 'State'], [
                 [html`Your own computers, through <a href="https://openvibe.bot/docs/computers">OpenVibe.Bot</a>: list and read files, run programs and write files there, as you, at the level you set on the computer`, html`Live: install OpenVibe Node with <code>--computer ask</code> and turn on "Let my agent use this computer" on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>. At <code>ask</code>, you approve each run or write on the computer.`],
                 [html`<a href="/console">The Console</a>: what runs now, what waits for you, today's spend, your agents, computers and robots, and one box to start a task`, 'Live, for signed-in people.'],
                 [html`Ask in chat: write <code>@actor</code> and your question in OpenVibe's global chat or your own channel, and the answer comes back in the room`, 'Live: public tools only (never your computers, robots or code), 5 an hour, on your free tier.'],
+                [html`Run your own: Actor on your server with your own model (<a href="https://github.com/OpenVibers/OpenVibe.Actor/blob/main/docs/self-host.md">how</a>), signed in with your password, data on your disk`, 'Live: Docker or plain Node, Ollama or any OpenAI-compatible model.'],
             ])}</section>
 ${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, its webhooks and the router are an API. Apps get actor.task.* grants on OpenVibe.Services.', actions: [{ label: 'Read the API', href: '/docs', primary: true }, { label: 'See the agents', href: '/agents' }] }))}`,
         }, status);
@@ -156,7 +157,7 @@ ${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, i
         const shown = agents.filter((a) => a.id !== 'codes');
         return html`<figure class="router-card" aria-label="How Actor picked an agent for a sample task">
 <figcaption><span class="muted small">Sample task · Balanced</span><b>“Who handles the mail for openvibe.network, and is DMARC set up?”</b></figcaption>
-<ol>${shown.map((a, i) => html`<li class="${i === 0 ? 'pick' : ''}"><span class="rc-name">${a.name}</span><span class="rc-cost">~${usd(catalog.typicalCost(a.id))}</span><span class="rc-why">${i === 0 ? 'can run the DNS tools; cheapest that can' : a.can.includes('task:lookup') ? 'can do it, costs more' : 'cannot run lookups'}</span></li>`)}</ol>
+<ol>${shown.map((a, i) => html`<li class="${i === 0 ? 'pick' : ''}"><span class="rc-name">${a.name}</span><span class="rc-cost">~${usd(catalog.typicalCost(a.id, config))}</span><span class="rc-why">${i === 0 ? 'can run the DNS tools; cheapest that can' : a.can.includes('task:lookup') ? 'can do it, costs more' : 'cannot run lookups'}</span></li>`)}</ol>
 <p class="rc-foot">Checked by a second model before you see it.</p></figure>`;
     }
 
