@@ -137,7 +137,7 @@ ${table(['Piece', 'State'], [
                 ['The task router: modes, budgets, the explanation, live progress, cancel', 'Live.'],
                 ['OpenVibe runtime acting through OpenVibe.Search and OpenVibe.Tools', 'Live.'],
                 ['OpenAI\'s web agent as one of the routed agents', 'Live.'],
-                ['Private mode on an open model on OpenVibe\'s server', 'Live: short answers, no tools yet.'],
+                ['Private mode on an open model on OpenVibe\'s server', 'Live: short answers that never leave OpenVibe; tasks that need search or tools go to the other agents.'],
                 ['A second-family check on every answer, and hand-off on failure', 'Live.'],
                 [html`The API (<a href="/docs">docs</a>): tasks, the live stream, <a href="/docs#webhooks">signed webhooks</a>, the agents and a dry-run router`, 'Live, for people and for apps with actor.task.* grants from OpenVibe.Services.'],
                 [html`Tasks a watch hands over when its condition fires (<a href="https://openvibe.watch">OpenVibe.Watch</a>)`, 'Live: the task is yours, with your allowance; Watch sees only the tasks it started.'],
