@@ -53,6 +53,8 @@ const { boot, check, done } = require('./helpers/boot');
         assert.ok(shown.length >= 6);
         assert.deepStrictEqual(ld.find((x) => x['@type'] === 'FAQPage').mainEntity.map((q) => q.name), shown);
         assert.strictEqual((r.text.match(/<h1[ >]/g) || []).length, 1, 'one h1');
+        const description = /<meta name="description" content="([^"]*)"/.exec(r.text)[1].replace(/&#39;/g, "'");
+        assert.ok(description.length <= 160, `the description fits a search result (${description.length} characters)`);
     });
 
     await t.close();
