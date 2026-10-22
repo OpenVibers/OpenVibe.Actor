@@ -81,7 +81,8 @@ function renderPage(o) {
         title: o.title || `${SITE_NAME}: your agent for everything`,
         titleSuffix: o.title ? ` · ${SITE_NAME}` : '',
         siteName: SITE_NAME,
-        description: o.description || 'Give a task in plain words: Actor sends it to the best agent for it, OpenVibe\'s own or another platform\'s, checks the result and shows the cost and why. Like OpenRouter, for agents.',
+        // At most 160 characters, so search results show it whole.
+        description: o.description || 'Give a task in plain words. Actor picks the best agent for it, ours or another platform\'s, checks the answer and shows the cost and why.',
         canonical,
         robots: o.index ? 'index, follow' : 'noindex, nofollow',
         jsonLd: (o.jsonLd || []).filter(Boolean),
