@@ -41,7 +41,7 @@ const AGENTS = [
         quality: 'standard',
         can: ['task:answer', 'task:lookup', 'task:research', 'task:robot', 'task:computer', 'tool:openvibe-search', 'tool:openvibe-tools', 'tool:openvibe-bot'],
         rate_card: { input_usd_per_mtok: 0.30, output_usd_per_mtok: 1.20, source: DEEPSEEK_PRICES, verified_at: VERIFIED },
-        blurb: 'OpenVibe\'s own agent: a DeepSeek model that acts through OpenVibe services — search across the network, 160+ tools (DNS, mail, certificates, headers, conversions), a page reader, your own robots on OpenVibe.Bot when you let it drive them, and your own computers when you let it use them.',
+        blurb: 'OpenVibe\'s own agent: a DeepSeek model that acts through OpenVibe services — search across the network, the OpenVibe.Tools tools anyone can run (DNS, mail records, certificates, headers, WHOIS), a page reader, your own robots on OpenVibe.Bot when you let it drive them, and your own computers when you let it use them.',
     },
     {
         id: 'openai-agent',

@@ -23,6 +23,7 @@ const store = require('../tasks/store');
 const { createTask } = require('../tasks/create');
 const catalog = require('../agents/catalog');
 const { MODES } = require('../agents/router');
+const seo = require('openvibe-shared/seo');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -42,6 +43,35 @@ const EXAMPLES = [
     'Is the TLS certificate of example.com valid, and when does it expire?',
 ];
 
+// Tasks to start from, by what they need. Each one works today; the robot, computer and private ones say what they need.
+const TEMPLATES = [
+    { group: 'Look it up', items: [
+        { text: EXAMPLES[0] },
+        { text: EXAMPLES[3] },
+    ] },
+    { group: 'Research with sources', items: [
+        { text: EXAMPLES[1] },
+        { text: 'Which open-source licences let me sell hosted copies of the software? Compare MIT, Apache-2.0, GPL-3.0 and AGPL-3.0, with sources.' },
+    ] },
+    { group: 'Write and explain', items: [
+        { text: EXAMPLES[2] },
+        { text: 'Write a short, friendly note telling my viewers the stream starts an hour later on Friday.', mode: 'cheapest' },
+    ] },
+    { group: 'Across OpenVibe', items: [
+        { text: 'Find recent posts and clips on OpenVibe about Raspberry Pi robots, and link the best three.' },
+    ] },
+    { group: 'Your robot', needs: 'Turn on Your agent on the robot\'s panel first.', items: [
+        { text: 'Drive my rover forward for two seconds, turn on its headlights, then say hello.' },
+    ] },
+    { group: 'Your computer', needs: 'Needs the OpenVibe Node\'s computer plugin on that machine.', items: [
+        { text: 'On my computer, list the ten largest files in my Downloads folder.' },
+    ] },
+    { group: 'Private', needs: 'Answered on OpenVibe\'s own model; nothing leaves OpenVibe.', items: [
+        { text: 'Summarize the following note in three bullet points, without it leaving OpenVibe:', mode: 'private' },
+    ] },
+];
+const templateHref = (t) => `/?${new URLSearchParams({ task: t.text, ...(t.mode ? { mode: t.mode } : {}) })}#task`;
+
 const usd = (n) => (n == null ? '—' : n === 0 ? '$0' : n < 0.01 ? `$${Number(n).toFixed(4)}` : `$${Number(n).toFixed(2)}`);
 const perM = (n) => (n === 0 ? 'free' : `$${Number(n).toFixed(2)}`);
 const priceText = (rc) => (rc.input_usd_per_mtok === 0 && rc.output_usd_per_mtok === 0 ? 'Free (OpenVibe hardware)' : `${perM(rc.input_usd_per_mtok)} in · ${perM(rc.output_usd_per_mtok)} out per 1M tokens${rc.per_call_usd ? ` · ${usd(rc.per_call_usd)} a search` : ''}`);
@@ -58,10 +88,12 @@ function createPageRoutes(ctx) {
     // ── The task box ─────────────────────────────────────────
     function taskForm(req, { text = '', mode = 'balanced', problem = null } = {}) {
         if (!signedIn(req)) {
+            // A template picked while signed out waits in the box and comes back after sign-in.
+            const next = text ? `/?${new URLSearchParams({ task: text, mode })}` : '/#task';
             return html`<div class="task-box task-box-guest">
-<p class="task-box-lead">Sign in with your OpenVibe account and ask anything like:</p>
-<ul class="examples">${EXAMPLES.map((e) => html`<li>“${e}”</li>`)}</ul>
-<div class="task-actions"><a class="sc-btn sc-primary" href="/auth/login?next=%2F%23task">Sign in to start</a><span class="muted small">Free: ${tier.tasksPerDay} tasks a day, no card.</span></div></div>`;
+${text ? html`<p class="task-box-lead">Your task, ready to run once you sign in:</p><blockquote class="hm-chosen">${text}</blockquote>`
+        : html`<p class="task-box-lead">Sign in with your OpenVibe account and ask in plain words. Not sure what to ask? Start from one of the tasks below.</p>`}
+<div class="task-actions"><a class="sc-btn sc-primary" href="/auth/login?next=${encodeURIComponent(next)}">${text ? 'Sign in to run it' : 'Sign in to start'}</a><span class="muted small">Free: ${tier.tasksPerDay} tasks a day, no card.</span></div></div>`;
         }
         return html`<form class="task-box" method="post" action="/tasks">
 ${problem ? notice(problem, 'warn') : ''}
@@ -75,8 +107,21 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
     }
 
     // ── Home ─────────────────────────────────────────────────
-    function home(req, res, { status = 200, form = {} } = {}) {
+    // The OpenVibe.Tools tools the runtime can call (the adapters' own cached catalog), waited for at most a second.
+    async function callableTools() {
+        const ov = ctx.adapters && ctx.adapters.tools;
+        if (!ov || typeof ov.tools !== 'function') return [];
+        const list = await Promise.race([ov.tools().catch(() => []), new Promise((resolve) => setTimeout(() => resolve([]), 1000).unref())]);
+        return (Array.isArray(list) ? list : []).filter((t) => t && t.id && t.name);
+    }
+
+    async function home(req, res, { status = 200, form = {} } = {}) {
         const agents = catalog.list(config);
+        const tools = await callableTools();
+        // A template link (/?task=…&mode=…#task) fills the task box; the page itself stays the canonical /.
+        if (!form.text && typeof req.query.task === 'string') form = { text: req.query.task.slice(0, 2000), mode: MODES.includes(req.query.mode) ? req.query.mode : 'balanced' };
+        const working = agents.filter((a) => a.available).length;
+        const faq = faqItems(agents);
         const hero = showcase.hero({
             eyebrow: 'OpenVibe.Actor · your agent for everything · alpha',
             title: 'Ask once.', accent: 'The right agent does it.',
@@ -85,13 +130,28 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
             note: `Open source (AGPL-3.0). Free tier: ${tier.tasksPerDay} tasks a day, up to ${usd(tier.perTaskUsd)} each. The list below says exactly what works today.`,
             aside: { html: String(routerCard(agents)) },
         });
+        const stats = [
+            [working, working === 1 ? 'agent working now' : 'agents working now', '#h-agents'],
+            [tools.length, 'tools it can run', '#h-tools'],
+            [MODES.length, 'ways to choose', '#route'],
+            [tier.tasksPerDay, 'free tasks a day', '#faq'],
+        ].filter(([n]) => n > 0);
         page(req, res, {
-            index: true, cache: signedIn(req) ? null : PUBLIC_CACHE,
-            jsonLd: homeJsonLd(config),
+            index: true, cache: signedIn(req) && !req.query.task ? null : req.query.task ? cache.htmlHeaders({ private: true }) : PUBLIC_CACHE,
+            jsonLd: [...homeJsonLd(config),
+                seo.jsonLd.itemList('Agents OpenVibe.Actor routes tasks to', agents.map((a) => ({ name: a.name, url: `${config.baseUrl}/agents#${a.id}`, description: (catalog.byId(a.id) || {}).blurb }))),
+                seo.jsonLd.faq(faq.map(([q, a]) => ({ q, a })))],
             styles: [showcase.STYLESHEET],
+            css: ['css/home.css'],
             body: html`${raw(hero)}
+<section class="sc-sec hm-stats-sec" aria-label="OpenVibe.Actor in numbers"><ul class="hm-stats">${stats.map(([n, label, href]) => html`<li><a href="${href}"><b>${n}</b><span>${label}</span></a></li>`)}</ul></section>
 <section class="sc-sec" id="task" aria-labelledby="h-task"><h2 id="h-task">Give Actor a task</h2>
 ${taskForm(req, form)}</section>
+<section class="sc-sec" aria-labelledby="h-templates"><h2 id="h-templates">Start from one of these</h2>
+<p class="sc-lede">Tasks that work today. Pick one and it lands in the task box, ready to run or change.</p>
+<ul class="hm-templates">${TEMPLATES.map((g) => html`<li class="hm-tgroup"><p class="hm-tgroup-head"><b>${g.group}</b></p>
+${g.items.map((t) => html`<a class="hm-template" href="${templateHref(t)}"><span>${t.text}</span><small>${t.mode ? `${MODE_LABEL[t.mode]} mode · ` : ''}Use this</small></a>`)}
+${g.needs ? html`<p class="hm-needs">${g.needs}</p>` : ''}</li>`)}</ul></section>
 ${raw(showcase.features({
                 title: 'What it can do today',
                 lede: 'Each of these is a real agent working through a real API, not a demo.',
@@ -105,7 +165,11 @@ ${raw(showcase.features({
                     { icon: 'ov:check', title: 'Checked before you see it', text: 'A second model reads every answer first, from another model family where one is available (private mode checks on OpenVibe\'s own model); a failed check goes to the next agent.' },
                 ],
             }))}
+${tools.length ? html`<section class="sc-sec" aria-labelledby="h-tools"><h2 id="h-tools">Tools it can run</h2>
+<p class="sc-lede">For exact answers, OpenVibe's own agent runs these ${tools.length} OpenVibe.Tools tools itself instead of guessing: the same public tools anyone can use on openvibe.tools.</p>
+<ul class="hm-chips hm-tools">${tools.map((t) => html`<li>${/^https:\/\//.test(t.docs || '') ? html`<a href="${t.docs}">${t.name}</a>` : t.name}</li>`)}</ul></section>` : ''}
 ${raw(showcase.steps({
+                id: 'route',
                 title: 'How a task finds its agent',
                 items: [
                     { title: 'Sort the task', text: 'An answer, a lookup, research, a live web search, code, your own robot or your own computer: that decides what an agent must be able to do.' },
@@ -149,8 +213,35 @@ ${table(['Piece', 'State'], [
                 [html`Ask in chat: write <code>@actor</code> and your question in OpenVibe's global chat or your own channel, and the answer comes back in the room`, 'Live: public tools only (never your computers, robots or code), 5 an hour, on your free tier.'],
                 [html`Run your own: Actor on your server with your own model (<a href="https://github.com/OpenVibers/OpenVibe.Actor/blob/main/docs/self-host.md">how</a>), signed in with your password, data on your disk`, 'Live: Docker or plain Node, Ollama or any OpenAI-compatible model.'],
             ])}</section>
+${raw(showcase.code({
+                id: 'api',
+                title: 'Hand it tasks from your own code',
+                lede: 'Every task, its live stream and its webhooks are an API, and the router answers a dry run with no account at all.',
+                samples: [
+                    { label: 'Which agent, what cost (curl, no token)', lang: 'sh', code: `curl -X POST ${config.baseUrl}/api/v1/route \\\n  -H 'Content-Type: application/json' \\\n  -d '{"task": "Is the certificate of example.com valid?",\n       "mode": "cheapest"}'` },
+                    { label: 'JavaScript (openvibe-sdk)', lang: 'js', code: "import { createClient } from 'openvibe-sdk/core';\nimport { createActorClient } from 'openvibe-sdk/actor';\n\nconst actor = createActorClient(\n    createClient({ credentials: 'include' }));\nconst task = await actor.tasks.create({\n    task: 'Summarize the latest Node.js release',\n});\nfor await (const e of actor.tasks.events(task.id)) {\n    console.log(e.event, e.data);\n}" },
+                ],
+            }))}
+<section class="sc-sec" id="faq" aria-labelledby="h-faq"><h2 id="h-faq">Questions</h2>
+<div class="hm-faq">${faq.map(([q, a]) => html`<div class="hm-qa"><h3>${q}</h3><p>${a}</p></div>`)}</div></section>
 ${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, its webhooks and the router are an API. Apps get actor.task.* grants on OpenVibe.Services.', actions: [{ label: 'Read the API', href: '/docs', primary: true }, { label: 'See the agents', href: '/agents' }] }))}`,
         }, status);
+    }
+
+    /** Questions people ask first, answered from the running config and the catalog. */
+    function faqItems(agents) {
+        const names = agents.filter((a) => a.available).map((a) => a.name);
+        const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
+        return [
+            ['What does OpenVibe.Actor do?', 'You describe a task in plain words. Actor sorts it, picks the agent that can do it best within your budget and mode, runs it while you watch its steps, has a second model check the answer, and shows you the answer with its sources, what it cost and why that agent.'],
+            ['What does it cost?', `The free tier gives ${tier.tasksPerDay} tasks a day, up to ${usd(tier.perTaskUsd)} each, with no card. Every task shows its real cost to a fraction of a cent.`],
+            list ? ['Which agents does it use?', `${list} are working now. The agents page lists each one with its price per million tokens and what it can do.`] : null,
+            ['Is the answer checked?', 'Yes. A second model reads every answer before you see it, from another model family where one is available. An answer that fails its check goes to the next agent that can do the task.'],
+            ['What is private mode?', 'Private mode uses only an open model on OpenVibe\'s own server, so the task never leaves OpenVibe. It is for short answers; tasks that need search or tools go to the other agents in the other modes.'],
+            ['Can it use my computer or my robot?', 'Only if you turn it on. On openvibe.bot you let your agent use a computer or drive a robot, one at a time. On a computer at the ask level, each program or write waits for your approval on that computer.'],
+            ['Can I run it myself?', 'Yes. Actor is open source under the AGPL-3.0 and runs on your own server with Docker or plain Node and your own model, such as Ollama or any OpenAI-compatible one.'],
+            ['Can my app use it?', 'Yes. Apps get actor.task.* grants on OpenVibe.Services and use the same API: create a task, follow its live stream, and receive signed webhooks when it ends.'],
+        ].filter(Boolean);
     }
 
     function routerCard(agents) {
