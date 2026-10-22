@@ -28,11 +28,30 @@ function pkcePair() {
     return { verifier, challenge };
 }
 
-/** Same-site relative paths only (never protocol-relative, never another origin). */
-function sanitizeNext(next) {
+/** This site's own origins: BASE_URL, and the other hosts this process serves (OpenVibe.Homes for Rent). */
+function ownOrigins(config) {
+    const out = new Set();
+    for (const u of [config && config.baseUrl, config && config.homes && config.homes.url]) {
+        try { if (u) out.add(new URL(u).origin); } catch { /* not a URL */ }
+    }
+    return out;
+}
+
+/**
+ * Same-site relative paths only (never protocol-relative, never another origin). An absolute URL on one of this
+ * site's own origins counts as its path: the shared navbar's silent sign-in sends the whole page address, and until
+ * 2026-10-22 that landed on the home page (a person signed in quietly found themselves somewhere else).
+ */
+function sanitizeNext(next, config) {
     // Browsers drop tab and newline characters from a URL and read a backslash as "/": "/<TAB>/evil.com" would
     // leave the site. A next with any control character or backslash goes home.
     if (typeof next === 'string' && /[\u0000-\u001f\u007f\\]/.test(next)) return '/';
+    if (typeof next === 'string' && /^https?:\/\//i.test(next)) {
+        let u = null;
+        try { u = new URL(next); } catch { return '/'; }
+        if (!ownOrigins(config).has(u.origin)) return '/';
+        next = `${u.pathname}${u.search}${u.hash}`;
+    }
     if (typeof next !== 'string' || !/^\/(?!\/|\\)/.test(next) || next.length > 500) return '/';
     return next;
 }
@@ -106,6 +125,9 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             username: typeof claims.username === 'string' ? claims.username.slice(0, 64) : null,
             displayName: typeof claims.display_name === 'string' ? claims.display_name.slice(0, 80) : (typeof claims.username === 'string' ? claims.username.slice(0, 64) : 'you'),
             role,
+            // The navbar's avatar and colour (Network's token claims; the avatar is an https image on openvibe.media).
+            avatarUrl: typeof claims.avatar_url === 'string' && /^https:\/\/[^\s"'<>]{1,500}$/.test(claims.avatar_url) ? claims.avatar_url : null,
+            profileColor: typeof claims.profile_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(claims.profile_color) ? claims.profile_color : null,
             // The person's Network access token: used for server-side Network calls, never rendered.
             token,
         };
@@ -173,7 +195,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             const silent = Boolean(req.query.silent) && req.query.silent !== '0';
             const state = crypto.randomBytes(16).toString('hex');
             const { verifier, challenge } = pkcePair();
-            res.cookie(FLOW_COOKIE, JSON.stringify({ state, verifier, next: sanitizeNext(req.query.next), silent }), flowOpts());
+            res.cookie(FLOW_COOKIE, JSON.stringify({ state, verifier, next: sanitizeNext(req.query.next, config), silent }), flowOpts());
             res.set('Cache-Control', cache.htmlHeaders({ private: true }));
             res.redirect(authorizeUrl(config, { state, challenge, silent }));
         });
@@ -183,7 +205,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             let flow = null;
             try { flow = JSON.parse(req.cookies[FLOW_COOKIE] || 'null'); } catch { flow = null; }
             res.clearCookie(FLOW_COOKIE, { ...cookieBase(), path: '/auth' });
-            const next = flow ? sanitizeNext(flow.next) : '/';
+            const next = flow ? sanitizeNext(flow.next, config) : '/';
             const { code, state, error } = req.query;
             if (error) {
                 if ((flow && flow.silent) || error === 'login_required' || error === 'interaction_required') return res.redirect(next);
@@ -197,6 +219,9 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             try {
                 const data = await tokenGrant({ grant_type: 'authorization_code', code: String(code), redirect_uri: config.oauth.redirectUri, code_verifier: flow.verifier });
                 setSession(res, data);
+                // Whatever this browser kept of the site was drawn for a guest: drop it, so the page it returns to (and Back)
+                // is drawn for the person who just signed in.
+                res.set('Clear-Site-Data', '"cache"');
                 return res.redirect(next);
             } catch (err) {
                 log.warn('[Actor] sign-in exchange failed:', err.status || '', err.error || '');
@@ -218,7 +243,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
         r.get('/logout', (req, res, next) => {
             if (sameOriginRequest(req)) return next();
             res.set('Cache-Control', cache.htmlHeaders({ private: true }));
-            const q = req.query.next ? `?next=${encodeURIComponent(sanitizeNext(req.query.next))}` : '';
+            const q = req.query.next ? `?next=${encodeURIComponent(sanitizeNext(req.query.next, config))}` : '';
             res.type('html').send(`<!doctype html><meta charset="utf-8"><title>Sign out</title><meta name="viewport" content="width=device-width,initial-scale=1">`
                 + `<form method="post" action="/auth/logout${q}" style="font:16px system-ui;margin:3em auto;max-width:24em;text-align:center">`
                 + `<p>Sign out of OpenVibe.Actor?</p><button type="submit">Sign out</button> <a href="/">Cancel</a></form>`);
@@ -234,8 +259,9 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
                 }).catch(() => {});
             }
             clearSession(res);
+            res.set('Clear-Site-Data', '"cache"');
             res.cookie(HINT_COOKIE, 'guest', { sameSite: 'lax', secure: config.cookies.secure, httpOnly: false, path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
-            res.redirect(303, sanitizeNext(req.query.next));
+            res.redirect(303, sanitizeNext(req.query.next, config));
         });
 
         r.get('/me', (req, res) => {
@@ -247,7 +273,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             if (!c[ACCESS_COOKIE] && !c[REFRESH_COOKIE] && !req.get('authorization')) return res.json({ user: null });
             const v = req.viewer;
             if (!v || v.kind !== 'user') return res.status(401).json({ error: 'Not signed in' });
-            res.json({ user: { username: v.username, display_name: v.displayName, subject_id: v.subject, role: v.role } });
+            res.json({ user: { username: v.username, display_name: v.displayName, subject_id: v.subject, role: v.role, avatar_url: v.avatarUrl || null, profile_color: v.profileColor || null } });
         });
         return r;
     }
@@ -255,4 +281,4 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
     return { middleware, routes, asViewer, tokenGrant, pkcePair };
 }
 
-module.exports = { createSso, pkcePair, sanitizeNext, authorizeUrl, ACCESS_COOKIE, REFRESH_COOKIE };
+module.exports = { createSso, pkcePair, sanitizeNext, ownOrigins, authorizeUrl, ACCESS_COOKIE, REFRESH_COOKIE };

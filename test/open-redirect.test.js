@@ -17,4 +17,12 @@ for (const v of ['//evil.com', '/\\evil.com', '\\\\evil.com', 'https://evil.com'
     assert.ok(!/^\s*javascript:/i.test(String(sanitizeNext(v, config))), JSON.stringify(v));
 }
 assert.strictEqual(sanitizeNext('/settings?tab=a', config), '/settings?tab=a', 'a plain relative path is kept');
+
+// The shared navbar's silent sign-in sends the whole page address: on this site's own origin it is that page's path
+// (before 2026-10-22 it went to the home page); anywhere else, or a lookalike host, goes home.
+assert.strictEqual(sanitizeNext('https://site.openvibe.test/a/b?x=1#c', config), '/a/b?x=1#c');
+for (const v of ['https://evil.com/a', 'https://site.openvibe.test.evil.com/a', 'https://site.openvibe.test@evil.com/', 'https://site.openvibe.test//evil.com', 'http://site.openvibe.test/a']) {
+    assert.strictEqual(sanitizeNext(v, config), '/', v);
+}
+assert.strictEqual(sanitizeNext('https://site.openvibe.test/a'), '/', 'with no origins known, an absolute URL goes home');
 console.log('open redirect: all checks passed');
