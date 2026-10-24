@@ -45,7 +45,10 @@ const checkerFor = (agentId, checkers, opts) => checkersFor(agentId, checkers, o
  * Ask each checker in turn until one gives a verdict: a checker that answers nothing usable (a provider error, no JSON)
  * passes the turn to the next; only when none gives a verdict is the result unavailable (and never delivered).
  */
-async function check({ task, answer, sources = [], evidence = [], agentId, mode, checkers, signal }) {
+async function check({ task, answer, sources = [], evidence = [], agentId, mode, checkers, signal, now = Date.now }) {
+    // The checker knows today's date: without it, a model whose training ends earlier refused a correct web answer for a
+    // release "dated Oct 21, 2026, which is in the future and plainly impossible" (2026-10-24, a task from Chat's Vibe).
+    const today = new Date(now()).toISOString().slice(0, 10);
     const list = checkersFor(agentId, checkers, { mode, grounded: evidence.length > 0 });
     if (!list.length) return { ok: false, unavailable: true, reason: 'no model is available to check this answer', cost_usd: 0 };
     let cost = 0;
@@ -65,7 +68,7 @@ async function check({ task, answer, sources = [], evidence = [], agentId, mode,
     for (const c of list) {
         try {
             const r = await c.chat({
-                messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: `=== Task ===\n${String(task).slice(0, 6000)}\n\n=== The agent's answer (prose to the person) ===\n${String(answer).slice(0, 12000)}\n=== End of answer ===${cited}${tools}` }],
+                messages: [{ role: 'system', content: `${SYSTEM}\nToday is ${today} (UTC). A date on or before today is in the past or present, never in the future; recent releases, prices and events up to today are possible.` }, { role: 'user', content: `=== Task ===\n${String(task).slice(0, 6000)}\n\n=== The agent's answer (prose to the person) ===\n${String(answer).slice(0, 12000)}\n=== End of answer ===${cited}${tools}` }],
                 json: true, maxTokens: 160, signal,
             });
             cost += r.cost_usd || 0;
