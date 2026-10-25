@@ -9,7 +9,7 @@ const path = require('path');
 const { createDb } = require('openvibe-sdk/db');
 const { ids } = require('openvibe-contracts');
 
-const TABLES = ['tasks', 'task_events', 'spend_daily', 'actor_agents', 'actor_agent_memory', 'actor_approvals'];
+const TABLES = ['tasks', 'task_events', 'spend_daily', 'actor_agents', 'actor_agent_memory', 'actor_agent_proposals', 'actor_approvals'];
 
 const MIGRATIONS = path.join(__dirname, '..', 'migrations');
 const DEV_PGLITE = path.join(__dirname, '..', 'data', 'pglite');
