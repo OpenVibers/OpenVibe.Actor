@@ -29,6 +29,22 @@ function createAgentPages(ctx) {
     const MODE_LABELS = { balanced: 'Balanced (default)', cheapest: 'Cheapest', best: 'Best', fastest: 'Fastest', private: 'Private' };
     const SCHEDULE_LABELS = { off: 'Only when I run it', hourly: 'Every hour', daily: 'Every day', weekly: 'Every week' };
     const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    // Templates (consumer plan step 4, "personal agents grow up"): a first agent in one click, its instructions written
+    // for what Actor's runtime can do (OpenVibe's services as tools, the web in the fuller modes, Codes on your machine).
+    // The parts in <angle brackets> are the person's to fill in; an agent is not created while one is left.
+    const TEMPLATES = [
+        { id: 'job-search', name: 'Job search', schedule: 'daily', schedule_at: '08:00', mode: 'balanced', line: 'New jobs that fit you, every morning',
+          instructions: 'Find job listings posted in the last day for <the role you want, your main skills, and where: a city or "remote">. Look on OpenVibe Jobs (openvibe.work) first, then the wider web. List up to 10, each with its title, company, place, the pay when it is given, and the link to apply. Leave out any listing your memory says you were already shown, and note the new ones in your memory.' },
+        { id: 'research-brief', name: 'Research brief', schedule: 'weekly', schedule_at: '09:00', schedule_dow: 1, mode: 'best', line: 'A one-page brief on a subject, every week',
+          instructions: 'Research <a subject you follow> and write a one-page brief: what is new this week, the main points of view, and what to watch next. Give the link of every source you rely on, and say plainly when something could not be confirmed.' },
+        { id: 'price-watch', name: 'Price watch', schedule: 'daily', schedule_at: '12:00', mode: 'cheapest', line: 'Tell me when a price drops',
+          instructions: 'Check today\'s price of <the product, and the link to its page in a shop>. Say the price, whether it is lower than the last price in your memory, and the cheapest place you found with its link. Then keep today\'s price in your memory. (For a page that changes often, OpenVibe Alerts can watch it every few minutes and wake this agent.)' },
+        { id: 'morning-briefing', name: 'Morning briefing', schedule: 'daily', schedule_at: '07:00', mode: 'balanced', line: 'Five bullets on what happened overnight',
+          instructions: 'Summarise what happened in <the subjects you care about> in the last 24 hours in five bullets, each with its link. Then add one line on anything new on OpenVibe from its changelog (openvibe.blog/changelog).' },
+        { id: 'make-something', name: 'Make something', schedule: 'off', mode: 'best', line: 'Build it on your computer, as a pull request',
+          instructions: 'Build <what you want: a small web page, a script, a tool> in <the repository, for example your-name/your-project> with OpenVibe Code on my own computer, run its tests, and open a pull request for me to review. Never push to the main branch.' },
+    ];
+    const UNFILLED = /<[^<>]{3,80}>/;
     function form(a = {}) {
         return html`<div class="pa-form">
 <label class="pa-wide">Name <input name="name" maxlength="60" required value="${a.name || ''}" placeholder="Morning briefing"></label>
@@ -55,17 +71,23 @@ function createAgentPages(ctx) {
         if (!signed(req)) return login(req, res);
         const agents = await personal.list(s, owner(req));
         const waiting = await approvals.pendingCount(s, owner(req));
+        const chosen = TEMPLATES.find((x) => x.id === req.query.template) || null;
         page(req, res, 'Your agents', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · personal agents · alpha</p><h1>Your agents</h1>
 <p class="pa-lede">An agent is a task you set up once: standing instructions, a memory you can read and edit, and a schedule. Every run is an ordinary Actor task, with the same routing, checks, costs and limits.</p>
 <p><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> · what your agents asked to do while you were away.</p></header>
 ${agents.length ? html`<ul class="pa-cards">${agents.map((a) => html`<li class="pa-card"><a href="/me/agents/${a.id}"><strong>${a.name}</strong></a>
 <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span>
 <span class="pa-when">${when(a)}</span>${a.last_run_at ? html`<span class="pa-when">Last run ${time(a.last_run_at)}</span>` : ''}</li>`)}</ul>`
-        : html`<p class="pa-empty">No agent yet. Create your first one below.</p>`}
-<section class="pa-panel"><h2>Create an agent</h2><form method="post" action="/me/agents">${form()}<button type="submit" class="pa-btn pa-primary">Create agent</button></form></section>`);
+        : html`<p class="pa-empty">No agent yet. Start from a template, or create your own below.</p>`}
+<section class="pa-panel" aria-labelledby="pa-templates-h"><h2 id="pa-templates-h">Start from a template</h2>
+<ul class="pa-templates">${TEMPLATES.map((x) => html`<li><a class="pa-template${chosen && chosen.id === x.id ? ' is-chosen' : ''}" href="/me/agents?template=${x.id}#create"><strong>${x.name}</strong><span>${x.line}</span><small>${when({ schedule: x.schedule, schedule_at: x.schedule_at, schedule_dow: x.schedule_dow })}</small></a></li>`)}</ul></section>
+<section class="pa-panel" id="create"><h2>${chosen ? `Create: ${chosen.name}` : 'Create an agent'}</h2>${chosen ? html`<p class="pa-hint">Fill in the parts in &lt;angle brackets&gt;, then create it. You can change anything later.</p>` : ''}<form method="post" action="/me/agents">${form(chosen ? { ...chosen, id: undefined } : {})}<button type="submit" class="pa-btn pa-primary">Create agent</button></form></section>`);
     });
     r.post('/me/agents', async (req, res) => {
         if (!write(req, res)) return;
+        if (UNFILLED.test(String(req.body.instructions || ''))) {
+            return page(req, res, 'Create agent', html`<h1>Create agent</h1><p>Fill in the parts in &lt;angle brackets&gt; first: the agent needs to know what you mean.</p><form method="post" action="/me/agents">${form(req.body)}<button type="submit" class="pa-btn pa-primary">Create agent</button></form>`, 422);
+        }
         const out = await personal.create(s, config, owner(req), fields(req.body));
         if (!out.row) return page(req, res, 'Create agent', html`<h1>Create agent</h1><p>${out.error || 'Agent limit reached.'}</p><form method="post" action="/me/agents">${form(req.body)}<button type="submit">Create</button></form>`, out.limit ? 429 : 422);
         res.redirect(303, `/me/agents/${out.row.id}`);
