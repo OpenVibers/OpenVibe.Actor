@@ -160,14 +160,17 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (verdict.ok) {
                     let answer = out.text;
                     if (row.via && /^agent:agt_/.test(row.via)) {
-                        const match = answer.match(/(?:^|\n)REMEMBER: ([^\n]*)[ \t]*$/);
-                        if (match) {
+                        // A personal agent's closing lines, in either order: REMEMBER: (a memory note) and IMPROVE: (a
+                        // line it suggests for its instructions, which waits for the person). Both come off the answer.
+                        const personal = require('../agents/personal');
+                        for (let i = 0; i < 2; i++) {
+                            const match = answer.match(/(?:^|\n)(REMEMBER|IMPROVE): ([^\n]*)[ \t]*$/);
+                            if (!match) break;
                             answer = answer.slice(0, match.index).trimEnd();
-                            const note = match[1].trim();
-                            if (note && note.length <= 300) {
-                                const personal = require('../agents/personal');
-                                await personal.addMemory(s, row.requester, row.via.slice(6), note, 'agent');
-                            }
+                            const text = match[2].trim();
+                            if (!text || text.length > 300) continue;
+                            if (match[1] === 'REMEMBER') await personal.addMemory(s, row.requester, row.via.slice(6), text, 'agent');
+                            else await personal.addProposal(s, row.requester, row.via.slice(6), text, id);
                         }
                     }
                     const result = { answer, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };

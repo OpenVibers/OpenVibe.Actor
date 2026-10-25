@@ -19,7 +19,8 @@
 .pa-form .pa-wide { grid-column: 1 / -1; }
 .pa-hint { display: block; font-size: 13px; font-weight: 400; color: var(--text-secondary, #96a7c2); }
 .pa-runs, .pa-notes { list-style: none; padding: 0; margin: 0 0 .75rem; }
-.pa-runs li { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border-bottom: 1px solid var(--border-color, rgba(255,255,255,.08)); }
+.pa-runs li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .25rem 1rem; padding: .45rem 0; border-bottom: 1px solid var(--border-color, rgba(255,255,255,.08)); }
+.pa-run-gist { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; font-size: .88rem; color: var(--text-muted, #8b98ad); }
 .pa-notes li { padding: .7rem 0; border-bottom: 1px solid var(--border-color, rgba(255,255,255,.08)); }
 .pa-note-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pa-note-meta { margin: .15rem 0 0; font-size: 12px; color: var(--text-secondary, #96a7c2); }

@@ -131,7 +131,19 @@ ${a.state === 'pending' ? html`<form method="post" action="/me/approvals/${a.id}
         if (!signed(req)) return login(req, res);
         const a = await find(req, res); if (!a) return;
         const notes = await personal.memory(s, a.owner, a.id);
-        const runs = await s.db.many('SELECT id, state, created_at FROM tasks WHERE requester = $1 AND via = $2 ORDER BY id DESC LIMIT 20', [a.owner, `agent:${a.id}`]);
+        const suggestions = await personal.proposals(s, a.owner, a.id);
+        const pendingSuggestions = suggestions.filter((p) => p.state === 'pending');
+        const applied = suggestions.filter((p) => p.state === 'applied').slice(0, 5);
+        const runs = await s.db.many('SELECT id, state, created_at, result, cost_usd, error_detail FROM tasks WHERE requester = $1 AND via = $2 ORDER BY id DESC LIMIT 20', [a.owner, `agent:${a.id}`]);
+        // The run journal: each run's first line (its answer, or why it did not finish) and what it cost.
+        const gist = (t) => {
+            let r = t.result;
+            if (typeof r === 'string') { try { r = JSON.parse(r); } catch { r = null; } }
+            const text = r && typeof r.answer === 'string' ? r.answer : (t.error_detail || '');
+            const line = text.replace(/[#*_`>]+/g, '').replace(/\s+/g, ' ').trim();
+            return line.length > 140 ? `${line.slice(0, 140).replace(/\s+\S*$/, '')}…` : line;
+        };
+        const usd = (v) => (v == null || !Number.isFinite(Number(v)) ? '' : ` · $${Number(v) < 0.01 ? Number(v).toFixed(4) : Number(v).toFixed(2)}`);
         const pill = (state) => state === 'succeeded' ? 'pill-succeeded' : state === 'failed' || state === 'cancelled' ? 'pill-failed' : 'pill-running';
         page(req, res, a.name, html`<p class="crumbs"><a href="/me/agents">Your agents</a></p>
 <header class="pa-head"><h1>${a.name}</h1><p class="pa-lede"><span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></header>
@@ -140,8 +152,14 @@ ${a.last_skip_reason ? html`<p class="notice" role="status">The last scheduled r
 <section class="pa-panel"><h2>Run now</h2><form method="post" action="/me/agents/${a.id}/run"><label>Input (optional) <span class="pa-hint">Anything this run should also consider.</span><textarea name="input" maxlength="8000" rows="3"></textarea></label><button type="submit" class="pa-btn pa-primary">Run now</button></form></section>
 <section class="pa-panel"><h2>Wake it when something happens</h2><p>Besides its schedule, this agent can run the moment something happens: a channel goes live, a new blog post, a page changes, a price drops, a webhook arrives. <a href="https://openvibe.watch">OpenVibe.Watch</a> watches for it and runs this agent with what it saw.</p>
 <p class="pa-actions"><a class="pa-btn" href="https://openvibe.watch/watches/new?template=event&amp;agent_id=${a.id}">When something happens on OpenVibe</a> <a class="pa-btn" href="https://openvibe.watch/watches/new?template=page&amp;agent_id=${a.id}">When a page changes</a></p></section>
-<section class="pa-panel"><h2>Recent runs</h2>${runs.length ? html`<ul class="pa-runs">${runs.map((t) => html`<li><a href="/tasks/${t.id}">${time(t.created_at)}</a> <span class="pill ${pill(t.state)}">${t.state}</span></li>`)}</ul>` : html`<p class="muted">No run yet.</p>`}</section>
+<section class="pa-panel"><h2>Recent runs</h2>${runs.length ? html`<ul class="pa-runs">${runs.map((t) => html`<li><a href="/tasks/${t.id}">${time(t.created_at)}</a> <span class="pill ${pill(t.state)}">${t.state}</span>${usd(t.cost_usd)}${gist(t) ? html`<span class="pa-run-gist">${gist(t)}</span>` : ''}</li>`)}</ul>` : html`<p class="muted">No run yet.</p>`}</section>
 </div>
+${pendingSuggestions.length || applied.length ? html`<section class="pa-panel" aria-labelledby="pa-sugg-h"><h2 id="pa-sugg-h">Suggestions from your agent</h2>
+<p class="pa-hint">After a run that passed its check, the agent may suggest a line for its instructions. Nothing changes until you add it, and you can undo it.</p>
+${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Suggested ${time(p.created_at)}${p.from_task ? html` after <a href="/tasks/${p.from_task}">this run</a>` : ''}</p>
+<form method="post" action="/me/agents/${a.id}/suggestions/${p.id}" class="pa-actions"><button type="submit" name="decision" value="apply" class="pa-btn pa-primary">Add to its instructions</button> <button type="submit" name="decision" value="dismiss" class="pa-btn">Dismiss</button></form></li>`)}</ul>` : ''}
+${applied.length ? html`<details><summary>Added lately</summary><ul class="pa-notes">${applied.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Added ${time(p.decided_at)}</p>
+<form method="post" action="/me/agents/${a.id}/suggestions/${p.id}"><button type="submit" name="decision" value="undo" class="pa-danger-link">Undo</button></form></li>`)}</ul></details>` : ''}</section>` : ''}
 <section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check.</p>
 ${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta">${n.origin === 'agent' ? 'Written by the agent' : 'Written by you'} · ${time(n.created_at)}</p>
 <details><summary>Edit or delete</summary><form method="post" action="/me/agents/${a.id}/memory/${n.id}/edit"><label>Note <input name="text" maxlength="1000" value="${n.text}"></label><button type="submit" class="pa-btn">Save</button></form>
@@ -152,6 +170,12 @@ ${notes.length ? html`<p><a href="/me/agents/${a.id}/forget" class="pa-danger-li
 <form method="post" action="/me/agents/${a.id}/delete" class="pa-delete"><button type="submit" class="pa-danger-link">Delete this agent</button> <span class="pa-hint">Its memory goes with it; its past runs stay on your task list.</span></form></section>`);
     });
     r.post('/me/agents/:id/edit', async (req, res) => { if (!write(req, res)) return; const out = await personal.update(s, config, owner(req), req.params.id, fields(req.body)); if (!out) return page(req, res, 'Agent not found', html`<h1>Agent not found</h1>`, 404); if (!out.row) return page(req, res, 'Invalid agent', html`<h1>Invalid agent</h1><p>${out.error}</p>`, 422); res.redirect(303, `/me/agents/${req.params.id}`); });
+    r.post('/me/agents/:id/suggestions/:pid', async (req, res) => {
+        if (!write(req, res)) return;
+        const out = await personal.decide(s, owner(req), req.params.id, req.params.pid, String((req.body || {}).decision || ''));
+        if (out.error) return page(req, res, 'Not done', html`<h1>Not done</h1><p>${out.error}</p><p><a href="/me/agents/${req.params.id}">Back to the agent</a></p>`, out.status);
+        res.redirect(303, `/me/agents/${req.params.id}`);
+    });
     r.post('/me/agents/:id/delete', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [a.id, a.owner]); res.redirect(303, '/me/agents'); });
     r.post('/me/agents/:id/run', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; const out = await personal.run(ctx, a, req.body.input || ''); if (out.code) return page(req, res, 'Run refused', html`<h1>Run refused</h1><p>${out.detail}</p><p><a href="/me/agents/${a.id}">Back to agent</a></p>`, out.status); res.redirect(303, `/tasks/${out.task.id}`); });
     r.post('/me/agents/:id/memory', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; const out = await personal.addMemory(s, a.owner, a.id, req.body.text); if (!out.row) return page(req, res, 'Memory refused', html`<h1>Memory refused</h1><p>${out.error || 'Memory is full.'}</p>`, out.limit ? 429 : 422); res.redirect(303, `/me/agents/${a.id}`); });
