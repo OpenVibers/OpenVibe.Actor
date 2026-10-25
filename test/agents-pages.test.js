@@ -33,6 +33,21 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.strictEqual((await t.get(`/me/agents/${id}/forget`, { as: a })).status, 200);
             assert.strictEqual((await t.get(`/me/agents/${id}/forget`, { as: b })).status, 404);
         });
+        await check('templates fill the form, and an agent is not made while a part in <angle brackets> is left', async () => {
+            const listing = await t.get('/me/agents', { as: a });
+            ['job-search', 'research-brief', 'price-watch', 'morning-briefing', 'make-something'].forEach((id) => assert.ok(listing.text.includes(`href="/me/agents?template=${id}#create"`), id));
+            const chosen = await t.get('/me/agents?template=job-search', { as: a });
+            assert.match(chosen.text, /<h2>Create: Job search<\/h2>/);
+            assert.match(chosen.text, /value="Job search"/);
+            assert.match(chosen.text, /Find job listings posted in the last day for &lt;the role you want/);
+            assert.match(chosen.text, /<option value="daily" selected>/);
+            const base = { name: 'Job search', mode: 'balanced', budget_per_run_usd: '0.02', daily_runs_max: '1', schedule: 'daily', schedule_at: '08:00', schedule_dow: '', status: 'active' };
+            const unfilled = await t.get('/me/agents', { as: a, form: { ...base, instructions: 'Find jobs: <the role you want>.' }, headers: SAME });
+            assert.strictEqual(unfilled.status, 422);
+            assert.match(unfilled.text, /Fill in the parts in &lt;angle brackets&gt; first/);
+            const filled = await t.get('/me/agents', { as: a, form: { ...base, instructions: 'Find jobs: a junior video editor, remote.' }, headers: SAME });
+            assert.strictEqual(filled.status, 303);
+        });
     } finally { await t.close(); }
     done();
 })();

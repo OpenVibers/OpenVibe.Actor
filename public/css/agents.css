@@ -33,3 +33,13 @@
 .pa-btn.pa-primary:hover { filter: brightness(1.08); }
 .pa-pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color, rgba(255,255,255,.15)); font-size: 13px; }
 .pa-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+
+/* Templates: a first agent in one click (the chosen one stays lit while its form is open below). */
+.pa-templates { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr)); gap: .6rem; }
+.pa-template { display: flex; flex-direction: column; gap: .25rem; height: 100%; box-sizing: border-box; padding: .85rem 1rem; border-radius: 12px; border: 1px solid var(--border-color, rgba(255,255,255,.12)); background: var(--bg-card, #131c2e); color: var(--text-primary, #e6edf7); text-decoration: none; }
+.pa-template strong { font-size: 1rem; }
+.pa-template span { color: var(--text-secondary, #96a7c2); font-size: .9rem; }
+.pa-template small { color: var(--text-muted, #7386a3); font-size: .78rem; }
+.pa-template.is-chosen { border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 10%, var(--bg-card, #131c2e)); }
+.pa-template:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
+@media (hover: hover) { .pa-template:hover { border-color: var(--accent, #3b82f6); } }
