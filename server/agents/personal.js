@@ -6,11 +6,32 @@ const { createTask } = require('../tasks/create');
 const SCHEDULES = ['off', 'hourly', 'daily', 'weekly'];
 const ID = /^agt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const MEM_ID = /^mem_[0-9A-HJKMNP-TV-Z]{26}$/;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// Quiet hours (quiet_from to quiet_to, HH:MM UTC; the window may cross midnight, like 22:00 to 07:00): no scheduled run
+// starts inside them. An hourly run waits for the end; a daily or weekly time inside them is refused when it is set.
+const minutes = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
+function inQuiet(agent, at) {
+    if (!agent.quiet_from || !agent.quiet_to) return false;
+    const d = new Date(at);
+    const m = d.getUTCHours() * 60 + d.getUTCMinutes();
+    const from = minutes(agent.quiet_from), to = minutes(agent.quiet_to);
+    return from < to ? m >= from && m < to : m >= from || m < to;
+}
+function quietEnd(agent, at) {
+    const d = new Date(at);
+    const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) + minutes(agent.quiet_to) * 60_000);
+    if (end <= d) end.setUTCDate(end.getUTCDate() + 1);
+    return end;
+}
 
 function nextRun(agent, after) {
     if (agent.schedule === 'off') return null;
     const start = new Date(after);
-    if (agent.schedule === 'hourly') return new Date(start.getTime() + 3_600_000).toISOString();
+    if (agent.schedule === 'hourly') {
+        const next = new Date(start.getTime() + 3_600_000);
+        return (inQuiet(agent, next) ? quietEnd(agent, next) : next).toISOString();
+    }
     const [hour, minute] = agent.schedule_at.split(':').map(Number);
     const candidate = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate(), hour, minute));
     if (agent.schedule === 'daily') {
@@ -23,7 +44,7 @@ function nextRun(agent, after) {
 }
 
 function validate(input, config, current = null) {
-    const allowed = ['name', 'instructions', 'mode', 'budget_per_run_usd', 'daily_runs_max', 'schedule', 'schedule_at', 'schedule_dow', 'status'];
+    const allowed = ['name', 'instructions', 'mode', 'budget_per_run_usd', 'daily_runs_max', 'schedule', 'schedule_at', 'schedule_dow', 'quiet_from', 'quiet_to', 'status'];
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some((k) => !allowed.includes(k))) return 'Unknown agent setting.';
     const a = { ...current, ...input };
     if (typeof a.name !== 'string' || a.name.trim().length < 1 || a.name.length > 60) return 'name must be 1–60 characters.';
@@ -32,8 +53,14 @@ function validate(input, config, current = null) {
     if (typeof a.budget_per_run_usd !== 'number' || !Number.isFinite(a.budget_per_run_usd) || a.budget_per_run_usd <= 0 || a.budget_per_run_usd > config.allowance.perTaskUsd) return 'budget_per_run_usd exceeds the per-task allowance or is invalid.';
     if (!Number.isInteger(a.daily_runs_max) || a.daily_runs_max < 1 || a.daily_runs_max > 24) return 'daily_runs_max must be 1–24.';
     if (!SCHEDULES.includes(a.schedule)) return 'schedule is invalid.';
-    if (['daily', 'weekly'].includes(a.schedule) && !/^([01]\d|2[0-3]):[0-5]\d$/.test(a.schedule_at || '')) return 'schedule_at must be HH:MM UTC.';
+    if (['daily', 'weekly'].includes(a.schedule) && !HHMM.test(a.schedule_at || '')) return 'schedule_at must be HH:MM UTC.';
     if (a.schedule === 'weekly' && (!Number.isInteger(a.schedule_dow) || a.schedule_dow < 0 || a.schedule_dow > 6)) return 'schedule_dow must be 0–6.';
+    if ((a.quiet_from == null) !== (a.quiet_to == null)) return 'quiet_from and quiet_to go together: set both or neither.';
+    if (a.quiet_from != null) {
+        if (!HHMM.test(a.quiet_from) || !HHMM.test(a.quiet_to)) return 'quiet_from and quiet_to must be HH:MM UTC.';
+        if (a.quiet_from === a.quiet_to) return 'Quiet hours must not start and end at the same time.';
+        if (['daily', 'weekly'].includes(a.schedule) && inQuiet(a, `2000-01-01T${a.schedule_at}:00.000Z`)) return 'schedule_at falls inside the quiet hours.';
+    }
     if (!['active', 'paused'].includes(a.status)) return 'status is invalid.';
     return null;
 }
@@ -43,7 +70,7 @@ const list = (s, owner) => s.db.many('SELECT * FROM actor_agents WHERE owner = $
 const memory = (s, owner, id) => s.db.many('SELECT * FROM actor_agent_memory WHERE owner = $1 AND agent_id = $2 ORDER BY created_order DESC', [owner, id]);
 
 async function create(s, config, owner, input) {
-    const body = { mode: 'balanced', budget_per_run_usd: config.allowance.perTaskUsd, daily_runs_max: 1, schedule: 'off', schedule_at: null, schedule_dow: null, status: 'active', ...input };
+    const body = { mode: 'balanced', budget_per_run_usd: config.allowance.perTaskUsd, daily_runs_max: 1, schedule: 'off', schedule_at: null, schedule_dow: null, quiet_from: null, quiet_to: null, status: 'active', ...input };
     const invalid = validate(body, config);
     if (invalid) return { error: invalid };
     return s.tx(async () => {
@@ -54,9 +81,9 @@ async function create(s, config, owner, input) {
         const count = Number(await s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1', [owner]));
         if (count >= config.agents.maxPerOwner) return { limit: true };
         const now = s.iso();
-        const row = await s.db.maybe(`INSERT INTO actor_agents (id, owner, name, instructions, mode, budget_per_run_usd, daily_runs_max, schedule, schedule_at, schedule_dow, next_run_at, status, created_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13) RETURNING *`,
-        [s.newId('agt'), owner, body.name, body.instructions, body.mode, body.budget_per_run_usd, body.daily_runs_max, body.schedule, body.schedule_at, body.schedule_dow, nextRun(body, now), body.status, now]);
+        const row = await s.db.maybe(`INSERT INTO actor_agents (id, owner, name, instructions, mode, budget_per_run_usd, daily_runs_max, schedule, schedule_at, schedule_dow, quiet_from, quiet_to, next_run_at, status, created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15) RETURNING *`,
+        [s.newId('agt'), owner, body.name, body.instructions, body.mode, body.budget_per_run_usd, body.daily_runs_max, body.schedule, body.schedule_at, body.schedule_dow, body.quiet_from, body.quiet_to, nextRun(body, now), body.status, now]);
         return { row };
     });
 }
@@ -67,7 +94,7 @@ async function update(s, config, owner, id, patch) {
     const invalid = validate(patch, config, row);
     if (invalid) return { error: invalid };
     const a = { ...row, ...patch };
-    const at = ['schedule', 'schedule_at', 'schedule_dow'].some((k) => Object.hasOwn(patch, k)) ? nextRun(a, s.iso()) : row.next_run_at;
+    const at = ['schedule', 'schedule_at', 'schedule_dow', 'quiet_from', 'quiet_to'].some((k) => Object.hasOwn(patch, k)) ? nextRun(a, s.iso()) : row.next_run_at;
     const cols = Object.keys(patch);
     const args = cols.map((k) => patch[k]);
     args.push(at, s.iso(), id, owner);
@@ -133,4 +160,4 @@ async function tick(ctx) {
     }
 }
 
-module.exports = { ID, MEM_ID, SCHEDULES, get, list, memory, create, update, addMemory, prompt, run, tick, nextRun, validate };
+module.exports = { ID, MEM_ID, SCHEDULES, get, list, memory, create, update, addMemory, prompt, run, tick, nextRun, inQuiet, validate };

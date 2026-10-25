@@ -10,6 +10,26 @@ const personal = require('../server/agents/personal');
         assert.strictEqual(personal.nextRun({ schedule: 'daily', schedule_at: '09:00' }, at), '2026-10-12T09:00:00.000Z');
         assert.strictEqual(personal.nextRun({ schedule: 'weekly', schedule_at: '09:00', schedule_dow: 0 }, at), '2026-10-18T09:00:00.000Z');
     });
+    await check('quiet hours: an hourly run waits for their end, across midnight too', async () => {
+        const night = { schedule: 'hourly', quiet_from: '22:00', quiet_to: '07:00' };
+        assert.strictEqual(personal.nextRun(night, '2026-10-11T20:30:00.000Z'), '2026-10-11T21:30:00.000Z');
+        assert.strictEqual(personal.nextRun(night, '2026-10-11T21:30:00.000Z'), '2026-10-12T07:00:00.000Z');
+        assert.strictEqual(personal.nextRun(night, '2026-10-12T02:15:00.000Z'), '2026-10-12T07:00:00.000Z');
+        assert.strictEqual(personal.nextRun(night, '2026-10-12T07:00:00.000Z'), '2026-10-12T08:00:00.000Z');
+        const lunch = { schedule: 'hourly', quiet_from: '13:00', quiet_to: '14:00' };
+        assert.strictEqual(personal.nextRun(lunch, '2026-10-11T12:30:00.000Z'), '2026-10-11T14:00:00.000Z');
+        assert.ok(personal.inQuiet(night, '2026-10-11T23:59:00.000Z') && !personal.inQuiet(night, '2026-10-11T07:00:00.000Z'));
+    });
+    await check('quiet hours: both or neither, HH:MM, not empty, and a daily time cannot sit inside them', async () => {
+        const config = { allowance: { perTaskUsd: 0.05 } };
+        const ok = { name: 'A', instructions: 'B', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'daily', schedule_at: '09:00', schedule_dow: null, status: 'active' };
+        assert.strictEqual(personal.validate({ ...ok, quiet_from: '22:00', quiet_to: '07:00' }, config), null);
+        assert.match(personal.validate({ ...ok, quiet_from: '22:00' }, config), /set both or neither/);
+        assert.match(personal.validate({ ...ok, quiet_from: '22:00', quiet_to: '7am' }, config), /HH:MM/);
+        assert.match(personal.validate({ ...ok, quiet_from: '22:00', quiet_to: '22:00' }, config), /same time/);
+        assert.match(personal.validate({ ...ok, schedule_at: '23:30', quiet_from: '22:00', quiet_to: '07:00' }, config), /inside the quiet hours/);
+        assert.strictEqual(personal.validate({ ...ok, schedule: 'off', schedule_at: null, quiet_from: '22:00', quiet_to: '07:00' }, config), null);
+    });
     let now = Date.parse('2026-10-11T12:30:00.000Z');
     const submitted = [];
     const t = await boot({ now: () => now, adapters: { run: {}, checkers: {} } });
@@ -33,6 +53,13 @@ const personal = require('../server/agents/personal');
             const after = await personal.get(t.ctx.s, owner, a.id);
             assert.match(after.last_skip_reason, /actor.agent.limit/);
             assert.ok(after.next_run_at > new Date(now).toISOString());
+        });
+        await check('a scheduled agent with quiet hours is next due when they end', async () => {
+            const quiet = (await personal.create(t.ctx.s, t.config, owner, { ...base, name: 'Quiet', quiet_from: '13:00', quiet_to: '20:00' })).row;
+            assert.strictEqual(quiet.quiet_from, '13:00');
+            assert.strictEqual(quiet.next_run_at, '2026-10-11T20:00:00.000Z');
+            const moved = (await personal.update(t.ctx.s, t.config, owner, quiet.id, { quiet_from: null, quiet_to: null })).row;
+            assert.strictEqual(moved.next_run_at, new Date(now + 3_600_000).toISOString(), 'clearing them reschedules');
         });
     } finally { await t.close(); }
     done();

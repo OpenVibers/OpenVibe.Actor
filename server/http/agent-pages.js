@@ -56,15 +56,19 @@ function createAgentPages(ctx) {
 <label>Schedule <select name="schedule">${personal.SCHEDULES.map((x) => html`<option value="${x}"${(a.schedule || 'off') === x ? raw(' selected') : ''}>${SCHEDULE_LABELS[x]}</option>`)}</select></label>
 <label>At (UTC) <input name="schedule_at" type="time" value="${a.schedule_at || ''}"><span class="pa-hint">For daily and weekly.</span></label>
 <label>On <select name="schedule_dow"><option value=""${a.schedule_dow == null ? raw(' selected') : ''}>Any day</option>${DAYS.map((d, i) => html`<option value="${String(i)}"${a.schedule_dow === i ? raw(' selected') : ''}>${d}</option>`)}</select><span class="pa-hint">For weekly.</span></label>
+<label>Quiet from (UTC) <input name="quiet_from" type="time" value="${a.quiet_from || ''}"><span class="pa-hint">No scheduled run starts in quiet hours; Run now still works.</span></label>
+<label>Quiet until (UTC) <input name="quiet_to" type="time" value="${a.quiet_to || ''}"><span class="pa-hint">It may cross midnight, like 22:00 to 07:00.</span></label>
 <label>Status <select name="status"><option value="active"${a.status !== 'paused' ? raw(' selected') : ''}>Active</option><option value="paused"${a.status === 'paused' ? raw(' selected') : ''}>Paused</option></select></label>
 </div>`;
     }
-    const when = (a) => a.schedule === 'off' ? 'Runs when you run it' : a.schedule === 'hourly' ? 'Every hour'
-        : a.schedule === 'daily' ? `Every day at ${a.schedule_at} UTC` : `Every ${DAYS[a.schedule_dow]} at ${a.schedule_at} UTC`;
+    const when = (a) => a.schedule === 'off' ? 'Runs when you run it' : (a.schedule === 'hourly' ? 'Every hour'
+        : a.schedule === 'daily' ? `Every day at ${a.schedule_at} UTC` : `Every ${DAYS[a.schedule_dow]} at ${a.schedule_at} UTC`)
+        + (a.quiet_from ? `, quiet ${a.quiet_from}–${a.quiet_to} UTC` : '');
     function fields(body) {
         return { name: body.name, instructions: body.instructions, mode: body.mode,
             budget_per_run_usd: Number(body.budget_per_run_usd), daily_runs_max: Number(body.daily_runs_max), schedule: body.schedule,
-            schedule_at: body.schedule_at || null, schedule_dow: body.schedule_dow === '' ? null : Number(body.schedule_dow), status: body.status };
+            schedule_at: body.schedule_at || null, schedule_dow: body.schedule_dow === '' ? null : Number(body.schedule_dow),
+            quiet_from: body.quiet_from || null, quiet_to: body.quiet_to || null, status: body.status };
     }
 
     r.get('/me/agents', async (req, res) => {
