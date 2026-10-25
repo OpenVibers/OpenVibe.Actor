@@ -89,6 +89,17 @@ function createApi(ctx) {
         const page = await store.listTasks(s, row.owner, { limit, before, via: `agent:${row.id}` });
         res.json({ tasks: page.rows.map((t) => store.toWire(t, { baseUrl: config.baseUrl })), next: page.next });
     });
+    // Suggestions the agent made for its instructions (agents/personal.js): list, then apply, dismiss or undo one.
+    r.get('/me/agents/:id/suggestions', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
+        const row = await personal.get(s, req.principal.requester, req.params.id);
+        if (!row) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        res.json({ suggestions: await personal.proposals(s, row.owner, row.id) });
+    });
+    r.post('/me/agents/:id/suggestions/:pid/:action', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
+        const out = await personal.decide(s, req.principal.requester, req.params.id, req.params.pid, req.params.action);
+        if (out.error) return problem(req, res, out.status, out.status === 404 ? 'actor.agent.not_found' : 'actor.agent.invalid', out.error);
+        res.json({ suggestion: out.row, agent: out.agent });
+    });
     r.get('/me/agents/:id/memory', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (row) res.json({ memory: await personal.memory(s, row.owner, row.id) });
     });

@@ -67,6 +67,16 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const two = (await personal.proposals(t.ctx.s, owner, made.id)).find((p) => p.text === 'Two.');
             assert.strictEqual((await t.get(`/me/agents/${made.id}/suggestions/${two.id}`, { as: stranger, form: { decision: 'apply' }, headers: SAME })).status, 404);
         });
+        await check('the API lists them and decides one (actor.agent.manage); a bad action is refused', async () => {
+            const list = await t.get(`/api/v1/me/agents/${made.id}/suggestions`, { as: who });
+            assert.strictEqual(list.status, 200);
+            const two = list.json().suggestions.find((p) => p.text === 'Two.');
+            assert.ok(two && two.state === 'pending');
+            const applied = await t.get(`/api/v1/me/agents/${made.id}/suggestions/${two.id}/apply`, { as: who, method: 'POST', json: {}, headers: SAME });
+            assert.strictEqual(applied.status, 200, applied.text);
+            assert.match(applied.json().agent.instructions, /\n- Two\.$/);
+            assert.strictEqual((await t.get(`/api/v1/me/agents/${made.id}/suggestions/${two.id}/explode`, { as: who, method: 'POST', json: {}, headers: SAME })).status, 404);
+        });
     } finally { await t.close(); }
     done();
 })();
