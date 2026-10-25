@@ -38,6 +38,7 @@ function fakeBot({ machines = null } = {}) {
             if (v.op === 'write') return reply(200, { result: 'expired', reason: 'no acknowledgement before the deadline' });
             if (body.kind === 'screen') return reply(200, { result: 'ack', data: { format: 'jpeg', width: v.max_width, height: 720, content_b64: Buffer.from('fake-jpeg').toString('base64') } });
             if (body.kind === 'input') return reply(200, { result: 'ack', data: { done: true, action: v.action, ...(v.x != null ? { x: v.x * 2, y: v.y * 2 } : {}) } });
+            if (body.kind === 'desk') return reply(200, { result: 'ack', data: { running: v.action !== 'stop', display: ':91', width: v.width || 1280, height: v.height || 800, window_manager: 'openbox' } });
             if (body.kind === 'browser') {
                 if (v.action === 'fill') return reply(200, { result: 'ack', data: { done: true, selector: v.selector, chars: v.text.length } });
                 if (v.action === 'close') return reply(200, { result: 'ack', data: { done: true } });
@@ -206,6 +207,34 @@ const as = { requester: `user:${ME}` };
         const before = bot.calls.length;
         for (const bad of [{ action: 'eval' }, { action: 'open', url: 'file:///etc/passwd' }, { action: 'open' }, { action: 'click' }, { action: 'fill', text: 'x' }, { action: 'press', key: 'ctrl+alt+Delete' }]) {
             assert.ok(JSON.parse(await t.call('computer_browser', { machine: PC, ...bad }, as)).error, JSON.stringify(bad));
+        }
+        assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
+    });
+
+    await check('computer_desk and desk "private": the agent works on a desk of its own, never the person\'s screen; bad sizes never leave Actor', async () => {
+        const bot = fakeBot({ machines: [{ id: PC, name: 'desk-pc', online: true, agent_computer: true, computer: { level: 'trusted', screen: { level: 'trusted' }, input: { level: 'trusted' }, browser: { level: 'trusted' }, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true }, waiting: 0 } }] });
+        const vision = async () => ({ text: 'An empty desktop.', cost_usd: 0 });
+        const t = createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }), vision });
+        const defs = await t.definitions(as);
+        assert.ok(defs.some((d) => d.function.name === 'computer_desk'), 'offered with the computer tools');
+        ['computer_screen', 'computer_input', 'computer_browser'].forEach((n) => assert.deepStrictEqual(defs.find((d) => d.function.name === n).function.parameters.properties.desk.enum, ['main', 'private'], n));
+        assert.deepStrictEqual(JSON.parse(await t.call('list_my_computers', {}, as)).computers[0].can, ['screen', 'input', 'browser', 'desk'], 'the model sees the machine has a desk');
+        assert.deepStrictEqual(JSON.parse(await t.call('computer_desk', { machine: PC, action: 'start', width: 1920, height: 1080 }, as)), { running: true, display: ':91', width: 1920, height: 1080 });
+        const started = bot.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1);
+        assert.deepStrictEqual([started.subject, started.body.value, started.body.ms], [ME, { action: 'start', width: 1920, height: 1080 }, 120000], 'as the person, with time for an approval');
+        const look = JSON.parse(await t.call('computer_screen', { machine: PC, question: 'What is open?', desk: 'private' }, as));
+        assert.strictEqual(look.desk, 'private');
+        assert.deepStrictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'screen').at(-1).body.value, { max_width: 1280, desk: 'private' });
+        await t.call('computer_input', { machine: PC, action: 'click', x: 10, y: 10, width: 1280, height: 800, desk: 'private' }, as);
+        assert.strictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'input').at(-1).body.value.desk, 'private');
+        await t.call('computer_browser', { machine: PC, action: 'open', url: 'https://example.org/', desk: 'private' }, as);
+        assert.strictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'browser').at(-1).body.value.desk, 'private');
+        await t.call('computer_browser', { machine: PC, action: 'read' }, as);
+        assert.strictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'browser').at(-1).body.value.desk, undefined, 'without desk "private", the person\'s own screen, as before');
+        assert.deepStrictEqual(JSON.parse(await t.call('computer_desk', { machine: PC, action: 'stop' }, as)).running, false);
+        const before = bot.calls.length;
+        for (const bad of [{ action: 'reboot' }, { action: 'start', width: 100, height: 100 }, { action: 'start', width: 1280 }]) {
+            assert.ok(JSON.parse(await t.call('computer_desk', { machine: PC, ...bad }, as)).error, JSON.stringify(bad));
         }
         assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
     });

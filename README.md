@@ -122,6 +122,13 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
   - Reading, screenshots and closing run at every level; the rest wait for approval at `ask`. Below `full` the machine
     refuses addresses on its own network.
   - Approvals can come from the Node's tray or notification buttons, as well as `openvibe-node approve` (Node v0.11.0).
+  - `computer_desk` (contracts 0.214.0, Node v0.15.0 on Linux) starts, stops or reports the machine's private desk: a
+    screen of its own (Xvfb with its own bus and window manager) where the agent works without touching the person's.
+    `computer_screen`, `computer_input` and `computer_browser` take `desk: "private"` to act there. Bot refuses that on
+    a machine without a desk, so it never falls back to the person's screen.
+  - `list_my_computers` shows `desk` among what a machine can do. The runtime is told to do screen, mouse and browser
+    work on the private desk when there is one (start, work, stop), unless the task is about what is on the person's
+    own screen. Starting waits for approval at `ask`; sizes are the contract's (640-3840 × 480-2160, 1280 × 800 by default).
 - **OpenVibe.Events** (`ACTOR_EVENTS_URL`): the two ADR-033 subscriptions created at boot, plus `chat.message.created` while asking from chat is on, and delivery to the loopback `/internal/events`.
 - **OpenVibe.Chat** (`ACTOR_CHAT_URL`, default `http://127.0.0.1:4400`): **ask Actor from chat** ([server/chat/asks.js](server/chat/asks.js)).
   - **Who and where:** a signed-in person writes `@actor <task>` in the global chat or their own channel's chat. Guests, relayed external chatters (`source_platform`) and other people's channels are ignored.

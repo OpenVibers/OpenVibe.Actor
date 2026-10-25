@@ -15,6 +15,9 @@
  *     write → { path, written }                                          (create, overwrite or append)
  *     screen → { format, width, height, content_b64 }                    (the screen now, scaled to max_width)
  *     input → { done, action, x?, y? }                                  (mouse, scroll, typing or a key, as the person)
+ *     desk  → { running, display?, width?, height? }                    (the machine's private desk: start, stop, status)
+ *   screen, input and browser take desk: "private" to act on the private desk (contracts 0.214.0, Node v0.15.0 on Linux),
+ *   a screen of its own where the agent works without touching the person's; Bot refuses it on a machine without one.
  *
  * Off (enabled false) without ACTOR_BOT_URL or without Actor's client secret.
  */
@@ -33,6 +36,8 @@ const POINT_ACTIONS = new Set(['move', 'click', 'double_click', 'right_click']);
 const BROWSER_ACTIONS = new Set(['open', 'click', 'fill', 'press', 'back', 'read', 'close']);
 const PAGE_TEXT = 3500;
 const PAGE_LINKS = 25;
+const DESK_ACTIONS = new Set(['start', 'stop', 'status']);
+const onDesk = (a) => (a && a.desk === 'private' ? { desk: 'private' } : {});
 const BROWSER_KEYS = new Set(['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', 'Space']);
 
 function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null }) {
@@ -75,7 +80,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (!r.ok) return problem(r, 'your computers');
         const machines = ((r.data && r.data.machines) || []).filter((m) => m.computer).map((m) => ({
             id: m.id, name: m.name, online: m.online, level: m.computer.level,
-            can: ['terminal', 'files', 'screen', 'input'].filter((k) => m.computer[k]),
+            can: ['terminal', 'files', 'screen', 'input', 'browser', 'desk'].filter((k) => m.computer[k]),
             folders: (m.computer.files && m.computer.files.roots) || [],
             ...(m.computer.waiting ? { waiting_for_approval: m.computer.waiting } : {}),
         }));
@@ -131,10 +136,10 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
     }
 
     /** The machine's screen now, as an image (JPEG when the machine has Pillow, else PNG), at most `maxWidth` wide. */
-    async function screen(subject, machine, { maxWidth = SCREEN_WIDTH, signal } = {}) {
+    async function screen(subject, machine, { maxWidth = SCREEN_WIDTH, signal, desk = 'main' } = {}) {
         const bad = guard(subject, machine);
         if (bad) return bad;
-        const r = await command(subject, machine, 'screen', { max_width: maxWidth }, { signal, windowMs: READ_WINDOW_MS });
+        const r = await command(subject, machine, 'screen', { max_width: maxWidth, ...onDesk({ desk }) }, { signal, windowMs: READ_WINDOW_MS });
         if (r.error) return r;
         const d = r.data;
         if (!d.content_b64 || !/^(jpeg|png)$/.test(String(d.format || ''))) return { error: 'the machine sent no picture of its screen' };
@@ -150,7 +155,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (bad) return bad;
         const a = args && typeof args === 'object' ? args : {};
         if (!INPUT_ACTIONS.has(a.action)) return { error: `action is one of ${[...INPUT_ACTIONS].join(', ')}` };
-        const value = { action: a.action };
+        const value = { action: a.action, ...onDesk(a) };
         const int = (v) => Number.isInteger(v) ? v : (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
         if (POINT_ACTIONS.has(a.action) || (a.action === 'scroll' && a.x != null)) {
             const x = int(a.x), y = int(a.y);
@@ -188,7 +193,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (bad) return bad;
         const a = args && typeof args === 'object' ? args : {};
         if (!BROWSER_ACTIONS.has(a.action)) return { error: `action is one of ${[...BROWSER_ACTIONS].join(', ')}` };
-        const value = { action: a.action };
+        const value = { action: a.action, ...onDesk(a) };
         if (a.action === 'open') {
             if (typeof a.url !== 'string' || !/^https?:\/\//i.test(a.url) || a.url.length > 2048) return { error: 'open needs url: an http or https address' };
             value.url = a.url;
@@ -219,7 +224,28 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         };
     }
 
-    return { enabled, mine, list, read, run, write, screen, input, browser };
+    /**
+     * The machine's private desk (contracts 0.214.0 `desk`): start it (an acting command: at level "ask" the person
+     * approves it on the machine), stop it, or ask whether it runs. Sizes are the contract's: 640-3840 × 480-2160.
+     */
+    async function desk(subject, machine, args, { signal } = {}) {
+        const bad = guard(subject, machine);
+        if (bad) return bad;
+        const a = args && typeof args === 'object' ? args : {};
+        if (!DESK_ACTIONS.has(a.action)) return { error: 'action is start, stop or status' };
+        const value = { action: a.action };
+        if (a.action === 'start' && (a.width != null || a.height != null)) {
+            const w = Number(a.width), h = Number(a.height);
+            if (!Number.isInteger(w) || !Number.isInteger(h) || w < 640 || w > 3840 || h < 480 || h > 2160) return { error: 'width is 640 to 3840 and height 480 to 2160 (or leave both out: 1280 × 800)' };
+            Object.assign(value, { width: w, height: h });
+        }
+        const r = await command(subject, machine, 'desk', value, { signal, windowMs: a.action === 'status' ? READ_WINDOW_MS : ACT_WINDOW_MS });
+        if (r.error) return r;
+        const d = r.data || {};
+        return { running: !!d.running, ...(d.display ? { display: d.display } : {}), ...(Number.isInteger(d.width) ? { width: d.width, height: d.height } : {}) };
+    }
+
+    return { enabled, mine, list, read, run, write, screen, input, browser, desk };
 }
 
 module.exports = { createComputers };
