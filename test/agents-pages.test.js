@@ -48,6 +48,17 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const filled = await t.get('/me/agents', { as: a, form: { ...base, instructions: 'Find jobs: a junior video editor, remote.' }, headers: SAME });
             assert.strictEqual(filled.status, 303);
         });
+        await check('quiet hours from the form: saved, shown, and a time inside them refused', async () => {
+            assert.match((await t.get('/me/agents', { as: a })).text, /name="quiet_from" type="time"/);
+            const base = { name: 'Hourly', instructions: 'Check the page.', mode: 'balanced', budget_per_run_usd: '0.02', daily_runs_max: '3', schedule_dow: '', status: 'active' };
+            const made = await t.get('/me/agents', { as: a, form: { ...base, schedule: 'hourly', schedule_at: '', quiet_from: '22:00', quiet_to: '07:00' }, headers: SAME });
+            assert.strictEqual(made.status, 303);
+            const own = await t.get(made.headers.get('location'), { as: a });
+            assert.match(own.text, /Every hour, quiet 22:00–07:00 UTC/);
+            const inside = await t.get('/me/agents', { as: a, form: { ...base, schedule: 'daily', schedule_at: '23:00', quiet_from: '22:00', quiet_to: '07:00' }, headers: SAME });
+            assert.strictEqual(inside.status, 422);
+            assert.match(inside.text, /inside the quiet hours/);
+        });
     } finally { await t.close(); }
     done();
 })();
