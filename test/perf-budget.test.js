@@ -19,7 +19,7 @@ const BUDGETS = {
     htmlBrotliKB: 13.5,   // 8.6; 9.6 with "Ask in chat"; 12.1 with the rich home
     jsFiles: 5,   // 5 (theme-loader, web-runtime, navbar, footer, boost: openvibe-shared/shell)
     jsRawKB: 264,   // 239.8
-    jsBrotliKB: 62.5,   // 56.5
+    jsBrotliKB: 67,   // 65.3 Shared 4.12.0: the light/dark switch, the seasonal mark and the theme pairs; 56.5
     cssFiles: 3,   // 2 (actor.css + the cached /shared/showcase.css); 3 with home.css, the home's own sections (10-22)
     cssRawKB: 32,   // 24.2 (the task page's outcome card and timeline); 28.9 with home.css
     cssBrotliKB: 7.3,   // 5.4; 6.6 with home.css
