@@ -52,7 +52,7 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 | `GET /me/approvals`, `GET/POST /me/approvals/:id` (signed in) | the person | the approval inbox ([server/agents/approvals.js](server/agents/approvals.js)): when one of the person's own agents runs while they are away and would start a coding task on their machine (the `codes` agent), the run asks instead and ends with a link; nothing reaches Codes until the person approves, which starts it as their own task (declining runs nothing; a request expires after 7 days). In the account export (`approvals.json`) and deletion. |
 | `GET/POST /api/v1/me/agents/:id/memory`, `PATCH/DELETE /api/v1/me/agents/:id/memory/:mem`, `DELETE /api/v1/me/agents/:id/memory` | `actor.agent.manage` for a token | control its memory |
 | `POST /api/v1/me/agents/:id/run`, `GET /api/v1/me/agents/:id/runs` | `actor.agent.run` for a token | run now or list its tasks |
-| `POST /me/agents/:id/suggestions/:pid` (signed in) | the person | what the agent suggested adding to its instructions (a run that passed its check may end with `IMPROVE: <line>`; at most three wait, the same line once), under "Suggestions from your agent" on its page: apply adds the line, dismiss drops it, undo restores the instructions while they are as it left them. In the account export (`agent-suggestions.json`) and deletion. The API routes follow once `actor.agent.manage` lists them (contracts). |
+| `GET /api/v1/me/agents/:id/suggestions`, `POST /api/v1/me/agents/:id/suggestions/:pid/{apply,dismiss,undo}`; `POST /me/agents/:id/suggestions/:pid` (signed in) | `actor.agent.manage` for a token | what the agent suggested adding to its instructions (a run that passed its check may end with `IMPROVE: <line>`; at most three wait, the same line once), also under "Suggestions from your agent" on its page: apply adds the line, dismiss drops it, undo restores the instructions while they are as it left them. In the account export (`agent-suggestions.json`) and deletion. |
 | `POST /api/v1/route` | public | dry run: which agent and why (heuristic class; nothing runs or is charged) |
 | `GET /api/v1/resources` | `actor.resource.read` (service token) | `common.resource-list-result@1` for `actor.task`; filters: `project`, `kind`, `cursor`, `limit` |
 | `GET /api/v1/resources/:ovrn` | `actor.resource.read` (service token) | one `common.resource-summary@1` for a project-owned task |
@@ -245,7 +245,7 @@ Reporting a vulnerability: [SECURITY.md](SECURITY.md).
 Part of the [OpenVibe network](https://openvibe.network). Built in the open by [OpenVibers](https://github.com/OpenVibers).
 
 <!-- versions:start -->
-- openvibe-contracts: v0.213.0
+- openvibe-contracts: v0.214.0
 - openvibe-sdk: v0.65.0
 - openvibe-shared: v4.13.0
 <!-- versions:end -->
