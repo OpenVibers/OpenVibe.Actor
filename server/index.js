@@ -20,7 +20,7 @@ const PRUNE_EVERY_MS = 6 * 60 * 60_000;
 function createLifecycle({ server, ctx, exit, signals, timers = [], extra = [] }) {
     return gracefulStop({
         name: 'Actor', server, deadlineExitCode: 0, exit, signals, deadlineMs: 10_000,
-        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.webhooks.stop(), () => ctx.chatAsks.stop(), () => ctx.keys.client.stop(), async () => { clearInterval(ctx.telemetryTick); if (ctx.retention) await ctx.retention.stop(); if (ctx.telemetry) await ctx.telemetry.stop(); }, () => ctx.s.close(), ...extra],
+        close: [() => { for (const t of timers) clearInterval(t); }, () => ctx.engine.stop(), () => ctx.webhooks.stop(), () => ctx.chatAsks.stop(), () => { if (ctx.vibeDelivery) ctx.vibeDelivery.stop(); }, () => ctx.keys.client.stop(), async () => { clearInterval(ctx.telemetryTick); if (ctx.retention) await ctx.retention.stop(); if (ctx.telemetry) await ctx.telemetry.stop(); }, () => ctx.s.close(), ...extra],
     });
 }
 
@@ -36,6 +36,8 @@ async function start() {
     ctx.webhooks.start();
     // Replies to "@actor …" in chat (chat/asks.js), posted once their task has ended.
     ctx.chatAsks.start();
+    // Personal agents' runs into their owners' Vibe chats (agents/vibe-deliver.js).
+    ctx.vibeDelivery.start();
 
     const server = app.listen(config.port, config.host, () => {
         const available = require('./agents/catalog').list(config).filter((a) => a.available).map((a) => a.id);

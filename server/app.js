@@ -93,7 +93,9 @@ async function createApp(opts = {}) {
     const chatClient = opts.chatClient || createChatClient({ config, fetchImpl });
     const chatAsks = createChatAsks({ s, config, chat: chatClient, now: s.now, log,
         createTask: (args) => createTask({ s, config, engine, webhooks, ...args }) });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks };
+    // Each personal agent's run that passed its check also goes to its owner's Vibe chat (agents/vibe-deliver.js).
+    const vibeDelivery = require('./agents/vibe-deliver').createVibeDelivery({ s, config, chat: chatClient, log });
+    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;

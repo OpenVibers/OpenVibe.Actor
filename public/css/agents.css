@@ -17,6 +17,9 @@
 .pa-panel textarea { resize: vertical; }
 .pa-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr)); gap: .9rem 1rem; width: 100%; }
 .pa-form .pa-wide { grid-column: 1 / -1; }
+.pa-panel label.pa-check { flex-direction: row; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; }
+.pa-panel .pa-check input[type="checkbox"] { width: 1.1rem; height: 1.1rem; margin: 0; padding: 0; accent-color: var(--accent, #3b82f6); }
+.pa-check .pa-hint { flex-basis: 100%; }
 .pa-hint { display: block; font-size: 13px; font-weight: 400; color: var(--text-secondary, #96a7c2); }
 .pa-runs, .pa-notes { list-style: none; padding: 0; margin: 0 0 .75rem; }
 .pa-runs li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .25rem 1rem; padding: .45rem 0; border-bottom: 1px solid var(--border-color, rgba(255,255,255,.08)); }

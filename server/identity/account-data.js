@@ -38,6 +38,8 @@ const TABLES = [
     { table: 'actor_agent_memory', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-memory.json' },
     // What their agents suggested adding to their instructions, and what they decided (agents/personal.js).
     { table: 'actor_agent_proposals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-suggestions.json' },
+    // Which of their agents' runs went to their Vibe chats (agents/vibe-deliver.js).
+    { table: 'actor_vibe_deliveries', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-runs-sent-to-vibe.json' },
     { table: 'actor_agents', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agents.json' },
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },

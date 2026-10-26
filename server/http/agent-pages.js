@@ -59,6 +59,7 @@ function createAgentPages(ctx) {
 <label>Quiet from (UTC) <input name="quiet_from" type="time" value="${a.quiet_from || ''}"><span class="pa-hint">No scheduled run starts in quiet hours; Run now still works.</span></label>
 <label>Quiet until (UTC) <input name="quiet_to" type="time" value="${a.quiet_to || ''}"><span class="pa-hint">It may cross midnight, like 22:00 to 07:00.</span></label>
 <label>Status <select name="status"><option value="active"${a.status !== 'paused' ? raw(' selected') : ''}>Active</option><option value="paused"${a.status === 'paused' ? raw(' selected') : ''}>Paused</option></select></label>
+<label class="pa-wide pa-check"><input type="hidden" name="send_to_vibe" value="0"><input type="checkbox" name="send_to_vibe" value="1"${a.send_to_vibe === false ? '' : raw(' checked')}> Send each run to Vibe <span class="pa-hint">Each result also lands in a chat named after this agent on openvibe.chat/vibe, where you can ask Vibe about it.</span></label>
 </div>`;
     }
     const when = (a) => a.schedule === 'off' ? 'Runs when you run it' : (a.schedule === 'hourly' ? 'Every hour'
@@ -68,7 +69,9 @@ function createAgentPages(ctx) {
         return { name: body.name, instructions: body.instructions, mode: body.mode,
             budget_per_run_usd: Number(body.budget_per_run_usd), daily_runs_max: Number(body.daily_runs_max), schedule: body.schedule,
             schedule_at: body.schedule_at || null, schedule_dow: body.schedule_dow === '' ? null : Number(body.schedule_dow),
-            quiet_from: body.quiet_from || null, quiet_to: body.quiet_to || null, status: body.status };
+            quiet_from: body.quiet_from || null, quiet_to: body.quiet_to || null, status: body.status,
+            // The hidden 0 always comes; a ticked box adds a 1.
+            ...(body.send_to_vibe !== undefined ? { send_to_vibe: [].concat(body.send_to_vibe).includes('1') } : {}) };
     }
 
     r.get('/me/agents', async (req, res) => {
@@ -135,6 +138,8 @@ ${a.state === 'pending' ? html`<form method="post" action="/me/approvals/${a.id}
         const pendingSuggestions = suggestions.filter((p) => p.state === 'pending');
         const applied = suggestions.filter((p) => p.state === 'applied').slice(0, 5);
         const runs = await s.db.many('SELECT id, state, created_at, result, cost_usd, error_detail FROM tasks WHERE requester = $1 AND via = $2 ORDER BY id DESC LIMIT 20', [a.owner, `agent:${a.id}`]);
+        // Its Vibe chat (agents/vibe-deliver.js), once a run has gone there.
+        const vibeChat = a.send_to_vibe ? await s.db.maybe("SELECT chat_url FROM actor_vibe_deliveries WHERE agent_id = $1 AND owner = $2 AND state = 'sent' AND chat_url IS NOT NULL ORDER BY sent_at DESC LIMIT 1", [a.id, a.owner]) : null;
         // The run journal: each run's first line (its answer, or why it did not finish) and what it cost.
         const gist = (t) => {
             let r = t.result;
@@ -152,7 +157,7 @@ ${a.last_skip_reason ? html`<p class="notice" role="status">The last scheduled r
 <section class="pa-panel"><h2>Run now</h2><form method="post" action="/me/agents/${a.id}/run"><label>Input (optional) <span class="pa-hint">Anything this run should also consider.</span><textarea name="input" maxlength="8000" rows="3"></textarea></label><button type="submit" class="pa-btn pa-primary">Run now</button></form></section>
 <section class="pa-panel"><h2>Wake it when something happens</h2><p>Besides its schedule, this agent can run the moment something happens: a channel goes live, a new blog post, a page changes, a price drops, a webhook arrives. <a href="https://openvibe.watch">OpenVibe.Watch</a> watches for it and runs this agent with what it saw.</p>
 <p class="pa-actions"><a class="pa-btn" href="https://openvibe.watch/watches/new?template=event&amp;agent_id=${a.id}">When something happens on OpenVibe</a> <a class="pa-btn" href="https://openvibe.watch/watches/new?template=page&amp;agent_id=${a.id}">When a page changes</a></p></section>
-<section class="pa-panel"><h2>Recent runs</h2>${runs.length ? html`<ul class="pa-runs">${runs.map((t) => html`<li><a href="/tasks/${t.id}">${time(t.created_at)}</a> <span class="pill ${pill(t.state)}">${t.state}</span>${usd(t.cost_usd)}${gist(t) ? html`<span class="pa-run-gist">${gist(t)}</span>` : ''}</li>`)}</ul>` : html`<p class="muted">No run yet.</p>`}</section>
+<section class="pa-panel"><h2>Recent runs</h2>${vibeChat && /^https:\/\/openvibe\.chat\/vibe\/v-[0-9a-f]{12}$/.test(vibeChat.chat_url) ? html`<p class="pa-hint">Each run also lands in <a href="${vibeChat.chat_url}">its Vibe chat</a>, where you can ask Vibe about it.</p>` : ''}${runs.length ? html`<ul class="pa-runs">${runs.map((t) => html`<li><a href="/tasks/${t.id}">${time(t.created_at)}</a> <span class="pill ${pill(t.state)}">${t.state}</span>${usd(t.cost_usd)}${gist(t) ? html`<span class="pa-run-gist">${gist(t)}</span>` : ''}</li>`)}</ul>` : html`<p class="muted">No run yet.</p>`}</section>
 </div>
 ${pendingSuggestions.length || applied.length ? html`<section class="pa-panel" aria-labelledby="pa-sugg-h"><h2 id="pa-sugg-h">Suggestions from your agent</h2>
 <p class="pa-hint">After a run that passed its check, the agent may suggest a line for its instructions. Nothing changes until you add it, and you can undo it.</p>

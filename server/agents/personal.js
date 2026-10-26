@@ -46,7 +46,7 @@ function nextRun(agent, after) {
 }
 
 function validate(input, config, current = null) {
-    const allowed = ['name', 'instructions', 'mode', 'budget_per_run_usd', 'daily_runs_max', 'schedule', 'schedule_at', 'schedule_dow', 'quiet_from', 'quiet_to', 'status'];
+    const allowed = ['name', 'instructions', 'mode', 'budget_per_run_usd', 'daily_runs_max', 'schedule', 'schedule_at', 'schedule_dow', 'quiet_from', 'quiet_to', 'send_to_vibe', 'status'];
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some((k) => !allowed.includes(k))) return 'Unknown agent setting.';
     const a = { ...current, ...input };
     if (typeof a.name !== 'string' || a.name.trim().length < 1 || a.name.length > 60) return 'name must be 1–60 characters.';
@@ -63,6 +63,7 @@ function validate(input, config, current = null) {
         if (a.quiet_from === a.quiet_to) return 'Quiet hours must not start and end at the same time.';
         if (['daily', 'weekly'].includes(a.schedule) && inQuiet(a, `2000-01-01T${a.schedule_at}:00.000Z`)) return 'schedule_at falls inside the quiet hours.';
     }
+    if (a.send_to_vibe !== undefined && typeof a.send_to_vibe !== 'boolean') return 'send_to_vibe must be true or false.';
     if (!['active', 'paused'].includes(a.status)) return 'status is invalid.';
     return null;
 }
@@ -72,7 +73,7 @@ const list = (s, owner) => s.db.many('SELECT * FROM actor_agents WHERE owner = $
 const memory = (s, owner, id) => s.db.many('SELECT * FROM actor_agent_memory WHERE owner = $1 AND agent_id = $2 ORDER BY created_order DESC', [owner, id]);
 
 async function create(s, config, owner, input) {
-    const body = { mode: 'balanced', budget_per_run_usd: config.allowance.perTaskUsd, daily_runs_max: 1, schedule: 'off', schedule_at: null, schedule_dow: null, quiet_from: null, quiet_to: null, status: 'active', ...input };
+    const body = { mode: 'balanced', budget_per_run_usd: config.allowance.perTaskUsd, daily_runs_max: 1, schedule: 'off', schedule_at: null, schedule_dow: null, quiet_from: null, quiet_to: null, send_to_vibe: true, status: 'active', ...input };
     const invalid = validate(body, config);
     if (invalid) return { error: invalid };
     return s.tx(async () => {
@@ -83,9 +84,9 @@ async function create(s, config, owner, input) {
         const count = Number(await s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1', [owner]));
         if (count >= config.agents.maxPerOwner) return { limit: true };
         const now = s.iso();
-        const row = await s.db.maybe(`INSERT INTO actor_agents (id, owner, name, instructions, mode, budget_per_run_usd, daily_runs_max, schedule, schedule_at, schedule_dow, quiet_from, quiet_to, next_run_at, status, created_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15) RETURNING *`,
-        [s.newId('agt'), owner, body.name, body.instructions, body.mode, body.budget_per_run_usd, body.daily_runs_max, body.schedule, body.schedule_at, body.schedule_dow, body.quiet_from, body.quiet_to, nextRun(body, now), body.status, now]);
+        const row = await s.db.maybe(`INSERT INTO actor_agents (id, owner, name, instructions, mode, budget_per_run_usd, daily_runs_max, schedule, schedule_at, schedule_dow, quiet_from, quiet_to, next_run_at, status, created_at, updated_at, send_to_vibe)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15,$16) RETURNING *`,
+        [s.newId('agt'), owner, body.name, body.instructions, body.mode, body.budget_per_run_usd, body.daily_runs_max, body.schedule, body.schedule_at, body.schedule_dow, body.quiet_from, body.quiet_to, nextRun(body, now), body.status, now, body.send_to_vibe]);
         return { row };
     });
 }
