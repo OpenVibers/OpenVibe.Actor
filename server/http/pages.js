@@ -224,6 +224,7 @@ ${raw(showcase.code({
             }))}
 <section class="sc-sec" id="faq" aria-labelledby="h-faq"><h2 id="h-faq">Questions</h2>
 <div class="hm-faq">${faq.map(([q, a]) => html`<div class="hm-qa"><h3>${q}</h3><p>${a}</p></div>`)}</div></section>
+${raw(showcase.network({ service: 'actor' }))}
 ${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, its webhooks and the router are an API. Apps get actor.task.* grants on OpenVibe.Services.', actions: [{ label: 'Read the API', href: '/docs', primary: true }, { label: 'See the agents', href: '/agents' }] }))}`,
         }, status);
     }

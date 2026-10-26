@@ -14,7 +14,7 @@ const { measure, check, format } = require('openvibe-shared/perf-budget');
 // Budgets are set from the numbers measured on 2026-10-08 (the real ones, fresh database), rounded up with about 10%
 // headroom; file counts are the measured counts and external files stay at 0.
 const BUDGETS = {
-    htmlRawKB: 58.5,   // measured 35.8 (the guest task box lists example tasks); 39.6 with the home's "Ask in chat" row (10-15);
+    htmlRawKB: 64,   // 59.2 with the Part of OpenVibe section (Shared 4.13, 2026-10-26); measured 35.8 (the guest task box lists example tasks); 39.6 with the home's "Ask in chat" row (10-15);
                        // 53.2 with the rich home (10-22): numbers, task templates, the 34 Tools chips, the API samples, the questions
     htmlBrotliKB: 13.5,   // 8.6; 9.6 with "Ask in chat"; 12.1 with the rich home
     jsFiles: 5,   // 5 (theme-loader, web-runtime, navbar, footer, boost: openvibe-shared/shell)
