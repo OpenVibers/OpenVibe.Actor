@@ -15,7 +15,7 @@
  *     write → { path, written }                                          (create, overwrite or append)
  *     screen → { format, width, height, content_b64 }                    (the screen now, scaled to max_width)
  *     input → { done, action, x?, y? }                                  (mouse, scroll, typing or a key, as the person)
- *     desk  → { running, display?, width?, height? }                    (the machine's private desk: start, stop, status)
+ *     desk  → { running, kind?, display?, width?, height? }             (a desk: start, stop, status; kind browser|desktop)
  *   screen, input and browser take desk: "private" to act on the private desk (contracts 0.214.0, Node v0.15.0 on Linux),
  *   or a named desk "desk-<name>" (contracts 0.215.0, Node v0.19.0: several desks per machine; agents/tools.js gives each
  *   task one, the model only ever says "private"),
@@ -44,6 +44,7 @@ const PAGE_TEXT_WITH_ELEMENTS = 2200;
 const PAGE_ELEMENTS = 60;
 const REF = /^e[0-9]{1,5}$/;
 const DESK_ACTIONS = new Set(['start', 'stop', 'status']);
+const DESK_KINDS = new Set(['desktop', 'browser']);
 const DESK_NAME = /^desk-[a-z0-9][a-z0-9-]{0,23}$/;
 const onDesk = (a) => (a && (a.desk === 'private' || DESK_NAME.test(String(a.desk || ''))) ? { desk: a.desk } : {});
 const BROWSER_KEYS = new Set(['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', 'Space']);
@@ -91,6 +92,8 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             can: ['terminal', 'files', 'screen', 'input', 'browser', 'desk'].filter((k) => m.computer[k]),
             // Several desks at once (Node v0.19.0): each task then works on a desk of its own there.
             ...(m.computer.desk && m.computer.desk.named === true ? { desks_at_once: Number(m.computer.desk.max_desks) || 1 } : {}),
+            // The kinds of desk it runs (Node v0.23.0, Desks plan D2): browser (a browser alone) and desktop (a whole screen).
+            ...(m.computer.desk && Array.isArray(m.computer.desk.kinds) ? { desk_kinds: m.computer.desk.kinds.filter((k) => DESK_KINDS.has(k)) } : {}),
             folders: (m.computer.files && m.computer.files.roots) || [],
             ...(m.computer.waiting ? { waiting_for_approval: m.computer.waiting } : {}),
         }));
@@ -255,6 +258,10 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const a = args && typeof args === 'object' ? args : {};
         if (!DESK_ACTIONS.has(a.action)) return { error: 'action is start, stop or status' };
         const value = { action: a.action, ...(DESK_NAME.test(String(a.desk || '')) ? { desk: a.desk } : {}) };
+        if (a.action === 'start' && a.kind != null) {
+            if (!DESK_KINDS.has(a.kind)) return { error: 'kind is browser (a browser alone) or desktop (a whole screen)' };
+            value.kind = a.kind;
+        }
         if (a.action === 'start' && (a.width != null || a.height != null)) {
             const w = Number(a.width), h = Number(a.height);
             if (!Number.isInteger(w) || !Number.isInteger(h) || w < 640 || w > 3840 || h < 480 || h > 2160) return { error: 'width is 640 to 3840 and height 480 to 2160 (or leave both out: 1280 × 800)' };
@@ -263,7 +270,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const r = await command(subject, machine, 'desk', value, { signal, windowMs: a.action === 'status' ? READ_WINDOW_MS : ACT_WINDOW_MS });
         if (r.error) return r;
         const d = r.data || {};
-        return { running: !!d.running, ...(d.display ? { display: d.display } : {}), ...(Number.isInteger(d.width) ? { width: d.width, height: d.height } : {}) };
+        return { running: !!d.running, ...(DESK_KINDS.has(d.kind) ? { kind: d.kind } : {}), ...(d.display ? { display: d.display } : {}), ...(Number.isInteger(d.width) ? { width: d.width, height: d.height } : {}) };
     }
 
     /** Whether the person is using a desk now, and when they last did (Bot's desk turn, Desks plan D4). */
