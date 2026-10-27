@@ -277,6 +277,35 @@ const as = { requester: `user:${ME}` };
         assert.deepStrictEqual(old.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1).body.value, { action: 'start' });
     });
 
+    await check('computer_browser with element refs and receipts (Desks plan D3, Node v0.21.0): a ref clicks exactly that element; the result says what changed and lists the page\'s elements', async () => {
+        const bot = fakeBot({ machines: [{ id: PC, name: 'desk-pc', online: true, agent_computer: true, computer: { level: 'trusted', browser: { level: 'trusted' } } }] });
+        const inner = bot.fetchImpl;
+        const elements = Array.from({ length: 90 }, (_, i) => `e${i + 1} button "Item ${i + 1}"`);
+        bot.fetchImpl = async (url, init = {}) => {
+            const body = init.body ? JSON.parse(init.body) : null;
+            if (body && body.kind === 'browser' && body.value.action === 'click') {
+                bot.calls.push({ method: 'POST', path: new URL(url).pathname, body });
+                return new Response(JSON.stringify({ result: 'ack', data: { url: 'https://example.org/app', title: 'App', text: 'y'.repeat(9000), truncated: false, links: [{ text: 'x', href: 'https://example.org/x' }], elements, receipt: { url_changed: false, appeared: ['Row added'], gone: 1 } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+            }
+            return inner(url, init);
+        };
+        const t = createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }) });
+        const out = await t.call('computer_browser', { machine: PC, action: 'click', ref: 'e7' }, as);
+        assert.strictEqual(bot.calls.at(-1).body.value.selector, '[data-ov-ref="e7"]', 'the ref names exactly that element');
+        const r = JSON.parse(out);
+        assert.deepStrictEqual(r.changed, { url: false, appeared: ['Row added'], gone: 1 });
+        assert.strictEqual(r.elements.length, 60, 'the first 60 elements');
+        assert.strictEqual(r.elements[6], 'e7 button "Item 7"');
+        assert.strictEqual(r.links, undefined, 'links are among the elements');
+        assert.strictEqual(r.text.length, 2200);
+        assert.ok(out.length <= 6000, `one tool result stays whole: ${out.length}`);
+        const before = bot.calls.length;
+        for (const bad of [{ action: 'click', ref: 'button' }, { action: 'open', url: 'https://example.org/', ref: 'e1' }, { action: 'click', ref: 'e1"]' }]) {
+            assert.match(JSON.parse(await t.call('computer_browser', { machine: PC, ...bad }, as)).error, /ref is an element/, JSON.stringify(bad));
+        }
+        assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
+    });
+
     await check('off without a Bot URL or a client secret', async () => {
         assert.strictEqual(createComputers({ config: { ...config, services: { ...config.services, botUrl: '' } } }).enabled, false);
         assert.strictEqual(createComputers({ config: { ...config, oauth: { clientId: 'actor', clientSecret: '' } } }).enabled, false);

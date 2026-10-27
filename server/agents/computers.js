@@ -38,6 +38,11 @@ const POINT_ACTIONS = new Set(['move', 'click', 'double_click', 'right_click']);
 const BROWSER_ACTIONS = new Set(['open', 'click', 'fill', 'press', 'back', 'read', 'close']);
 const PAGE_TEXT = 3500;
 const PAGE_LINKS = 25;
+// With the page's elements as refs (Node v0.21.0) the links are among them, so the text gets less room and the links
+// none: one tool result stays whole (tools.js clips results at 6000 characters).
+const PAGE_TEXT_WITH_ELEMENTS = 2200;
+const PAGE_ELEMENTS = 60;
+const REF = /^e[0-9]{1,5}$/;
 const DESK_ACTIONS = new Set(['start', 'stop', 'status']);
 const DESK_NAME = /^desk-[a-z0-9][a-z0-9-]{0,23}$/;
 const onDesk = (a) => (a && (a.desk === 'private' || DESK_NAME.test(String(a.desk || ''))) ? { desk: a.desk } : {});
@@ -203,6 +208,11 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             if (typeof a.url !== 'string' || !/^https?:\/\//i.test(a.url) || a.url.length > 2048) return { error: 'open needs url: an http or https address' };
             value.url = a.url;
         }
+        // A ref (e7) from the page's elements names exactly that element: Node keeps it on the element as data-ov-ref.
+        if (a.ref != null) {
+            if (!['click', 'fill'].includes(a.action) || !REF.test(String(a.ref))) return { error: 'ref is an element\'s ref from the page (for example e7), for click or fill' };
+            a.selector = `[data-ov-ref="${a.ref}"]`;
+        }
         if (a.action === 'click') {
             if (typeof a.selector === 'string' && a.selector) value.selector = a.selector.slice(0, 500);
             else if (typeof a.text === 'string' && a.text.trim()) value.text = a.text.slice(0, 200);
@@ -222,10 +232,16 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const d = r.data || {};
         if (a.action === 'fill') return { done: !!d.done, chars: d.chars };
         if (a.action === 'close') return { done: true };
-        // Sized to fit one tool result whole (tools.js clips results at 6000 characters): the text, then the first links.
+        // Sized to fit one tool result whole (tools.js clips results at 6000 characters): what the action changed (its
+        // receipt), the page's elements as refs to act on (Node v0.21.0), then its text; links when there are no refs.
+        const elements = Array.isArray(d.elements) ? d.elements.slice(0, PAGE_ELEMENTS).map((e) => String(e).slice(0, 110)) : null;
+        const room = elements ? PAGE_TEXT_WITH_ELEMENTS : PAGE_TEXT;
+        const text = typeof d.text === 'string' ? d.text : '';
         return {
-            url: d.url, title: d.title, text: typeof d.text === 'string' ? d.text.slice(0, PAGE_TEXT) : '', truncated: !!d.truncated || (typeof d.text === 'string' && d.text.length > PAGE_TEXT),
-            links: Array.isArray(d.links) ? d.links.slice(0, PAGE_LINKS).map((l) => ({ text: String(l.text || '').slice(0, 60), href: String(l.href || '').slice(0, 200) })) : [],
+            url: d.url, title: d.title,
+            ...(d.receipt && typeof d.receipt === 'object' ? { changed: { url: !!d.receipt.url_changed, appeared: (d.receipt.appeared || []).slice(0, 8), gone: d.receipt.gone | 0 } } : {}),
+            ...(elements ? { elements } : { links: Array.isArray(d.links) ? d.links.slice(0, PAGE_LINKS).map((l) => ({ text: String(l.text || '').slice(0, 60), href: String(l.href || '').slice(0, 200) })) : [] }),
+            text: text.slice(0, room), truncated: !!d.truncated || text.length > room,
         };
     }
 
