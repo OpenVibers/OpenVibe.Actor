@@ -92,6 +92,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             can: ['terminal', 'files', 'screen', 'input', 'browser', 'desk'].filter((k) => m.computer[k]),
             // Several desks at once (Node v0.19.0): each task then works on a desk of its own there.
             ...(m.computer.desk && m.computer.desk.named === true ? { desks_at_once: Number(m.computer.desk.max_desks) || 1 } : {}),
+            ...(Number.isInteger(m.computer.desks_running) ? { desks_running: m.computer.desks_running } : {}),
             // The kinds of desk it runs (Node v0.23.0, Desks plan D2): browser (a browser alone) and desktop (a whole screen).
             ...(m.computer.desk && Array.isArray(m.computer.desk.kinds) ? { desk_kinds: m.computer.desk.kinds.filter((k) => DESK_KINDS.has(k)) } : {}),
             // It keeps the person's browser profile from desk to desk (Node v0.24.0): sign in once.
