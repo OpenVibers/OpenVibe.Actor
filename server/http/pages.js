@@ -345,7 +345,7 @@ ${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk
 <a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
 </section>` : ''}
 ${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(' hidden')}>
-<img id="last-look-img" src="${look ? `/tasks/${row.id}/look?at=${look.at}` : ''}" alt="The screen your agent last looked at"${look && look.width ? raw(` width="${Number(look.width)}" height="${Number(look.height)}"`) : ''} loading="lazy">
+<a id="last-look-link" href="${look ? `/tasks/${row.id}/look?at=${look.at}` : '#'}" target="_blank" rel="noopener" title="Open it full size"><img id="last-look-img" src="${look ? `/tasks/${row.id}/look?at=${look.at}` : ''}" alt="The screen your agent last looked at"${look && look.width ? raw(` width="${Number(look.width)}" height="${Number(look.height)}"`) : ''} loading="lazy"></a>
 <figcaption class="muted small">What your agent last saw on the screen${look ? html` · ${time(new Date(look.at).toISOString())}` : ''}</figcaption>
 </figure>` : ''}
 <section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>

@@ -128,6 +128,7 @@ button.sc-btn.sc-primary { border: 0; }
 .desk-card[hidden] { display: none; }
 .last-look { margin: 0 0 18px; }
 .last-look[hidden] { display: none; }
+.last-look a { display: block; width: fit-content; max-width: min(100%, 720px); }
 .last-look img { display: block; max-width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line, rgba(127, 127, 127, 0.3)); }
 .last-look figcaption { margin-top: 6px; }
 .desk-card p { margin: 0; flex: 1 1 260px; }
