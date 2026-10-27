@@ -11,6 +11,8 @@ const { check, done } = require('./helpers/boot');
 
 const ME = 'usr_01M4W5JBFEG3QG9ER8W1A2K0RX';
 const PC = 'dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9';
+const MAC = 'dev_01M4W5JBFDG2TJ8C4FRDMCWBZA';
+const OLD = 'dev_01M4W5JBFDG2TJ8C4FRDMCWBZB';
 const config = {
     networkInternalUrl: 'http://network.test', oauth: { clientId: 'actor', clientSecret: 'actor-secret' },
     services: { searchUrl: 'http://search.test', toolsUrl: 'http://tools.test', botUrl: 'http://bot.test', botPublicUrl: 'https://openvibe.bot' },
@@ -275,6 +277,36 @@ const as = { requester: `user:${ME}` };
         const t2 = createOpenVibeTools({ config, fetchImpl: old.fetchImpl, robots: createRobots({ config, fetchImpl: old.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: old.fetchImpl, tokens }), vision });
         await t2.call('computer_desk', { machine: PC, action: 'start' }, { ...as, desks: t2.deskRun() });
         assert.deepStrictEqual(old.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1).body.value, { action: 'start' });
+    });
+
+    await check('browser desks (Desks plan D2, Node v0.23.0): a task\'s desk is a browser alone where the machine runs them, a whole desk when the model asks or the machine has no browser desks; an older Node is sent no kind', async () => {
+        const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 2 };
+        const machines = [
+            { id: PC, name: 'desk-pc', online: true, agent_computer: true, computer: { level: 'trusted', browser: { level: 'trusted' }, desk: { ...desk, kinds: ['desktop', 'browser'] } } },
+            { id: MAC, name: 'macbook', online: true, agent_computer: true, computer: { level: 'trusted', browser: { level: 'trusted' }, desk: { ...desk, window_manager: null, kinds: ['browser'] } } },
+            { id: OLD, name: 'old-pc', online: true, agent_computer: true, computer: { level: 'trusted', browser: { level: 'trusted' }, desk } },
+        ];
+        const bot = fakeBot({ machines });
+        const t = createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }), vision: async () => ({ text: 'x', cost_usd: 0 }) });
+        const listed = JSON.parse(await t.call('list_my_computers', {}, as)).computers;
+        assert.deepStrictEqual(listed.map((m) => m.desk_kinds), [['desktop', 'browser'], ['browser'], undefined], 'the model sees which kinds each runs');
+        const last = () => bot.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1).body.value;
+        const run = t.deskRun();
+        await t.call('computer_desk', { machine: PC, action: 'start' }, { ...as, desks: run });
+        assert.deepStrictEqual(last(), { action: 'start', desk: run.name, kind: 'browser' }, 'web work: a browser desk by default');
+        const whole = t.deskRun();
+        await t.call('computer_desk', { machine: PC, action: 'start', kind: 'desktop' }, { ...as, desks: whole });
+        assert.strictEqual(last().kind, 'desktop', 'a whole desk when the model asks');
+        await t.call('computer_desk', { machine: MAC, action: 'start' }, { ...as, desks: t.deskRun() });
+        assert.strictEqual(last().kind, 'browser');
+        await t.call('computer_desk', { machine: OLD, action: 'start' }, { ...as, desks: t.deskRun() });
+        assert.strictEqual(last().kind, undefined, 'an older Node is sent no kind');
+        await t.call('computer_desk', { machine: PC, action: 'stop' }, { ...as, desks: run });
+        assert.deepStrictEqual(last(), { action: 'stop', desk: run.name }, 'stop takes no kind');
+        const deskCommands = () => bot.calls.filter((c) => c.body && c.body.kind === 'desk').length;
+        const before = deskCommands();
+        assert.match(JSON.parse(await t.call('computer_desk', { machine: PC, action: 'start', kind: 'vm' }, { ...as, desks: t.deskRun() })).error, /kind is browser/);
+        assert.strictEqual(deskCommands(), before, 'a bad kind never reaches the machine');
     });
 
     await check('computer_browser with element refs and receipts (Desks plan D3, Node v0.21.0): a ref clicks exactly that element; the result says what changed and lists the page\'s elements', async () => {
