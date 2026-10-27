@@ -16,10 +16,10 @@ const { measure, check, format } = require('openvibe-shared/perf-budget');
 const BUDGETS = {
     htmlRawKB: 64,   // 59.2 with the Part of OpenVibe section (Shared 4.13, 2026-10-26); measured 35.8 (the guest task box lists example tasks); 39.6 with the home's "Ask in chat" row (10-15);
                        // 53.2 with the rich home (10-22): numbers, task templates, the 34 Tools chips, the API samples, the questions
-    htmlBrotliKB: 13.5,   // 8.6; 9.6 with "Ask in chat"; 12.1 with the rich home
+    htmlBrotliKB: 15,   // 13.7 openvibe-shared 4.15 footer: the compact footer opens into the whole one, and the pulse line; 8.6; 9.6 with "Ask in chat"; 12.1 with the rich home
     jsFiles: 5,   // 5 (theme-loader, web-runtime, navbar, footer, boost: openvibe-shared/shell)
-    jsRawKB: 269,   // 264.3 with Shared 4.13.0 (2026-10-26: account links); 239.8
-    jsBrotliKB: 67,   // 65.3 Shared 4.12.0: the light/dark switch, the seasonal mark and the theme pairs; 56.5
+    jsRawKB: 278,   // 273.2 openvibe-shared 4.15 footer: the compact footer opens into the whole one, and the pulse line; 264.3 with Shared 4.13.0 (2026-10-26: account links); 239.8
+    jsBrotliKB: 69,   // 67.9 openvibe-shared 4.15 footer: the compact footer opens into the whole one, and the pulse line; 65.3 Shared 4.12.0: the light/dark switch, the seasonal mark and the theme pairs; 56.5
     cssFiles: 3,   // 2 (actor.css + the cached /shared/showcase.css); 3 with home.css, the home's own sections (10-22)
     cssRawKB: 40,   // 35.1 with Shared 4.13.0 (2026-10-26: account links); 24.2 (the task page's outcome card and timeline); 28.9 with home.css
     cssBrotliKB: 9,   // 7.7 with Shared 4.13.0 (2026-10-26: account links); 5.4; 6.6 with home.css
