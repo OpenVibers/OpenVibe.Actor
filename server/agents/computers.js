@@ -94,6 +94,8 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             ...(m.computer.desk && m.computer.desk.named === true ? { desks_at_once: Number(m.computer.desk.max_desks) || 1 } : {}),
             // The kinds of desk it runs (Node v0.23.0, Desks plan D2): browser (a browser alone) and desktop (a whole screen).
             ...(m.computer.desk && Array.isArray(m.computer.desk.kinds) ? { desk_kinds: m.computer.desk.kinds.filter((k) => DESK_KINDS.has(k)) } : {}),
+            // It keeps the person's browser profile from desk to desk (Node v0.24.0): sign in once.
+            ...(m.computer.desk && m.computer.desk.profiles === true ? { keeps_sign_ins: true } : {}),
             folders: (m.computer.files && m.computer.files.roots) || [],
             ...(m.computer.waiting ? { waiting_for_approval: m.computer.waiting } : {}),
         }));
@@ -258,6 +260,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const a = args && typeof args === 'object' ? args : {};
         if (!DESK_ACTIONS.has(a.action)) return { error: 'action is start, stop or status' };
         const value = { action: a.action, ...(DESK_NAME.test(String(a.desk || '')) ? { desk: a.desk } : {}) };
+        if (a.action === 'start' && typeof a.profile === 'string' && /^[a-z0-9][a-z0-9-]{0,23}$/.test(a.profile)) value.profile = a.profile;
         if (a.action === 'start' && a.kind != null) {
             if (!DESK_KINDS.has(a.kind)) return { error: 'kind is browser (a browser alone) or desktop (a whole screen)' };
             value.kind = a.kind;

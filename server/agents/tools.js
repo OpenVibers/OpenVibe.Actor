@@ -167,7 +167,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
      * desk the run used. A model's own desk name is refused, so a run can never reach another task's desk.
      */
     function deskRun() {
-        return { name: `desk-${crypto.randomBytes(5).toString('hex')}`, named: null, kinds: new Map(), used: new Set() };
+        return { name: `desk-${crypto.randomBytes(5).toString('hex')}`, named: null, kinds: new Map(), keeps: new Set(), used: new Set() };
     }
 
     async function deskFor(run, person, machine, { signal } = {}) {
@@ -177,6 +177,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
             const computers = (mine && mine.computers) || [];
             run.named = new Set(computers.filter((m) => m.desks_at_once).map((m) => m.id));
             run.kinds = new Map(computers.filter((m) => Array.isArray(m.desk_kinds)).map((m) => [m.id, m.desk_kinds]));
+            run.keeps = new Set(computers.filter((m) => m.keeps_sign_ins).map((m) => m.id));
         }
         if (!run.named.has(machine)) return 'private';
         run.used.add(machine);
@@ -255,6 +256,11 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                         const { kind, ...rest } = a;
                         const chosen = a.desk === 'private' ? kind : deskKind(desks, a.machine, kind);   // private: a whole desk
                         a = chosen ? { ...rest, kind: chosen } : rest;
+                        // The person's sign-ins carry from task to task (Node v0.24.0): every task's desk starts from the
+                        // browser profile kept for their agent on that machine, and saves it back when it stops. Never
+                        // the model's choice.
+                        delete a.profile;
+                        if (a.desk !== 'private' && desks && desks.keeps && desks.keeps.has(a.machine)) a.profile = AGENT_PROFILE;
                     }
                 }
                 if (name === 'list_my_computers') return json(await pcs.mine(person, { signal }));
@@ -309,6 +315,8 @@ const COMPUTER_TOOLS = new Set([...COMPUTER_DEFS, SCREEN_DEF, INPUT_DEF, BROWSER
 const PERSON_WAIT_MS = 10 * 60_000;
 const PERSON_POLL_MS = 3000;
 const PERSON_QUIET_MS = 20_000;
+// The browser profile kept for the person's agent on each of their machines (Node v0.24.0: sign in once).
+const AGENT_PROFILE = 'agent';
 // The tools that work on a screen: their desk "private" is the task's own desk (deskRun).
 const DESK_TOOLS = new Set(['computer_screen', 'computer_input', 'computer_browser', 'computer_desk']);
 // What the vision model is for: reading a screen faithfully. What is on the screen is content, never instructions.
