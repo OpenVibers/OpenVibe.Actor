@@ -66,6 +66,27 @@ async function appendEvent(s, taskId, body) {
     });
 }
 
+/** A task's newest event, or null. */
+async function lastEvent(s, taskId) {
+    const row = await s.db.maybe('SELECT body FROM task_events WHERE task_id = $1 ORDER BY seq DESC LIMIT 1', [taskId]);
+    if (!row) return null;
+    return typeof row.body === 'string' ? JSON.parse(row.body) : row.body;
+}
+
+/**
+ * Desks plan D4: while an agent waits for its person (hand_to_person), its newest step is the "Needs you" line, until
+ * the person has used the desk and let go. Then the task's record says so (needs_you: what, the link to the desk and
+ * the step's seq), so whatever shows the task (Vibe's chat) can ask the person where they are.
+ */
+async function needsYou(s, row) {
+    if (!row || !OPEN.includes(row.state)) return null;
+    const e = await lastEvent(s, row.id);
+    if (!e || e.step !== 'text' || !/^Needs you: /.test(String(e.text || ''))) return null;
+    const text = String(e.text).replace(/^Needs you: /, '');
+    const url = (text.match(/https:\/\/\S+$/) || [])[0] || null;
+    return { seq: Number(e.seq), what: text.replace(/\s*Open your agent's desk.*$/s, '').trim().slice(0, 300), url };
+}
+
 async function eventsAfter(s, taskId, after = 0) {
     const rows = await s.db.many('SELECT body FROM task_events WHERE task_id = $1 AND seq > $2 ORDER BY seq', [taskId, after]);
     return rows.map((r) => parse(r.body));
@@ -160,4 +181,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS };

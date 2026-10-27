@@ -110,6 +110,19 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         assert.ok(!page.text.includes('href="https://evil.example'), 'another address stays text');
         assert.ok(page.text.includes('data-bot="https://openvibe.bot"'));
     });
+    await check('the task\'s record says it needs its person while the hand-off waits, and stops saying so after', async () => {
+        const bea = t.network.addUser('desk-bea');
+        const id = t.ctx.s.newId('tsk');
+        await store.insertTask(t.ctx.s, { id, requester: `user:${bea.subject}`, task: 'Book it', mode: 'balanced', budget_task: 0.05, budget_day: 1, created_at: t.ctx.s.iso() });
+        const watch = `https://openvibe.bot/machines/${PC}/screen?desk=desk-0123456789`;
+        await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'plan', agent: 'openvibe-runtime', text: 'OpenVibe runtime takes it.' });
+        assert.strictEqual((await t.get(`/api/v1/tasks/${id}`, { as: bea })).json().needs_you, undefined, 'nothing waits yet');
+        const e = await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'text', text: `Needs you: Sign in to the airline. Open your agent's desk, take it over, do it, then let go: ${watch}` });
+        const waiting = (await t.get(`/api/v1/tasks/${id}`, { as: bea })).json();
+        assert.deepStrictEqual(waiting.needs_you, { seq: e.seq, what: 'Sign in to the airline.', url: watch });
+        await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'tool_result', tool: 'hand_to_person', text: '{"done":true}' });
+        assert.strictEqual((await t.get(`/api/v1/tasks/${id}`, { as: bea })).json().needs_you, undefined, 'the person let go: nothing waits');
+    });
     await t.close();
     done();
 })();
