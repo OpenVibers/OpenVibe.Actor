@@ -322,7 +322,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
             styles: [showcase.STYLESHEET],
             noReferrer: true,
             body: html`${open ? raw('<noscript><meta http-equiv="refresh" content="4"></noscript>') : ''}
-<article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${open ? '1' : ''}">
+<article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${open ? '1' : ''}" data-bot="${botPages}">
 <header class="task-head">
 <p class="task-status"><span class="pill pill-${t.state}">${STATE_TEXT[t.state]}</span>${kind ? html`<span class="chip">${kind}</span>` : ''}<span class="chip">${MODE_LABEL[t.mode]}</span><span class="chip" id="task-cost">${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${time(t.created_at)}</p>
 <h1 class="task-text">${row.task}</h1>
@@ -421,10 +421,27 @@ ${a.refused ? html`<details class="refused"><summary>See the answer that didn't 
 </section>`;
     }
 
+    // A step's links to the person's own desk on OpenVibe.Bot (Desks plan D4: Watch, Take over) are made clickable;
+    // every other address in a step stays text (a model writes steps too, and its links are never vouched for).
+    const botPages = String((config.services && config.services.botPublicUrl) || 'https://openvibe.bot').replace(/\/+$/, '');
+    const deskLink = new RegExp(`${botPages.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/machines/dev_[0-9A-HJKMNP-TV-Z]{26}/screen(?:\\?desk=[a-z0-9-]{1,40})?`, 'g');
+    function withDeskLinks(text) {
+        const t = String(text || '');
+        const parts = [];
+        let last = 0;
+        for (const m of t.matchAll(deskLink)) {
+            parts.push(t.slice(last, m.index), html`<a href="${m[0]}" rel="noopener">${/[?]desk=/.test(m[0]) ? 'your agent\'s desk' : 'the screen'}</a>`);
+            last = m.index + m[0].length;
+        }
+        parts.push(t.slice(last));
+        return parts;
+    }
+
     function stepItem(e) {
         if (e.step === 'tool_call') return html`<li class="tl-item tl-tool"><span class="tl-k">Used</span><span class="tl-v"><code>${e.tool}</code> ${e.input || ''}</span></li>`;
         if (e.step === 'tool_result') return html`<li class="tl-item tl-result${e.is_error ? ' tl-err' : ''}"><span class="tl-k">Got</span><span class="tl-v"><span class="muted">${(e.text || '').slice(0, 220)}</span></span></li>`;
-        return html`<li class="tl-item tl-say"><span class="tl-k">Note</span><span class="tl-v">${e.text || ''}</span></li>`;
+        if (/^Needs you: /.test(e.text || '')) return html`<li class="tl-item tl-needs"><span class="tl-k">Needs you</span><span class="tl-v">${withDeskLinks(String(e.text).replace(/^Needs you: /, ''))}</span></li>`;
+        return html`<li class="tl-item tl-say"><span class="tl-k">Note</span><span class="tl-v">${withDeskLinks(e.text)}</span></li>`;
     }
 
     function explanationBlock(explanation) {

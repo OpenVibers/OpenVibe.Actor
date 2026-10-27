@@ -35,13 +35,28 @@
       box.appendChild(sec);
       lastCheckFailed = false;
     }
+    // Links to the person's own desk on OpenVibe.Bot become clickable (Desks plan D4); any other address stays text.
+    var bot = (art.getAttribute('data-bot') || 'https://openvibe.bot').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var deskLink = new RegExp(bot + '/machines/dev_[0-9A-HJKMNP-TV-Z]{26}/screen(?:\\?desk=[a-z0-9-]{1,40})?', 'g');
+    function withLinks(node, text) {
+      var t = String(text || ''), last = 0, m;
+      deskLink.lastIndex = 0;
+      while ((m = deskLink.exec(t))) {
+        node.appendChild(document.createTextNode(t.slice(last, m.index)));
+        var a = el('a', null, /[?]desk=/.test(m[0]) ? 'your agent\u2019s desk' : 'the screen');
+        a.href = m[0]; a.rel = 'noopener';
+        node.appendChild(a);
+        last = m.index + m[0].length;
+      }
+      node.appendChild(document.createTextNode(t.slice(last)));
+    }
     function item(kind, cls, value, code) {
       if (!current) attempt('Agent');
       var li = el('li', 'tl-item ' + cls);
       li.appendChild(el('span', 'tl-k', kind));
       var v = el('span', 'tl-v');
       if (code) { v.appendChild(el('code', null, code)); v.appendChild(document.createTextNode(' ')); }
-      v.appendChild(document.createTextNode(value || ''));
+      withLinks(v, value);
       li.appendChild(v);
       current.appendChild(li);
     }
@@ -56,6 +71,7 @@
       if (e.step === 'text' && e.is_error) return item('Stopped', 'tl-err', e.text);
       if (e.step === 'tool_call') return item(LABEL.tool_call, 'tl-tool', e.input, e.tool);
       if (e.step === 'tool_result') return item(LABEL.tool_result, 'tl-result' + (e.is_error ? ' tl-err' : ''), String(e.text || '').slice(0, 220), e.tool);
+      if (/^Needs you: /.test(e.text || '')) return item('Needs you', 'tl-needs', String(e.text).replace(/^Needs you: /, ''));
       return item(LABEL.text, 'tl-say', e.text);
     }
 
