@@ -303,6 +303,14 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(last().kind, undefined, 'an older Node is sent no kind');
         await t.call('computer_desk', { machine: PC, action: 'stop' }, { ...as, desks: run });
         assert.deepStrictEqual(last(), { action: 'stop', desk: run.name }, 'stop takes no kind');
+        // Kept sign-ins (Node v0.24.0): a machine that keeps profiles starts every task's desk from the agent's profile.
+        const keeps = fakeBot({ machines: [{ ...machines[0], computer: { ...machines[0].computer, desk: { ...machines[0].computer.desk, profiles: true } } }] });
+        const t3 = createOpenVibeTools({ config, fetchImpl: keeps.fetchImpl, robots: createRobots({ config, fetchImpl: keeps.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: keeps.fetchImpl, tokens }), vision: async () => ({ text: 'x', cost_usd: 0 }) });
+        assert.strictEqual(JSON.parse(await t3.call('list_my_computers', {}, as)).computers[0].keeps_sign_ins, true);
+        const kept = t3.deskRun();
+        await t3.call('computer_desk', { machine: PC, action: 'start', profile: 'someone-else' }, { ...as, desks: kept });
+        assert.deepStrictEqual(keeps.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1).body.value, { action: 'start', desk: kept.name, kind: 'browser', profile: 'agent' }, 'the agent\'s kept profile, never the model\'s choice');
+        assert.strictEqual(last().profile, undefined, 'a machine that keeps none is sent none');
         const deskCommands = () => bot.calls.filter((c) => c.body && c.body.kind === 'desk').length;
         const before = deskCommands();
         assert.match(JSON.parse(await t.call('computer_desk', { machine: PC, action: 'start', kind: 'vm' }, { ...as, desks: t.deskRun() })).error, /kind is browser/);
