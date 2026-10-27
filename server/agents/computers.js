@@ -17,6 +17,8 @@
  *     input → { done, action, x?, y? }                                  (mouse, scroll, typing or a key, as the person)
  *     desk  → { running, display?, width?, height? }                    (the machine's private desk: start, stop, status)
  *   screen, input and browser take desk: "private" to act on the private desk (contracts 0.214.0, Node v0.15.0 on Linux),
+ *   or a named desk "desk-<name>" (contracts 0.215.0, Node v0.19.0: several desks per machine; agents/tools.js gives each
+ *   task one, the model only ever says "private"),
  *   a screen of its own where the agent works without touching the person's; Bot refuses it on a machine without one.
  *
  * Off (enabled false) without ACTOR_BOT_URL or without Actor's client secret.
@@ -37,7 +39,8 @@ const BROWSER_ACTIONS = new Set(['open', 'click', 'fill', 'press', 'back', 'read
 const PAGE_TEXT = 3500;
 const PAGE_LINKS = 25;
 const DESK_ACTIONS = new Set(['start', 'stop', 'status']);
-const onDesk = (a) => (a && a.desk === 'private' ? { desk: 'private' } : {});
+const DESK_NAME = /^desk-[a-z0-9][a-z0-9-]{0,23}$/;
+const onDesk = (a) => (a && (a.desk === 'private' || DESK_NAME.test(String(a.desk || ''))) ? { desk: a.desk } : {});
 const BROWSER_KEYS = new Set(['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', 'Space']);
 
 function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null }) {
@@ -81,6 +84,8 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const machines = ((r.data && r.data.machines) || []).filter((m) => m.computer).map((m) => ({
             id: m.id, name: m.name, online: m.online, level: m.computer.level,
             can: ['terminal', 'files', 'screen', 'input', 'browser', 'desk'].filter((k) => m.computer[k]),
+            // Several desks at once (Node v0.19.0): each task then works on a desk of its own there.
+            ...(m.computer.desk && m.computer.desk.named === true ? { desks_at_once: Number(m.computer.desk.max_desks) || 1 } : {}),
             folders: (m.computer.files && m.computer.files.roots) || [],
             ...(m.computer.waiting ? { waiting_for_approval: m.computer.waiting } : {}),
         }));
@@ -233,7 +238,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (bad) return bad;
         const a = args && typeof args === 'object' ? args : {};
         if (!DESK_ACTIONS.has(a.action)) return { error: 'action is start, stop or status' };
-        const value = { action: a.action };
+        const value = { action: a.action, ...(DESK_NAME.test(String(a.desk || '')) ? { desk: a.desk } : {}) };
         if (a.action === 'start' && (a.width != null || a.height != null)) {
             const w = Number(a.width), h = Number(a.height);
             if (!Number.isInteger(w) || !Number.isInteger(h) || w < 640 || w > 3840 || h < 480 || h > 2160) return { error: 'width is 640 to 3840 and height 480 to 2160 (or leave both out: 1280 × 800)' };

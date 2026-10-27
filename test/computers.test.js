@@ -239,6 +239,44 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
     });
 
+    await check('each task its own desk (Desks plan D1): on a machine that runs several, desk "private" is a desk named for the run; the run stops it at the end; a model never names one', async () => {
+        const many = { level: 'trusted', screen: { level: 'trusted' }, input: { level: 'trusted' }, browser: { level: 'trusted' }, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } };
+        const bot = fakeBot({ machines: [{ id: PC, name: 'desk-pc', online: true, agent_computer: true, computer: many }] });
+        const vision = async () => ({ text: 'A page.', cost_usd: 0 });
+        const t = createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }), vision });
+        assert.strictEqual(JSON.parse(await t.call('list_my_computers', {}, as)).computers[0].desks_at_once, 4, 'the model sees it runs several');
+        const a = t.deskRun();
+        const b = t.deskRun();
+        assert.match(a.name, /^desk-[0-9a-f]{10}$/);
+        assert.notStrictEqual(a.name, b.name, 'two runs, two desks');
+        const last = (kind) => bot.calls.filter((c) => c.body && c.body.kind === kind).at(-1).body.value;
+        await t.call('computer_desk', { machine: PC, action: 'start' }, { ...as, desks: a });
+        assert.deepStrictEqual(last('desk'), { action: 'start', desk: a.name }, 'run a starts its own desk');
+        await t.call('computer_desk', { machine: PC, action: 'start' }, { ...as, desks: b });
+        assert.strictEqual(last('desk').desk, b.name, 'run b another');
+        await t.call('computer_browser', { machine: PC, action: 'open', url: 'https://example.org/', desk: 'private' }, { ...as, desks: a });
+        assert.strictEqual(last('browser').desk, a.name);
+        const look = JSON.parse(await t.call('computer_screen', { machine: PC, question: 'What is open?', desk: 'private' }, { ...as, desks: b }));
+        assert.strictEqual(last('screen').desk, b.name);
+        assert.strictEqual(look.desk, 'private', 'the model only ever sees its "private" desk');
+        // A model cannot reach another task's desk by naming it.
+        const before = bot.calls.length;
+        const sneaky = JSON.parse(await t.call('computer_browser', { machine: PC, action: 'read', desk: a.name }, { ...as, desks: b }));
+        assert.match(sneaky.error, /desk is "private"/);
+        assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
+        // The run's end stops its own desk only.
+        await t.closeDesks(a, as.requester);
+        assert.deepStrictEqual(last('desk'), { action: 'stop', desk: a.name });
+        assert.strictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'desk' && c.body.value.action === 'stop').length, 1, 'b keeps its desk');
+        await t.closeDesks(a, as.requester);
+        assert.strictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'desk' && c.body.value.action === 'stop').length, 1, 'closing twice stops nothing more');
+        // A machine on an older Node: the run's desk is the machine's one private desk, as before.
+        const old = fakeBot({ machines: [{ id: PC, name: 'desk-pc', online: true, agent_computer: true, computer: { ...many, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true } } }] });
+        const t2 = createOpenVibeTools({ config, fetchImpl: old.fetchImpl, robots: createRobots({ config, fetchImpl: old.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: old.fetchImpl, tokens }), vision });
+        await t2.call('computer_desk', { machine: PC, action: 'start' }, { ...as, desks: t2.deskRun() });
+        assert.deepStrictEqual(old.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1).body.value, { action: 'start' });
+    });
+
     await check('off without a Bot URL or a client secret', async () => {
         assert.strictEqual(createComputers({ config: { ...config, services: { ...config.services, botUrl: '' } } }).enabled, false);
         assert.strictEqual(createComputers({ config: { ...config, oauth: { clientId: 'actor', clientSecret: '' } } }).enabled, false);
