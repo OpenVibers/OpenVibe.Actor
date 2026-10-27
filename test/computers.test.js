@@ -324,6 +324,34 @@ const as = { requester: `user:${ME}` };
         const n = execs();
         assert.match(JSON.parse(await t4.call('computer_run', { machine: PC, argv: ['xterm'], detach: true }, { ...as, desks: office })).error, /desk "private"/);
         assert.strictEqual(execs(), n, 'never detached on the person\'s screen');
+        // Placement (Desks plan D6): machine "any" goes to a desk host before a person's own computer, the next one when full.
+        const HOST = 'dev_01M4W5JBFDG2TJ8C4FRDMCWBZC';
+        const place = fakeBot({ machines: [
+            { id: PC, name: 'laptop', online: true, agent_computer: true, computer: { level: 'trusted', screen: { level: 'trusted' }, browser: { level: 'trusted' }, desk: { ...desk, kinds: ['desktop', 'browser'] }, desks_running: 0 } },
+            { id: HOST, name: 'old-laptop', online: true, agent_computer: true, computer: { level: 'trusted', browser: { level: 'trusted' }, desk: { ...desk, kinds: ['desktop', 'browser'] }, desks_running: 1 } },
+        ] });
+        const inner = place.fetchImpl;
+        let hostFull = false;
+        const sentTo = [];   // [machine, kind] of each command, whichever machine it went to
+        place.fetchImpl = async (url, init = {}) => {
+            const body = init.body ? JSON.parse(init.body) : null;
+            const target = (/\/machines\/(dev_[0-9A-Z]+)\/commands/.exec(String(url)) || [])[1];
+            if (target && body) sentTo.push([target, body.kind]);
+            if (hostFull && body && body.kind === 'desk' && body.value.action === 'start' && target === HOST) {
+                return new Response(JSON.stringify({ machine_id: HOST, id: 'op', result: 'nack', reason: 'this machine already runs desk-x (browser), its limit (max_desks 2; a browser desk counts as half): stop one first' }), { status: 200, headers: { 'content-type': 'application/json' } });
+            }
+            return inner(target === HOST ? String(url).replace(HOST, PC) : url, init);   // the fake answers for one machine
+        };
+        const t5 = createOpenVibeTools({ config, fetchImpl: place.fetchImpl, robots: createRobots({ config, fetchImpl: place.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: place.fetchImpl, tokens }), vision: async () => ({ text: 'x', cost_usd: 0 }) });
+        const r1 = t5.deskRun();
+        const placed = JSON.parse(await t5.call('computer_desk', { machine: 'any', action: 'start' }, { ...as, desks: r1 }));
+        assert.strictEqual(placed.machine, HOST, 'a desk host first, though it runs one desk already');
+        await t5.call('computer_browser', { machine: 'any', action: 'open', url: 'https://example.org/', desk: 'private' }, { ...as, desks: r1 });
+        assert.deepStrictEqual(sentTo.at(-1), [HOST, 'browser'], '"any" then means the machine its desk is on');
+        hostFull = true;
+        const r2 = t5.deskRun();
+        assert.strictEqual(JSON.parse(await t5.call('computer_desk', { machine: 'any', action: 'start' }, { ...as, desks: r2 })).machine, PC, 'the next machine when one is full');
+        assert.match(JSON.parse(await t5.call('computer_screen', { machine: 'any', question: 'x', desk: 'private' }, { ...as, desks: t5.deskRun() })).error, /start one with computer_desk/);
         const deskCommands = () => bot.calls.filter((c) => c.body && c.body.kind === 'desk').length;
         const before = deskCommands();
         assert.match(JSON.parse(await t.call('computer_desk', { machine: PC, action: 'start', kind: 'vm' }, { ...as, desks: t.deskRun() })).error, /kind is browser/);
