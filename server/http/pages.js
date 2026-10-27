@@ -67,6 +67,10 @@ const TEMPLATES = [
     { group: 'Your computer', needs: 'Needs the OpenVibe Node\'s computer plugin on that machine.', items: [
         { text: 'On my computer, list the ten largest files in my Downloads folder.' },
     ] },
+    { group: 'On a desk of its own', needs: 'Needs a computer or desk host with the OpenVibe Node\'s computer plugin. Watch the desk and take it over from the task.', items: [
+        { text: 'On my computer, open openvibe.live in your own browser on a desk of your own, and tell me who is live right now and what each stream is about.' },
+        { text: 'On my computer, open the sign-in page of <a site I use> on your desk and hand it to me to sign in; then tell me what my account page shows.' },
+    ] },
     { group: 'Private', needs: 'Answered on OpenVibe\'s own model; nothing leaves OpenVibe.', items: [
         { text: 'Summarize the following note in three bullet points, without it leaving OpenVibe:', mode: 'private' },
     ] },
