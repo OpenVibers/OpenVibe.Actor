@@ -126,6 +126,10 @@ button.sc-btn.sc-primary { border: 0; }
 /* Desks plan D4: the agent handed its person a step (a sign-in, a CAPTCHA): the one item that asks for them. */
 .desk-card { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 0 0 18px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 40%, transparent); }
 .desk-card[hidden] { display: none; }
+.last-look { margin: 0 0 18px; }
+.last-look[hidden] { display: none; }
+.last-look img { display: block; max-width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line, rgba(127, 127, 127, 0.3)); }
+.last-look figcaption { margin-top: 6px; }
 .desk-card p { margin: 0; flex: 1 1 260px; }
 .tl-needs { padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent); }
 .tl-needs::before { border-color: var(--accent, #3b82f6); background: var(--accent, #3b82f6); left: -19px; }

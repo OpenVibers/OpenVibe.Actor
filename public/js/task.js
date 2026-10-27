@@ -73,8 +73,19 @@
         deskCard.hidden = false;
       } else if (/"running":false/.test(t)) deskCard.hidden = true;
     }
+    // What the agent last saw: a new look at its screen refreshes the picture.
+    var lastLook = document.getElementById('last-look');
+    function onLook(e) {
+      if (!lastLook || e.step !== 'tool_result' || e.tool !== 'computer_screen' || e.is_error) return;
+      var img = document.getElementById('last-look-img');
+      img.removeAttribute('width');
+      img.removeAttribute('height');
+      img.setAttribute('src', '/tasks/' + encodeURIComponent(id) + '/look?at=' + Date.now());
+      lastLook.hidden = false;
+    }
     function onOutput(e) {
       onDesk(e);
+      onLook(e);
       if ((e.step === 'plan' || e.step === 'handoff') && e.agent) return attempt((e.text || e.agent).replace(/ takes it.*$/, ''));
       if (e.step === 'plan') return undefined;
       if (e.step === 'check') {

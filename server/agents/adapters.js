@@ -56,7 +56,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
     const runtimeModel = own ? chatClient({ baseUrl: own.url, apiKey: own.apiKey, model: own.model, rates: ownRates, fetchImpl, timeoutMs: 180_000 }) : deepseek;
     const runtimeModelName = own ? own.model : p.deepseek.model;
 
-    async function runtime({ task, requester = null, signal, emit, meter, budgetLeft, waitForPerson = null }) {
+    async function runtime({ task, requester = null, taskId = null, signal, emit, meter, budgetLeft, waitForPerson = null }) {
         if (!runtimeModel) throw new ProviderError('the runtime has no model configured', { code: 'actor.agent.unavailable' });
         const tools = await ovTools.definitions({ signal, requester });
         const robots = tools.some((d) => d.function && d.function.name === 'robot_steps');
@@ -65,7 +65,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
         let last = '';
         const evidence = [];   // what each tool answered, for the check (agents/check.js)
         // This run's own desk on any machine that runs several (Desks plan D1), stopped when the run ends, however it ends.
-        const desks = ovTools.deskRun ? ovTools.deskRun() : null;
+        const desks = ovTools.deskRun ? ovTools.deskRun(taskId) : null;
         try {
             for (let turn = 1; turn <= MAX_TURNS; turn++) {
                 if (budgetLeft() <= 0) throw new ProviderError('the task reached its budget before the runtime finished', { code: 'actor.budget.exceeded' });
