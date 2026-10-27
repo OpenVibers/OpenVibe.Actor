@@ -266,7 +266,19 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { running: !!d.running, ...(d.display ? { display: d.display } : {}), ...(Number.isInteger(d.width) ? { width: d.width, height: d.height } : {}) };
     }
 
-    return { enabled, mine, list, read, run, write, screen, input, browser, desk };
+    /** Whether the person is using a desk now, and when they last did (Bot's desk turn, Desks plan D4). */
+    async function deskTurn(subject, machine, desk, { signal } = {}) {
+        const bad = guard(subject, machine);
+        if (bad) return bad;
+        const r = await call('GET', `/machines/${machine}/desk-turn?desk=${encodeURIComponent(desk)}`, subject, { signal });
+        if (!r.ok) return problem(r, 'the desk');
+        return { person_driving: !!(r.data && r.data.person_driving), last_person_at: (r.data && r.data.last_person_at) || null };
+    }
+
+    /** The person's page to watch a desk live and take it over (Bot's own screen page). */
+    const watchUrl = (machine, desk) => `${pages}/machines/${machine}/screen${desk && desk !== 'main' ? `?desk=${encodeURIComponent(desk)}` : ''}`;
+
+    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl };
 }
 
 module.exports = { createComputers };

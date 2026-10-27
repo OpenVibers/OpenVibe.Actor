@@ -1,5 +1,8 @@
 'use strict';
 
+// The most a task's clock waits for its person, in all (Desks plan D4: hand_to_person).
+const PERSON_WAIT_MAX_MS = 15 * 60_000;
+
 /**
  * The task engine: a queued task runs here, in the process that accepted it (no claims, no leases).
  *
@@ -84,8 +87,23 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             await store.addSpend(s, row.requester, v);
         };
         const budgetLeft = () => budget - spent;
-        const timer = setTimeout(() => { if (running.has(id)) running.get(id).abort('timeout'); }, config.taskTimeoutMs);
+        const abortAtEnd = () => { if (running.has(id)) running.get(id).abort('timeout'); };
+        let ends = Date.now() + config.taskTimeoutMs;
+        let timer = setTimeout(abortAtEnd, config.taskTimeoutMs);
         timer.unref();
+        // Desks plan D4: a task that handed its person a step on its desk (a sign-in, a CAPTCHA, a payment) waits for
+        // them; its clock waits too, up to PERSON_WAIT_MAX_MS in all. Answers how long it may wait (0: no more).
+        let waited = 0;
+        const waitForPerson = (ms) => {
+            const add = Math.max(0, Math.min(Number(ms) || 0, PERSON_WAIT_MAX_MS - waited));
+            if (!add) return 0;
+            waited += add;
+            ends += add;
+            clearTimeout(timer);
+            timer = setTimeout(abortAtEnd, Math.max(0, ends - Date.now()));
+            timer.unref();
+            return add;
+        };
         const explanation = [];
         const tried = new Map();
         // The quality tier a hand-off may not go below: the tier of the best agent tried so far (catalog quality).
@@ -141,7 +159,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 let out;
                 try {
                     // From chat the runtime is never offered the person's own robots or computers (no requester for its tools).
-                    out = await adapters.run[agentId]({ task: row.task, requester: fromChat ? null : row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }) });
+                    out = await adapters.run[agentId]({ task: row.task, requester: fromChat ? null : row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, waitForPerson, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }) });
                 } catch (err) {
                     if (signal.aborted) throw err;
                     const why = (err && err.message) || String(err);
