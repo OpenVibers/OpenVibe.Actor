@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const looks = require('./looks');
+const { createNotifier } = require('../notify/client');
 
 /**
  * What the OpenVibe runtime can do, as model tools — every one of them an OpenVibe service's public API, called the
@@ -53,8 +54,10 @@ const json = (v) => clip(JSON.stringify(v));
 /** The person a task is for, when it is a signed-in person ('user:usr_…' → 'usr_…'), else null. */
 const personOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
 
-function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null }) {
+function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null, notifier = null }) {
     const { searchUrl, toolsUrl } = config.services;
+    // Desks plan D4: "hand it to me" reaches the person through Network's notifications (server/notify/client.js).
+    const notify = notifier || createNotifier({ config, fetchImpl, log });
     const bot = robots || createRobots({ config, fetchImpl });
     const pcs = computers || createComputers({ config, fetchImpl });
     let catalog = null;
@@ -237,6 +240,9 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         const granted = waitForPerson ? waitForPerson(PERSON_WAIT_MS) : 0;
         if (!granted) return { done: false, note: 'This task has already waited for the person as long as it may: tell them in your answer what is left for them to do, with the link.', watch };
         if (emit) await emit({ step: 'text', text: `Needs you: ${what} Open your agent's desk, take it over, do it, then let go: ${watch}` });
+        // Wherever the person is (Network's bell, and a push when they allowed it), with the link to the desk. Best
+        // effort, never awaited by the wait below.
+        if (notify.enabled) notify.needsYou({ subject: person, what, url: watch }).catch(() => {});
         const started = Date.now();
         const end = started + granted;
         let took = false;

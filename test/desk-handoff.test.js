@@ -40,7 +40,10 @@ function botWith(turns) {
     };
     return { asked, fetchImpl };
 }
-const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }) });
+// Network notifications (Desks plan D4): recorded, never sent from these tests.
+const told = [];
+const notifier = { enabled: true, needsYou: async (n) => { told.push(n); return { sent: true }; } };
+const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }), notifier });
 
 (async () => {
     await check('hand_to_person: the person takes the desk and lets go, and the agent goes on (looking again first)', async () => {
@@ -66,6 +69,7 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         assert.strictEqual(said[0].step, 'text');
         assert.match(said[0].text, new RegExp(`^Needs you: Sign in to your Google account in the browser\\. .*https://openvibe\\.bot/machines/${PC}/screen\\?desk=${run.name}$`));
         assert.ok(bot.asked.every((d) => d === run.name), 'it watched the task\'s own desk');
+        assert.deepStrictEqual(told.at(-1), { subject: ME, what: 'Sign in to your Google account in the browser.', url: out.watch }, 'the person is told wherever they are, with the link');
     });
 
     await check('hand_to_person: nobody takes it, the clock may not wait, or there is nothing to do', async () => {
