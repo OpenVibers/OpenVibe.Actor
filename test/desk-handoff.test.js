@@ -123,6 +123,34 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'tool_result', tool: 'hand_to_person', text: '{"done":true}' });
         assert.strictEqual((await t.get(`/api/v1/tasks/${id}`, { as: bea })).json().needs_you, undefined, 'the person let go: nothing waits');
     });
+    await check('a running task shows the desk it works on, to watch and take over, on its record and its page; not after the desk stops', async () => {
+        const cy = t.network.addUser('desk-cy');
+        const id = t.ctx.s.newId('tsk');
+        await store.insertTask(t.ctx.s, { id, requester: `user:${cy.subject}`, task: 'Find a flight', mode: 'balanced', budget_task: 0.05, budget_day: 1, created_at: t.ctx.s.iso() });
+        const watch = `https://openvibe.bot/machines/${PC}/screen?desk=desk-0123456789`;
+        await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'plan', agent: 'openvibe-runtime', text: 'OpenVibe runtime takes it.' });
+        const before = await t.get(`/tasks/${id}`, { as: cy });
+        assert.ok(/<section class="desk-card" id="desk-card" aria-live="polite" hidden>/.test(before.text), 'no desk yet: the card waits, hidden');
+        assert.strictEqual((await t.get(`/api/v1/tasks/${id}`, { as: cy })).json().desk, undefined);
+        await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'tool_call', tool: 'computer_desk', input: `${PC}: ` });
+        await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'tool_result', tool: 'computer_desk', text: JSON.stringify({ watch, running: true, kind: 'browser', width: 1280, height: 800 }) });
+        assert.deepStrictEqual((await t.get(`/api/v1/tasks/${id}`, { as: cy })).json().desk, { url: watch, kind: 'browser' });
+        const during = await t.get(`/tasks/${id}`, { as: cy });
+        assert.ok(during.text.includes('<section class="desk-card" id="desk-card" aria-live="polite">'), 'shown');
+        assert.ok(during.text.includes('Watch and take over') && during.text.includes(' (a browser)'));
+        assert.ok(during.text.includes(`id="desk-link" href="${watch}"`) || during.text.includes(`id="desk-link" href="${watch.replace(/&/g, '&amp;')}"`));
+        // A failed start or a model's text never makes a desk; a stop ends it.
+        await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'tool_result', tool: 'computer_browser', text: JSON.stringify({ watch: 'https://evil.example/x', running: true }) });
+        assert.strictEqual((await t.get(`/api/v1/tasks/${id}`, { as: cy })).json().desk.url, watch, 'only computer_desk results count');
+        await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'tool_result', tool: 'computer_desk', text: JSON.stringify({ running: false }) });
+        assert.strictEqual((await t.get(`/api/v1/tasks/${id}`, { as: cy })).json().desk, undefined, 'stopped');
+        assert.deepStrictEqual(store.deskFrom([{ step: 'tool_result', tool: 'computer_desk', is_error: true, text: JSON.stringify({ watch, running: true }) }]), null, 'an error is no desk');
+        // A finished task shows none.
+        await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'tool_result', tool: 'computer_desk', text: JSON.stringify({ watch, running: true }) });
+        await store.updateTask(t.ctx.s, id, { state: 'succeeded', finished_at: t.ctx.s.iso() });
+        assert.strictEqual((await t.get(`/api/v1/tasks/${id}`, { as: cy })).json().desk, undefined);
+        assert.ok(!(await t.get(`/tasks/${id}`, { as: cy })).text.includes('desk-card'));
+    });
     await t.close();
     done();
 })();
