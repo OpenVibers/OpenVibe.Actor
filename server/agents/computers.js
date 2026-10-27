@@ -96,6 +96,8 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             ...(m.computer.desk && Array.isArray(m.computer.desk.kinds) ? { desk_kinds: m.computer.desk.kinds.filter((k) => DESK_KINDS.has(k)) } : {}),
             // It keeps the person's browser profile from desk to desk (Node v0.24.0): sign in once.
             ...(m.computer.desk && m.computer.desk.profiles === true ? { keeps_sign_ins: true } : {}),
+            // It runs programs on a desk (Node v0.26.0): computer_run with desk "private", and detach for an app.
+            ...(m.computer.terminal && m.computer.terminal.desks === true ? { apps_on_desk: true } : {}),
             folders: (m.computer.files && m.computer.files.roots) || [],
             ...(m.computer.waiting ? { waiting_for_approval: m.computer.waiting } : {}),
         }));
@@ -123,7 +125,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { path: r.data.path, size: r.data.size, offset: off, ...(binary ? { bytes: bytes.length, note: 'not text' } : { text }), truncated: !!r.data.truncated };
     }
 
-    async function run(subject, machine, argv, { cwd = null, timeoutS = null, signal } = {}) {
+    async function run(subject, machine, argv, { cwd = null, timeoutS = null, desk = null, detach = false, signal } = {}) {
         const bad = guard(subject, machine);
         if (bad) return bad;
         if (!Array.isArray(argv) || !argv.length || argv.length > 64 || !argv.every((a) => typeof a === 'string' && a.length && a.length <= 4096)) {
@@ -132,9 +134,16 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const value = { argv };
         if (cwd) value.cwd = String(cwd);
         if (Number.isInteger(timeoutS) && timeoutS > 0) value.timeout_s = Math.min(timeoutS, 600);
+        // On a desk (Node v0.26.0): its session, so a program's windows open there; detach keeps an app running there.
+        if (desk && desk !== 'main') value.desk = desk;
+        if (detach) {
+            if (!value.desk) return { error: 'detach is for your own desk only (desk "private"): an app is never left running on the person\'s screen' };
+            value.detach = true;
+        }
         const r = await command(subject, machine, 'exec', value, { signal, windowMs: ACT_WINDOW_MS });
         if (r.error) return r;
         const d = r.data;
+        if (d.started) return { started: true, pid: d.pid, note: 'It runs on your desk until the desk stops: look with computer_screen (desk "private") and use it with computer_input.' };
         return { exit_code: d.exit_code, stdout: d.stdout, stderr: d.stderr, truncated: !!d.truncated, timed_out: !!d.timed_out };
     }
 
