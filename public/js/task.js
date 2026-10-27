@@ -80,7 +80,9 @@
       var img = document.getElementById('last-look-img');
       img.removeAttribute('width');
       img.removeAttribute('height');
-      img.setAttribute('src', '/tasks/' + encodeURIComponent(id) + '/look?at=' + Date.now());
+      var src = '/tasks/' + encodeURIComponent(id) + '/look?at=' + Date.now();
+      img.setAttribute('src', src);
+      document.getElementById('last-look-link').setAttribute('href', src);
       lastLook.hidden = false;
     }
     function onOutput(e) {
