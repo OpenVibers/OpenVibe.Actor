@@ -219,7 +219,7 @@ const as = { requester: `user:${ME}` };
         assert.ok(defs.some((d) => d.function.name === 'computer_desk'), 'offered with the computer tools');
         ['computer_screen', 'computer_input', 'computer_browser'].forEach((n) => assert.deepStrictEqual(defs.find((d) => d.function.name === n).function.parameters.properties.desk.enum, ['main', 'private'], n));
         assert.deepStrictEqual(JSON.parse(await t.call('list_my_computers', {}, as)).computers[0].can, ['screen', 'input', 'browser', 'desk'], 'the model sees the machine has a desk');
-        assert.deepStrictEqual(JSON.parse(await t.call('computer_desk', { machine: PC, action: 'start', width: 1920, height: 1080 }, as)), { running: true, display: ':91', width: 1920, height: 1080 });
+        assert.deepStrictEqual(JSON.parse(await t.call('computer_desk', { machine: PC, action: 'start', width: 1920, height: 1080 }, as)), { watch: `https://openvibe.bot/machines/${PC}/screen?desk=private`, running: true, display: ':91', width: 1920, height: 1080 }, 'with the link to watch and take it over (Desks plan D4)');
         const started = bot.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1);
         assert.deepStrictEqual([started.subject, started.body.value, started.body.ms], [ME, { action: 'start', width: 1920, height: 1080 }, 120000], 'as the person, with time for an approval');
         const look = JSON.parse(await t.call('computer_screen', { machine: PC, question: 'What is open?', desk: 'private' }, as));
