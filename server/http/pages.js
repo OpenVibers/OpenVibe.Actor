@@ -22,6 +22,7 @@ const { markdown } = require('../render/markdown');
 const store = require('../tasks/store');
 const { createTask } = require('../tasks/create');
 const catalog = require('../agents/catalog');
+const looks = require('../agents/looks');
 const { MODES } = require('../agents/router');
 const seo = require('openvibe-shared/seo');
 
@@ -304,6 +305,15 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
     const STATE_TEXT = { queued: 'Waiting to start', running: 'Working', verifying: 'Checking the answer', succeeded: 'Done', failed: 'Didn\'t finish', cancelled: 'Cancelled' };
     const CLASS_TEXT = { answer: 'Answer', lookup: 'Lookup', research: 'Research', web: 'Web search', code: 'Code', robot: 'Your robot', computer: 'Your computer' };
 
+    // What the agent last saw (agents/looks.js): its task's owner only, never cached.
+    r.get('/tasks/:id/look', async (req, res) => {
+        const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
+        const look = row && row.requester === requesterOf(req) ? looks.get(row.id) : null;
+        if (!look) return res.status(404).type('text').send('No picture');
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.type(look.format === 'png' ? 'image/png' : 'image/jpeg').send(look.data);
+    });
+
     r.get('/tasks/:id', async (req, res) => {
         const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
         if (!row || row.requester !== requesterOf(req)) {
@@ -316,6 +326,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         const cls = (events.find((e) => e.step === 'plan' && !e.agent && /"(\w+)" task/.test(e.text || '')) || { text: '' }).text.match(/"(\w+)"/);
         const kind = cls ? CLASS_TEXT[cls[1]] || cls[1] : null;
         const desk = open ? store.deskFrom(events) : null;
+        const look = looks.get(row.id);
         page(req, res, {
             title: row.task.length > 60 ? `${row.task.slice(0, 59)}…` : row.task,
             crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task' }],
@@ -333,6 +344,10 @@ ${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk
 <p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
 <a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
 </section>` : ''}
+${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(' hidden')}>
+<img id="last-look-img" src="${look ? `/tasks/${row.id}/look?at=${look.at}` : ''}" alt="The screen your agent last looked at"${look && look.width ? raw(` width="${Number(look.width)}" height="${Number(look.height)}"`) : ''} loading="lazy">
+<figcaption class="muted small">What your agent last saw on the screen${look ? html` · ${time(new Date(look.at).toISOString())}` : ''}</figcaption>
+</figure>` : ''}
 <section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
 <div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div>
 ${open ? html`<p class="muted small live-note" id="live-note"><span class="dot-pulse" aria-hidden="true"></span> Updating as the agent works.</p>` : ''}

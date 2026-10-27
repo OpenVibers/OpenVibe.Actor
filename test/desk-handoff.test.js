@@ -151,6 +151,30 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         assert.strictEqual((await t.get(`/api/v1/tasks/${id}`, { as: cy })).json().desk, undefined);
         assert.ok(!(await t.get(`/tasks/${id}`, { as: cy })).text.includes('desk-card'));
     });
+    await check('what the agent last saw: its last screen picture on the owner\'s task page, nowhere else, in memory only', async () => {
+        const looks = require('../server/agents/looks');
+        const dee = t.network.addUser('desk-dee');
+        const eve = t.network.addUser('desk-eve');
+        const id = t.ctx.s.newId('tsk');
+        await store.insertTask(t.ctx.s, { id, requester: `user:${dee.subject}`, task: 'Check the form', mode: 'balanced', budget_task: 0.05, budget_day: 1, created_at: t.ctx.s.iso() });
+        assert.strictEqual((await t.get(`/tasks/${id}/look`, { as: dee })).status, 404, 'no look yet');
+        const before = await t.get(`/tasks/${id}`, { as: dee });
+        assert.ok(/<figure class="last-look" id="last-look" hidden>/.test(before.text), 'the picture waits, hidden, while the task runs');
+        const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+        assert.ok(looks.put(id, { format: 'jpeg', width: 1280, height: 800, content_b64: jpeg.toString('base64') }));
+        const img = await t.get(`/tasks/${id}/look`, { as: dee });
+        assert.strictEqual(img.status, 200);
+        assert.match(img.headers['content-type'] || (img.headers.get && img.headers.get('content-type')) || '', /^image\/jpeg/);
+        assert.match(img.headers['cache-control'] || (img.headers.get && img.headers.get('cache-control')) || '', /no-store/);
+        assert.strictEqual((await t.get(`/tasks/${id}/look`, { as: eve })).status, 404, 'someone else never sees it');
+        assert.strictEqual((await t.get(`/tasks/${id}/look`)).status, 404, 'nor someone signed out');
+        const page = await t.get(`/tasks/${id}`, { as: dee });
+        assert.ok(page.text.includes('<figure class="last-look" id="last-look">') && page.text.includes('width="1280" height="800"'));
+        assert.ok(page.text.includes('What your agent last saw on the screen'));
+        // Kept in memory for a while, then gone; never more than MAX tasks.
+        assert.strictEqual(looks.get(id, Date.now() + looks.KEEP_MS + 1), null);
+        assert.strictEqual(looks.put('tsk_x', { content_b64: '' }), false, 'an empty picture is not kept');
+    });
     await t.close();
     done();
 })();

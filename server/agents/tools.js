@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const looks = require('./looks');
 
 /**
  * What the OpenVibe runtime can do, as model tools — every one of them an OpenVibe service's public API, called the
@@ -143,11 +144,13 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     }
 
     /** One look at a computer's screen: the picture to the vision model with the question, its answer back. */
-    async function lookAtScreen(person, a, { signal, meter, budgetLeft }) {
+    async function lookAtScreen(person, a, { signal, meter, budgetLeft, desks = null }) {
         if (!vision) return { error: 'no vision model is configured on this server, so the screen cannot be read' };
         if (budgetLeft && budgetLeft() <= 0) return { error: 'the task reached its budget' };
         const shot = await pcs.screen(person, a.machine, { signal, desk: a.desk && a.desk !== 'main' ? a.desk : 'main' });
         if (shot.error) return shot;
+        // What the agent last saw, for the person's own task page (in memory only).
+        if (desks && desks.taskId) looks.put(desks.taskId, shot);
         const question = String(a.question || '').trim().slice(0, 500) || 'Describe what is on the screen: the windows, what each shows, and any message or error in full.';
         const r = await vision({
             messages: [
@@ -166,8 +169,8 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
      * other's screen, browser or files; elsewhere it is the machine's one private desk, as before. close() stops every
      * desk the run used. A model's own desk name is refused, so a run can never reach another task's desk.
      */
-    function deskRun() {
-        return { name: `desk-${crypto.randomBytes(5).toString('hex')}`, named: null, kinds: new Map(), keeps: new Set(), used: new Set() };
+    function deskRun(taskId = null) {
+        return { name: `desk-${crypto.randomBytes(5).toString('hex')}`, taskId, named: null, kinds: new Map(), keeps: new Set(), used: new Set() };
     }
 
     async function deskFor(run, person, machine, { signal } = {}) {
@@ -267,7 +270,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                 if (name === 'computer_list') return json(await pcs.list(person, a.machine, a.path, { signal }));
                 if (name === 'computer_read') return json(await pcs.read(person, a.machine, a.path, { offset: a.offset, signal }));
                 if (name === 'computer_run') return json(await pcs.run(person, a.machine, a.argv, { cwd: a.cwd, timeoutS: a.timeout_s, signal }));
-                if (name === 'computer_screen') return json(await lookAtScreen(person, a, { signal, meter, budgetLeft }));
+                if (name === 'computer_screen') return json(await lookAtScreen(person, a, { signal, meter, budgetLeft, desks }));
                 if (name === 'computer_input') return json(await pcs.input(person, a.machine, a, { signal }));
                 if (name === 'computer_browser') return json(await pcs.browser(person, a.machine, a, { signal }));
                 if (name === 'computer_desk') {
