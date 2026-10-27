@@ -87,6 +87,30 @@ async function needsYou(s, row) {
     return { seq: Number(e.seq), what: text.replace(/\s*Open your agent's desk.*$/s, '').trim().slice(0, 300), url };
 }
 
+/**
+ * The desk a running task works on now (Desks plan: Watch and Take over), from its own computer_desk results: a start
+ * answers {"watch": <the person's page for that desk on OpenVibe.Bot>, "running": true, "kind"?}, a stop
+ * {"running": false}. Tool results come from Actor's own tools, never from the model. → { url, kind } or null.
+ */
+const DESK_WATCH = /^\{"watch":"(https:\/\/[^"\\\s]{1,300})"/;
+function deskFrom(events) {
+    let desk = null;
+    for (const e of events) {
+        if (!e || e.step !== 'tool_result' || e.tool !== 'computer_desk' || e.is_error) continue;
+        const t = String(e.text || '');
+        const m = DESK_WATCH.exec(t);
+        if (m && /"running":true/.test(t)) desk = { url: m[1], kind: (/"kind":"(browser|desktop)"/.exec(t) || [])[1] || null };
+        else if (/"running":false/.test(t)) desk = null;
+    }
+    return desk;
+}
+
+async function taskDesk(s, row) {
+    if (!row || !OPEN.includes(row.state)) return null;
+    const rows = await s.db.many('SELECT body FROM task_events WHERE task_id = $1 ORDER BY seq DESC LIMIT 200', [row.id]);
+    return deskFrom(rows.map((r) => parse(r.body)).reverse());
+}
+
 async function eventsAfter(s, taskId, after = 0) {
     const rows = await s.db.many('SELECT body FROM task_events WHERE task_id = $1 AND seq > $2 ORDER BY seq', [taskId, after]);
     return rows.map((r) => parse(r.body));
@@ -181,4 +205,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS };

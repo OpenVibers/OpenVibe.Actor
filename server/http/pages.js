@@ -315,6 +315,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         const open = store.OPEN.includes(row.state);
         const cls = (events.find((e) => e.step === 'plan' && !e.agent && /"(\w+)" task/.test(e.text || '')) || { text: '' }).text.match(/"(\w+)"/);
         const kind = cls ? CLASS_TEXT[cls[1]] || cls[1] : null;
+        const desk = open ? store.deskFrom(events) : null;
         page(req, res, {
             title: row.task.length > 60 ? `${row.task.slice(0, 59)}…` : row.task,
             crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task' }],
@@ -328,6 +329,10 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
 <h1 class="task-text">${row.task}</h1>
 </header>
 ${outcome(t, row)}
+${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
+<p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
+<a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
+</section>` : ''}
 <section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
 <div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div>
 ${open ? html`<p class="muted small live-note" id="live-note"><span class="dot-pulse" aria-hidden="true"></span> Updating as the agent works.</p>` : ''}

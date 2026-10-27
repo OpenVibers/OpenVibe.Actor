@@ -60,7 +60,21 @@
       li.appendChild(v);
       current.appendChild(li);
     }
+    // The desk it works on (Desks plan): a computer_desk start shows "Watch and take over", its stop hides it.
+    var deskCard = document.getElementById('desk-card');
+    var deskWatch = new RegExp('^\\{"watch":"(' + bot + '/machines/dev_[0-9A-HJKMNP-TV-Z]{26}/screen(?:\\?desk=[a-z0-9-]{1,40})?)"');
+    function onDesk(e) {
+      if (!deskCard || e.step !== 'tool_result' || e.tool !== 'computer_desk' || e.is_error) return;
+      var t = String(e.text || '');
+      var m = deskWatch.exec(t);
+      if (m && /"running":true/.test(t)) {
+        document.getElementById('desk-link').setAttribute('href', m[1]);
+        document.getElementById('desk-kind').textContent = /"kind":"browser"/.test(t) ? ' (a browser)' : '';
+        deskCard.hidden = false;
+      } else if (/"running":false/.test(t)) deskCard.hidden = true;
+    }
     function onOutput(e) {
+      onDesk(e);
       if ((e.step === 'plan' || e.step === 'handoff') && e.agent) return attempt((e.text || e.agent).replace(/ takes it.*$/, ''));
       if (e.step === 'plan') return undefined;
       if (e.step === 'check') {

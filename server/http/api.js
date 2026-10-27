@@ -177,6 +177,9 @@ function createApi(ctx) {
         // Waiting for its person on its desk (Desks plan D4): what, and the link to the desk.
         const needs = await store.needsYou(s, row);
         if (needs) out.needs_you = needs;
+        // The desk it works on now, to watch live and take over (Desks plan).
+        const desk = await store.taskDesk(s, row);
+        if (desk) out.desk = desk;
         res.json(out);
     });
 

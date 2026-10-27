@@ -124,6 +124,9 @@ button.sc-btn.sc-primary { border: 0; }
 .tl-err::before { border-color: var(--warning, #f59e0b); }
 .tl-err .tl-k { color: var(--warning-text, var(--warning, #f59e0b)); }
 /* Desks plan D4: the agent handed its person a step (a sign-in, a CAPTCHA): the one item that asks for them. */
+.desk-card { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 0 0 18px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 40%, transparent); }
+.desk-card[hidden] { display: none; }
+.desk-card p { margin: 0; flex: 1 1 260px; }
 .tl-needs { padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent); }
 .tl-needs::before { border-color: var(--accent, #3b82f6); background: var(--accent, #3b82f6); left: -19px; }
 .tl-needs .tl-k { color: var(--accent-light, #60a5fa); }
