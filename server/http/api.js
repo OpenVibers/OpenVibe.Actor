@@ -172,7 +172,12 @@ function createApi(ctx) {
 
     r.get('/tasks/:id', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
         const row = await load(req, res);
-        if (row) res.json(wire(row));
+        if (!row) return;
+        const out = wire(row);
+        // Waiting for its person on its desk (Desks plan D4): what, and the link to the desk.
+        const needs = await store.needsYou(s, row);
+        if (needs) out.needs_you = needs;
+        res.json(out);
     });
 
     r.get('/tasks/:id/events', principal.requireCapability('actor.task.read'), limits.budget('actor.task.stream'), async (req, res) => {
