@@ -46,7 +46,7 @@ let RELEASE = 'dev';
 function setRelease(id) { if (id) RELEASE = String(id); }
 
 /**
- * o: title, description, body (html), viewer, config, path, index (default false), scripts [rel],
+ * o: title, description, body (html), viewer, config, path, index (default false), scripts [rel], sharedScripts [openvibe-shared file names],
  *    crumbs [{ label, href }], jsonLd [nodes] (serialised by openvibe-shared/seo), styles [openvibe-shared stylesheet names]
  */
 function renderPage(o) {
@@ -77,7 +77,7 @@ function renderPage(o) {
     const crumbs = (o.crumbs || []).length
         ? html`<nav class="crumbs" aria-label="Breadcrumbs">${o.crumbs.map((c, i) => html`${i ? ' / ' : ''}${c.href ? html`<a href="${c.href}">${c.label}</a>` : c.label}`)}</nav>`
         : '';
-    const scripts = (o.scripts || []).map((rel) => html`<script src="${asset(rel)}" defer></script>`);
+    const scripts = (o.sharedScripts || []).map((name) => html`<script src="${ovServe.url(name)}" defer></script>`).concat((o.scripts || []).map((rel) => html`<script src="${asset(rel)}" defer></script>`));
     return shell.page({
         name: SITE_NAME,
         lang: 'en',

@@ -334,7 +334,10 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         page(req, res, {
             title: row.task.length > 60 ? `${row.task.slice(0, 59)}…` : row.task,
             crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task' }],
-            scripts: open ? ['js/task.js'] : [],
+            // How it went is the agents' session (openvibe-shared/agent-session.js, js/task.js mounts it from the events
+            // below and, while the task runs, from its live stream); the attempts drawn here stay for a page without scripts.
+            scripts: ['js/task.js'],
+            sharedScripts: ['agent-session.js'],
             styles: [showcase.STYLESHEET],
             noReferrer: true,
             body: html`${open ? raw('<noscript><meta http-equiv="refresh" content="4"></noscript>') : ''}
@@ -354,6 +357,7 @@ ${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(
 </figure>` : ''}
 <section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
 <div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div>
+<script type="application/json" id="task-events">${raw(JSON.stringify(events.slice(-3000)).replace(/</g, '\\u003c'))}</script>
 ${open ? html`<p class="muted small live-note" id="live-note"><span class="dot-pulse" aria-hidden="true"></span> Updating as the agent works.</p>` : ''}
 </section>
 ${t.explanation ? explanationBlock(t.explanation) : ''}
