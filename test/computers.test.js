@@ -387,6 +387,43 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
     });
 
+    await check('a desk on a desk host when none of the person\'s computers has one (Desks plan D6, OpenVibe.Run sessions)', async () => {
+        const SES = 'ses_01JD2C3D4E5F6G7H8J9K0MNPQR';
+        const runCalls = [];
+        const bot = fakeBot({ machines: [] });   // no computer open to the agent
+        const inner = bot.fetchImpl;
+        bot.fetchImpl = async (url, init = {}) => {
+            const u = new URL(url);
+            if (u.host !== 'run.test') return inner(url, init);
+            const body = init.body ? JSON.parse(init.body) : null;
+            runCalls.push({ method: init.method || 'GET', path: u.pathname, subject: (init.headers || {})['X-OV-Subject'], body });
+            const session = (state) => ({ id: SES, state, owner: { type: 'user', id: ME } });
+            const reply = (status, b) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } });
+            if (u.pathname === '/api/v1/sessions' && init.method === 'POST') return reply(201, session('running'));
+            if (u.pathname === `/api/v1/sessions/${SES}/commands`) return reply(200, { session_id: SES, id: 'c', result: 'ack', state: 'running', data: { url: body.value.url || 'https://example.org/', title: 'Example', text: 'hello', truncated: false, links: [] } });
+            if (u.pathname === `/api/v1/sessions/${SES}/end`) return reply(200, session('ended'));
+            return reply(404, { code: 'run.session.not_found' });
+        };
+        const cfg = { ...config, services: { ...config.services, runUrl: 'http://run.test' } };
+        const t = createOpenVibeTools({ config: cfg, fetchImpl: bot.fetchImpl, robots: createRobots({ config: cfg, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config: cfg, fetchImpl: bot.fetchImpl, tokens }), vision: async () => ({ text: 'x', cost_usd: 0 }) });
+        const run = t.deskRun('tsk_1');
+        const placed = JSON.parse(await t.call('computer_desk', { machine: 'any', action: 'start' }, { ...as, desks: run }));
+        assert.deepStrictEqual([placed.machine, placed.running, placed.kind], [`run:${SES}`, true, 'browser'], JSON.stringify(placed));
+        assert.deepStrictEqual(runCalls[0].body, { kind: 'browser', ttl_s: 3600, idle_s: 900, idempotency_key: 'actor:tsk_1' });
+        assert.strictEqual(runCalls[0].subject, ME, 'as the person');
+        const page = JSON.parse(await t.call('computer_browser', { machine: 'any', action: 'open', url: 'https://example.org/a', desk: 'private' }, { ...as, desks: run }));
+        assert.strictEqual(page.title, 'Example');
+        const sent = runCalls.find((c) => c.path.endsWith('/commands'));
+        assert.deepStrictEqual(sent.body, { kind: 'browser', value: { action: 'open', url: 'https://example.org/a' } }, 'Run names the desk: Actor never does');
+        assert.match(JSON.parse(await t.call('computer_run', { machine: `run:${SES}`, argv: ['id'] }, { ...as, desks: run })).error, /browser only/);
+        assert.ok(!JSON.parse(await t.call('hand_to_person', { machine: 'any', what: 'Sign in.' }, { ...as, desks: run })).watch, 'no take-over link for a desk host');
+        await t.closeDesks(run, as.requester);
+        assert.ok(runCalls.some((c) => c.path === `/api/v1/sessions/${SES}/end`), 'the session ends with the task');
+        // Without Run (no runUrl), the old answer stands.
+        const off = createOpenVibeTools({ config, fetchImpl: bot.fetchImpl, robots: createRobots({ config, fetchImpl: bot.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: bot.fetchImpl, tokens }) });
+        assert.match(JSON.parse(await off.call('computer_desk', { machine: 'any', action: 'start' }, { ...as, desks: off.deskRun() })).error, /none of the person's computers runs desks/);
+    });
+
     await check('off without a Bot URL or a client secret', async () => {
         assert.strictEqual(createComputers({ config: { ...config, services: { ...config.services, botUrl: '' } } }).enabled, false);
         assert.strictEqual(createComputers({ config: { ...config, oauth: { clientId: 'actor', clientSecret: '' } } }).enabled, false);

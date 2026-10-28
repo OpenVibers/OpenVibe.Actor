@@ -89,6 +89,9 @@ function load(env = process.env) {
             // OpenVibe.Codes: the `codes` agent runs a person's coding task on their own machine. Empty turns it off.
             codesUrl: trim(env.ACTOR_CODES_URL != null ? env.ACTOR_CODES_URL : (selfHosted ? '' : 'http://127.0.0.1:4900')),
             codesPublicUrl: trim(env.ACTOR_CODES_PUBLIC_URL || 'https://openvibe.codes'),
+            // OpenVibe.Run: a browser session on a desk host when none of the person's own machines has a desk for the
+            // task (Desks plan D6). Empty turns it off.
+            runUrl: trim(env.ACTOR_RUN_URL != null ? env.ACTOR_RUN_URL : (selfHosted ? '' : 'http://127.0.0.1:4920')),
         },
 
         // What one person may spend without paying (plan T17: "free tier from the bounded allowance"), and the

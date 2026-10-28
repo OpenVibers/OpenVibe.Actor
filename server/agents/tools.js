@@ -220,6 +220,10 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
 
     async function closeDesks(run, requester) {
         const person = personOf(requester);
+        if (run && person && pcs.isSession && pcs.isSession(run.placed)) {
+            await pcs.endSession(person, run.placed).catch(() => null);   // the task's desk on a desk host ends with it
+            run.placed = null;
+        }
         if (!run || !person || !run.used.size) return;
         await Promise.all([...run.used].map((machine) => pcs.desk(person, machine, { action: 'stop', desk: run.name }).catch(() => null)));
         run.used.clear();
@@ -279,12 +283,22 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                     if (desks && desks.placed) a = { ...a, machine: desks.placed };
                     else if (name === 'computer_desk' && a.action === 'start') {
                         const order = await placementOrder(person, { signal });
-                        if (!order.length) return json({ error: 'none of the person\'s computers runs desks for you now: it needs OpenVibe Node v0.19.0 or newer, online, with "Let my agent use this computer" on' });
                         let out = null;
                         for (const id of order.slice(0, 4)) {
                             out = JSON.parse(await call(name, { ...a, machine: id }, { signal, requester, meter, budgetLeft, desks, emit, waitForPerson }));
                             if (!(out && out.error && /limit|max_desks|already runs/i.test(out.error))) return json(out && !out.error ? { machine: id, ...out } : out);
                         }
+                        // None of the person's own machines has room (or none runs desks): a browser desk on a desk host,
+                        // through an OpenVibe.Run session (Desks plan D6), for browser work only.
+                        if (pcs.sessionsOn && (a.kind == null || a.kind === 'browser')) {
+                            const ses = await pcs.openSession(person, { taskId: desks && desks.taskId, width: a.width, height: a.height, signal });
+                            if (!ses.error) {
+                                if (desks) desks.placed = ses.machine;
+                                return json({ machine: ses.machine, running: true, kind: 'browser', where: 'a desk host (none of your own computers had a desk free)', note: 'A browser alone, on a machine that is not the person\'s: computer_browser, computer_screen and computer_input work there with machine "any"; no programs or files. It ends with the task.' });
+                            }
+                            if (!order.length) return json({ error: `none of the person's computers runs desks for you now, and ${ses.error}` });
+                        }
+                        if (!order.length) return json({ error: 'none of the person\'s computers runs desks for you now: it needs OpenVibe Node v0.19.0 or newer, online, with "Let my agent use this computer" on' });
                         return json({ error: `every computer of the person's that runs desks is full right now (${out.error})` });
                     } else return json({ error: 'no desk of yours runs yet: start one with computer_desk start and machine "any"' });
                 }
@@ -317,9 +331,13 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                         if (a.action === 'stop' && desks.placed === a.machine) desks.placed = null;
                     }
                     // The person can watch the task's desk live and take it over (Desks plan D4): the link comes first.
-                    return json(out && out.running && a.action !== 'stop' ? { watch: pcs.watchUrl(a.machine, a.desk), ...out } : out);
+                    return json(out && out.running && a.action !== 'stop' && !(pcs.isSession && pcs.isSession(a.machine)) ? { watch: pcs.watchUrl(a.machine, a.desk), ...out } : out);
                 }
-                if (name === 'hand_to_person') return json(await handToPerson(person, a, { signal, desks, emit, waitForPerson }));
+                if (name === 'hand_to_person') {
+                    // A desk on a desk host (an OpenVibe.Run session) is not the person's to take over yet.
+                    if (pcs.isSession && pcs.isSession(a.machine === 'any' && desks ? desks.placed : a.machine)) return json({ done: false, note: 'Your desk is on a desk host, which the person cannot take over from here: tell them in your answer what is left for them to do, and where.' });
+                    return json(await handToPerson(person, a, { signal, desks, emit, waitForPerson }));
+                }
                 return json(await pcs.write(person, a.machine, a.path, a.text, { mode: a.mode || 'create', signal }));
             }
             if (name === 'search_openvibe') return json(await searchOpenVibe(a.query, { signal }));

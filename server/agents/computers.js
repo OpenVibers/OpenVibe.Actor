@@ -26,6 +26,9 @@
 const { serviceAuth } = require('openvibe-contracts');
 
 const MACHINE_ID = /^dev_[0-9A-HJKMNP-TV-Z]{26}$/;
+// A desk on a desk host, through an OpenVibe.Run session (Desks plan D6): the task's "machine" is then run:<session id>.
+const SESSION_MACHINE = /^run:(ses_[0-9A-HJKMNP-TV-Z]{26})$/;
+const SESSION_KINDS = new Set(['screen', 'input', 'browser']);
 const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 // A command waits on the machine for its owner's approval at level "ask", then runs: two minutes, inside a task's three.
 const ACT_WINDOW_MS = 120_000;
@@ -58,6 +61,58 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         audience: 'openvibe.bot', scope: 'bot.computer.control', fetchImpl,
     });
 
+    // OpenVibe.Run's sessions (contracts 0.223.0): a browser desk on a desk host for the person, when none of their own
+    // machines has one. Run's own service token (audience openvibe.run), naming the person in X-OV-Subject.
+    const runBase = config.services.runUrl;
+    const sessionsOn = !!(runBase && (tokensOverride || config.oauth.clientSecret));
+    const runTokens = !sessionsOn ? null : (tokensOverride || serviceAuth.createTokenClient({
+        tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.run', scope: 'run.session.create run.session.read run.session.control', fetchImpl,
+    }));
+    async function runCall(method, path, subject, { body, signal, timeoutMs = 15_000 } = {}) {
+        const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+        const res = await fetchImpl(`${runBase}/api/v1${path}`, {
+            method,
+            headers: { Accept: 'application/json', 'X-OV-Subject': subject, ...(body ? { 'Content-Type': 'application/json' } : {}), ...(await runTokens.authHeaders()) },
+            body: body ? JSON.stringify(body) : undefined, signal: sig,
+        });
+        const data = await res.json().catch(() => null);
+        return { status: res.status, ok: res.ok, data };
+    }
+    const runProblem = (r, what) => ({ error: (r.data && (r.data.detail || r.data.title)) || `Run answered ${r.status} for ${what}`, code: (r.data && r.data.code) || null });
+    const pause = (ms, signal) => new Promise((resolve) => { const t = setTimeout(resolve, ms); if (signal) signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true }); });
+    /**
+     * A browser session for the person on a desk host (Desks plan D6), started and waited for until its desk runs (at
+     * most 45 s). → { machine: 'run:ses_…', session } or { error }
+     */
+    async function openSession(subject, { taskId = null, ttlS = 3600, width, height, signal } = {}) {
+        if (!sessionsOn) return { error: 'no desk host is reachable from here (OpenVibe.Run sessions are off)' };
+        if (!USER_SUBJECT.test(subject)) return { error: 'a session is only for a signed-in person' };
+        const body = { kind: 'browser', ttl_s: Math.min(14400, Math.max(60, Math.round(ttlS))), idle_s: 900,
+            ...(Number.isInteger(width) ? { width } : {}), ...(Number.isInteger(height) ? { height } : {}),
+            ...(taskId ? { idempotency_key: `actor:${taskId}` } : {}) };
+        const made = await runCall('POST', '/sessions', subject, { body, signal });
+        if (!made.ok) return runProblem(made, 'a browser session');
+        let s = made.data;
+        const until = Date.now() + 45_000;
+        while (s && s.state !== 'running' && s.state !== 'ended' && Date.now() < until && !(signal && signal.aborted)) {
+            await pause(1000, signal);
+            const r = await runCall('GET', `/sessions/${s.id}`, subject, { signal });
+            if (r.ok) s = r.data;
+        }
+        if (!s || s.state !== 'running') {
+            if (s && s.state !== 'ended') await runCall('POST', `/sessions/${s.id}/end`, subject, { signal }).catch(() => null);
+            return { error: s && s.end ? `no desk host could take a browser desk now (${s.end.reason})` : 'no desk host took a browser desk in time' };
+        }
+        return { machine: `run:${s.id}`, session: s };
+    }
+    async function endSession(subject, machine, { signal } = {}) {
+        const m = SESSION_MACHINE.exec(String(machine || ''));
+        if (!m || !sessionsOn) return { error: 'not a session desk' };
+        const r = await runCall('POST', `/sessions/${m[1]}/end`, subject, { signal });
+        return r.ok ? { running: false, stopped: true } : runProblem(r, 'ending the session');
+    }
+
     async function call(method, path, subject, { body, signal, timeoutMs = 15_000 } = {}) {
         const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
         const res = await fetchImpl(`${base}/api/v1${path}`, {
@@ -71,11 +126,24 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
     const problem = (r, what) => ({ error: (r.data && (r.data.detail || r.data.title)) || `Bot answered ${r.status} for ${what}`, code: (r.data && r.data.code) || null });
     const guard = (subject, machine) => {
         if (!USER_SUBJECT.test(subject)) return { error: 'computers are only for a signed-in person' };
+        if (SESSION_MACHINE.test(String(machine || ''))) return null;   // the task's desk on a desk host (command() checks the kind)
         if (!MACHINE_ID.test(String(machine || ''))) return { error: 'machine must be a machine id from list_my_computers (dev_…)' };
         return null;
     };
     /** One command through Bot; the machine's answer, or its refusal (a nack's reason), as an error. */
     async function command(subject, machine, kind, value, { signal, windowMs }) {
+        const ses = SESSION_MACHINE.exec(String(machine || ''));
+        if (ses) {
+            // A desk on a desk host: only its page (screen, input, browser), through Run, which names the desk itself.
+            if (!SESSION_KINDS.has(kind)) return { error: 'your desk is on a desk host, which runs a browser only: no programs or files there' };
+            const { desk: _desk, ...rest } = value || {};
+            const r = await runCall('POST', `/sessions/${ses[1]}/commands`, subject, { body: { kind, value: rest }, signal, timeoutMs: windowMs + 10_000 });
+            if (!r.ok) return runProblem(r, `the ${kind} command`);
+            if (r.data.result === 'ack') return { data: r.data.data || {} };
+            if (r.data.state === 'ended') return { error: 'your desk on the desk host has ended (its time ran out or its host went away): start a new one with computer_desk start and machine "any"' };
+            if (r.data.result === 'expired') return { error: 'the desk host did not answer in time' };
+            return { error: r.data.reason || `the desk host refused it (${r.data.result})` };
+        }
         const r = await call('POST', `/machines/${machine}/commands`, subject, { body: { kind, value, ms: windowMs }, signal, timeoutMs: windowMs + 10_000 });
         if (!r.ok) return problem(r, `the ${kind} command`);
         if (r.data.result === 'ack') return { data: r.data.data || {} };
@@ -269,6 +337,11 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const bad = guard(subject, machine);
         if (bad) return bad;
         const a = args && typeof args === 'object' ? args : {};
+        if (SESSION_MACHINE.test(String(machine))) {
+            if (a.action === 'stop') return endSession(subject, machine, { signal });
+            if (a.action === 'status') return { running: true, where: 'a desk host (OpenVibe.Run session)' };
+            return { error: 'your desk on the desk host runs already' };
+        }
         if (!DESK_ACTIONS.has(a.action)) return { error: 'action is start, stop or status' };
         const value = { action: a.action, ...(DESK_NAME.test(String(a.desk || '')) ? { desk: a.desk } : {}) };
         if (a.action === 'start' && typeof a.profile === 'string' && /^[a-z0-9][a-z0-9-]{0,23}$/.test(a.profile)) value.profile = a.profile;
@@ -299,7 +372,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
     /** The person's page to watch a desk live and take it over (Bot's own screen page). */
     const watchUrl = (machine, desk) => `${pages}/machines/${machine}/screen${desk && desk !== 'main' ? `?desk=${encodeURIComponent(desk)}` : ''}`;
 
-    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl };
+    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, openSession, endSession, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
 }
 
 module.exports = { createComputers };
