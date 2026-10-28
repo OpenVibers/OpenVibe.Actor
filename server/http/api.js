@@ -24,8 +24,11 @@ const { heuristic } = require('../agents/classify');
 const { route, MODES } = require('../agents/router');
 const { createTask } = require('../tasks/create');
 const personal = require('../agents/personal');
+const approvals = require('../agents/approvals');
+const items = require('../actions/items');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
+const USER_ID = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 function createApi(ctx) {
     const { config, s, engine, stream, principal, limits, webhooks } = ctx;
@@ -35,6 +38,48 @@ function createApi(ctx) {
     r.use(express.json({ limit: '64kb' }));
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
     r.use(principal.middleware);
+
+    // An Action Center read is a first-party service acting for one person, named in the query. A person's own token
+    // never reaches another person's items through it.
+    const isService = (p) => Boolean(p && p.kind === 'app' && p.claims && String(p.claims.sub || '').startsWith('svc:') && p.claims.actor_type === 'service');
+
+    // ── The Action Center (plan 2026-10-28 §3.10) ────────────
+    r.get('/actions', principal.requireCapability('actor.actions.read'), limits.reads('actor.actions.read'), async (req, res) => {
+        if (!isService(req.principal)) return problem(req, res, 403, 'capability.denied', 'actor.actions.read is for first-party services');
+        const subject = String(req.query.subject || '').trim();
+        if (!USER_ID.test(subject)) return problem(req, res, 400, 'subject.invalid', 'subject must be a usr_… subject id');
+        const requester = `user:${subject}`;
+        const cutoff = new Date(s.now() - 30 * 86_400_000).toISOString();
+        const rows = await s.db.many(`SELECT t.*, le.at AS last_at, le.body AS last_event,
+                (SELECT count(*) FROM task_events e WHERE e.task_id = t.id AND e.body->>'step' = 'tool_call') AS tool_steps
+            FROM tasks t
+            LEFT JOIN LATERAL (SELECT body, body->>'at' AS at FROM task_events e WHERE e.task_id = t.id ORDER BY e.seq DESC LIMIT 1) le ON true
+            WHERE t.requester = $1 AND (t.state = ANY($2) OR COALESCE(t.finished_at, t.created_at) >= $3)
+            ORDER BY COALESCE(t.finished_at, le.at, t.created_at) DESC
+            LIMIT 50`, [requester, store.OPEN, cutoff]);
+        const tasks = rows.map((row) => items.taskItem(row, { lastEvent: store.parseJson(row.last_event), steps: Number(row.tool_steps) }));
+        const asks = (await approvals.list(s, requester))
+            .filter((a) => a.state === 'pending')
+            .map(items.approvalItem);
+        const scheduled = (await personal.list(s, requester))
+            .filter((a) => a.status === 'active' && a.schedule !== 'off' && a.next_run_at)
+            .map(items.scheduledItem);
+        const all = [...tasks, ...asks, ...scheduled].sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : a.id < b.id ? 1 : -1));
+        res.json({ items: all.slice(0, 50) });
+    });
+
+    // The same decision the person makes on /me/approvals, for the service acting from the Action Center. Deciding an
+    // already-decided request answers its current state (idempotent), never a conflict.
+    r.post('/approvals/:id/decide', principal.requireCapability('actor.approval.decide'), limits.budget('actor.approval.decide'), async (req, res) => {
+        if (!isService(req.principal)) return problem(req, res, 403, 'capability.denied', 'actor.approval.decide is for first-party services');
+        const subject = String(req.get('x-ov-subject') || '').trim();
+        if (!USER_ID.test(subject)) return problem(req, res, 400, 'subject.invalid', 'X-OV-Subject must be the approval owner\'s usr_… subject id');
+        const decision = String((req.body || {}).decision || '');
+        if (!['approve', 'decline'].includes(decision)) return problem(req, res, 422, 'actor.approval.invalid', 'decision must be approve or decline');
+        const out = await approvals.decide(ctx, `user:${subject}`, req.params.id, decision, { idempotent: true });
+        if (out.error) return problem(req, res, out.status, out.status === 404 ? 'actor.approval.not_found' : 'actor.approval.invalid', out.error);
+        res.json(items.approvalItem(out.row));
+    });
 
     // ── The catalog and the dry run (public) ─────────────────
     r.get('/agents', limits.reads('actor.agent.read'), (req, res) => res.json({ agents: catalog.list(config) }));

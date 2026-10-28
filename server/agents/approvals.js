@@ -49,12 +49,17 @@ async function pendingCount(s, owner) {
     return Number(await s.db.value("SELECT count(*) FROM actor_approvals WHERE owner = $1 AND state = 'pending'", [owner]));
 }
 
-/** The person decides. Approving a codes.task starts it as their own task, routed to the codes agent. */
-async function decide(ctx, owner, id, decision) {
+/** The person decides. Approving a codes.task starts it as their own task, routed to the codes agent.
+ *  With `idempotent`, a request already decided answers its current state instead of a conflict (the JSON
+ *  Action Center route); the HTML page keeps its 409. */
+async function decide(ctx, owner, id, decision, { idempotent = false } = {}) {
     const { s, config, engine, webhooks } = ctx;
     const row = await get(s, owner, id);
     if (!row) return { error: 'No such request of yours.', status: 404 };
-    if (row.state !== 'pending') return { error: `This request is already ${row.state}.`, status: 409 };
+    if (row.state !== 'pending') {
+        if (idempotent) return { row };
+        return { error: `This request is already ${row.state}.`, status: 409 };
+    }
     if (decision === 'decline') {
         const done = await s.db.one("UPDATE actor_approvals SET state = 'declined', decided_at = $2 WHERE id = $1 AND state = 'pending' RETURNING *", [id, s.iso()]);
         return { row: done };
