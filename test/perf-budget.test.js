@@ -21,7 +21,7 @@ const BUDGETS = {
     jsRawKB: 305,   // 300.5 openvibe-shared 4.25.0: the menu's orb beside the brand, both balances on phones, messages, the account sheet on phones and the bar stepping away on phones; 293 openvibe-shared 4.22.0: the navbar's magnifier search button and More dropdown (search.js and loading.js load only when used); 287.2 Shared 4.17.0: OpenCoins and Vibes chips (wallet: true) in the navbar; 273.2 openvibe-shared 4.15 footer: the compact footer opens into the whole one, and the pulse line; 264.3 with Shared 4.13.0 (2026-10-26: account links); 239.8
     jsBrotliKB: 76,   // 74.2 openvibe-shared 4.25.0: the menu's orb beside the brand, both balances on phones, messages, the account sheet on phones and the bar stepping away on phones; 70.5 Shared 4.17.0: OpenCoins and Vibes chips (wallet: true) in the navbar; 67.9 openvibe-shared 4.15 footer: the compact footer opens into the whole one, and the pulse line; 65.3 Shared 4.12.0: the light/dark switch, the seasonal mark and the theme pairs; 56.5
     cssFiles: 3,   // 2 (actor.css + the cached /shared/showcase.css); 3 with home.css, the home's own sections (10-22)
-    cssRawKB: 40,   // 35.1 with Shared 4.13.0 (2026-10-26: account links); 24.2 (the task page's outcome card and timeline); 28.9 with home.css
+    cssRawKB: 46,   // 41.8 openvibe-shared 4.26.1 (hero visual); 35.1 with Shared 4.13.0 (2026-10-26: account links); 24.2 (the task page's outcome card and timeline); 28.9 with home.css
     cssBrotliKB: 9,   // 7.7 with Shared 4.13.0 (2026-10-26: account links); 5.4; 6.6 with home.css
     externalFiles: 0,   // 0
 };
