@@ -32,6 +32,7 @@ const BUDGETS = {
     'actor.agent.manage': { minute: 30, hour: 600 },
     'actor.route': { minute: 30, hour: 600 },
     'actor.task.stream': { minute: 30, hour: 600 },
+    'actor.approval.decide': { minute: 30, hour: 600 },
 };
 
 function createCallerLimits({ config, now = () => Date.now(), registry = null, log = console, enabled = true, valkey = null }) {

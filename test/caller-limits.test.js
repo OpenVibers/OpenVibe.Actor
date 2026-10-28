@@ -4,7 +4,7 @@
  * gets 429 problem+json `rate_limited` with Retry-After, before the route does any work, while
  * another caller still passes; the window reopens on the clock. A person counts as themselves, anyone
  * else by address. Actor's own budgets are pinned: actor.task.create and actor.agent.run 6 a minute, actor.agent.manage and actor.route 30,
- * actor.task.stream 30; reads take ACTOR_LIMITS_MINUTE/ACTOR_LIMITS_HOUR. Health, ready, release.json
+ * actor.task.stream 30; an approval decision 30; reads take ACTOR_LIMITS_MINUTE/ACTOR_LIMITS_HOUR. Health, ready, release.json
  * and metrics are never limited; refusals are logged (no token) and counted in actor_rate_limited_total.
  */
 const assert = require('assert');
@@ -27,6 +27,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             'actor.agent.manage': { minute: 30, hour: 600 },
             'actor.route': { minute: 30, hour: 600 },
             'actor.task.stream': { minute: 30, hour: 600 },
+            'actor.approval.decide': { minute: 30, hour: 600 },
         });
     });
 

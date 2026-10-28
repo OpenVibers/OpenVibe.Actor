@@ -13,7 +13,7 @@ const contracts = require('openvibe-contracts');
 const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
-const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run'];
+const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide'];
 const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 const INDEX_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-index.js'), 'utf8');
