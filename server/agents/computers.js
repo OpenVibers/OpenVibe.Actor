@@ -102,7 +102,8 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             folders: (m.computer.files && m.computer.files.roots) || [],
             ...(m.computer.waiting ? { waiting_for_approval: m.computer.waiting } : {}),
         }));
-        if (!machines.length) return { computers: [], note: `No computer is open to the agent. On ${pages}/machines the person adds one with --computer (for example "ask") and turns on "Let my agent use this computer".` };
+        // What the person does about it, for the agent to pass on as steps (adapters.js ANSWER_STYLE).
+        if (!machines.length) return { computers: [], note: `None of the person's computers is open to their agent yet. Steps for them: 1) open ${pages}/machines; 2) pick a computer already paired there, or add one with the one-line installer that page gives (--computer ask for a computer they use themselves, --desk-host for a spare machine that only runs agent desks); 3) on that computer's card turn on "Let my agent use this computer"; 4) send the task again. Levels: observe (the agent only looks and reads), ask (each program it runs or file it changes waits for the person's approval on that computer), trusted (it acts without asking). A browser task can also run on a desk host, with no access to the person's own files.` };
         return { computers: machines, note: 'At level "observe" only reading works; at "ask" each run or write waits for the person to approve it on that machine.' };
     }
 
