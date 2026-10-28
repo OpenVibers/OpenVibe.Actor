@@ -41,7 +41,7 @@ you own first.
 | `DATA_DIR` | where the database lives (PGlite in `DATA_DIR/pglite`); set `DATABASE_URL` and `DATABASE_DIRECT_URL` for PostgreSQL instead |
 | `ACTOR_RUNTIME_URL`, `ACTOR_RUNTIME_MODEL`, `ACTOR_RUNTIME_API_KEY` | the runtime's model: any OpenAI-compatible `/v1` endpoint |
 | `ACTOR_RUNTIME_INPUT_USD_PER_MTOK`, `…_OUTPUT_…` | its price per million tokens (0 on your own hardware), used for budgets and costs |
-| `ACTOR_SEARCH_URL`, `ACTOR_TOOLS_URL` | OpenVibe's public Search and Tools, used anonymously; empty means the runtime is not offered them |
+| `ACTOR_SEARCH_URL`, `ACTOR_TOOLS_URL` | OpenVibe's public Search and Tools, used anonymously (web search, `search_web`, also needs your client secret and the `search.query.delegate` grant); empty means the runtime is not offered them |
 | `ACTOR_DEEPSEEK_API_KEY`, `ACTOR_OPENAI_API_KEY` | optional: more agents, and another model family to check answers |
 | `ACTOR_FREE_*`, `ACTOR_MAX_COST_USD_PER_DAY` | your own daily limits |
 
