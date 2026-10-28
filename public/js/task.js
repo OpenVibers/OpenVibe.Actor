@@ -1,6 +1,8 @@
-/* A running task's page: follows its live stream (GET /api/v1/tasks/:id/events, actor.task-event@1) and draws each step
- * the way the server renders a finished task (one block per agent that tries, its steps, its check); when the task ends
- * the page reloads to show the outcome. Without this script the page refreshes itself every few seconds (<noscript>). */
+/* A task's page. With openvibe-shared/agent-session.js on the page, How it went is the agents' session: every step (its
+ * call and its result), each agent that tried, its checks and hand-offs, from the events the page carries and, while the
+ * task runs, from its live stream (GET /api/v1/tasks/:id/events, actor.task-event@1). Without it, a running task's steps
+ * are drawn the way the server renders a finished one. When the task ends the page reloads to show the outcome. Without
+ * this script the page refreshes itself every few seconds (<noscript>). */
 (function () {
   'use strict';
   var LABEL = { tool_call: 'Used', tool_result: 'Got', text: 'Note' };
@@ -13,7 +15,30 @@
     return n;
   }
 
+  // The session view over How it went: the events the page carries, then (while open) the live ones.
+  function session(art) {
+    var data = document.getElementById('task-events');
+    var box = document.getElementById('attempts');
+    if (!window.OpenVibeAgentSession || !data || !box || art.dataset.session) return null;
+    var events;
+    try { events = JSON.parse(data.textContent); } catch (err) { return null; }
+    art.dataset.session = '1';
+    var host = el('div', 'task-session');
+    box.parentNode.insertBefore(host, box);
+    box.hidden = true; box.style.display = 'none';   // .attempts sets a display of its own, which [hidden] alone does not beat
+    // Only the person's own desk becomes a link (Desks plan D4): an agent reads untrusted pages, so any other address stays text.
+    var botRe = (art.getAttribute('data-bot') || 'https://openvibe.bot').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var ownDesk = new RegExp('^' + botRe + '/machines/dev_[0-9A-HJKMNP-TV-Z]{26}/screen(?:\\?desk=[a-z0-9-]{1,40})?$');
+    var view = window.OpenVibeAgentSession.mount(host, { title: (document.querySelector('.task-text') || {}).textContent || 'Task', status: art.getAttribute('data-open') === '1' ? 'running' : 'queued', follow: art.getAttribute('data-open') === '1', empty: 'Waiting for an agent to start…', link: function (u) { return ownDesk.test(u); } });
+    view.pushAll(events);
+    var pill = art.className.match(/state-([a-z_]+)/);
+    if (pill && art.getAttribute('data-open') !== '1') view.status(pill[1] === 'done' ? 'succeeded' : pill[1]);
+    return view;
+  }
+
   function start() {
+    var art0 = document.querySelector('article.task');
+    var view = art0 ? session(art0) : null;
     var art = document.querySelector('article.task[data-open="1"]');
     if (!art || !window.EventSource || art.dataset.live) return;
     art.dataset.live = '1';
@@ -88,6 +113,7 @@
     function onOutput(e) {
       onDesk(e);
       onLook(e);
+      if (view) { view.push(e); return undefined; }
       if ((e.step === 'plan' || e.step === 'handoff') && e.agent) return attempt((e.text || e.agent).replace(/ takes it.*$/, ''));
       if (e.step === 'plan') return undefined;
       if (e.step === 'check') {
@@ -105,7 +131,7 @@
     var src = new EventSource('/api/v1/tasks/' + encodeURIComponent(id) + '/events?after=' + encodeURIComponent(art.getAttribute('data-last') || '0'));
     src.addEventListener('output', function (m) { try { onOutput(JSON.parse(m.data)); } catch (err) { /* a malformed event is skipped */ } });
     src.addEventListener('state', function (m) {
-      try { var s = JSON.parse(m.data).state; if (liveState && STATE[s]) liveState.textContent = STATE[s] + '…'; } catch (err) { /* ignore */ }
+      try { var ev = JSON.parse(m.data), s = ev.state; if (liveState && STATE[s]) liveState.textContent = STATE[s] + '…'; if (view) view.push(ev); } catch (err) { /* ignore */ }
       fetch('/api/v1/tasks/' + encodeURIComponent(id), { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (t) {
         if (t && t.cost && cost) cost.textContent = cost.textContent.replace(/^\$[0-9.]+/, '$' + (t.cost.usd < 0.01 ? t.cost.usd.toFixed(4) : t.cost.usd.toFixed(2)));
       }).catch(function () {});

@@ -113,6 +113,12 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         assert.ok(page.text.includes(`<a href="${watch.replace(/&/g, '&amp;')}" rel="noopener">your agent&#39;s desk</a>`) || page.text.includes(`<a href="${watch}" rel="noopener">your agent&#39;s desk</a>`), 'the desk link is clickable');
         assert.ok(!page.text.includes('href="https://evil.example'), 'another address stays text');
         assert.ok(page.text.includes('data-bot="https://openvibe.bot"'));
+        // How it went is the agents' session (openvibe-shared/agent-session.js): the page carries its events as data,
+        // where nothing an agent wrote can end the script early.
+        assert.ok(/<script src="[^"]*agent-session\.js[^"]*" defer>/.test(page.text), 'the session view');
+        const data = /<script type="application\/json" id="task-events">([\s\S]*?)<\/script>/.exec(page.text);
+        assert.ok(data && JSON.parse(data[1]).some((e) => e.step === 'plan'), 'the events, as data');
+        assert.ok(!/<\/?[a-z]/i.test(data[1]), 'no markup inside the data');
     });
     await check('the task\'s record says it needs its person while the hand-off waits, and stops saying so after', async () => {
         const bea = t.network.addUser('desk-bea');
