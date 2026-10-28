@@ -97,6 +97,10 @@ async function startProviders() {
                 res.writeHead(200, { 'content-type': 'application/json' });
                 return res.end(JSON.stringify({ state: 'succeeded', tool: 'mx', result: { data: { target: (body.input || {}).target, records: { MX: [{ exchange: 'mailserver.example.com', priority: 1 }] } } } }));
             }
+            if (url.pathname === '/search/api/v1/query' && req.method === 'GET') {
+                res.writeHead(200, { 'content-type': 'application/json' });
+                return res.end(JSON.stringify({ results: [{ scope: 'network', kind: 'document', title: 'A post', snippet: 'about things', url: 'https://openvibe.community/p/x', type: 'post', owner: 'community' }], route: { explain: [] } }));
+            }
             if (url.pathname === '/search/api/v1/search') {
                 res.writeHead(200, { 'content-type': 'application/json' });
                 return res.end(JSON.stringify({ results: [{ title: 'A post', summary: 'about things', canonical_url: 'https://openvibe.community/p/x', type: 'post', owner: 'community' }] }));

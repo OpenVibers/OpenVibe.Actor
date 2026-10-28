@@ -9,6 +9,10 @@ const { createNotifier } = require('../notify/client');
  * way any app would call it (never a private path, never a URL the model invents for Actor to fetch itself):
  *
  *   search_openvibe(query)      OpenVibe.Search: streams, clips, pastes, posts, wiki pages, threads across the network
+ *                               (the Search Fabric's network scope, GET /api/v1/query; /api/v1/search on an older Search)
+ *   search_web(query)           the Search Fabric's web scope (POST /api/v1/query): open index first, then paid providers
+ *                               and Wikipedia, each result with its URL; asked as Actor's service principal
+ *                               (search.query.delegate) for the person the task is for (X-OV-Subject)
  *   find_tools(need)            OpenVibe.Tools' catalog: which of its tools can do this, with each tool's input
  *   run_tool(tool, input)       OpenVibe.Tools' run API (POST /api/v1/tools/<id>/run): DNS, mail records, certificates,
  *                               headers, WHOIS, conversions, hashes, … — only tools the catalog marks callable by anyone
@@ -42,6 +46,7 @@ const { createNotifier } = require('../notify/client');
  * what an anonymous caller could already do, and every result is clipped before it goes back to the model.
  */
 
+const { serviceAuth } = require('openvibe-contracts');
 const { createRobots } = require('./robots');
 const { createComputers } = require('./computers');
 
@@ -54,8 +59,14 @@ const json = (v) => clip(JSON.stringify(v));
 /** The person a task is for, when it is a signed-in person ('user:usr_…' → 'usr_…'), else null. */
 const personOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
 
-function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null, notifier = null }) {
+function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null, notifier = null, searchTokens = null }) {
     const { searchUrl, toolsUrl } = config.services;
+    // The web scope costs money past the open index, so it is asked as Actor (a service principal), never anonymously:
+    // off without Actor's client secret.
+    const webTokens = !searchUrl ? null : searchTokens || (config.oauth && config.oauth.clientSecret ? serviceAuth.createTokenClient({
+        tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.search', scope: 'search.query.delegate', fetchImpl,
+    }) : null);
     // Desks plan D4: "hand it to me" reaches the person through Network's notifications (server/notify/client.js).
     const notify = notifier || createNotifier({ config, fetchImpl, log });
     const bot = robots || createRobots({ config, fetchImpl });
@@ -64,9 +75,9 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     let catalogAt = 0;
     const schemas = new Map();
 
-    async function getJson(url, { signal, timeoutMs = 15_000, method = 'GET', body } = {}) {
+    async function getJson(url, { signal, timeoutMs = 15_000, method = 'GET', body, headers = {} } = {}) {
         const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
-        const res = await fetchImpl(url, { method, headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}), 'user-agent': 'OpenVibeActor/1.0 (+https://openvibe.actor)' }, body: body ? JSON.stringify(body) : undefined, signal: sig });
+        const res = await fetchImpl(url, { method, headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}), 'user-agent': 'OpenVibeActor/1.0 (+https://openvibe.actor)', ...headers }, body: body ? JSON.stringify(body) : undefined, signal: sig });
         const text = await res.text();
         let data = null;
         try { data = JSON.parse(text); } catch { /* not JSON */ }
@@ -124,9 +135,28 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     }
 
     async function searchOpenVibe(query, { signal } = {}) {
-        const r = await getJson(`${searchUrl}/api/v1/search?q=${encodeURIComponent(String(query || '').slice(0, 200))}&limit=8`, { signal });
-        if (!r.ok || !r.data) return { error: `Search answered ${r.status}` };
-        return (r.data.results || []).slice(0, 8).map((x) => ({ title: x.title, summary: x.summary, url: x.canonical_url, type: x.type, from: x.owner, published_at: x.published_at || null }));
+        const q = encodeURIComponent(String(query || '').slice(0, 200));
+        const r = await getJson(`${searchUrl}/api/v1/query?q=${q}&scopes=network&limit=8`, { signal });
+        if (r.ok && r.data && Array.isArray(r.data.results)) {
+            return r.data.results.slice(0, 8).map((x) => ({ title: x.title, summary: x.snippet, url: x.url, type: x.type, from: x.owner, published_at: x.published_at || null }));
+        }
+        if (r.status !== 404) return { error: `Search answered ${r.status}` };
+        // A Search without the fabric (before Search#119).
+        const old = await getJson(`${searchUrl}/api/v1/search?q=${q}&limit=8`, { signal });
+        if (!old.ok || !old.data) return { error: `Search answered ${old.status}` };
+        return (old.data.results || []).slice(0, 8).map((x) => ({ title: x.title, summary: x.summary, url: x.canonical_url, type: x.type, from: x.owner, published_at: x.published_at || null }));
+    }
+
+    /** The web, cited: each result keeps its URL, site and date, and the answer says which step found them. */
+    async function searchWeb(query, person, { signal } = {}) {
+        if (!webTokens) return { error: 'web search is not connected on this server' };
+        const headers = { ...(await webTokens.authHeaders()), ...(person ? { 'x-ov-subject': person } : {}) };
+        const r = await getJson(`${searchUrl}/api/v1/query`, { method: 'POST', body: { q: String(query || '').slice(0, 300), scopes: ['web'], limit: 6 }, headers, signal, timeoutMs: 30_000 });
+        if (!r.ok || !r.data) return { error: (r.data && (r.data.detail || r.data.title)) || `Search answered ${r.status}` };
+        const results = (Array.isArray(r.data.results) ? r.data.results : []).slice(0, 6)
+            .map((x) => ({ title: x.title, summary: x.snippet, url: x.url, site: x.site, published_at: x.published_at || null }));
+        const steps = ((r.data.route && r.data.route.explain) || []).filter((e) => e && e.scope === 'web' && e.answered).map((e) => e.step);
+        return results.length ? { results, found_by: steps.join(', ') || null } : { results: [], note: 'Nothing found on the web for that; try other words.' };
     }
 
     /** The function definitions the runtime's model sees, and the dispatcher that runs one call. */
@@ -136,6 +166,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         // the runtime is then offered only the tools it can reach.
         const defs = [
             ...(searchUrl ? [{ type: 'function', function: { name: 'search_openvibe', description: 'Search everything published on the OpenVibe network (streams, clips, pastes, community posts, wiki pages, blog posts, threads). Returns titles, summaries and links.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } }] : []),
+            ...(webTokens ? [{ type: 'function', function: { name: 'search_web', description: 'Search the web for anything outside OpenVibe (news, facts, documentation, products). Returns up to 6 results, each with its title, summary, URL, site and date: cite the URLs you use. Prefer search_openvibe for OpenVibe content.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } }] : []),
             ...(toolsUrl ? [{ type: 'function', function: { name: 'find_tools', description: 'Find OpenVibe.Tools tools for a need (for example "mx records", "ssl certificate", "whois", "http headers", "base64", "hash"). Returns each tool id with its input schema and an example.', parameters: { type: 'object', properties: { need: { type: 'string' } }, required: ['need'] } } }, { type: 'function', function: { name: 'run_tool', description: 'Run one OpenVibe.Tools tool by id with its input object (use find_tools first to see the input).', parameters: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool', 'input'] } } }] : []),
         ];
         if (list.some((t) => t.id === 'read')) {
@@ -341,6 +372,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                 return json(await pcs.write(person, a.machine, a.path, a.text, { mode: a.mode || 'create', signal }));
             }
             if (name === 'search_openvibe') return json(await searchOpenVibe(a.query, { signal }));
+            if (name === 'search_web') return json(await searchWeb(a.query, personOf(requester), { signal }));
             if (name === 'find_tools') return json(await findTools(a.need, { signal }));
             if (name === 'run_tool') return json(await runTool(String(a.tool || ''), a.input, { signal }));
             if (name === 'read_page') return json(await runTool('read', { url: String(a.url || ''), max_chars: 12000 }, { signal }));
@@ -351,7 +383,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         }
     }
 
-    return { definitions, call, deskRun, closeDesks, handToPerson, tools, findTools, runTool, searchOpenVibe, robots: bot, computers: pcs };
+    return { definitions, call, deskRun, closeDesks, handToPerson, tools, findTools, runTool, searchOpenVibe, searchWeb, robots: bot, computers: pcs };
 }
 
 const ROBOT_DEFS = [
