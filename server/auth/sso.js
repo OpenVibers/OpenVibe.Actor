@@ -219,9 +219,8 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             try {
                 const data = await tokenGrant({ grant_type: 'authorization_code', code: String(code), redirect_uri: config.oauth.redirectUri, code_verifier: flow.verifier });
                 setSession(res, data);
-                // Whatever this browser kept of the site was drawn for a guest: drop it, so the page it returns to (and Back)
-                // is drawn for the person who just signed in.
-                res.set('Clear-Site-Data', '"cache"');
+                // No Clear-Site-Data here or on sign-out: Chrome holds such an answer (and the cookies it sets) until the
+                // cache is cleared, which on phones left people on the account chooser with no session (2026-10-28).
                 return res.redirect(next);
             } catch (err) {
                 log.warn('[Actor] sign-in exchange failed:', err.status || '', err.error || '');
@@ -259,7 +258,6 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
                 }).catch(() => {});
             }
             clearSession(res);
-            res.set('Clear-Site-Data', '"cache"');
             res.cookie(HINT_COOKIE, 'guest', { sameSite: 'lax', secure: config.cookies.secure, httpOnly: false, path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
             res.redirect(303, sanitizeNext(req.query.next, config));
         });
