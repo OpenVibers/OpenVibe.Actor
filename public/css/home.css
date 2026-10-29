@@ -26,10 +26,8 @@
 .hm-more .ovk-fold-body > div > p:first-child { margin-top: 0; }
 .hm-api-more { margin: 16px 0 0; }
 
-/* The rest of OpenVibe (showcase.apps): its four places in one row on a phone, not three and one; room before the
+/* The rest of OpenVibe (showcase.apps, whose four tiles fill their rows since openvibe-shared 4.39.0): room before the
    Frame's "Recently shipped" under it. */
-@media (max-width: 599px) { .hm-net .sc-apps { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-@media (min-width: 600px) and (max-width: 959px) { .hm-net .sc-apps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .hm-net { margin-bottom: 48px; }
 
 /* The tools the runtime can run, as chips. */
