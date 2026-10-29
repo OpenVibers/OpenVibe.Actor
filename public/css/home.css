@@ -1,26 +1,36 @@
-/* openvibe.actor's home page only (server/http/pages.js): the numbers, the task templates, the tools Actor can run and
-   the questions. Colours come from the Frame's theme tokens, so it follows the person's theme, light or dark. */
+/* openvibe.actor's home page only (server/http/pages.js). The pieces are the shared kit's (kit.css: the numbers, rows and
+   folds; room.css: the cards and the rail; showcase.css: the hero, the steps, the questions and the launcher); this file
+   only places them. Colours come from the Frame's theme tokens, so it follows the person's theme, light or dark. */
 .page { --hm-accent-text: color-mix(in srgb, var(--accent-light, #60a5fa) 45%, var(--text-primary, #e6edf7)); }
 .sc-eyebrow { color: var(--hm-accent-text); }
 .sc-table thead th { color: var(--text-secondary, #96a7c2); }
 
-/* Numbers from the catalog and the running config. */
-.hm-stats-sec { margin-top: 40px; }
-.hm-stats { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(128px, 100%), 1fr)); }
-.hm-stats a { display: grid; gap: 2px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border, rgba(255, 255, 255, .08)); background: var(--bg-secondary, #101828); color: inherit; text-decoration: none; transition: border-color .15s; }
-.hm-stats a:hover, .hm-stats a:focus-visible { border-color: var(--accent, #3b82f6); }
-.hm-stats b { font-size: 30px; line-height: 1.1; letter-spacing: -.02em; }
-.hm-stats span { font-size: 13.5px; color: var(--text-secondary, #96a7c2); }
+/* The numbers, one strip under the hero. */
+.hm-stats-sec { margin: 22px 0 0; }
 
-/* Task templates, grouped by what they need. */
-.hm-templates { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); }
-.hm-tgroup { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px; border-radius: 16px; border: 1px solid var(--border, rgba(255, 255, 255, .08)); background: var(--bg-secondary, #101828); }
-.hm-tgroup-head { margin: 0 0 2px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary, #96a7c2); }
-.hm-template { display: grid; gap: 4px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border-light, var(--border, #2c3d5c)); background: var(--bg-primary, #0a0f1c); color: var(--text-primary, #e6edf7); text-decoration: none; font-size: 14.5px; line-height: 1.45; transition: border-color .15s; }
-.hm-template:hover, .hm-template:focus-visible { border-color: var(--accent, #3b82f6); }
-.hm-template small { font-size: 12.5px; font-weight: 700; color: var(--hm-accent-text); }
-.hm-needs { margin: auto 0 0; font-size: 13px; color: var(--text-secondary, #96a7c2); }
+/* The task box, then the tasks to start from: a rail on a phone; from 760 px a grid that wraps, so it needs no arrows. */
+.hm-task .sc-lede { margin-bottom: 0; }
+.hm-task .ovk-rail { margin-top: 22px; }
+@media (min-width: 760px) {
+    .hm-task .ovk-rail-track { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); grid-auto-columns: auto; overflow: visible; margin: 0; padding: 2px 0 6px; }
+    .hm-task .ovk-rail-btn { display: none; }
+}
+.hm-needs { margin: 0; font-size: 13.5px; color: var(--text-secondary, #96a7c2); }
 .hm-chosen { margin: 0 0 12px; padding: 10px 14px; border-left: 3px solid var(--accent, #3b82f6); border-radius: 0 10px 10px 0; background: var(--bg-primary, #0a0f1c); font-size: 15px; overflow-wrap: anywhere; }
+
+/* How it works: each part is a fold; a showcase block inside one drops its section spacing. A link to a part (#tools)
+   lands on its anchor inside the fold, which opens it; the margin keeps the fold's title in view under the navbar. */
+.hm-more .ovk-fold-body > div { scroll-margin-top: calc(var(--ovnav-real-h, 56px) + 84px); }
+.hm-more .ovk-fold-body .sc-sec { margin: 0; }
+.hm-more .ovk-fold-body .sc-lede { margin-bottom: 14px; }
+.hm-more .ovk-fold-body > div > p:first-child { margin-top: 0; }
+.hm-api-more { margin: 16px 0 0; }
+
+/* The rest of OpenVibe (showcase.apps): its four places in one row on a phone, not three and one; room before the
+   Frame's "Recently shipped" under it. */
+@media (max-width: 599px) { .hm-net .sc-apps { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (min-width: 600px) and (max-width: 959px) { .hm-net .sc-apps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.hm-net { margin-bottom: 48px; }
 
 /* The tools the runtime can run, as chips. */
 .hm-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -28,15 +38,8 @@
 .hm-chips a, .hm-chips li:not(:has(a)) { display: inline-block; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border-light, var(--border, #2c3d5c)); background: var(--bg-secondary, #101828); color: var(--text-primary, #e6edf7); font-size: 13.5px; text-decoration: none; overflow-wrap: anywhere; }
 .hm-chips a:hover, .hm-chips a:focus-visible { border-color: var(--accent, #3b82f6); }
 
-/* Questions, answered on the page. */
-.hm-faq { display: grid; gap: 12px 28px; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); }
-.hm-qa { padding: 4px 0 14px; border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08)); }
-.hm-qa h3 { margin: 0 0 6px; font-size: 16px; }
-.hm-qa p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--text-secondary, #96a7c2); }
-
-/* The shared steps and code grids ask for 280–320 px; a 320 px phone has less. */
+/* The shared steps and code grids ask for 280–320 px; a 320 px phone has less (and a fold's padding takes more). */
 .sc-steps { grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
 .sc-code { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
 @media (max-width: 520px) { .sc-code pre { white-space: pre-wrap; overflow-wrap: anywhere; } }
 @media (max-width: 420px) { .sc-hero, .sc-sec, .sc-cta { padding-left: 16px; padding-right: 16px; } }
-@media (prefers-reduced-motion: reduce) { .hm-stats a, .hm-template { transition: none; } }

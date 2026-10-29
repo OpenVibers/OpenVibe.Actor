@@ -95,7 +95,7 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 - Tasks, their event logs and daily spend (`migrations/0001_tasks.sql`). Tasks are kept 30 days, then pruned with their events. Nothing stored is a credential, a key or a token.
 - Request telemetry (`migrations/0010_telemetry.sql`): each HTTP request is aggregated by route template, method and status class, never by raw URL. Once a minute one `http.request` sample per key, plus the active-requests, p95 latency and event-loop-lag gauges, is written to this service's own `telemetry_samples` table (openvibe-sdk 0.46 telemetry, the `platform.telemetry-sample@1` shape); rows older than 14 days are deleted daily. `/shared` files, static assets, health, readiness and `/metrics` are not counted. `server/app.js` builds the collector (`createHttpTelemetry`) and mounts its middleware; `server/index.js` flushes it every minute and on stop, and runs the 14-day retention.
 - The agent catalog and its rate cards; the routing policy over them (placement itself is `openvibe-sdk/placement`).
-- The home page (`server/http/pages.js`, `public/css/home.css`, `test/home.test.js`): the task box, numbers read from the catalog, the running config and OpenVibe.Tools' catalog (the runtime's own cached copy, waited for at most a second), task templates that fill the task box (`/?task=…&mode=…`, kept by no shared cache; signed out, the task waits for sign-in), the Tools tools the runtime can run, the agents, the API samples and the questions people ask first, with JSON-LD WebSite, WebApplication, WebPage, ItemList (the agents) and FAQPage (exactly the questions shown).
+- The home page (`server/http/pages.js`, `public/css/home.css`, `test/home.test.js`) is a taste and a door, about five phone screens, built from the shared kit (`kit.css`, `room.css`, `showcase.css`): the task box, numbers read from the catalog, the running config and OpenVibe.Tools' catalog (the runtime's own cached copy, waited for at most a second) as one `kit.stats` strip, task templates as a rail of cards that fill the task box (`/?task=…&mode=…`, kept by no shared cache; signed out, the task waits for sign-in; what a robot, computer, desk or private task needs is said in the box), the agents as rows that open `/agents`, the parts read once as folds (how a task finds its agent, the comparison, what works today, the Tools tools the runtime can run, the API samples; a link to `#tools` or `#api` opens its fold), the questions people ask first and the rest of OpenVibe as a launcher, with JSON-LD WebSite, WebApplication, WebPage, ItemList (the agents) and FAQPage (exactly the questions shown).
 
 ## Does not own
 
@@ -254,5 +254,5 @@ Part of the [OpenVibe network](https://openvibe.network). Built in the open by [
 <!-- versions:start -->
 - openvibe-contracts: v0.229.0
 - openvibe-sdk: v0.67.0
-- openvibe-shared: v4.37.0
+- openvibe-shared: v4.38.0
 <!-- versions:end -->
