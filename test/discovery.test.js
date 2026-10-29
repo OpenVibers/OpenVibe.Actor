@@ -56,6 +56,26 @@ const PRIVATE = ['/tasks', '/auth/', '/api/', '/limits.json'];
             for (const p of ['/tasks', '/auth/']) assert.ok(!r.text.includes(`https://openvibe.actor${p}`), `private path in llms.txt: ${p}`);
         });
 
+        await check('llms.txt: every URL it lists answers a GET, and the POST-only endpoint is described, not linked', async () => {
+            const r = await t.get('/llms.txt');
+            const SITE = 'https://openvibe.actor';
+            // Every link the file names must answer when it is fetched as a link.
+            const links = r.text.split('](').slice(1).map((s) => s.split(')')[0]).filter((u) => u.startsWith('http'));
+            assert.ok(links.length >= 8, 'too few links: ' + links.length);
+            for (const url of links) {
+                if (!url.startsWith(SITE)) continue;   // the other OpenVibe sites are not this app to fetch
+                const res = await t.get(new URL(url).pathname);
+                assert.ok(res.status < 400, url + ' answers ' + res.status);
+            }
+            // The router answers POST only, so it is described in the section body, never linked.
+            const endpoint = '/api/v1/route';
+            assert.ok(!r.text.includes('](' + SITE + endpoint + ')'), 'the POST-only endpoint is still a link');
+            const described = r.text.split('\n').find((l) => l.startsWith('POST ' + endpoint + ' — '));
+            assert.ok(described, 'the POST-only endpoint is not described');
+            assert.ok(described.includes('POST only'), 'the description does not say it answers POST only');
+            assert.ok(!described.includes(']('), 'the described POST endpoint is a link');
+            assert.ok(!described.includes('http'), 'the described POST endpoint names a URL to fetch');
+        });
         await check('llms-full.txt: 200 text/plain, the site title, and every page the sitemap lists', async () => {
             const r = await t.get('/llms-full.txt');
             assert.strictEqual(r.status, 200);

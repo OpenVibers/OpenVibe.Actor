@@ -46,6 +46,27 @@ const publicPages = () => [
     { path: '/updates', changefreq: 'daily', priority: 0.5 },
 ];
 
+/**
+ * llms.txt: the shared kit's llmsTxt, with one thing it cannot say. A POST-only endpoint is not a
+ * page to fetch — a link to it is a URL that answers 404 to a GET, and a language model that
+ * follows it gets nothing. So a section may carry notes: plain lines that describe such an
+ * endpoint (POST /api/v1/route — ...) instead of linking it. Every real GET link stays a link.
+ */
+function llmsTxt({ name, summary, details, sections = [] }) {
+    const out = [`# ${name}`, '', `> ${String(summary || '').replace(/\s+/g, ' ').trim()}`, ''];
+    if (details) out.push(String(details).trim(), '');
+    for (const sec of sections) {
+        if (!sec) continue;
+        const links = (sec.links || []).map((l) => '- [' + l.title + '](' + l.url + ')' + (l.note ? ': ' + String(l.note).replace(/\s+/g, ' ').trim() : ''));
+        const notes = (sec.notes || []).map((n) => String(n).replace(/\s+/g, ' ').trim());
+        if (!links.length && !notes.length) continue;
+        out.push('## ' + sec.title, '');
+        if (links.length) out.push(...links, '');
+        if (notes.length) out.push(...notes, '');
+    }
+    return out.join('\n');
+}
+
 function createDiscoveryRoutes(ctx) {
     const { config } = ctx;
     const r = asyncRouter();
@@ -61,7 +82,7 @@ function createDiscoveryRoutes(ctx) {
     });
 
     r.get('/llms.txt', (_req, res) => {
-        res.type('text/plain').set('Cache-Control', TEXT).send(seo.llmsTxt({
+        res.type('text/plain').set('Cache-Control', TEXT).send(llmsTxt({
             name: SITE_NAME,
             summary: 'OpenVibe.Actor: an AI agent router and OpenVibe\'s own agent. A task in plain words goes to the best agent system for it, by what the task needs and the caller\'s mode (cheapest, balanced, best, fastest, private); a second model family checks the answer; the task records its cost to a fraction of a cent and why that agent was picked.',
             details: 'Agents today: the OpenVibe runtime (a DeepSeek model acting through OpenVibe.Search and OpenVibe.Tools: DNS, mail records, certificates, headers, WHOIS and more), OpenAI\'s web agent (live web search with sources), and an open model on OpenVibe\'s own server for private mode. Coding goes to OpenVibe.Codes. Every page is server-rendered and readable without JavaScript. The API: POST /api/v1/tasks, GET /api/v1/tasks/:id, GET /api/v1/tasks/:id/events (server-sent events), POST /api/v1/tasks/:id/cancel, GET /api/v1/agents and POST /api/v1/route (public dry run). Tasks are platform.task@1 in openvibe-contracts.',
@@ -74,11 +95,13 @@ function createDiscoveryRoutes(ctx) {
                 ] },
                 { title: 'Machine-readable', links: [
                     { title: 'The agents (JSON)', url: abs('/api/v1/agents'), note: 'actor.agent-list-result@1' },
-                    { title: 'Dry-run the router', url: abs('/api/v1/route'), note: 'POST { task, mode? } → which agent and why (platform.placement-result@1)' },
+                    { title: 'The agent manifest (JSON)', url: abs('/.well-known/agent.json'), note: 'what this site tells an agent about itself' },
                     { title: 'The free tier (JSON)', url: abs('/limits.json') },
                     { title: 'Sitemap', url: abs('/sitemap.xml') },
                     { title: 'Full text for language models', url: abs('/llms-full.txt') },
                     { title: 'Release metadata (JSON)', url: abs('/release.json') },
+                ], notes: [
+                    'POST /api/v1/route — dry-run the router: send { task, mode? } and get which agent would take it and why (platform.placement-result@1). It answers POST only, so there is no page here to fetch; the API is described at /docs.',
                 ] },
                 { title: 'Elsewhere', links: [
                     { title: 'OpenVibe.Codes', url: 'https://openvibe.codes', note: 'the coding-agent harness Actor sends coding work to' },
