@@ -39,7 +39,6 @@ form.inline { display: inline; }
 
 /* The home page's showcase sections (openvibe-shared/showcase.css) sit inside .page, which has its own gutter. */
 .page .sc-hero, .page .sc-sec, .page .sc-cta { padding-left: 0; padding-right: 0; }
-.page .sc-ic .ov-icon { --ovi-size: 28px !important; }
 button.sc-btn { background: transparent; }
 button.sc-btn.sc-primary { border: 0; }
 
@@ -75,14 +74,8 @@ button.sc-btn.sc-primary { border: 0; }
 .examples { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .examples li { padding: 8px 12px; border-radius: 10px; background: var(--bg-primary, #0a0f1c); border: 1px solid var(--border, #1f2d47); color: var(--text-secondary, #96a7c2); font-size: .94rem; }
 
-/* ── The agents ── */
-.agent-cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
-.agent-card { padding: 16px; border-radius: 16px; border: 1px solid var(--border, #1f2d47); background: var(--bg-secondary, #101828); }
-/* An agent that is off: a dashed outline and no fill, never faded text (opacity took it below WCAG AA contrast). */
-.agent-card.off { border-style: dashed; background: transparent; }
-.agent-card .muted { color: var(--text-secondary, #96a7c2); }
-.agent-card header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-.agent-card p { margin: .5rem 0 0; font-size: 14px; line-height: 1.5; }
+/* ── The agents (/agents): what each one is, under its name ── */
+.agent-blurb { min-width: 16rem; margin: .4rem 0 0; font-size: 13.5px; line-height: 1.5; color: var(--text-secondary, #96a7c2); }
 
 /* ── One task: the status line and the task, the outcome, how it went, why ── */
 .task-head { margin-top: .4rem; }
