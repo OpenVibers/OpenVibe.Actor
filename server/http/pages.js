@@ -91,8 +91,8 @@ function createPageRoutes(ctx) {
     const tier = config.allowance;
 
     // ── The task box ─────────────────────────────────────────
-    function taskForm(req, { text = '', mode = 'balanced', problem = null } = {}) {
-        if (!signedIn(req)) {
+    function taskForm(viewer, { text = '', mode = 'balanced', problem = null } = {}) {
+        if (!(viewer.kind === 'user' && viewer.subject)) {
             // A template picked while signed out waits in the box and comes back after sign-in.
             const next = text ? `/?${new URLSearchParams({ task: text, mode })}` : '/#task';
             return html`<div class="task-box task-box-guest">
@@ -120,18 +120,19 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
         return (Array.isArray(list) ? list : []).filter((t) => t && t.id && t.name);
     }
 
-    async function home(req, res, { status = 200, form = {} } = {}) {
+    async function homePage({ viewer = { kind: 'anonymous' }, query = {}, form = {} } = {}) {
         const agents = catalog.list(config);
         const tools = await callableTools();
+        const signed = viewer.kind === 'user' && viewer.subject;
         // A template link (/?task=…&mode=…#task) fills the task box; the page itself stays the canonical /.
-        if (!form.text && typeof req.query.task === 'string') form = { text: req.query.task.slice(0, 2000), mode: MODES.includes(req.query.mode) ? req.query.mode : 'balanced' };
+        if (!form.text && typeof query.task === 'string') form = { text: query.task.slice(0, 2000), mode: MODES.includes(query.mode) ? query.mode : 'balanced' };
         const working = agents.filter((a) => a.available).length;
         const faq = faqItems(agents);
         const hero = showcase.hero({
             eyebrow: 'OpenVibe.Actor · your agent for everything · alpha',
             title: 'Ask once.', accent: 'The right agent does it.',
             lede: 'Give Actor a task in plain words. It picks the agent that fits: OpenVibe\'s own, acting through OpenVibe Search and Tools, or another platform\'s, like OpenAI\'s web agent. It runs the task, has a second model check the answer, and shows you what it cost and why that agent. Like OpenRouter, for agents.',
-            actions: signedIn(req) ? [{ label: 'Give it a task', href: '#task', primary: true }, { label: 'Your tasks', href: '/tasks' }] : [{ label: 'Sign in to start', href: '/auth/login?next=%2F', primary: true }, { label: 'See the agents', href: '/agents' }],
+            actions: signed ? [{ label: 'Give it a task', href: '#task', primary: true }, { label: 'Your tasks', href: '/tasks' }] : [{ label: 'Sign in to start', href: '/auth/login?next=%2F', primary: true }, { label: 'See the agents', href: '/agents' }],
             note: `Open source (AGPL-3.0). Free tier: ${tier.tasksPerDay} tasks a day, up to ${usd(tier.perTaskUsd)} each. The list below says exactly what works today.`,
             aside: { html: String(routerCard(agents)) },
         });
@@ -141,8 +142,8 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
             [MODES.length, 'ways to choose', '#route'],
             [tier.tasksPerDay, 'free tasks a day', '#faq'],
         ].filter(([n]) => n > 0);
-        page(req, res, {
-            index: true, cache: signedIn(req) && !req.query.task ? null : req.query.task ? cache.htmlHeaders({ private: true }) : PUBLIC_CACHE,
+        return {
+            agent: true, index: true, cache: signed && !query.task ? null : query.task ? cache.htmlHeaders({ private: true }) : PUBLIC_CACHE,
             jsonLd: [...homeJsonLd(config),
                 seo.jsonLd.itemList('Agents OpenVibe.Actor routes tasks to', agents.map((a) => ({ name: a.name, url: `${config.baseUrl}/agents#${a.id}`, description: (catalog.byId(a.id) || {}).blurb }))),
                 seo.jsonLd.faq(faq.map(([q, a]) => ({ q, a })))],
@@ -151,7 +152,7 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
             body: html`${raw(hero)}
 <section class="sc-sec hm-stats-sec" aria-label="OpenVibe.Actor in numbers"><ul class="hm-stats">${stats.map(([n, label, href]) => html`<li><a href="${href}"><b>${n}</b><span>${label}</span></a></li>`)}</ul></section>
 <section class="sc-sec" id="task" aria-labelledby="h-task"><h2 id="h-task">Give Actor a task</h2>
-${taskForm(req, form)}</section>
+${taskForm(viewer, form)}</section>
 <section class="sc-sec" aria-labelledby="h-templates"><h2 id="h-templates">Start from one of these</h2>
 <p class="sc-lede">Tasks that work today. Pick one and it lands in the task box, ready to run or change.</p>
 <ul class="hm-templates">${TEMPLATES.map((g) => html`<li class="hm-tgroup"><p class="hm-tgroup-head"><b>${g.group}</b></p>
@@ -231,7 +232,12 @@ ${raw(showcase.code({
 <div class="hm-faq">${faq.map(([q, a]) => html`<div class="hm-qa"><h3>${q}</h3><p>${a}</p></div>`)}</div></section>
 ${raw(showcase.network({ service: 'actor' }))}
 ${raw(showcase.cta({ title: 'Build on it', text: 'Every task, its live stream, its webhooks and the router are an API. Apps get actor.task.* grants on OpenVibe.Services.', actions: [{ label: 'Read the API', href: '/docs', primary: true }, { label: 'See the agents', href: '/agents' }] }))}`,
-        }, status);
+        };
+    }
+
+    /** Render the home page through the route's own response shape (the POST failure path reuses it). */
+    async function home(req, res, { status = 200, form = {} } = {}) {
+        return page(req, res, await homePage({ viewer: req.viewer, query: req.query, form }), status);
     }
 
     /** Questions people ask first, answered from the running config and the catalog. */
@@ -293,7 +299,7 @@ ${a.available ? '' : html`<p class="muted small">${a.reason}</p>`}
             title: 'Your tasks', crumbs: [{ label: 'Your tasks' }], styles: [showcase.STYLESHEET],
             body: html`<h1>Your tasks</h1>
 <p class="muted">Today: ${today.tasks} of ${tier.tasksPerDay} free tasks, ${usd(today.usd)} of ${usd(tier.perDayUsd)}. Tasks are kept ${store.RETENTION_DAYS} days.</p>
-${taskForm(req)}
+${taskForm(req.viewer)}
 ${table(['Task', 'State', 'Agent', 'Cost', 'Started'], pageRows.rows.map((t) => {
                 const result = t.result ? (typeof t.result === 'string' ? JSON.parse(t.result) : t.result) : null;
                 return [html`<a href="/tasks/${t.id}">${t.task.length > 90 ? `${t.task.slice(0, 89)}…` : t.task}</a>`, badge(t.state, STATE_KIND[t.state]), result ? (catalog.byId(result.agent) || {}).name || result.agent : '—', usd(t.cost_usd == null ? null : Number(t.cost_usd)), time(t.created_at)];
@@ -489,10 +495,10 @@ ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates |
     });
 
     // ── The agents ───────────────────────────────────────────
-    r.get('/agents', (req, res) => {
+    function agentsPage() {
         const agents = catalog.list(config);
-        page(req, res, {
-            index: true, cache: PUBLIC_CACHE,
+        return {
+            agent: true, index: true, cache: PUBLIC_CACHE,
             title: 'The agents',
             description: 'Every agent system OpenVibe.Actor routes a task to — OpenVibe\'s own runtime, OpenAI\'s web agent, an open model on OpenVibe hardware, OpenVibe.Codes — with what each can do, its trust class and its price per million tokens.',
             crumbs: [{ label: 'Agents' }],
@@ -520,11 +526,12 @@ ${table(['Mode', 'What it picks'], MODES.map((m) => [html`<strong>${MODE_LABEL[m
 <p>Before you see an answer, a model of another family reads it: DeepSeek's answers are checked by OpenAI's smallest model and OpenAI's by DeepSeek. In private mode only OpenVibe's own model may read the task, so it checks its own answer and the task says so. A failed check sends the task to the next agent that can do it.</p>
 <h2 id="trust">Trust</h2>
 <p><strong>first-party</strong> runs on OpenVibe's own hardware; <strong>external</strong> means the task's text goes to that provider (the OpenVibe runtime is OpenVibe's code, but its model runs at DeepSeek). Private mode takes only first-party agents.</p>`,
-        });
-    });
+        };
+    }
+    r.get('/agents', (req, res) => page(req, res, agentsPage()));
 
     // ── The API reference ────────────────────────────────────
-    r.get('/docs', (req, res) => {
+    function docsPage() {
         const b = config.baseUrl;
         const create = `curl -s ${b}/api/v1/tasks \\
   -H "authorization: Bearer $TOKEN" \\
@@ -537,8 +544,8 @@ ${table(['Mode', 'What it picks'], MODES.map((m) => [html`<strong>${MODE_LABEL[m
 id: 3
 event: output
 data: {"task_id":"tsk_…","seq":3,"kind":"output","agent":"openvibe-runtime","step":"tool_call","tool":"run_tool","input":"ssl {\\"target\\":\\"example.com\\"}"}`;
-        page(req, res, {
-            index: true, cache: PUBLIC_CACHE,
+        return {
+            agent: true, index: true, cache: PUBLIC_CACHE,
             title: 'API',
             description: 'The OpenVibe.Actor API: create a task, watch it live over server-sent events, read the result with its cost and explanation, cancel it; list the agents and dry-run the router.',
             crumbs: [{ label: 'API' }],
@@ -580,18 +587,25 @@ ${table(['Code', 'Meaning'], [
                 [html`<code>actor.check.unavailable</code>`, 'The answer could not be checked, so it was not delivered.'],
                 [html`<code>actor.task.timeout</code> / <code>actor.task.interrupted</code>`, 'It ran too long, or Actor restarted while it ran.'],
             ])}`,
-        });
-    });
+        };
+    }
+    r.get('/docs', (req, res) => page(req, res, docsPage()));
 
     // ── Limits and the update log ────────────────────────────
     r.get('/limits.json', (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ maxAge: 300 }));
         res.json({ service: 'actor', free_tier: { tasks_per_day: tier.tasksPerDay, per_task_usd: tier.perTaskUsd, per_day_usd: tier.perDayUsd }, task_timeout_seconds: Math.round(config.taskTimeoutMs / 1000), retention_days: store.RETENTION_DAYS });
     });
-    r.get('/updates', (req, res) => page(req, res, { index: true, cache: PUBLIC_CACHE, title: 'What shipped on OpenVibe.Actor', body: raw(frame.updatesBody({ service: 'actor', siteName: 'OpenVibe.Actor' }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`) }));
+    const updatesPage = () => ({ agent: true, index: true, cache: PUBLIC_CACHE, title: 'What shipped on OpenVibe.Actor', body: raw(frame.updatesBody({ service: 'actor', siteName: 'OpenVibe.Actor' }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`) });
+    r.get('/updates', (req, res) => page(req, res, updatesPage()));
 
     // ── Discovery: robots.txt, sitemap.xml, llms.txt, llms-full.txt ──
     r.use(createDiscoveryRoutes(ctx));
+
+    // The public pages the agent layer's Markdown twins (server/agent-pages.js) render with the same builders.
+    // A task page is behind a person's token and is deliberately absent.
+    r.publicViews = { home: homePage, agents: agentsPage, docs: docsPage, updates: updatesPage };
+
     return r;
 }
 
