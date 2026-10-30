@@ -1,34 +1,43 @@
 'use strict';
 
 /**
- * Sign-in with OpenVibe.Network: OAuth 2 authorization code with PKCE (S256), as OAuth client `actor`.
+ * Sign-in with OpenVibe.Network: openvibe-sdk/sso (0.73.0) is the one module every site uses. This file is this
+ * site's thin wrapper around it — the routes, the middleware and the shapes this site's pages still read.
  *
- *   GET  /auth/login      → Network /oauth/authorize?…&code_challenge=…&code_challenge_method=S256
- *                           (?silent=1 adds prompt=none; ?next= a same-site path)
- *   GET  /auth/callback   → state check, server-side code exchange (client secret + code_verifier)
- *   GET  /auth/logout     → clear cookies, revoke the refresh token (best effort)
- *   GET  /auth/me         → { user } for the shared navbar (it cannot read the httpOnly cookie); { user: null } for a guest
+ *   GET  /auth/login     → Network /oauth/authorize with state and PKCE (S256); ?next, ?silent, ?prompt, ?login_hint
+ *   GET  /auth/callback  → the state is compared in constant time, the code is exchanged server-side (client secret)
+ *   GET  /auth/logout    → the cookies are cleared, the refresh token revoked (best effort)
+ *   GET  /auth/me        → { user } for the shared navbar
+ *   GET  /auth/health    → { ok, client }: does the Network accept this site's OAuth client?
+ *   POST /auth/fedcm     → the shared navbar's FedCM assertion, swapped for tokens
+ *   POST /auth/refresh   → the tokens are rotated with the refresh token
  *
- * The person's Network access token lives in an httpOnly cookie (actor_at) no script can read: with it, a script
- * could spend their free tier. The refresh token (actor_rt) is httpOnly too. Neither is ever stored server-side,
- * rendered or logged.
+ * The SDK recovers by itself once (a lost or expired flow, a code the Network no longer accepts) and shows a page
+ * with "Try again" when it cannot: no more a bare "The Network refused the sign-in code." A client the Network
+ * refuses is logged as a configuration error, and GET /auth/health answers 503 for it.
+ *
+ * Nothing signed in is signed out: the old cookie (actor_at) is read as the session until the next sign-in or
+ * refresh writes ov_token and clears it. The access token stays httpOnly: no script can read it (the navbar asks
+ * /auth/me).
  */
 const crypto = require('crypto');
 const express = require('express');
 const cache = require('openvibe-shared/cache-policy');
+const { createSsoClient, COOKIES, parseCookies } = require('openvibe-sdk/sso');
 
 const ACCESS_COOKIE = 'actor_at';
 const REFRESH_COOKIE = 'actor_rt';
 const HINT_COOKIE = 'ov_sso_hint';
-const FLOW_COOKIE = 'actor_oauth';
+
+/** The cookie names a session is read from: the site's own before the move, the SDK's now. */
+const SESSION_COOKIES = [COOKIES.access, ACCESS_COOKIE];
 
 function pkcePair() {
-    const verifier = crypto.randomBytes(32).toString('base64url');           // 43 characters
+    const verifier = crypto.randomBytes(32).toString('base64url');
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
     return { verifier, challenge };
 }
 
-/** This site's own origins: BASE_URL, and the other hosts this process serves (OpenVibe.Homes for Rent). */
 function ownOrigins(config) {
     const out = new Set();
     for (const u of [config && config.baseUrl, config && config.homes && config.homes.url]) {
@@ -37,14 +46,8 @@ function ownOrigins(config) {
     return out;
 }
 
-/**
- * Same-site relative paths only (never protocol-relative, never another origin). An absolute URL on one of this
- * site's own origins counts as its path: the shared navbar's silent sign-in sends the whole page address, and until
- * 2026-10-22 that landed on the home page (a person signed in quietly found themselves somewhere else).
- */
+/** Same-site relative paths only (never protocol-relative, never another origin). */
 function sanitizeNext(next, config) {
-    // Browsers drop tab and newline characters from a URL and read a backslash as "/": "/<TAB>/evil.com" would
-    // leave the site. A next with any control character or backslash goes home.
     if (typeof next === 'string' && /[\u0000-\u001f\u007f\\]/.test(next)) return '/';
     if (typeof next === 'string' && /^https?:\/\//i.test(next)) {
         let u = null;
@@ -56,6 +59,7 @@ function sanitizeNext(next, config) {
     return next;
 }
 
+/** The authorize URL for a sign-in (pure; the SDK builds its own, this one stays for the site's tests). */
 function authorizeUrl(config, { state, challenge, silent = false }) {
     const q = new URLSearchParams({
         response_type: 'code',
@@ -71,185 +75,155 @@ function authorizeUrl(config, { state, challenge, silent = false }) {
 }
 
 function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console }) {
-    const cookieBase = () => ({ sameSite: 'lax', secure: config.cookies.secure, httpOnly: true, path: '/' });
+    // The one module. The site's own values, its own old cookies, and the audience it always verified with.
+    const sso = createSsoClient({
+        site: 'actor',
+        siteName: 'OpenVibe.Actor',
+        baseUrl: config.baseUrl,
+        clientId: config.oauth.clientId,
+        clientSecret: config.oauth.clientSecret,
+        networkUrl: config.networkUrl,
+        networkInternalUrl: config.networkInternalUrl || config.networkUrl,
+        issuer: config.networkIssuer || config.networkUrl,
+        redirectUri: config.oauth.redirectUri,
+        scope: config.oauth.scope,
+        audience: config.oauth.sessionAudience,
+        secureCookies: config.cookies.secure !== false,
+        httpOnlyAccess: true,
+        legacyCookies: { access: [ACCESS_COOKIE], refresh: [REFRESH_COOKIE] },
+        fetch: fetchImpl,
+        log,
+    });
 
-    function setSession(res, data) {
-        res.cookie(ACCESS_COOKIE, data.access_token, { ...cookieBase(), maxAge: 24 * 60 * 60 * 1000 });
-        if (data.refresh_token) res.cookie(REFRESH_COOKIE, data.refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 * 1000 });
-        res.cookie(HINT_COOKIE, 'account', { sameSite: 'lax', secure: config.cookies.secure, httpOnly: false, path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
-    }
-    function clearSession(res) {
-        res.clearCookie(ACCESS_COOKIE, cookieBase());
-        res.clearCookie(REFRESH_COOKIE, cookieBase());
-    }
+    const cookieBase = () => ({ sameSite: 'lax', secure: config.cookies.secure !== false, httpOnly: true, path: '/' });
 
-    /** POST the Network token endpoint (internal URL). Throws { status, error } on refusal. */
-    async function tokenGrant(fields) {
-        const body = new URLSearchParams({ client_id: config.oauth.clientId, client_secret: config.oauth.clientSecret, ...fields });
-        let res;
-        try {
-            res = await fetchImpl(`${config.networkInternalUrl}/oauth/token`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-                body, signal: AbortSignal.timeout(10_000),
-            });
-        } catch (err) {
-            throw Object.assign(new Error('OpenVibe.Network did not answer'), { status: 502, error: err && err.name === 'TimeoutError' ? 'timeout' : 'unreachable' });
-        }
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data || !data.access_token) {
-            throw Object.assign(new Error((data && (data.error_description || data.error)) || `token endpoint ${res.status}`),
-                { status: res.status, error: (data && data.error) || 'invalid_grant' });
-        }
-        return data;
-    }
-
-    /**
-     * An Actor session is a Network SESSION token: audience openvibe.network and a person. The Network
-     * signs FedCM assertions (audience = any owned-zone origin that asked), app/service tokens and
-     * internal tokens with the same key and issuer; none of them may become a session here.
-     */
-    async function verifySession(token) {
-        const v = await keys.verifyUser(token, { issuer: config.networkIssuer, audience: config.oauth.sessionAudience, now: now() });
-        const c = v.claims;
-        if (c && (c.typ === 'fedcm' || c.actor_type !== undefined)) return { ok: false, reason: 'not a session token' };
-        return v;
-    }
-
-    function viewerFromClaims(claims, token) {
+    /** The person, in the shape this site's pages read (req.viewer). */
+    function viewerFrom(claims, token) {
         const subject = typeof claims.subject_id === 'string' ? claims.subject_id : null;
         const role = typeof claims.role === 'string' ? claims.role : 'user';
+        const username = typeof claims.username === 'string' ? claims.username.slice(0, 64) : null;
         return {
             kind: 'user',
             subject,
-            username: typeof claims.username === 'string' ? claims.username.slice(0, 64) : null,
-            displayName: typeof claims.display_name === 'string' ? claims.display_name.slice(0, 80) : (typeof claims.username === 'string' ? claims.username.slice(0, 64) : 'you'),
+            username,
+            displayName: typeof claims.display_name === 'string' ? claims.display_name.slice(0, 80) : (username || 'you'),
             role,
-            // The navbar's avatar and colour (Network's token claims; the avatar is an https image on openvibe.media).
             avatarUrl: typeof claims.avatar_url === 'string' && /^https:\/\/[^\s"'<>]{1,500}$/.test(claims.avatar_url) ? claims.avatar_url : null,
             profileColor: typeof claims.profile_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(claims.profile_color) ? claims.profile_color : null,
-            // The person's Network access token: used for server-side Network calls, never rendered.
             token,
         };
     }
 
-    /** One refresh per request, however many Network calls in it see a 401 (refresh tokens rotate). */
-    async function refresh(req, res) {
-        if (!req.actorRefresh) req.actorRefresh = await doRefresh(req, res);
-        return req.actorRefresh;
-    }
+    /** The public profile the navbar and the API read (the same fields as before the move). */
+    const meOf = (claims) => {
+        const v = viewerFrom(claims, null);
+        return {
+            username: v.username,
+            display_name: v.displayName,
+            subject_id: v.subject,
+            role: v.role,
+            avatar_url: v.avatarUrl || null,
+            profile_color: v.profileColor || null,
+        };
+    };
 
-    async function doRefresh(req, res) {
-        const rt = req.cookies && req.cookies[REFRESH_COOKIE];
+    /**
+     * The access token expired (or is gone) but the refresh token is still there: rotate it and write the SDK's own
+     * cookies, the same names and options the SDK uses. The old cookies are cleared.
+     */
+    async function refreshSession(req, res) {
+        const c = parseCookies(req);
+        const rt = c[COOKIES.refresh] || c[REFRESH_COOKIE];
         if (!rt) return null;
-        try {
-            const data = await tokenGrant({ grant_type: 'refresh_token', refresh_token: rt });
-            setSession(res, data);
-            const v = await verifySession(data.access_token);
-            return v.ok ? viewerFromClaims(v.claims, data.access_token) : null;
-        } catch (err) {
-            if (err.status && err.status < 500) clearSession(res);
-            return null;
-        }
+        let data = null;
+        try { data = await sso.tokenGrant({ grant_type: 'refresh_token', refresh_token: rt }); } catch { return null; }
+        if (!data || !data.access_token) return null;
+        const claims = await sso.verify(data.access_token);
+        if (!claims) return null;
+        res.cookie(COOKIES.access, data.access_token, { ...cookieBase(), maxAge: 24 * 60 * 60 * 1000 });
+        if (data.refresh_token) res.cookie(COOKIES.refresh, data.refresh_token, { ...cookieBase(), path: '/auth', maxAge: 30 * 24 * 60 * 60 * 1000 });
+        res.clearCookie(ACCESS_COOKIE, { path: '/' });
+        res.clearCookie(REFRESH_COOKIE, { path: '/' });
+        return { claims, token: data.access_token };
     }
 
-    /** req.viewer for every page: the signed-in person, refreshed when their token expired. */
+    /** req.user and req.token for a valid session; req.viewer keeps this site's pages working as they are. */
     function middleware() {
-        return async (req, res, next) => {
+        const optional = sso.optionalAuth();
+        return (req, res, next) => {
             req.viewer = { kind: 'anonymous' };
-            const token = req.cookies && req.cookies[ACCESS_COOKIE];
-            if (!token) return next();
-            await keys.ensure();
-            const v = await verifySession(token);
-            if (v.ok) { req.viewer = viewerFromClaims(v.claims, token); return next(); }
-            if (v.expired) {
-                const fresh = await refresh(req, res);
-                if (fresh) { req.viewer = fresh; return next(); }
-            }
-            if (keys.loaded()) clearSession(res);
-            next();
+            optional(req, res, async () => {
+                try {
+                    if (req.user && req.token) { req.viewer = viewerFrom(req.user, req.token); return next(); }
+                    const fresh = await refreshSession(req, res);
+                    if (fresh) {
+                        req.user = fresh.claims;
+                        req.token = fresh.token;
+                        req.viewer = viewerFrom(fresh.claims, fresh.token);
+                    }
+                } catch (err) {
+                    log.warn('[OpenVibe.Actor] session refresh failed:', (err && err.message) || err);
+                }
+                return next();
+            });
         };
     }
 
-    /**
-     * Run fn(token) as the viewer; when the Network answers 401 (expired or revoked session), refresh
-     * once and run it again. Other failures are returned to the caller unchanged.
-     */
+    /** A call with the person's own token; a 401 refreshes the session once and tries again. */
     async function asViewer(req, res, fn) {
+        const token = req.token || (req.viewer && req.viewer.token) || null;
+        if (!token) throw Object.assign(new Error('Not signed in'), { status: 401 });
         try {
-            return await fn(req.viewer.token);
+            return await fn(token);
         } catch (err) {
             if (!err || err.status !== 401) throw err;
-            const fresh = await refresh(req, res);
+            const fresh = await refreshSession(req, res);
             if (!fresh) throw err;
-            req.viewer = fresh;
+            req.user = fresh.claims;
+            req.token = fresh.token;
+            req.viewer = viewerFrom(fresh.claims, fresh.token);
             return fn(fresh.token);
         }
     }
 
     function routes() {
         const r = express.Router();
-        const flowOpts = () => ({ ...cookieBase(), path: '/auth', maxAge: 10 * 60 * 1000 });
 
-        r.get('/login', (req, res) => {
-            const silent = Boolean(req.query.silent) && req.query.silent !== '0';
-            const state = crypto.randomBytes(16).toString('hex');
-            const { verifier, challenge } = pkcePair();
-            res.cookie(FLOW_COOKIE, JSON.stringify({ state, verifier, next: sanitizeNext(req.query.next, config), silent }), flowOpts());
+        // No Clear-Site-Data on the callback or on sign-out: Chrome holds such an answer (and the cookies it sets)
+        // until the cache is cleared, which on phones left people on the account chooser with no session (2026-10-28).
+
+        // GET /auth/me: the shared navbar's answer. A guest is { user: null } (200); a session that does not verify
+        // is 401, as it always was here.
+        r.get('/me', async (req, res) => {
             res.set('Cache-Control', cache.htmlHeaders({ private: true }));
-            res.redirect(authorizeUrl(config, { state, challenge, silent }));
+            const c = parseCookies(req);
+            const presented = Boolean(c[COOKIES.access] || c[ACCESS_COOKIE] || c[COOKIES.refresh] || c[REFRESH_COOKIE] || req.get('authorization'));
+            if (!presented) return res.json({ user: null });
+            const claims = await sso.verify(sso.extractToken(req));
+            if (!claims) return res.status(401).json({ error: 'Not signed in' });
+            return res.json({ user: meOf(claims) });
         });
 
-        r.get('/callback', async (req, res) => {
-            res.set('Cache-Control', cache.htmlHeaders({ private: true }));
-            let flow = null;
-            try { flow = JSON.parse(req.cookies[FLOW_COOKIE] || 'null'); } catch { flow = null; }
-            res.clearCookie(FLOW_COOKIE, { ...cookieBase(), path: '/auth' });
-            const next = flow ? sanitizeNext(flow.next, config) : '/';
-            const { code, state, error } = req.query;
-            if (error) {
-                if ((flow && flow.silent) || error === 'login_required' || error === 'interaction_required') return res.redirect(next);
-                return res.status(400).type('text/plain').send(`Sign-in was not completed (${String(error).slice(0, 60)}).`);
-            }
-            if (!flow || typeof flow.state !== 'string' || typeof flow.verifier !== 'string' || typeof state !== 'string'
-                || state.length !== flow.state.length || !crypto.timingSafeEqual(Buffer.from(state), Buffer.from(flow.state))) {
-                return res.status(400).type('text/plain').send('Sign-in state did not match. Please try signing in again.');
-            }
-            if (!code) return res.status(400).type('text/plain').send('The Network sent no authorization code.');
-            try {
-                const data = await tokenGrant({ grant_type: 'authorization_code', code: String(code), redirect_uri: config.oauth.redirectUri, code_verifier: flow.verifier });
-                setSession(res, data);
-                // No Clear-Site-Data here or on sign-out: Chrome holds such an answer (and the cookies it sets) until the
-                // cache is cleared, which on phones left people on the account chooser with no session (2026-10-28).
-                return res.redirect(next);
-            } catch (err) {
-                log.warn('[Actor] sign-in exchange failed:', err.status || '', err.error || '');
-                return res.status(err.status && err.status < 500 ? 400 : 502).type('text/plain')
-                    .send(err.status && err.status < 500 ? 'The Network refused the sign-in code. Please sign in again.' : 'Sign-in failed: OpenVibe.Network did not answer. Please try again.');
-            }
-        });
-
-        // Sign-out ends the session, so another site must not be able to trigger it (a cross-site
-        // <img src=/auth/logout> or link). A same-origin navigation or form, or the address bar
-        // (Sec-Fetch-Site none), signs out directly; anything else gets a confirm button (POST).
+        // Sign-out stays a same-site action: another site cannot sign a person out.
         const sameOriginRequest = (req) => {
             const site = String(req.get('sec-fetch-site') || '');
             if (site) return site === 'same-origin' || (site === 'none' && req.method === 'GET');
             const origin = req.get('origin');
             if (origin) return origin === `${req.protocol}://${req.get('host')}`;
-            return req.method === 'GET';    // no fetch metadata and no Origin: an old browser navigating
+            return req.method === 'GET';
         };
         r.get('/logout', (req, res, next) => {
             if (sameOriginRequest(req)) return next();
             res.set('Cache-Control', cache.htmlHeaders({ private: true }));
             const q = req.query.next ? `?next=${encodeURIComponent(sanitizeNext(req.query.next, config))}` : '';
-            res.type('html').send(`<!doctype html><meta charset="utf-8"><title>Sign out</title><meta name="viewport" content="width=device-width,initial-scale=1">`
+            res.type('html').send('<!doctype html><meta charset="utf-8"><title>Sign out</title><meta name="viewport" content="width=device-width,initial-scale=1">'
                 + `<form method="post" action="/auth/logout${q}" style="font:16px system-ui;margin:3em auto;max-width:24em;text-align:center">`
-                + `<p>Sign out of OpenVibe.Actor?</p><button type="submit">Sign out</button> <a href="/">Cancel</a></form>`);
+                + '<p>Sign out of OpenVibe.Actor?</p><button type="submit">Sign out</button> <a href="/">Cancel</a></form>');
         });
         r.post('/logout', (req, res, next) => (sameOriginRequest(req) ? next() : res.status(403).type('text/plain').send('Sign-out must come from this site.')));
         r.all('/logout', async (req, res) => {
-            const rt = req.cookies && req.cookies[REFRESH_COOKIE];
+            const c = parseCookies(req);
+            const rt = c[COOKIES.refresh] || c[REFRESH_COOKIE];
             if (rt) {
                 fetchImpl(`${config.networkInternalUrl}/oauth/revoke`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -257,26 +231,20 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
                     signal: AbortSignal.timeout(3000),
                 }).catch(() => {});
             }
-            clearSession(res);
-            res.cookie(HINT_COOKIE, 'guest', { sameSite: 'lax', secure: config.cookies.secure, httpOnly: false, path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
-            res.redirect(303, sanitizeNext(req.query.next, config));
+            res.clearCookie(COOKIES.access, { path: '/' });
+            res.clearCookie(COOKIES.refresh, { path: '/auth' });
+            res.clearCookie(ACCESS_COOKIE, { path: '/' });
+            res.clearCookie(REFRESH_COOKIE, { path: '/' });
+            res.cookie(HINT_COOKIE, 'guest', { sameSite: 'lax', secure: config.cookies.secure !== false, httpOnly: false, path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
+            return res.redirect(303, sanitizeNext(req.query.next, config));
         });
 
-        r.get('/me', (req, res) => {
-            res.set('Cache-Control', cache.htmlHeaders({ private: true }));
-            // No session at all (a guest: no access or refresh cookie) is signed out, not an error: the shared
-            // navbar asks this on every page view, and a 401 logged a console error on each (browser check,
-            // OpenVibe.Host). A session cookie that is present but invalid or expired still answers 401.
-            const c = req.cookies || {};
-            if (!c[ACCESS_COOKIE] && !c[REFRESH_COOKIE] && !req.get('authorization')) return res.json({ user: null });
-            const v = req.viewer;
-            if (!v || v.kind !== 'user') return res.status(401).json({ error: 'Not signed in' });
-            res.json({ user: { username: v.username, display_name: v.displayName, subject_id: v.subject, role: v.role, avatar_url: v.avatarUrl || null, profile_color: v.profileColor || null } });
-        });
+        // The SDK's own routes: /login, /callback, /fedcm, /refresh, /health.
+        r.use(sso.router(express));
         return r;
     }
 
-    return { middleware, routes, asViewer, tokenGrant, pkcePair };
+    return { middleware, routes, asViewer, tokenGrant: (fields) => sso.tokenGrant(fields), pkcePair, client: sso, checkClient: (o) => sso.checkClient(o) };
 }
 
-module.exports = { createSso, pkcePair, sanitizeNext, ownOrigins, authorizeUrl, ACCESS_COOKIE, REFRESH_COOKIE };
+module.exports = { createSso, pkcePair, sanitizeNext, ownOrigins, authorizeUrl, ACCESS_COOKIE, REFRESH_COOKIE, SESSION_COOKIES };

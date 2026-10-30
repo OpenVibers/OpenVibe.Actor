@@ -1,11 +1,15 @@
 'use strict';
 /**
- * Sign-in with PKCE S256 (client id actor, cookies actor_at/actor_rt/actor_oauth), truthful readiness
- * (db and agents required), /release.json, loopback-only /metrics, and pages useful without JavaScript.
+ * Sign-in with PKCE S256 through openvibe-sdk/sso (0.73.0): the routes, the SDK's own recovery (a lost flow or a
+ * code the Network no longer accepts starts the sign-in once more by itself, and only then shows a page with
+ * "Try again"), the old cookies read as the session, truthful readiness (db and the agents are required), 
+ * /release.json, loopback-only /metrics, and pages useful without JavaScript.
  */
 const assert = require('assert');
 const crypto = require('crypto');
 const { boot, check, done } = require('./helpers/boot');
+
+const cookieJar = (res) => res.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
 
 (async () => {
     const t = await boot();
@@ -19,45 +23,72 @@ const { boot, check, done } = require('./helpers/boot');
         assert.strictEqual(loc.searchParams.get('client_id'), 'actor');
         assert.strictEqual(loc.searchParams.get('code_challenge_method'), 'S256');
         assert.match(loc.searchParams.get('code_challenge'), /^[A-Za-z0-9_-]{43}$/);
-        assert.match(loc.searchParams.get('state'), /^[0-9a-f]{32}$/);
-        assert.match(r.headers.get('set-cookie'), /actor_oauth=.*Path=\/auth.*HttpOnly/i);
+        assert.match(loc.searchParams.get('state'), /^[A-Za-z0-9_-]{32}$/);
+        assert.match(r.headers.get('set-cookie'), /ov_oauth_state=.*Path=\/auth.*HttpOnly/i);
     });
 
-    await check('callback exchanges the code with the matching verifier and sets httpOnly session cookies', async () => {
+    await check('login passes ?silent, ?prompt and ?login_hint to the Network', async () => {
+        const silent = new URL((await t.get('/auth/login?silent=1')).headers.get('location'));
+        assert.strictEqual(silent.searchParams.get('prompt'), 'none');
+        const chooser = new URL((await t.get('/auth/login?prompt=select_account')).headers.get('location'));
+        assert.strictEqual(chooser.searchParams.get('prompt'), 'select_account');
+        const hint = new URL((await t.get('/auth/login?login_hint=kim')).headers.get('location'));
+        assert.strictEqual(hint.searchParams.get('login_hint'), 'kim');
+    });
+
+    await check('callback exchanges the code with the matching verifier and sets the SDK\'s own httpOnly cookies', async () => {
         const login = await t.get('/auth/login?next=/tasks');
         const loc = new URL(login.headers.get('location'));
-        const flowCookie = login.headers.get('set-cookie').split(';')[0];
+        const flowCookie = cookieJar(login);
         const code = t.network.issueCode(user, loc.searchParams.get('code_challenge'));
         const r = await t.get(`/auth/callback?code=${code}&state=${loc.searchParams.get('state')}`, { cookie: flowCookie });
         assert.strictEqual(r.status, 302, r.text);
         assert.strictEqual(r.headers.get('location'), '/tasks');
         const set = r.headers.get('set-cookie');
-        assert.match(set, /actor_at=[^;]+;.*HttpOnly/i);
-        assert.match(set, /actor_rt=[^;]+;.*HttpOnly/i);
-        const at = set.match(/actor_at=([^;]+)/)[1];
-        const me = await t.get('/auth/me', { cookie: `actor_at=${at}` });
+        assert.match(set, /ov_token=[^;]+;.*HttpOnly/i);
+        assert.match(set, /ov_refresh=[^;]+;.*HttpOnly/i);
+        assert.match(set, /actor_at=;/);
+        const at = set.match(/ov_token=([^;]+)/)[1];
+        const me = await t.get('/auth/me', { cookie: `ov_token=${at}` });
         assert.strictEqual(me.json().user.username, 'kim');
         assert.ok(!me.text.includes(at), '/auth/me never returns the token');
     });
 
-    await check('a wrong state or a verifier that does not match is refused', async () => {
+    await check('the old cookie is still the session, so nobody is signed out by the move', async () => {
+        const at = t.network.userToken(user);
+        const me = await t.get('/auth/me', { cookie: `actor_at=${at}` });
+        assert.strictEqual(me.status, 200);
+        assert.strictEqual(me.json().user.username, 'kim');
+        assert.strictEqual(me.json().user.subject_id, user.subject);
+    });
+
+    await check('a wrong state or a verifier that does not match starts the sign-in once more', async () => {
         const login = await t.get('/auth/login');
         const loc = new URL(login.headers.get('location'));
-        const flowCookie = login.headers.get('set-cookie').split(';')[0];
+        const flowCookie = cookieJar(login);
         const code = t.network.issueCode(user, loc.searchParams.get('code_challenge'));
         const bad = await t.get(`/auth/callback?code=${code}&state=${'0'.repeat(32)}`, { cookie: flowCookie });
-        assert.strictEqual(bad.status, 400);
+        assert.strictEqual(bad.status, 302, 'the SDK recovers by itself once');
+        assert.match(bad.headers.get('location'), /^\/auth\/login/);
+        const retry = cookieJar(bad);
+        assert.match(retry, /ov_oauth_retry=1/);
+        const again = await t.get(`/auth/callback?code=${code}&state=${'0'.repeat(32)}`, { cookie: `${flowCookie}; ${retry}` });
+        assert.strictEqual(again.status, 400);
+        assert.match(again.text, /Try again/);
         const other = t.network.issueCode(user, crypto.createHash('sha256').update('another-verifier').digest('base64url'));
-        const mismatch = await t.get(`/auth/callback?code=${other}&state=${loc.searchParams.get('state')}`, { cookie: flowCookie });
-        assert.strictEqual(mismatch.status, 400, 'Network refuses the PKCE check; Actor reports it');
-        const noCookie = await t.get(`/auth/callback?code=${code}&state=${loc.searchParams.get('state')}`);
-        assert.strictEqual(noCookie.status, 400);
+        assert.strictEqual((await t.get(`/auth/callback?code=${other}&state=${loc.searchParams.get('state')}`, { cookie: flowCookie })).status, 302);
+        assert.strictEqual((await t.get(`/auth/callback?code=${code}&state=${loc.searchParams.get('state')}`)).status, 302);
     });
 
     await check('next= only accepts same-site paths', async () => {
         const r = await t.get('/auth/login?next=//evil.example/x');
-        const flow = decodeURIComponent(r.headers.get('set-cookie').match(/actor_oauth=([^;]+)/)[1]);
-        assert.strictEqual(JSON.parse(flow).next, '/');
+        assert.ok(!/ov_oauth_next=[^;]+/.test(String(r.headers.get('set-cookie') || '')), 'another origin is never a target');
+    });
+
+    await check('/auth/health says whether the Network accepts this site\'s client', async () => {
+        const r = await t.get('/auth/health');
+        assert.strictEqual(r.status, 200);
+        assert.deepStrictEqual(r.json(), { ok: true, client: 'ok' });
     });
 
     await check('readiness is truthful: required db + the agents; JWKS, the OAuth client and Valkey are optional', async () => {
@@ -70,6 +101,8 @@ const { boot, check, done } = require('./helpers/boot');
         assert.strictEqual(b.checks.agents.required, true);
         assert.strictEqual(b.checks.network_jwks.status, 'ok');
         assert.strictEqual(b.checks.oauth_client.status, 'ok');
+        assert.strictEqual(b.checks.sso_client.status, 'ok');
+        assert.strictEqual(b.checks.sso_client.required, true);
         assert.ok(!('docs' in b.checks) && !('events_relay' in b.checks), 'the console\'s checks moved with it');
     });
 
