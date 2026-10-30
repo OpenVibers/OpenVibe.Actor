@@ -40,7 +40,8 @@ class ModelError extends Error {
 const PREFERRED_CHECKED = '2026-10-30';
 const PREFERRED = {
     openai: ['gpt-5.1', 'gpt-5-pro', 'gpt-5', 'o4', 'o3', 'gpt-4.1', 'gpt-4o', 'gpt-5-mini', 'o4-mini', 'o3-mini', 'gpt-5-nano', 'gpt-4.1-mini', 'gpt-4o-mini'],
-    deepseek: ['deepseek-v4-pro', 'deepseek-reasoner', 'deepseek-chat', 'deepseek-flash'],
+    // DeepSeek V4.1 Flash leads its family by the owner's choice (10-30: "don't use DeepSeek Pro … use Flash 4.1").
+    deepseek: ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-reasoner', 'deepseek-chat'],
     runtime: [],
     compatible: [],
     local: [],
@@ -49,7 +50,10 @@ const PREFERRED = {
 const FAST_PREFERRED = ['gpt-5-nano', 'gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-mini', 'o4-mini', 'o3-mini'];
 // Not chat models: embeddings, audio, images, moderation, research agents and dated snapshots (a moving alias is preferred).
 const NOT_CHAT = /(embed|whisper|tts|audio|image|dall-e|moderation|transcribe|realtime|search-|research|codex|computer-use|-\d{4}-\d{2}-\d{2}$)/i;
-const SMALL = /(nano|mini|flash|small|lite|tiny|(?:^|[^a-z])(?:1|3|7|8|13)b(?:$|[^a-z]))/i;
+const SMALL_RE = /(nano|mini|flash|small|lite|tiny|(?:^|[^a-z])(?:1|3|7|8|13)b(?:$|[^a-z]))/i;
+// DeepSeek's Flash is its full V4.1 model, not a small one: it may take any tier (the owner's pick, 10-30).
+const FULL = new Set(['deepseek-flash']);
+const SMALL = { test: (m) => !FULL.has(String(m)) && SMALL_RE.test(String(m)) };
 
 const TIERS = ['fast', 'smart', 'best', 'check', 'vision'];
 const PROVIDERS = ['openai', 'deepseek', 'runtime', 'compatible', 'local'];

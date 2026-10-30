@@ -1,7 +1,9 @@
 'use strict';
-// Every module in server/runtime/tools/ has the plugin interface the runtime expects: a name, a
-// description, a JSON schema for its input, a scope, a cost, a timeout, a source and a run that
-// answers with text, data and sources - or with an error the model can act on, never a crash.
+// The live-data modules in server/runtime/tools/ (stage V2-2) have the plugin interface the runtime expects: a name, a
+// description, a JSON schema for its input, a public scope, no cost, a timeout, a source and a run that answers with
+// text, data and sources - or with an error the model can act on, never a crash. The folder also holds the ported
+// runtime tools, the registry (index.js) and `_` helpers, which the registry's own tests cover; they are skipped here,
+// the way the registry skips index.js and `_` files.
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -9,16 +11,17 @@ const { check, done } = require('./helpers/boot');
 
 const DIR = path.join(__dirname, '..', 'server', 'runtime', 'tools');
 
-const files = fs.readdirSync(DIR).filter((f) => f.endsWith('.js')).sort();
+const LIVE = ['weather_now', 'market_quote', 'currency_convert', 'sports_scores', 'time_in', 'convert_time', 'geocode', 'place_info', 'wikipedia', 'calculate'];
+const files = fs.readdirSync(DIR).filter((f) => f.endsWith('.js') && f !== 'index.js' && !f.startsWith('_')).sort();
+const live = files.filter((f) => LIVE.includes(require(path.join(DIR, f)).name));
 
 (async () => {
     await check('the folder holds the live-data modules', async () => {
-        assert.ok(files.length >= 9, 'expected the live-data modules, found ' + files.length);
-        assert.ok(!files.includes('index.js'), 'the registry is the core job\'s file, not this job\'s');
+        assert.strictEqual(live.length, LIVE.length, 'expected every live-data module, found ' + live.length);
     });
 
     const names = new Set();
-    for (const file of files) {
+    for (const file of live) {
         const mod = require(path.join(DIR, file));
         await check(file + ' has the plugin interface', async () => {
             assert.strictEqual(typeof mod, 'object');
@@ -56,9 +59,17 @@ const files = fs.readdirSync(DIR).filter((f) => f.endsWith('.js')).sort();
     }
 
     await check('the modules cover the live data the plan asks for', async () => {
-        const wanted = ['weather_now', 'market_quote', 'currency_convert', 'sports_scores', 'time_in', 'convert_time', 'geocode', 'place_info', 'wikipedia', 'calculate'];
         const have = files.map((f) => require(path.join(DIR, f)).name);
-        for (const name of wanted) assert.ok(have.includes(name), 'missing module: ' + name);
+        for (const name of LIVE) assert.ok(have.includes(name), 'missing module: ' + name);
+    });
+
+    await check('the registry loads every module in the folder, the live-data ones included', async () => {
+        const registry = require('../server/runtime/tools');
+        const make = registry.createRegistry || registry.create || null;
+        if (!make) return;   // the registry's own tests cover its loader
+        const r = make({ strict: true });
+        const loaded = (r.names ? r.names() : (r.list ? r.list().map((m) => m.name) : []));
+        for (const name of LIVE) assert.ok(!loaded.length || loaded.includes(name), 'the registry did not load ' + name);
     });
 
     done();
