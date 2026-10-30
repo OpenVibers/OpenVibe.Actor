@@ -19,54 +19,70 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
     const lee = t.network.addUser('lee');
     const create = (json, o = {}) => t.get('/api/v1/tasks', { as: o.as || kim, json, headers: { ...SAME, ...(o.headers || {}) } });
 
-    await check('a lookup task runs on the OpenVibe runtime through OpenVibe.Tools, is checked by another family, and is delivered', async () => {
+    await check('a lookup task runs through the one loop, uses OpenVibe.Tools, and is checked by another family', async () => {
         t.providers.reset();
-        t.providers.state.cls = 'lookup';
-        const r = await create({ task: 'Who handles mail for openvibe.network?' });
-        assert.strictEqual(r.status, 201, r.text);
-        const created = r.json();
-        valid(created);
-        assert.strictEqual(created.state, 'queued');
-        assert.match(r.headers.get('location'), /^\/api\/v1\/tasks\/tsk_/);
-        await t.waitFor(created.id);
-        const task = (await t.get(`/api/v1/tasks/${created.id}`, { as: kim })).json();
-        valid(task);
-        assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
-        assert.strictEqual(task.result.agent, 'openvibe-runtime');
-        assert.match(task.result.answer, /mailserver\.example\.com/, 'the tool result reached the answer');
-        assert.strictEqual(task.result.checked.by, 'openai');
-        assert.strictEqual(task.result.checked.cross_family, true);
-        assert.ok(task.cost.usd > 0 && task.cost.usd < 0.01, String(task.cost.usd));
-        assert.strictEqual(task.explanation[0].selected, 'openvibe-runtime');
-        assert.ok(task.explanation[0].candidates.some((c) => c.id === 'open-model' && /lacks task:lookup/.test(c.excluded_because)));
-        assert.ok(t.providers.requests.some((q) => q.path === '/tools/api/v1/tools/mx/run'), 'the runtime called Tools');
-        assert.strictEqual(task.requester.type, 'user');
-        assert.strictEqual('project_id' in task, false);
+        const saved = t.config.loop.selfReflections;
+        t.config.loop.selfReflections = 0;
+        t.providers.state.script = [
+            { content: 'Checking the mail records.', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'run_tool', arguments: JSON.stringify({ tool: 'mx', input: { target: 'openvibe.network' } }) } }] },
+            { content: 'The mail for openvibe.network is handled by **mailserver.example.com** [E1].' },
+        ];
+        try {
+            const r = await create({ task: 'Who handles mail for openvibe.network?' });
+            assert.strictEqual(r.status, 201, r.text);
+            const created = r.json();
+            valid(created);
+            assert.strictEqual(created.state, 'queued');
+            assert.match(r.headers.get('location'), /^\/api\/v1\/tasks\/tsk_/);
+            await t.waitFor(created.id);
+            const task = (await t.get(`/api/v1/tasks/${created.id}`, { as: kim })).json();
+            valid(task);
+            assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
+            assert.strictEqual(task.result.agent, 'openvibe-runtime');
+            assert.match(task.result.answer, /mailserver\.example\.com/, 'the tool result reached the answer');
+            assert.strictEqual(task.result.checked.by, 'deepseek');
+            assert.strictEqual(task.result.checked.cross_family, true);
+            assert.ok(task.cost.usd > 0 && task.cost.usd < 0.01, String(task.cost.usd));
+            assert.strictEqual(task.explanation[0].selected, 'openvibe-runtime');
+            assert.strictEqual(task.result.evidence.length, 1);
+            assert.strictEqual(task.result.evidence[0].tool, 'run_tool');
+            assert.deepStrictEqual(task.result.citations, ['E1']);
+            assert.ok(t.providers.requests.some((q) => q.path === '/tools/api/v1/tools/mx/run'), 'the loop called Tools');
+            assert.strictEqual(task.requester.type, 'user');
+            assert.strictEqual('project_id' in task, false);
+        } finally { t.config.loop.selfReflections = saved; }
     });
 
-    await check('a web task goes to OpenAI\'s agent, with its sources, checked by DeepSeek', async () => {
+    await check('a web task runs on the one loop, keeps its sources and is checked across families', async () => {
         t.providers.reset();
-        t.providers.state.cls = 'web';
-        const id = (await create({ task: 'What changed in the latest Node.js release?' })).json().id;
-        await t.waitFor(id);
-        const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
-        assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
-        assert.strictEqual(task.result.agent, 'openai-agent');
-        assert.deepStrictEqual(task.result.sources, ['https://example.org/source']);
-        assert.strictEqual(task.result.checked.by, 'deepseek');
-        // Every hosted search is a step with both ends, and its result says what it found (a spinner otherwise).
-        const stream = (await t.get(`/api/v1/tasks/${id}/events`, { as: kim })).text;
-        const steps = [...stream.matchAll(/^data: (.*)$/gm)].map((m) => JSON.parse(m[1]));
-        const searches = steps.filter((e) => e.step === 'tool_call' && e.tool === 'web_search');
-        const found = steps.filter((e) => e.step === 'tool_result' && e.tool === 'web_search');
-        assert.ok(searches.length > 0, 'the hosted search is a step');
-        assert.strictEqual(found.length, searches.length, 'each search has its result');
-        assert.match(found[0].text, /stand-in search/, 'the result names the query');
-        assert.match(found[0].text, /Example source: https:\/\/example\.org\/source/, 'and the sources with their titles');
-        const pageHtml = (await t.get(`/tasks/${id}`, { as: kim })).text;
-        assert.match(pageHtml, /js\/task-events\.js/, 'the task page maps its events for the session view');
-        // 2000 in + 200 out at gpt-5-mini plus one search, plus the classifier and the checker on DeepSeek.
-        assert.ok(task.cost.usd > 0.0105 && task.cost.usd < 0.012, String(task.cost.usd));
+        const saved = t.config.loop.selfReflections;
+        t.config.loop.selfReflections = 0;
+        t.providers.state.script = [
+            { content: 'Searching the web.', tool_calls: [{ id: 'c2', type: 'function', function: { name: 'search_web', arguments: JSON.stringify({ query: 'latest Node.js release' }) } }] },
+            { content: '**Node 24.5** is the latest release, with the changes in its notes [E1].' },
+        ];
+        try {
+            const id = (await create({ task: 'What changed in the latest Node.js release?' })).json().id;
+            await t.waitFor(id);
+            const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
+            assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
+            assert.strictEqual(task.result.agent, 'openvibe-runtime');
+            assert.ok(task.result.sources.includes('https://example.org/source'), JSON.stringify(task.result.sources));
+            assert.strictEqual(task.result.evidence[0].tool, 'search_web');
+            assert.strictEqual(task.result.checked.by, 'deepseek');
+            assert.strictEqual(task.result.checked.cross_family, true);
+            // Every search is a step with both ends, and its result says what it found (a spinner otherwise).
+            const stream = (await t.get(`/api/v1/tasks/${id}/events`, { as: kim })).text;
+            const steps = [...stream.matchAll(/^data: (.*)$/gm)].map((m) => JSON.parse(m[1]));
+            const searches = steps.filter((e) => e.step === 'tool_call' && e.tool === 'search_web');
+            const found = steps.filter((e) => e.step === 'tool_result' && e.tool === 'search_web');
+            assert.ok(searches.length > 0, 'the search is a step');
+            assert.strictEqual(found.length, searches.length, 'each search has its result');
+            assert.match(found[0].text, /example\.org\/source/, 'the result carries its sources');
+            const pageHtml = (await t.get(`/tasks/${id}`, { as: kim })).text;
+            assert.match(pageHtml, /js\/task-events\.js/, 'the task page maps its events for the session view');
+            assert.ok(task.cost.usd > 0 && task.cost.usd < 0.02, String(task.cost.usd));
+        } finally { t.config.loop.selfReflections = saved; }
     });
 
     await check('private mode: only the open model, and the task text never leaves OpenVibe', async () => {
@@ -93,77 +109,86 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         assert.strictEqual(t.providers.requests.filter((q) => /chat|responses/.test(q.path)).length, 0);
     });
 
-    await check('a failing agent hands the task to the next one; both placements are in the explanation', async () => {
+    await check('a failed tool call is evidence too: the loop answers from what it has', async () => {
         t.providers.reset();
-        t.providers.state.cls = 'research';
-        t.providers.state.runtime = 'fail';
-        const id = (await create({ task: 'Summarize what OpenVibe is', mode: 'cheapest' })).json().id;
-        await t.waitFor(id);
-        const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
-        valid(task);
-        assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
-        assert.strictEqual(task.result.agent, 'openai-agent');
-        assert.strictEqual(task.explanation.length, 2);
-        assert.strictEqual(task.explanation[0].selected, 'openvibe-runtime');
-        assert.ok(task.explanation[1].candidates.some((c) => c.id === 'openvibe-runtime' && /tried first: HTTP 500/.test(c.excluded_because)));
+        const saved = t.config.loop.selfReflections;
+        t.config.loop.selfReflections = 0;
+        t.providers.state.script = [
+            { content: 'Trying a tool.', tool_calls: [{ id: 'c3', type: 'function', function: { name: 'no_such_tool', arguments: '{}' } }] },
+            { content: 'That step failed, but I can still answer from this run [E1].' },
+        ];
+        try {
+            const id = (await create({ task: 'Try the thing' })).json().id;
+            await t.waitFor(id);
+            const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
+            assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
+            assert.match(task.result.evidence[0].text, /unknown tool/);
+        } finally { t.config.loop.selfReflections = saved; }
     });
 
-    await check('an answer that fails its check is not delivered; the next agent gets the task', async () => {
+    await check('a live claim with no evidence gets one revision and is delivered once grounded', async () => {
         t.providers.reset();
-        t.providers.state.cls = 'research';
-        // The OpenAI checker rejects the runtime's answer; DeepSeek accepts the OpenAI agent's.
-        t.providers.state.checkOk = (body) => !/Runtime answer/.test(JSON.stringify(body));
-        const id = (await create({ task: 'Read about OpenVibe and summarize it', mode: 'cheapest' })).json().id;
-        await t.waitFor(id);
-        const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
-        assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
-        assert.strictEqual(task.result.agent, 'openai-agent');
-        assert.ok(!/Runtime answer/.test(task.result.answer));
-        const events = await t.get(`/api/v1/tasks/${id}/events`, { as: kim });
-        assert.match(events.text, /Check failed/);
-        const refused = [...events.text.matchAll(/^data: (.*)$/gm)].map((m) => JSON.parse(m[1])).filter((e) => e.step === 'text' && e.is_error);
-        assert.ok(refused.some((e) => /Runtime answer/.test(e.text)), 'the refused answer is kept as an error event after its check');
-        const pageHtml = (await t.get(`/tasks/${id}`, { as: kim })).text;
-        assert.match(pageHtml, /See the answer that didn't pass/, 'the task page folds the refused answer away');
-        assert.match(pageHtml, /class="outcome outcome-ok answer"/);
+        const saved = t.config.loop.selfReflections;
+        t.config.loop.selfReflections = 0;
+        t.providers.state.script = [
+            { content: 'The price of BTC is **$87,432** right now.' },
+            { content: 'Fetching a quote.', tool_calls: [{ id: 'c4', type: 'function', function: { name: 'search_web', arguments: JSON.stringify({ query: 'BTC price now' }) } }] },
+            { content: 'The price of BTC is **$87,432** [E1].' },
+        ];
+        let checks = 0;
+        t.providers.state.checkClaims = (body) => {
+            checks += 1;
+            const answer = String(((body.messages || []).find((m) => /=== The answer/.test(String(m.content))) || {}).content || '');
+            const cited = /\[E1\]/.test(answer);
+            return [{ claim: 'BTC is $87,432', kind: 'live', evidence: cited ? ['E1'] : [], supported: cited }];
+        };
+        try {
+            const id = (await create({ task: 'What is the price of BTC right now?' })).json().id;
+            await t.waitFor(id);
+            const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
+            assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
+            assert.match(task.result.answer, /\[E1\]/);
+            assert.deepStrictEqual(task.result.citations, ['E1']);
+            assert.ok(checks >= 2, 'the check ran again after the revision');
+            const events = await t.get(`/api/v1/tasks/${id}/events`, { as: kim });
+            assert.match(events.text, /Check failed/);
+            assert.match(events.text, /Checked by deepseek/);
+        } finally { t.config.loop.selfReflections = saved; t.providers.state.checkClaims = null; }
     });
 
-    await check('when every agent fails its check the task fails, with no result', async () => {
+    await check('an answer that never gets evidence is not delivered', async () => {
         t.providers.reset();
-        t.providers.state.cls = 'research';
+        const saved = t.config.loop.selfReflections;
+        t.config.loop.selfReflections = 0;
         t.providers.state.checkOk = false;
-        const id = (await create({ task: 'Read about OpenVibe and summarize it' })).json().id;
-        await t.waitFor(id);
-        const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
-        valid(task);
-        assert.strictEqual(task.state, 'failed');
-        assert.strictEqual(task.result, null);
-        assert.strictEqual(task.error.code, 'actor.agents.exhausted');
+        t.providers.state.script = [{ content: 'The price of BTC is **$87,432** right now.' }];
+        try {
+            const id = (await create({ task: 'What is the price of BTC right now?' })).json().id;
+            await t.waitFor(id);
+            const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
+            valid(task);
+            assert.strictEqual(task.state, 'failed');
+            assert.strictEqual(task.result, null);
+            assert.strictEqual(task.error.code, 'actor.check.ungrounded');
+            const events = await t.get(`/api/v1/tasks/${id}/events`, { as: kim });
+            const refused = [...events.text.matchAll(/^data: (.*)$/gm)].map((m) => JSON.parse(m[1])).filter((e) => e.step === 'text' && e.is_error);
+            assert.ok(refused.length > 0, 'the refused answer is kept as an error event, never delivered');
+        } finally { t.config.loop.selfReflections = saved; }
     });
 
-    await check('a checker that gives no verdict passes the check to the next one (same family, and the task says so)', async () => {
+    await check('a checker that cannot run never delivers the answer unchecked', async () => {
         t.providers.reset();
-        t.providers.state.checkerDown = 'openai';
-        const id = (await create({ task: 'Say hello' })).json().id;
-        await t.waitFor(id);
-        const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
-        assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
-        assert.strictEqual(task.result.agent, 'openvibe-runtime');
-        assert.deepStrictEqual([task.result.checked.by, task.result.checked.cross_family], ['deepseek', false]);
-        const deepseekChecks = t.providers.requests.filter((q) => q.path === '/deepseek/chat/completions' && /check an AI agent/.test(JSON.stringify(q.body)));
-        assert.ok(deepseekChecks.length === 1 && deepseekChecks[0].body.thinking && deepseekChecks[0].body.thinking.type === 'disabled', 'short calls run with DeepSeek reasoning off');
-    });
-
-    await check('a hand-off never goes to a weaker agent: after the runtime, the open model is out (lacks quality:standard)', async () => {
-        t.providers.reset();
-        t.providers.state.cls = 'answer';
-        t.providers.state.checkOk = (body) => !/Runtime answer/.test(JSON.stringify(body));
-        const id = (await create({ task: 'test', mode: 'balanced' })).json().id;
-        await t.waitFor(id);
-        const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
-        assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
-        assert.strictEqual(task.result.agent, 'openai-agent');
-        assert.ok(task.explanation[1].candidates.some((c) => c.id === 'open-model' && /lacks quality:standard/.test(c.excluded_because)), JSON.stringify(task.explanation[1].candidates));
+        const saved = t.config.loop.selfReflections;
+        t.config.loop.selfReflections = 0;
+        t.providers.state.checkerDown = 'deepseek';
+        t.providers.state.script = [{ content: 'A simple answer with no live facts.' }];
+        try {
+            const id = (await create({ task: 'Say hello' })).json().id;
+            await t.waitFor(id);
+            const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
+            assert.strictEqual(task.state, 'failed');
+            assert.strictEqual(task.error.code, 'actor.check.unavailable');
+        } finally { t.config.loop.selfReflections = saved; }
     });
 
     await check('a task that did not finish shows why in plain words and offers a retry in Best mode', async () => {
@@ -179,14 +204,13 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         assert.match(pageHtml, /class="attempt"/);
     });
 
-    await check('a budget below the cheapest capable agent fails before anything is paid', async () => {
+    await check('a task with a $0 budget runs nothing at all', async () => {
         t.providers.reset();
-        t.providers.state.cls = 'web';
-        const id = (await create({ task: 'Latest news about Mars', budget: { per_task_usd: 0.001 } })).json().id;
+        const id = (await create({ task: 'Latest news about Mars', budget: { per_task_usd: 0 } })).json().id;
         const row = await t.waitFor(id);
         assert.strictEqual(row.state, 'failed');
         assert.strictEqual(row.error_code, 'actor.budget.exceeded');
-        assert.strictEqual(t.providers.requests.filter((q) => q.path === '/openai/responses').length, 0);
+        assert.strictEqual(t.providers.requests.filter((q) => /chat|responses/.test(q.path)).length, 0);
     });
 
     await check('a budget above the free tier is refused, never lowered; an unknown field or a webhook secret by reference is refused', async () => {

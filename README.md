@@ -46,7 +46,7 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 | `GET /api/v1/tasks/:id/events` | `actor.task.read` | server-sent events, `actor.task-event@1`, resumable with `Last-Event-ID` |
 | `POST /api/v1/tasks/:id/cancel` | `actor.task.create` | stop it |
 | `GET /api/v1/tasks` | `actor.task.list` | `actor.task-list-result@1` |
-| `GET /api/v1/me/agents` | public | `actor.agent-list-result@1` |
+| `GET /api/v1/agents` | public | `actor.agent-list-result@2` |
 | `GET/POST /api/v1/me/agents` (signed in) | `actor.agent.manage` for a token | list or create your personal agents; signed-out GET keeps the public catalog |
 | `GET/PATCH/DELETE /api/v1/me/agents/:id` | `actor.agent.manage` for a token | read, edit or delete one personal agent |
 | `GET /me/approvals`, `GET/POST /me/approvals/:id` (signed in) | the person | the approval inbox ([server/agents/approvals.js](server/agents/approvals.js)): when one of the person's own agents runs while they are away and would start a coding task on their machine (the `codes` agent), the run asks instead and ends with a link; nothing reaches Codes until the person approves, which starts it as their own task (declining runs nothing; a request expires after 7 days). In the account export (`approvals.json`) and deletion. |

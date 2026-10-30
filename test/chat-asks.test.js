@@ -78,10 +78,10 @@ const message = (user, text, { room = { type: 'global' }, ...extra } = {}) => {
     });
 
     await check('the runtime is never handed the asker for its tools: no robots or computers of theirs are offered', async () => {
-        const run = t.ctx.adapters.run;
-        const real = run['openvibe-runtime'];
+        const loop = t.ctx.loop;
+        const real = loop.run;
         const seen = [];
-        run['openvibe-runtime'] = (args) => { seen.push(args.requester); return real(args); };
+        loop.run = (args) => { seen.push(args.requester); return real(args); };
         try {
             t.providers.reset();
             t.providers.state.cls = 'lookup';
@@ -94,7 +94,7 @@ const message = (user, text, { room = { type: 'global' }, ...extra } = {}) => {
             const api = await t.get('/api/v1/tasks', { as: joe, json: { task: 'Who handles mail for openvibe.network?' }, headers: { 'sec-fetch-site': 'same-origin' } });
             await t.waitFor(api.json().id);
             assert.deepStrictEqual(seen, [null, `user:${joe.subject}`], 'the same task asked on Actor itself: the person\'s own tools');
-        } finally { run['openvibe-runtime'] = real; }
+        } finally { loop.run = real; }
     });
 
     await check('a redelivery makes no second task; ordinary messages and other people\'s channels are ignored', async () => {

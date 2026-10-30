@@ -82,7 +82,7 @@ function createApi(ctx) {
     });
 
     // ── The catalog and the dry run (public) ─────────────────
-    r.get('/agents', limits.reads('actor.agent.read'), (req, res) => res.json({ agents: catalog.list(config) }));
+    r.get('/agents', limits.reads('actor.agent.read'), (req, res) => res.json(catalog.listResult(config, ctx.models)));
 
     // A person's own agents live under /me: /agents stays the public catalog of agent systems (actor.agent.read).
     r.get('/me/agents', principal.requireCapability('actor.agent.manage'), (req, res, next) => owner(req, res, next), limits.reads('actor.agent.manage'), async (req, res) => {

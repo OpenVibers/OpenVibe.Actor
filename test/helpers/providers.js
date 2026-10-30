@@ -22,16 +22,43 @@ const http = require('http');
 
 async function startProviders() {
     const requests = [];
-    const state = { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok' };
+    const state = { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', smart: 'tool', script: null, checkClaims: null, loopTool: null };
     const hanging = new Set();
 
     const usage = (inp, out) => ({ prompt_tokens: inp, completion_tokens: out, prompt_cache_hit_tokens: 0 });
     const chatReply = (res, message, u = usage(1000, 100)) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ model: 'stand-in', choices: [{ message: { role: 'assistant', ...message }, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }], usage: u })); };
+    const systemOf = (body) => String(((body.messages || [])[0] || {}).content || '');
     const userText = (body) => { const m = [...(body.messages || [])].reverse().find((x) => x.role === 'user'); return m ? String(m.content) : ''; };
 
+    /** The claim-level check (runtime/check.js): {claims, ok}. A test may script the claims. */
+    function checkReply(res, body, family) {
+        if (state.checkerDown === family) return chatReply(res, { content: '' }, usage(300, 160));
+        const ok = typeof state.checkOk === 'function' ? state.checkOk(body) : state.checkOk;
+        const scripted = typeof state.checkClaims === 'function' ? state.checkClaims(body) : null;
+        const claims = Array.isArray(scripted) ? scripted : (ok ? [] : [{ claim: 'a stand-in live fact with no evidence', kind: 'live', evidence: [], supported: false }]);
+        return chatReply(res, { content: JSON.stringify({ claims, ok, reason: ok ? 'all claims grounded' : 'a live claim has no evidence' }) }, usage(300, 30));
+    }
+
+    /** The one loop (runtime/loop.js) on the stand-in: script it, or one tool call then an answer. */
+    function loopReply(res, body) {
+        if (state.runtime === 'hang') { hanging.add(res); return undefined; }
+        if (Array.isArray(state.script) && state.script.length) {
+            const next = state.script.shift();
+            return chatReply(res, next, usage(next.usage ? next.usage.input : 1200, next.usage ? next.usage.output : 200));
+        }
+        const tools = (body.messages || []).filter((m) => m.role === 'tool');
+        if (!tools.length && state.smart !== 'answer') {
+            const call = state.loopTool || { name: 'run_tool', arguments: JSON.stringify({ tool: 'mx', input: { target: 'openvibe.network' } }) };
+            return chatReply(res, { content: 'Checking the records.', tool_calls: [{ id: 'call_1', type: 'function', function: call }] });
+        }
+        const said = tools.length ? String(tools[0].content || '').slice(0, 300) : '';
+        return chatReply(res, { content: `Stand-in answer to: ${userText(body).slice(0, 200)}${said ? `\n\nTool said: ${said}` : ''}\n\nSources\n- OpenVibe.Tools mx` });
+    }
+
     function judge(body, res, family) {
-        const sys = String(((body.messages || [])[0] || {}).content || '');
+        const sys = systemOf(body);
         if (/sort one task/.test(sys)) return chatReply(res, { content: JSON.stringify({ class: state.cls }) }, usage(200, 10));
+        if (/You verify an AI agent's answer/.test(sys)) return checkReply(res, body, family);
         if (/check an AI agent's answer/.test(sys)) {
             if (state.checkerDown === family) return chatReply(res, { content: '' }, usage(300, 160));
             const ok = typeof state.checkOk === 'function' ? state.checkOk(body) : state.checkOk;
@@ -50,7 +77,12 @@ async function startProviders() {
             requests.push({ path: url.pathname, query: url.search, body, auth: req.headers.authorization || null });
 
             if (url.pathname === '/deepseek/chat/completions') {
-                if (body.response_format) return judge(body, res, 'deepseek');
+                if (/You are OpenVibe Actor's agent/.test(systemOf(body))) return loopReply(res, body);
+                if (body.response_format) {
+                    const j = judge(body, res, 'deepseek');
+                    if (j !== null) return j;
+                    return chatReply(res, { content: JSON.stringify({ ok: true, claims: [], reason: 'stand-in' }) }, usage(300, 20));
+                }
                 if (state.runtime === 'fail') { res.writeHead(500, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'stand-in model is down' } })); }
                 if (state.runtime === 'hang') { hanging.add(res); return undefined; }
                 const tools = (body.messages || []).filter((m) => m.role === 'tool');
@@ -60,6 +92,9 @@ async function startProviders() {
                 return chatReply(res, { content: `Runtime answer to: ${userText(body)}${tools.length ? `\n\nTool said: ${tools[0].content.slice(0, 300)}` : ''}\n\nSources\n- OpenVibe.Tools mx` });
             }
             if (url.pathname === '/openai/chat/completions') {
+                const sys = systemOf(body);
+                if (/You are OpenVibe Actor's agent/.test(sys)) return loopReply(res, body);
+                if (/You plan one task/.test(sys)) return chatReply(res, { content: JSON.stringify({ assumptions: [], steps: [{ goal: 'Do the task' }] }) }, usage(200, 30));
                 const j = judge(body, res, 'openai');
                 if (j !== null) return j;
                 return chatReply(res, { content: 'nano answer' });
@@ -97,6 +132,10 @@ async function startProviders() {
                 res.writeHead(200, { 'content-type': 'application/json' });
                 return res.end(JSON.stringify({ state: 'succeeded', tool: 'mx', result: { data: { target: (body.input || {}).target, records: { MX: [{ exchange: 'mailserver.example.com', priority: 1 }] } } } }));
             }
+            if (url.pathname === '/search/api/v1/query' && req.method === 'POST') {
+                res.writeHead(200, { 'content-type': 'application/json' });
+                return res.end(JSON.stringify({ results: [{ title: 'Node 24.5 release notes', snippet: 'What changed in the latest release', url: 'https://example.org/source', site: 'example.org', published_at: '2026-10-20' }], route: { explain: [{ scope: 'web', answered: true, step: 'open-index' }] } }));
+            }
             if (url.pathname === '/search/api/v1/query' && req.method === 'GET') {
                 res.writeHead(200, { 'content-type': 'application/json' });
                 return res.end(JSON.stringify({ results: [{ scope: 'network', kind: 'document', title: 'A post', snippet: 'about things', url: 'https://openvibe.community/p/x', type: 'post', owner: 'community' }], route: { explain: [] } }));
@@ -116,10 +155,12 @@ async function startProviders() {
         ACTOR_OPENAI_API_KEY: 'oa-test-key', ACTOR_OPENAI_BASE_URL: `${url}/openai`,
         ACTOR_LOCAL_LLM_URL: `${url}/local`, ACTOR_LOCAL_LLM_MODEL: 'tiny-open',
         ACTOR_TOOLS_URL: `${url}/tools`, ACTOR_SEARCH_URL: `${url}/search`,
+        ACTOR_MODEL_FAST: 'openai:gpt-5-nano', ACTOR_MODEL_SMART: 'openai:gpt-5.1', ACTOR_MODEL_BEST: 'openai:gpt-5.1',
+        ACTOR_MODEL_CHECK: 'deepseek:deepseek-reasoner', ACTOR_MODEL_VISION: 'openai:gpt-5.1',
     };
     return {
         url, env, state, requests,
-        reset() { Object.assign(state, { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', checkerDown: null }); requests.length = 0; },
+        reset() { Object.assign(state, { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', checkerDown: null, smart: 'tool', script: null, checkClaims: null, loopTool: null }); requests.length = 0; },
         close: () => new Promise((r) => { for (const res of hanging) { try { res.destroy(); } catch { /* gone */ } } server.close(r); }),
     };
 }

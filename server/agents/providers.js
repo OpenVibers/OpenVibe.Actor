@@ -56,7 +56,8 @@ function chatClient({ baseUrl, apiKey, model, rates, fetchImpl = globalThis.fetc
     const reasoning = /^(gpt-5|o\d)/i.test(model || '');
     return async function chat({ messages, tools = null, json = false, maxTokens = 1500, signal } = {}) {
         const body = { model, messages, ...(extraBody || {}) };
-        if (reasoning) { body.max_completion_tokens = maxTokens + 1024; body.reasoning_effort = 'minimal'; } else { body.max_tokens = maxTokens; body.temperature = 0.2; }
+        // "low" is the one effort every reasoning chat model we call accepts (`minimal` is not offered by gpt-5.1).
+        if (reasoning) { body.max_completion_tokens = maxTokens + 1024; body.reasoning_effort = 'low'; } else { body.max_tokens = maxTokens; body.temperature = 0.2; }
         if (tools && tools.length) { body.tools = tools; body.tool_choice = 'auto'; }
         if (json) body.response_format = { type: 'json_object' };
         const j = await post(fetchImpl, `${baseUrl}/chat/completions`, apiKey, body, { signal, timeoutMs });

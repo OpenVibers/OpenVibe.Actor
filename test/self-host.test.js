@@ -33,7 +33,9 @@ const SECRET = 's'.repeat(43);
     // The operator's own model: a stand-in OpenAI-compatible server of its own.
     const model = await startProviders();
     const runtimeUrl = model.env.ACTOR_DEEPSEEK_BASE_URL;
-    const t = await boot({ env: { ...base, ACTOR_RUNTIME_URL: runtimeUrl, ACTOR_RUNTIME_MODEL: 'local-model', ACTOR_DEEPSEEK_API_KEY: null, ACTOR_OPENAI_API_KEY: null } });
+    // The stand-in providers' pinned tiers belong to those stand-ins; a self-hosted server has none, so each tier
+    // resolves from the one endpoint it has (the operator's own model) — and its check is that same model.
+    const t = await boot({ env: { ...base, ACTOR_RUNTIME_URL: runtimeUrl, ACTOR_RUNTIME_MODEL: 'local-model', ACTOR_DEEPSEEK_API_KEY: null, ACTOR_OPENAI_API_KEY: null, ACTOR_LOCAL_LLM_URL: null, ACTOR_LOCAL_LLM_MODEL: null, ACTOR_MODEL_FAST: null, ACTOR_MODEL_SMART: null, ACTOR_MODEL_BEST: null, ACTOR_MODEL_CHECK: null, ACTOR_MODEL_VISION: null } });
 
     await check('the owner signs in with the password; a wrong one is refused', async () => {
         const form = await t.get('/auth/login?next=/console');
