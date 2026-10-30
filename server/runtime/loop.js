@@ -31,6 +31,11 @@ const { createLedger } = require('./evidence');
 const { createTracer, codeOf } = require('./trace');
 const { createArtifactStore } = require('./artifacts');
 const { deskRun, closeDesks } = require('./tools/_person');
+const { understand } = require('./brain/understand');
+const { taskLedger, createProgress, replan, ledgerText } = require('./brain/ledger');
+const { allowedTiers, loadPrior, chooseTier, orderTools, STEP_KINDS } = require('./brain/choose');
+const { createEscalations } = require('./brain/escalate');
+const learn = require('./brain/learn');
 
 const MAX_ANSWER_TOKENS = 5000;
 const MAX_SUB_AGENTS = 4;
@@ -55,7 +60,7 @@ const MAX_PLAN_CHARS = 8000;
 
 const today = (now) => new Date(now()).toISOString().slice(0, 10);
 
-const SYSTEM = ({ date, plan, maxCalls = 12 }) => `You are OpenVibe Actor's agent. You complete a person's task by acting through your tools, then answer them. Today is ${date}.
+const SYSTEM = ({ date, plan, maxCalls = 12, note = '', ledger = '' }) => `You are OpenVibe Actor's agent. You complete a person's task by acting through your tools, then answer them. Today is ${date}.
 
 How the answer is grounded:
 - Every number, price, score, standing, weather reading, count, date, name or current status comes from a tool result in this run. Cite it inline as [E1], [E2], … right after the fact it supports.
@@ -79,6 +84,7 @@ How to work:
 
 Your plan:
 ${plan}
+${ledger ? `\n${ledger}` : ''}${note ? `\n${note}` : ''}
 
 Begin your answer with the answer itself, not with a statement about it.`;
 
@@ -118,13 +124,15 @@ function withoutMeta(text) {
     return parts.join('\n\n');
 }
 
-function planText(plan) {
+function planText(plan, brain = null) {
     const lines = [];
     if (plan.assumptions.length) lines.push(`Assumptions: ${plan.assumptions.join('; ')}`);
     plan.steps.forEach((s, i) => {
         const mark = s.state === 'done' ? '✓' : s.state === 'active' ? '→' : '·';
         lines.push(`${mark} ${i + 1}. ${s.goal}`);
     });
+    // The ledgers ride in the existing plan event (stage V2-8), so the live plan shows them without a second event.
+    if (brain && brain.ledger) lines.push(ledgerText(brain.ledger, brain.progress));
     return lines.join('\n').slice(0, MAX_PLAN_CHARS);
 }
 
@@ -166,7 +174,7 @@ async function spanCall(trace, { kind, name, tier = null, family = null, started
     });
 }
 
-function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null }) {
+function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null }) {
     const loopCfg = config.loop || {};
     const resultChars = loopCfg.toolResultChars || 6000;
     const maxCalls = loopCfg.maxToolCallsPerTurn || 8;
@@ -184,28 +192,39 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const fallback = () => ({ assumptions: [], steps: [{ goal: clip(state.task.replace(/\s+/g, ' ').trim(), 200) || 'Do the task', state: 'pending' }] });
         let plan = fallback();
         let startedAt = null;
+        const u = state.brain && state.brain.understanding;
         try {
             if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return plan;
             startedAt = now();
+            const heard = u ? `What the task means: ${u.deliverable}\nConstraints: ${u.constraints.join('; ') || 'none'}\nRisk: ${u.risk}\nAssumptions so far: ${u.assumptions.join('; ') || 'none'}${state.brain.personAnswer ? `\nThe person answered your question: ${clip(state.brain.personAnswer, 400)}` : ''}\n\n` : '';
             const r = await models.chat({
                 tier: 'fast',
                 messages: [
                     { role: 'system', content: `You plan one task for an agent that can call tools. Reply with JSON only: {"assumptions":["..."],"steps":[{"goal":"..."}]}. Give 2 to 5 short sub-goals in the order you will do them. An assumption is only what you must suppose and the task does not say; keep the list empty when there is none. Today is ${today(now)}.` },
-                    { role: 'user', content: planInput(state).slice(0, 6000) },
+                    { role: 'user', content: `${heard}${planInput(state)}`.slice(0, 6000) },
                 ],
                 json: true, maxTokens: 400, signal: state.signal,
             });
             await spanModel(ctx.trace, { tier: 'fast', family: r.family, startedAt, ms: now() - startedAt, result: r, step: 0 });
             startedAt = null;
             if (r.cost_usd) await ctx.meter(r.cost_usd);
+            if (state.brain) { state.brain.steps.push({ step_kind: 'plan', tier: 'fast', ok: true }); state.brain.tiers.add('fast'); }
             const m = String(r.text || '').match(/\{[\s\S]*\}/);
             const parsed = m ? JSON.parse(m[0]) : null;
             const steps = (parsed && Array.isArray(parsed.steps) ? parsed.steps : []).map((s) => ({ goal: clip((s && s.goal) || s, 200) })).filter((s) => s.goal).slice(0, 6);
-            if (steps.length) plan = { assumptions: (Array.isArray(parsed.assumptions) ? parsed.assumptions : []).map((a) => clip(a, 200)).slice(0, 5), steps: steps.map((s) => ({ ...s, state: 'pending' })) };
+            if (steps.length) {
+                const assumptions = [...new Set([...(Array.isArray(parsed.assumptions) ? parsed.assumptions : []), ...((u && u.assumptions) || [])].map((a) => clip(a, 200)).filter(Boolean))].slice(0, 5);
+                plan = { assumptions, steps: steps.map((s) => ({ ...s, state: 'pending' })) };
+            }
         } catch (err) {
             if (startedAt != null) await spanModel(ctx.trace, { tier: 'fast', startedAt, ms: now() - startedAt, error: err, step: 0 });
+            if (state.brain) state.brain.steps.push({ step_kind: 'plan', tier: 'fast', ok: false });
             if (state.signal && state.signal.aborted) throw err;
             if (log.warn) log.warn('[Actor] plan step fell back to the task:', (err && err.message) || err);
+        }
+        // The understand pass's assumptions are at the top of the plan even when the planner named none.
+        if (plan && u && Array.isArray(u.assumptions) && u.assumptions.length) {
+            plan.assumptions = [...new Set([...(plan.assumptions || []), ...u.assumptions].map((a) => clip(a, 200)).filter(Boolean))].slice(0, 5);
         }
         return plan;
     }
@@ -214,11 +233,17 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         state.plan.steps.forEach((s, i) => {
             if (s.state !== 'done' && s.state !== 'active') s.state = i === 0 || state.plan.steps.slice(0, i).every((x) => x.state === 'done') ? 'active' : 'pending';
         });
-        return ctx.emit({ step: 'plan', text: planText(state.plan) });
+        return ctx.emit({ step: 'plan', text: planText(state.plan, state.brain) });
+    }
+
+    /** The next sub-goal the progress ledger names: the plan's step in hand, else the last thing the model said it does. */
+    function nextGoal(state) {
+        const at = state.plan.steps.findIndex((s) => s.state === 'active');
+        return at >= 0 ? state.plan.steps[at].goal : (state.brain && state.brain.lastLine) || null;
     }
 
     /** One model turn. Checks the clock and the budget first; meters its cost after. */
-    async function callModel(state, ctx, { tools, forceNoTools = false } = {}) {
+    async function callModel(state, ctx, { tools, forceNoTools = false, stepKind = 'work' } = {}) {
         if (state.signal && state.signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'actor.task.cancelled' });
         if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return null;
         const defs = forceNoTools ? null : tools;
@@ -234,10 +259,12 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             });
         } catch (err) {
             await spanModel(ctx.trace, { tier: state.tier, family: state.family, startedAt, ms: now() - startedAt, error: err, step: state.calls + 1 });
+            if (state.brain) state.brain.steps.push({ step_kind: stepKind, tier: state.tier, ok: false });
             throw err;
         }
         await spanModel(ctx.trace, { tier: state.tier, family: state.family, startedAt, ms: now() - startedAt, result: r, step: state.calls + 1 });
         await ctx.meter(r.cost_usd);
+        if (state.brain) { state.brain.steps.push({ step_kind: stepKind, tier: state.tier, ok: true }); state.brain.tiers.add(state.tier); }
         state.model = r.model;
         state.family = r.family;
         state.provider = r.provider;
@@ -255,6 +282,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const planned = [];
         let looping = false;
         let delegated = 0;
+        let okResults = 0;
+        let errorResults = 0;
+        let lastTool = null;
         for (const call of calls) {
             const fn = call.function || {};
             let args = {};
@@ -263,6 +293,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const n = (state.counts.get(key) || 0) + 1;
             state.counts.set(key, n);
             if (state.allow && !state.allow.has(fn.name)) planned.push({ call, name: fn.name, args, skipped: 'that tool is not offered for this task' });
+            else if (state.brain && state.brain.withheld === fn.name) planned.push({ call, name: fn.name, args, skipped: 'that tool is not making progress; use another tool for this step' });
             else if (fn.name === DELEGATE.function.name && ++delegated > MAX_SUB_AGENTS) planned.push({ call, name: fn.name, args, skipped: `at most ${MAX_SUB_AGENTS} sub-agents at once; hand the rest over in the next turn` });
             else if (n >= 3) { looping = true; planned.push({ call, name: fn.name, args, skipped: 'the same tool and input were already called twice' }); }
             else planned.push({ call, name: fn.name, args });
@@ -308,6 +339,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 await ctx.emit({ step: 'tool_call', tool: p.name, input: summarize(p.args) });
                 state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ error: p.skipped, tool: p.name }) });
                 await ctx.emit({ step: 'tool_result', tool: p.name, text: p.skipped, is_error: true });
+                errorResults += 1;
                 continue;
             }
             const out = results[i++];
@@ -318,19 +350,32 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 const report = out.error ? { error: out.error } : { sub_agent: true, goal: out.goal, answer: out.answer, evidence: out.evidence };
                 state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify(report) });
                 await ctx.emit({ step: 'tool_result', tool: p.name, text: out.error || clip(`Sub-agent: ${out.calls} step${out.calls === 1 ? '' : 's'}, ${out.evidence.length} finding${out.evidence.length === 1 ? '' : 's'}. ${out.answer}`, 600), is_error: out.error ? true : undefined });
+                if (out.error) errorResults += 1; else okResults += 1;
+                if (state.brain) {
+                    state.brain.toolRuns = (state.brain.toolRuns || 0) + 1;
+                    state.brain.steps.push({ step_kind: 'work', tier: state.tier, tool: 'delegate', ok: !out.error });
+                }
                 continue;
             }
             const item = state.ledger.add({ tool: p.name, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs });
             state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: p.name, result: clip(out.text, resultChars) }) });
             await ctx.emit({ step: 'tool_result', tool: p.name, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
+            if (out.isError) { errorResults += 1; lastTool = p.name; } else okResults += 1;
+            if (state.brain) {
+                state.brain.toolRuns = (state.brain.toolRuns || 0) + 1;
+                state.brain.tools.add(p.name);
+                state.brain.steps.push({ step_kind: 'work', tier: state.tier, tool: p.name, ok: !out.isError });
+            }
         }
+        if (state.brain) state.brain.withheld = null;   // the refusal is for one turn; the tool is never removed
         for (const s of callsOut) {
             const name = (s.skipped.function && s.skipped.function.name) || 'tool';
             await ctx.emit({ step: 'tool_call', tool: name, input: summarize({}) });
             await ctx.emit({ step: 'tool_result', tool: name, text: s.why, is_error: true });
             state.messages.push({ role: 'tool', tool_call_id: s.skipped.id, content: JSON.stringify({ error: s.why }) });
+            errorResults += 1;
         }
-        return { looping };
+        return { looping, okResults, errorResults, lastTool };
     }
 
     /** The answer the evidence supports, when the budget or the clock says stop. */
@@ -365,13 +410,76 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             turns: state.calls,
             stopped: state.stopped || 'answer',
             readOutside: state.readOutside,
+            brain: state.brain ? {
+                kind: state.brain.kind,
+                understanding: state.brain.understanding ? {
+                    deliverable: state.brain.understanding.deliverable,
+                    risk: state.brain.understanding.risk,
+                    ambiguity: state.brain.understanding.ambiguity,
+                    outward: state.brain.understanding.outward,
+                    question: state.brain.understanding.question,
+                    assumptions: state.brain.understanding.assumptions,
+                } : null,
+                tiers: [...state.brain.tiers],
+                tools: [...state.brain.tools],
+                demoted: state.brain.demoted.slice(),
+                questions: state.brain.questions,
+                replans: state.brain.progressLedger ? state.brain.progressLedger.state.replans : 0,
+                escalations: state.brain.escalations ? state.brain.escalations.count() : 0,
+                progress: state.brain.progress,
+                steps: state.brain.steps.slice(0, 200),
+            } : null,
             state,
         };
     }
 
+    /** The tier for the next turn: the bandit's pick when stats and outcomes can speak, else the run's tier. */
+    async function tierFor(state, ctx) {
+        if (!stats || !state.brain || state.depth > 0) return state.tier;
+        const pick = await chooseTier({
+            mode: state.mode, kind: state.brain.kind, stepKind: 'work',
+            budgetLeft: ctx.budgetLeft ? ctx.budgetLeft() : Infinity,
+            models, stats, prior: state.brain.prior, preferred: state.baseTier || state.tier,
+        });
+        if (pick.tier) return pick.tier;
+        return pick.reason === 'budget' ? null : state.tier;
+    }
+
+    /**
+     * A stalled step gets one rung up the cascade: a stronger tier for the next turn, or a different tool suggested
+     * in its place. One per step, two per task (brain/escalate.js); the event says what changed.
+     */
+    async function escalateStalled(state, ctx, actOut = {}) {
+        if (!state.brain || !state.brain.escalations) return null;
+        const at = Math.max(0, state.plan.steps.findIndex((s) => s.state === 'active'));
+        const stepKey = `drive:${at}`;
+        if (state.brain.escalations.steps().get(stepKey)) return null;
+        const lastTool = actOut.lastTool || state.brain.lastTool || null;
+        const esc = state.brain.escalations.plan({
+            stepKey, mode: state.mode, currentTier: state.tier, currentTool: lastTool,
+            toolNames: state.tools.map((t) => t.function.name),
+            triedTiers: state.brain.triedTiers, triedTools: state.brain.triedTools,
+        });
+        if (!esc) return null;
+        if (esc.kind === 'model') {
+            state.tier = esc.tier;
+            state.brain.triedTiers.push(esc.tier);
+        } else {
+            state.brain.triedTools.push(esc.tool);
+            // The failed tool is refused for the next turn only, so the re-run is with another tool, never the
+            // identical call. It is not removed from the run: the turn after can use it again.
+            state.brain.withheld = lastTool;
+            state.messages.push({ role: 'user', content: `That step is not moving. Use ${esc.tool} instead of ${lastTool || 'the last tool'} (or another tool that can do it); never the same call again.` });
+        }
+        await state.brain.escalations.span(ctx.trace, esc, { step: state.calls, name: state.model || 'escalation', date: () => new Date(now()).toISOString() });
+        await ctx.emit({ step: 'escalation', text: esc.text });
+        return esc;
+    }
+
     /**
      * The loop itself, for a run or a sub-agent: a model turn, its tool calls, until an answer, the budget, the clock,
-     * a loop or (for a sub-agent) its cap on model calls.
+     * a loop or (for a sub-agent) its cap on model calls. After every step the progress ledger decides whether to
+     * replan (two stalls) or stop (three) — in code, never as the model's mood.
      */
     async function drive(state, ctx, { reflections = 0, maxModelCalls = Infinity } = {}) {
         const signal = state.signal;
@@ -385,10 +493,13 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 state.lastText = await forceAnswer(state, ctx, 'the sub-agent used its steps');
                 break;
             }
-            const r = await callModel(state, ctx, { tools: state.tools });
+            const tier = await tierFor(state, ctx);
+            if (tier === null) { state.lastText = await forceAnswer(state, ctx, 'the budget cannot pay for another model call'); break; }
+            state.tier = tier;
+            const r = await callModel(state, ctx, { tools: state.tools, stepKind: 'work' });
             if (!r) { state.lastText = await forceAnswer(state, ctx, 'the task reached its budget'); break; }
             state.messages.push(r.message);
-            if (r.text && r.text.trim()) state.lastText = r.text.trim();
+            if (r.text && r.text.trim()) { state.lastText = r.text.trim(); if (state.brain) state.brain.lastLine = clip(r.text.trim(), 160); }
             if (!r.toolCalls || !r.toolCalls.length) {
                 // A draft answer: the writer's own reflection before it is delivered.
                 if (state.selfReflections < reflections && (!ctx.budgetLeft || ctx.budgetLeft() > 0)) {
@@ -397,17 +508,40 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                     state.messages.push({ role: 'user', content: `Reflect before this is delivered. Check the draft claim by claim: which claims have no evidence? A live fact (a price, score, weather reading, count, current status, release, date) must cite an [E#] from this run. If one has no evidence and a tool can fetch it, call that tool now. If it cannot be verified, remove it or say plainly that it is unverified. Then give the final answer, keeping the citations.` });
                     continue;
                 }
+                if (state.brain && state.brain.progressLedger) {
+                    state.brain.progress = state.brain.progressLedger.update({ answered: true, nextGoal: state.brain.progressLedger.state.nextGoal });
+                    if (state.depth === 0) await emitPlan(state, ctx);
+                }
                 break;
             }
             if (r.text && r.text.trim()) await ctx.emit({ step: 'text', text: clip(r.text.trim(), 2000) });
-            const { looping } = await act(state, ctx, r.toolCalls);
-            if (state.depth === 0) {
+            const actOut = await act(state, ctx, r.toolCalls);
+            if (state.depth === 0 && state.brain && state.brain.progressLedger) {
                 state.plan.steps.forEach((s, i) => {
                     if (s.state === 'active' && i < state.plan.steps.length - 1) { s.state = 'done'; state.plan.steps[i + 1].state = 'active'; }
                 });
+                const upd = state.brain.progressLedger.update({
+                    okResults: actOut.okResults, errorResults: actOut.errorResults, looping: actOut.looping,
+                    nextGoal: nextGoal(state),
+                });
+                state.brain.progress = upd;
                 await emitPlan(state, ctx);
+                if (!upd.progressing) {
+                    await escalateStalled(state, ctx, actOut);
+                    if (upd.replan) {
+                        const again = replan(state.plan, { nextGoal: upd.next });
+                        if (again.changed) {
+                            await ctx.emit({ step: 'text', text: `That approach is not making progress; trying another route for step ${again.step}.` });
+                            await emitPlan(state, ctx);
+                        }
+                    }
+                    if (upd.stuck) {
+                        state.lastText = await forceAnswer(state, ctx, 'stuck: two routes made no progress, so this is what the evidence supports');
+                        break;
+                    }
+                }
             }
-            if (looping) {
+            if (actOut.looping) {
                 state.lastText = await forceAnswer(state, ctx, 'the same tool and input were called three times');
                 break;
             }
@@ -458,7 +592,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         return { delegate: true, goal, answer, evidence: [...ids.values()], calls: child.calls, spent, stopped: child.stopped || 'answer' };
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null }) {
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
         // Files and charts made in this run are stored privately for the person the task is for, in Actor's own
@@ -468,9 +602,16 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const state = {
             task: String(task), requester, taskId, mode, tier, signal, messages: [], lastText: '', model: null, family: null, provider: null,
             calls: 0, ledger: createLedger({ now }), plan: { assumptions: [], steps: [] }, counts: new Map(), stopped: null, selfReflections: 0,
-            readOutside: false, agentId,
+            readOutside: false, agentId, baseTier: tier,
             ctx: null, context: Array.isArray(context) ? context.filter((c) => c && c.task && c.answer).slice(-3) : [],
             depth: 0, tools: [], allow: null,
+            // The brain (stage V2-8): what understand found, the two ledgers, the learned prior and the cascade.
+            brain: {
+                understanding: null, kind: 'answer', personAnswer: null, ledger: null,
+                progressLedger: createProgress(), progress: null, prior: new Map(),
+                steps: [], tiers: new Set(), tools: new Set(), demoted: [], triedTiers: [], triedTools: [],
+                questions: 0, toolRuns: 0, escalations: createEscalations(), lastTool: null, lastLine: null,
+            },
         };
         const ctx = {
             config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, artifacts,
@@ -481,22 +622,84 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             state: { desks: requester ? deskRun(taskId) : null },
         };
         state.ctx = ctx;
+        // An assumption edit can arrive while the understand and plan calls are still running (the page already shows
+        // the plan of a previous turn). Hold it here and apply it as soon as the run's own handler exists.
+        if (control && typeof control === 'object') {
+            control.pending = [];
+            control.assume = async (text) => { control.pending.push(String(text == null ? '' : text)); return { ok: true, queued: true }; };
+        }
         try {
+            // Understand first (stage V2-8): one cheap call, before any tool, that sets the deliverable, the risk and
+            // the one question a high-risk ambiguous task may ask. It spends against the task's budget like any call.
+            if (!ctx.budgetLeft || ctx.budgetLeft() > 0) {
+                const u = await understand({ task: state.task, mode, context: state.context, models, trace: ctx.trace, signal, now });
+                state.brain.understanding = u;
+                state.brain.kind = u.kind;
+                if (u.cost_usd) await ctx.meter(u.cost_usd);
+                state.brain.steps.push({ step_kind: 'work', tier: 'fast', ok: true });
+                state.brain.tiers.add('fast');
+                if (u.question && askPerson && state.brain.questions === 0 && state.brain.toolRuns === 0) {
+                    const answer = await askPerson({ text: u.question.text, options: u.question.options, task: state.task });
+                    if (answer != null && String(answer).trim()) {
+                        state.brain.questions += 1;
+                        state.brain.personAnswer = String(answer).trim().slice(0, 2000);
+                        u.facts.given = [...(u.facts.given || []), `The person answered: ${clip(state.brain.personAnswer, 220)}`].slice(0, 8);
+                    }
+                }
+            }
             state.plan = await makePlan(state, ctx);
+            state.brain.ledger = taskLedger({ task: state.task, understanding: state.brain.understanding || {}, plan: state.plan });
+            state.brain.progressLedger = createProgress({ nextGoal: (state.plan.steps[0] || {}).goal || null });
+            state.brain.progress = state.brain.progressLedger.snapshot();
             await emitPlan(state, ctx);
-            state.messages.push({ role: 'system', content: SYSTEM({ date: today(now), plan: planText(state.plan), maxCalls }) });
+            // Which tools are offered first: the demoted ones last, never removed (stage V2-8). Below about 40 tools
+            // the model sees them all — no LLM picker and no embedding shortlist here.
+            const offered = registry.definitions({ requester, mode, config, models, signal, artifacts, store, agentId, taskId, now });
+            let statsRows = [];
+            if (stats) { try { statsRows = await stats.tools(); } catch { statsRows = []; } }
+            const ordered = orderTools(offered, statsRows);
+            state.brain.demoted = ordered.demoted;
+            // "best" mode may hand self-contained sub-goals to sub-agents (stage V2-7); no other mode is offered it.
+            const subAgents = mode === 'best' && ordered.tools.length > 0 && !(config.loop && config.loop.subAgents === false);
+            state.tools = subAgents ? ordered.tools.concat([DELEGATE]) : ordered.tools;
+            state.allow = new Set(state.tools.map((t) => t.function.name));
+            state.messages.push({
+                role: 'system',
+                content: SYSTEM({
+                    date: today(now), plan: planText(state.plan, state.brain), maxCalls,
+                    note: ordered.note, ledger: ledgerText(state.brain.ledger, state.brain.progress),
+                }),
+            });
             // A follow-up (stage V2-5b): the conversation it continues, as it went, then the new question.
             for (const c of state.context) state.messages.push({ role: 'user', content: c.task }, { role: 'assistant', content: c.answer });
             state.messages.push({ role: 'user', content: state.context.length ? `${FOLLOW_NOTE}\n\n${state.task}` : state.task });
-            const offered = registry.definitions({ requester, mode, config, models, signal, artifacts, store, agentId, taskId, now });
-            // "best" mode may hand self-contained sub-goals to sub-agents (stage V2-7); no other mode is offered it.
-            const subAgents = mode === 'best' && offered.length > 0 && !(config.loop && config.loop.subAgents === false);
-            state.tools = subAgents ? offered.concat([DELEGATE]) : offered;
-            state.allow = new Set(state.tools.map((t) => t.function.name));
+            if (state.brain.personAnswer) state.messages.push({ role: 'user', content: `I answered your question: ${state.brain.personAnswer}` });
+            state.brain.prior = await loadPrior({ store, kind: state.brain.kind, tiers: allowedTiers(mode), stepKinds: STEP_KINDS, log });
+            // An assumption edit on the live page is a follow-up turn in this same run: the person's words reach the
+            // model at its next turn and the plan's assumptions become theirs. Only the engine's route calls this.
+            if (control && typeof control === 'object') {
+                const applyAssumptions = async (text) => {
+                    const list = String(text == null ? '' : text).split(/[\n;]+/).map((a) => clip(a, 200)).filter(Boolean).slice(0, 5);
+                    if (!list.length) return { ok: false, reason: 'no assumptions were given' };
+                    state.plan.assumptions = list;
+                    state.messages.push({ role: 'user', content: `The person edited the plan's assumptions: ${list.join('; ')}. Use these from now on; do not restate them in the answer.` });
+                    await emitPlan(state, ctx);
+                    return { ok: true, assumptions: state.plan.assumptions };
+                };
+                control.assume = applyAssumptions;
+                control.plan = () => state.plan;
+                for (const text of control.pending.splice(0)) await applyAssumptions(text);
+            }
             // Read from config each run so a test (or an operator's change) takes effect without rebuilding the loop.
             const maxSelf = config.loop && config.loop.selfReflections != null ? config.loop.selfReflections : selfReflections;
-            await drive(state, ctx, { reflections: maxSelf });
+            try {
+                await drive(state, ctx, { reflections: maxSelf });
+            } finally {
+                // Every finished run teaches the router, once per distinct step outcome (stage V2-8). Best-effort.
+                await learn.recordSteps({ store, kind: state.brain.kind, steps: state.brain.steps, log, now }).catch(() => {});
+            }
             state.plan.steps.forEach((s) => { s.state = 'done'; });
+            if (state.brain.progressLedger) state.brain.progress = state.brain.progressLedger.update({ answered: true });
             await emitPlan(state, ctx);
             return resultOf(state);
         } catch (err) {
@@ -548,7 +751,32 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         };
     }
 
-    return { run, revise, close, planText, SYSTEM };
+    /**
+     * A failed check's escalation (stage V2-8): one tier up for the same step, never the identical call. The engine
+     * calls this once before its normal revision passes; the caps live in brain/escalate.js (one per step, two per
+     * task). Returns the revised result, or null when no rung is available.
+     */
+    async function escalate(prev, claims) {
+        const state = prev && prev.state;
+        if (!state || !state.ctx || !state.brain) return null;
+        const ctx = state.ctx;
+        if (ctx.signal && ctx.signal.aborted) return null;
+        if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return null;
+        const list = (claims || []).map((c) => (typeof c === 'string' ? c : c && c.claim)).filter(Boolean).slice(0, 20);
+        if (!list.length) return null;
+        const esc = state.brain.escalations.plan({
+            stepKey: 'check', mode: state.mode, currentTier: state.tier,
+            triedTiers: state.brain.triedTiers, triedTools: state.brain.triedTools,
+        });
+        if (!esc || esc.kind !== 'model') return null;
+        state.tier = esc.tier;
+        state.brain.triedTiers.push(esc.tier);
+        await state.brain.escalations.span(ctx.trace, esc, { step: state.calls, name: state.model || 'escalation', date: () => new Date(now()).toISOString() });
+        await ctx.emit({ step: 'escalation', text: esc.text });
+        return await revise(prev, claims);
+    }
+
+    return { run, revise, escalate, close, planText, SYSTEM };
 }
 
 module.exports = { createLoop, planText, SYSTEM, withoutMeta, DELEGATE, MAX_SUB_AGENTS };

@@ -127,7 +127,7 @@ const runArgs = (m, extra = {}) => ({
         const out = await m.loop.run(runArgs(m));
         assert.match(out.stopped, /budget/);
         assert.strictEqual(out.text, 'Working');
-        assert.strictEqual(m.models.chats.length, 2, 'the plan and the one tool turn only; no further paid call');
+        assert.strictEqual(m.models.chats.length, 3, 'understand + plan + the one tool turn; no further paid call');
         await m.loop.close(out.state);
     });
 
@@ -141,8 +141,8 @@ const runArgs = (m, extra = {}) => ({
             config: { ACTOR_LOOP_SELF_REFLECTIONS: '1' },
         });
         const out = await m.loop.run(runArgs(m));
-        assert.strictEqual(m.models.chats.length, 4, 'plan + draft + tool turn + final');
-        assert.match(String(m.models.chats[2].messages[m.models.chats[2].messages.length - 1].content), /Reflect before this is delivered/);
+        assert.strictEqual(m.models.chats.length, 5, 'understand + plan + draft + tool turn + final');
+        assert.match(String(m.models.chats[3].messages[m.models.chats[3].messages.length - 1].content), /Reflect before this is delivered/);
         assert.strictEqual(out.text, 'The price is **42** [E1].');
         assert.deepStrictEqual(out.citations, ['E1']);
         await m.loop.close(out.state);

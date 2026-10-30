@@ -36,8 +36,11 @@ function fakeModels(script) {
         async warm() {},
         async chat(req) {
             if (fail) throw new Error('fake model is down');
-            if (req.tier === 'fast') return reply({ text: JSON.stringify({ assumptions: [], steps: [{ goal: 'Do the task' }] }) });
+            const sys = String(((req.messages || [])[0] || {}).content || '');
+            // The brain's understand and the plan pass are the fast calls with their own prompts (stage V2-8). A fast
+            // WORK call (the bandit may pick fast once it has outcomes) gets the scripted turn like any other tier.
             if (req.tier === 'check') return reply({ text: JSON.stringify({ claims: [], ok: true, reason: 'nothing live' }) });
+            if (req.tier === 'fast' && /You read one task|You plan one task/.test(sys)) return reply({ text: JSON.stringify({ assumptions: [], steps: [{ goal: 'Do the task' }] }) });
             return reply(turns[Math.min(n++, turns.length - 1)]);
         },
     };

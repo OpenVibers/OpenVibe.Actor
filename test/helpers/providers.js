@@ -22,7 +22,7 @@ const http = require('http');
 
 async function startProviders() {
     const requests = [];
-    const state = { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', smart: 'tool', script: null, checkClaims: null, loopTool: null, judge: null };
+    const state = { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', smart: 'tool', script: null, checkClaims: null, loopTool: null, judge: null, understand: null, adjudicate: null };
     const hanging = new Set();
 
     const usage = (inp, out) => ({ prompt_tokens: inp, completion_tokens: out, prompt_cache_hit_tokens: 0 });
@@ -59,8 +59,15 @@ async function startProviders() {
         const sys = systemOf(body);
         if (/sort one task/.test(sys)) return chatReply(res, { content: JSON.stringify({ class: state.cls }) }, usage(200, 10));
         if (/You verify an AI agent's answer/.test(sys)) return checkReply(res, body, family);
+        // The understand pass (runtime/brain/understand.js, stage V2-8): a test scripts what the task means.
+        if (/You read one task before an agent runs it/.test(sys)) {
+            const u = typeof state.understand === 'function' ? state.understand(body) : state.understand;
+            return chatReply(res, { content: JSON.stringify(u || { kind: 'answer', deliverable: 'Answer the task', risk: 'low', ambiguity: 0.1 }) }, usage(300, 80));
+        }
         // A contested claim's judgement (runtime/adjudicate.js, stage V2-7b): a test scripts it in state.judge.
         if (/Two or more evidence items from an agent's tools disagree/.test(sys)) return chatReply(res, { content: state.judge || '{}' }, usage(400, 80));
+        // The challenge read (runtime/brain/confidence.js, stage V2-8).
+        if (/You check one claim against a counter-evidence search/.test(sys)) return chatReply(res, { content: state.adjudicate || JSON.stringify({ verdict: 'unclear', why: 'the stand-in found nothing either way' }) }, usage(300, 40));
         if (/check an AI agent's answer/.test(sys)) {
             if (state.checkerDown === family) return chatReply(res, { content: '' }, usage(300, 160));
             const ok = typeof state.checkOk === 'function' ? state.checkOk(body) : state.checkOk;
@@ -162,7 +169,7 @@ async function startProviders() {
     };
     return {
         url, env, state, requests,
-        reset() { Object.assign(state, { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', checkerDown: null, smart: 'tool', script: null, checkClaims: null, loopTool: null, judge: null }); requests.length = 0; },
+        reset() { Object.assign(state, { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', checkerDown: null, smart: 'tool', script: null, checkClaims: null, loopTool: null, judge: null, understand: null, adjudicate: null }); requests.length = 0; },
         close: () => new Promise((r) => { for (const res of hanging) { try { res.destroy(); } catch { /* gone */ } } server.close(r); }),
     };
 }

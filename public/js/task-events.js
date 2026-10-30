@@ -80,8 +80,28 @@
             var line = raw.trim(), m = PLAN_LINE.exec(line);
             if (m) out.steps.push({ goal: m[3], state: m[1] === '\u2713' ? 'done' : m[1] === '\u2192' ? 'active' : 'todo' });
             else if (/^Assumptions: /.test(line)) out.assumptions = line.slice(13).split('; ').filter(Boolean);
+            // The brain's ledgers (stage V2-8) ride in the plan event: "Task ledger: given … · find … · derive …" and
+            // "Progress: done/not done; looping/not looping; moving/no progress; next …". Parsed here so both the
+            // server-rendered plan card and the live one show them.
+            else if (/^Task ledger: /.test(line)) {
+                var ledger = { given: [], lookup: [], derive: [] };
+                line.slice(13).split(' \u00b7 ').forEach(function (part) {
+                    if (/^given /.test(part)) ledger.given = part.slice(6).split('; ').filter(Boolean);
+                    else if (/^find /.test(part)) ledger.lookup = part.slice(5).split('; ').filter(Boolean);
+                    else if (/^derive /.test(part)) ledger.derive = part.slice(7).split('; ').filter(Boolean);
+                });
+                out.ledger = ledger;
+            } else if (/^Progress: /.test(line)) {
+                var bits = line.slice(10).split('; ');
+                out.progress = {
+                    done: bits[0] === 'done',
+                    looping: bits[1] === 'looping',
+                    progressing: bits[2] !== 'no progress',
+                    next: (bits[3] || '').replace(/^next /, '') || null,
+                };
+            }
         });
-        return out.steps.length ? out : null;
+        return out.steps.length || out.ledger ? out : null;
     }
     /** The divider a plan draws in the session: the step in hand, or the whole plan done. */
     function planLine(p) {
@@ -166,6 +186,7 @@
             }
             if (e.step === 'handoff') { out.push(withAgent({ t: 'handoff', from: null, to: e.agent || null, reason: text }, e)); continue; }
             if (e.step === 'check') { out.push(withAgent({ t: 'note', level: /^checked/i.test(text) ? 'info' : 'warning', text: text }, e)); continue; }
+            if (e.step === 'escalation') { out.push(withAgent({ t: 'note', level: 'info', text: 'Escalated: ' + text }, e)); continue; }
             if (text) out.push(withAgent({ t: 'text', text: text }, e));
         }
 

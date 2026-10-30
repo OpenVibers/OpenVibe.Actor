@@ -129,3 +129,51 @@
 .bench-preview-wrap h2 { margin: 1.2rem 0 .4rem; font-size: .8rem; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted, #7386a3); }
 .bench-preview { box-sizing: border-box; max-width: 100%; max-height: 40vh; margin: 0; padding: 12px 14px; overflow: auto; border: 1px solid var(--border, #1f2d47); border-radius: 12px; background: var(--bg-primary, #0a0f1c);
   font: .85rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text-secondary, #96a7c2); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+
+/* The brain (Actor v2, stage V2-8): the one question before any work, editable assumptions, the ledgers, confidence on
+   each chip and the Challenge. Shared tokens only; every form is a plain POST and every row wraps at 320 px. */
+.question-card { margin: 0 0 1.4rem; padding: 16px 18px 14px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 45%, var(--border, #1f2d47));
+  background: color-mix(in srgb, var(--accent, #3b82f6) 7%, var(--bg-card, #131c2e)); }
+.question-card > h2 { margin: 0 0 .45rem; font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-light, #60a5fa); }
+.q-text { margin: 0 0 .8rem; font-size: 1.02rem; font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; }
+.q-options { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 .8rem; }
+.q-options .q-option { flex: 1 1 12rem; min-width: 0; min-height: 44px; padding: 8px 14px; box-sizing: border-box; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.q-own { margin: 0; }
+.q-own label { display: block; margin: 0 0 .3rem; font-size: .85rem; color: var(--text-muted, #7386a3); }
+.q-own-row { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+.q-own-row input { flex: 1 1 12rem; min-width: 0; min-height: 44px; box-sizing: border-box; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border-light, #2c3d5c);
+  background: var(--bg-secondary, #101828); color: var(--text-primary, #e6edf7); font: inherit; }
+.q-own-row .sc-btn { min-height: 44px; }
+.outcome-wait { border-color: color-mix(in srgb, var(--accent, #3b82f6) 40%, var(--border, #1f2d47)); }
+.assume-form { display: grid; gap: 6px; margin: .6rem 0 0 32px; }
+.assume-form label { font-size: .82rem; color: var(--text-muted, #7386a3); overflow-wrap: anywhere; }
+.assume-form textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 54px; max-height: 30vh; padding: 8px 10px; resize: vertical; border-radius: 10px; border: 1px solid var(--border-light, #2c3d5c);
+  background: var(--bg-secondary, #101828); color: var(--text-primary, #e6edf7); font: inherit; line-height: 1.45; overflow-wrap: anywhere; }
+.assume-form .sc-btn { justify-self: start; min-height: 38px; }
+.plan-ledger { margin: .7rem 0 0 32px; padding-top: .55rem; border-top: 1px solid var(--border, #1f2d47); font-size: .8rem; line-height: 1.5; color: var(--text-secondary, #96a7c2); overflow-wrap: anywhere; }
+.plan-ledger p { margin: 0; }
+.plan-ledger p + p { margin-top: .2rem; }
+.plan-ledger b { color: var(--text-muted, #7386a3); font-size: .74rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.plan-ledger .muted { display: inline-block; min-width: 2.8em; }
+.ev-conf, .ev-challenge { display: inline-flex; align-items: center; gap: 2px; padding: 0 7px; border-radius: 999px; font-size: .72rem; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+.ev-conf.is-sure { color: var(--success-text, var(--success, #22c55e)); background: color-mix(in srgb, var(--success, #22c55e) 14%, transparent); }
+.ev-conf.is-likely { color: var(--warning-text, var(--warning, #f59e0b)); background: color-mix(in srgb, var(--warning, #f59e0b) 14%, transparent); }
+.ev-conf.is-unverified, .ev-conf.is-unsure { color: var(--danger-text, var(--danger, #ef4444)); background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent); }
+.ev-sure { border-color: color-mix(in srgb, var(--success, #22c55e) 55%, transparent); }
+.ev-likely { border-color: color-mix(in srgb, var(--warning, #f59e0b) 55%, transparent); color: var(--warning-text, var(--warning, #f59e0b)); }
+.ev-unverified, .ev-unsure { border-color: color-mix(in srgb, var(--danger, #ef4444) 45%, transparent); color: var(--danger-text, var(--danger, #ef4444)); }
+.ev-actions { margin: .5rem 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.ev-challenge { text-decoration: none; color: var(--accent-light, #60a5fa); background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 32%, transparent); min-height: 28px; box-sizing: border-box; }
+.ev-challenge:hover, .ev-challenge:focus-visible { background: color-mix(in srgb, var(--accent, #3b82f6) 24%, transparent); }
+.ev-challenge-result { margin: .55rem 0 0; padding: .5rem .65rem; border-left: 2px solid var(--warning, #f59e0b); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--warning, #f59e0b) 7%, transparent); font-size: .85rem; overflow-wrap: anywhere; }
+.ev-challenge-result b { text-transform: capitalize; }
+.ev-challenge-result p { margin: .25rem 0 0; }
+.challenge-page { max-width: 46rem; }
+.challenge-card { margin: 1rem 0; padding: 16px 18px; border-radius: 16px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); }
+.challenge-claim { margin: 0 0 .6rem; font-size: 1.05rem; line-height: 1.45; overflow-wrap: anywhere; }
+.challenge-card form { display: flex; flex-wrap: wrap; gap: 8px; margin: .6rem 0 0; }
+@media (max-width: 480px) {
+  .plan-ledger, .assume-form { margin-left: 0; }
+  .q-options .q-option { flex-basis: 100%; }
+  .assume-form .sc-btn { width: 100%; }
+}

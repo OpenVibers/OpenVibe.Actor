@@ -29,10 +29,15 @@ const seo = require('openvibe-shared/seo');
 const { findArtifact, sendArtifact } = require('../runtime/artifacts');
 const trace = require('../runtime/trace');
 const benchOffers = require('../tasks/bench-offers');
+const confidence = require('../runtime/brain/confidence');
 const taskEvents = require('../../public/js/task-events');
 const { noLooks, hasLooks } = require('openvibe-sdk/no-looks');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
+const LOOP_AGENT = 'openvibe-runtime';
+// sure > likely > unverified > unsure: a chip shows the best grade any claim citing it received.
+const CONF_RANK = { sure: 3, likely: 2, unverified: 1, unsure: 0 };
+const CONF_TEXT = { sure: 'sure', likely: 'likely', unverified: 'unverified', unsure: 'unsure' };
 
 
 const MODE_TEXT = {
@@ -135,7 +140,7 @@ function inputText(input) {
  * The answer's citations as chips: "[E3]" (or "[E3, E5]") becomes a numbered chip that opens what that tool returned,
  * for the ids the ledger has; nothing inside code changes, and an id the ledger does not have stays as written.
  */
-function chipify(htmlText, evidence) {
+function chipify(htmlText, evidence, confidences = null) {
     const known = new Map((evidence || []).map((e) => [String(e.id), e]));
     if (!known.size) return htmlText;
     const chip = (id) => {
@@ -146,14 +151,29 @@ function chipify(htmlText, evidence) {
         // links every row.
         const refs = (Array.isArray(e.refs) ? e.refs : []).filter((r) => r && r.kind === 'memory');
         const one = refs.length === 1 ? refs[0] : null;
-        const label = (one ? `Memory: ${one.text}` : `Evidence ${n}: ${toolLabel(e.tool)}${inputText(e.input) ? `, ${inputText(e.input)}` : ''}`).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-        return `<a class="ev" href="${one ? `/memory#${one.id}` : `#ev-${id}`}" data-ev="${id}" aria-label="${label}" title="${label}">${n}</a>`;
+        const conf = confidences instanceof Map ? confidences.get(String(id)) : null;
+        const base = one ? `Memory: ${one.text}` : `Evidence ${n}: ${toolLabel(e.tool)}${inputText(e.input) ? `, ${inputText(e.input)}` : ''}`;
+        const label = `${base}${conf ? ` (${CONF_TEXT[conf] || conf})` : ''}`.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+        return `<a class="ev${conf ? ` ev-${conf}` : ''}" href="${one ? `/memory#${one.id}` : `#ev-${id}`}" data-ev="${id}"${conf ? ` data-confidence="${conf}"` : ''} aria-label="${label}" title="${label}">${n}</a>`;
     };
     return String(htmlText).split(/(<pre[\s\S]*?<\/pre>|<code[\s\S]*?<\/code>)/).map((part, i) => (i % 2 ? part : part.replace(/\[(E\d{1,3}(?:\s*,\s*E\d{1,3})*)\]/g, (all, ids) => {
         const list = ids.split(/\s*,\s*/);
         return list.every((id) => known.has(id)) ? `<span class="evs">${list.map(chip).join('')}</span>` : all;
     }))).join('');
 }
+/** The best confidence any claim citing an evidence id received; the chips show it (stage V2-8). */
+function claimConfidences(checked) {
+    const map = new Map();
+    for (const c of (checked && Array.isArray(checked.claims_detail) ? checked.claims_detail : [])) {
+        for (const id of (Array.isArray(c.evidence) ? c.evidence : [])) {
+            const key = String(id);
+            const prev = map.get(key);
+            if (!prev || (CONF_RANK[c.confidence] || 0) > (CONF_RANK[prev] || 0)) map.set(key, c.confidence || 'unverified');
+        }
+    }
+    return map;
+}
+
 const perM = (n) => (n === 0 ? 'free' : `$${Number(n).toFixed(2)}`);
 const priceText = (rc) => (rc.input_usd_per_mtok === 0 && rc.output_usd_per_mtok === 0 ? 'Free (OpenVibe hardware)' : `${perM(rc.input_usd_per_mtok)} in · ${perM(rc.output_usd_per_mtok)} out per 1M tokens${rc.per_call_usd ? ` · ${usd(rc.per_call_usd)} a search` : ''}`);
 
@@ -417,6 +437,138 @@ ${raw(showcase.faq({ id: 'faq', items: faq }))}
         return res.redirect(303, `/tasks/${out.task.id}`);
     });
 
+    // ── The one question, the assumptions, the Challenge (stage V2-8) ──────
+    // Every one of these is a plain form: they work without JavaScript, on a phone, one tap per option.
+    const OPEN_STATES = ['queued', 'running', 'verifying', 'needs_you'];
+    const CHALLENGE_ESTIMATE = 0.0015;
+
+    r.post('/tasks/:id/answer', require('express').urlencoded({ extended: false, limit: '32kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.redirect(303, '/tasks');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('An answer must be sent from openvibe.actor itself.');
+        const row = await store.getTask(s, req.params.id);
+        const raw = req.body && req.body.answer;
+        const text = String(Array.isArray(raw) ? raw[0] : raw || '').trim().slice(0, 2000);
+        if (!row || row.requester !== requesterOf(req)) return res.status(404).type('text/plain').send('No such task');
+        if (!text) return res.redirect(303, `/tasks/${row.id}#question`);
+        const ok = await engine.answer(row.id, text);
+        return res.redirect(303, `/tasks/${row.id}${ok ? '' : '?answer=gone'}`);
+    });
+
+    r.post('/tasks/:id/assumptions', require('express').urlencoded({ extended: false, limit: '32kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.redirect(303, '/tasks');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('An assumption edit must come from openvibe.actor itself.');
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req)) return res.status(404).type('text/plain').send('No such task');
+        if (!OPEN_STATES.includes(row.state)) return res.redirect(303, `/tasks/${row.id}`);
+        const text = String((req.body && req.body.assumptions) || '').slice(0, 2000);
+        const out = await engine.assume(row.id, text);
+        return res.redirect(303, `/tasks/${row.id}${out && out.ok ? '' : '?assume=gone'}#plan-card`);
+    });
+
+    /** The evidence item and the claim a Challenge would re-check, from a finished task's result. */
+    function challengeTarget(result, ev) {
+        const evidence = Array.isArray(result && result.evidence) ? result.evidence : [];
+        const item = evidence.find((e) => e && String(e.id) === ev);
+        if (!item) return null;
+        const claims = result && result.checked && Array.isArray(result.checked.claims_detail) ? result.checked.claims_detail : [];
+        const found = claims.find((c) => (Array.isArray(c.evidence) ? c.evidence : []).map(String).includes(ev));
+        const claim = found || {
+            claim: (inputText(item.input) || String(item.text || '')).slice(0, 300),
+            kind: 'live', evidence: [ev], supported: true, confidence: 'likely',
+        };
+        return { item, claim, evidence };
+    }
+
+    function challengeSearch(row, signal) {
+        return async (query) => {
+            if (!ctx.registry) return { text: 'no search is configured', isError: true };
+            return ctx.registry.run('search_web', { query }, { config, log: ctx.log, signal, requester: row.requester, now: () => s.now() });
+        };
+    }
+
+    function challengePage(req, res, row, ev, target, { problem = null } = {}) {
+        const left = Math.max(0, Number(row.budget_task) - Number(row.cost_usd || 0));
+        const enough = left >= CHALLENGE_ESTIMATE;
+        return page(req, res, {
+            title: 'Challenge a claim', crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task', href: `/tasks/${row.id}` }, { label: 'Challenge' }], noReferrer: true,
+            styles: [showcase.STYLESHEET], css: ['css/task.css'],
+            body: html`<article class="challenge-page">
+<h1>Challenge this claim</h1>
+<p><a href="/tasks/${row.id}#ev-${ev}">Back to the task</a></p>
+<section class="challenge-card">
+<p class="challenge-claim"><b>${target.claim.claim}</b></p>
+<p class="muted small">A counter-evidence search re-reads this claim: one web search and one cheap model read. It runs against this task's own allowance and is shown with the evidence, never silently.</p>
+<p>Estimate: <b>about ${usd(CHALLENGE_ESTIMATE)}</b> · this task has ${usd(left)} of its ${usd(Number(row.budget_task) || 0)} left.</p>
+${problem ? notice(problem, 'warn') : ''}
+${enough ? html`<form method="post" action="/tasks/${row.id}/challenge">
+<input type="hidden" name="ev" value="${ev}">
+<button class="sc-btn sc-primary" type="submit">Run the challenge</button>
+<a class="sc-btn" href="/tasks/${row.id}#ev-${ev}">Cancel</a>
+</form>` : html`<p class="notice warn">This task's allowance is spent, so no counter-search can run. The claim stays as graded on the page.</p><p><a class="sc-btn" href="/tasks/${row.id}#ev-${ev}">Back</a></p>`}
+</section>
+</article>`,
+        });
+    }
+
+    r.get('/tasks/:id/challenge', async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.redirect(303, '/tasks');
+        const ev = /^E\d{1,3}$/.test(String(req.query.ev || '')) ? String(req.query.ev) : null;
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req) || row.state !== 'succeeded' || !ev) return res.redirect(303, '/tasks');
+        const result = row.result ? (typeof row.result === 'string' ? JSON.parse(row.result) : row.result) : {};
+        const target = challengeTarget(result, ev);
+        if (!target) return res.redirect(303, `/tasks/${row.id}#ev-${ev}`);
+        return challengePage(req, res, row, ev, target);
+    });
+
+    r.post('/tasks/:id/challenge', require('express').urlencoded({ extended: false, limit: '32kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.redirect(303, '/tasks');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('A challenge must be sent from openvibe.actor itself.');
+        const ev = /^E\d{1,3}$/.test(String((req.body && req.body.ev) || '')) ? String(req.body.ev) : null;
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req) || row.state !== 'succeeded' || !ev) return res.redirect(303, '/tasks');
+        const result = row.result ? (typeof row.result === 'string' ? JSON.parse(row.result) : row.result) : {};
+        const target = challengeTarget(result, ev);
+        if (!target) return res.redirect(303, `/tasks/${row.id}#ev-${ev}`);
+        const left = Math.max(0, Number(row.budget_task) - Number(row.cost_usd || 0));
+        if (left < CHALLENGE_ESTIMATE) return challengePage(req, res, row, ev, target, { problem: 'This task\'s allowance is spent, so the challenge did not run.' });
+        if (!ctx.models) return challengePage(req, res, row, ev, target, { problem: 'No model is configured to check the counter-evidence.' });
+        const tracer = trace.createTracer({ store: s, taskId: row.id, log: ctx.log, now: () => s.now() });
+        let out;
+        try {
+            out = await confidence.challenge({
+                claim: target.claim, evidence: target.evidence, task: row.task, mode: row.mode, models: ctx.models,
+                search: challengeSearch(row), writerFamily: result.family || null, signal: undefined, now: () => s.now(), trace: tracer,
+                budgetLeft: () => Math.max(0, Number(row.budget_task) - Number(row.cost_usd || 0)),
+            });
+        } catch (err) {
+            return challengePage(req, res, row, ev, target, { problem: `The challenge did not finish: ${(err && err.message) || err}`.slice(0, 400) });
+        }
+        const cost = Number(out.cost_usd) || 0;
+        if (out.skipped) return challengePage(req, res, row, ev, target, { problem: 'The counter-evidence search is not available right now.' });
+        // The person's own allowance pays for it, as it did for the task; the deduction is the same two rows every task uses.
+        const spent = Number(row.cost_usd || 0) + cost;
+        await store.updateTask(s, row.id, { cost_usd: spent, free_usd: spent });
+        if (cost > 0) await store.addSpend(s, row.requester, cost);
+        // The challenge lands on this evidence item and on every claim that cites it; the answer text is not rewritten.
+        const evidence = (Array.isArray(result.evidence) ? result.evidence : []).map((e) => (e && String(e.id) === ev ? { ...e, challenge: out.claim.challenge } : e));
+        let claims = Array.isArray(result.checked && result.checked.claims_detail) ? result.checked.claims_detail : [];
+        claims = claims.map((c) => ((Array.isArray(c.evidence) ? c.evidence : []).map(String).includes(ev)
+            ? { ...c, confidence: out.claim.confidence, challenge: out.claim.challenge }
+            : c));
+        const confidenceCounts = claims.reduce((acc, c) => { const k = c.confidence || 'unverified'; acc[k] = (acc[k] || 0) + 1; return acc; }, { sure: 0, likely: 0, unverified: 0, unsure: 0 });
+        const checked = { ...(result.checked || {}), claims_detail: claims, confidence: confidenceCounts };
+        await store.updateTask(s, row.id, { result: { ...result, evidence, checked } });
+        const verdict = out.claim.challenge || {};
+        const text = `Challenged evidence ${ev}: ${verdict.verdict || 'unclear'}${verdict.why ? ` — ${verdict.why}` : ''}`.slice(0, 500);
+        await store.appendEvent(s, row.id, { at: s.iso(), kind: 'output', step: 'challenge', agent: LOOP_AGENT, text, is_error: out.claim.confidence === 'unsure' || undefined });
+        return res.redirect(303, `/tasks/${row.id}#ev-${ev}`);
+    });
+
     // ── Your tasks ───────────────────────────────────────────
     r.get('/tasks', async (req, res) => {
         if (!signedIn(req)) {
@@ -449,7 +601,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
     // Read top to bottom: what was asked and where it stands, the outcome (the answer, why it did not finish, or the
     // live progress), then how it went — one block per agent that tried, its steps, its check, and a refused answer
     // folded away — and why that agent, folded.
-    const STATE_TEXT = { queued: 'Waiting to start', running: 'Working', verifying: 'Checking the answer', succeeded: 'Done', failed: 'Didn\'t finish', cancelled: 'Cancelled' };
+    const STATE_TEXT = { queued: 'Waiting to start', running: 'Working', verifying: 'Checking the answer', needs_you: 'Waiting for you', succeeded: 'Done', failed: 'Didn\'t finish', cancelled: 'Cancelled' };
     const CLASS_TEXT = { answer: 'Answer', lookup: 'Lookup', research: 'Research', web: 'Web search', code: 'Code', robot: 'Your robot', computer: 'Your computer' };
 
     // What the agent last saw (agents/looks.js): its task's owner only, never cached.
@@ -551,7 +703,13 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
         const t = store.toWire(row, { baseUrl: config.baseUrl });
         const events = await store.eventsAfter(s, row.id, 0);
         const deliveries = row.webhooks ? await ctx.webhooks.forTask(row.id) : [];
-        const open = store.OPEN.includes(row.state);
+        const live = store.OPEN.includes(row.state);
+        const waiting = row.state === 'needs_you';
+        const open = live || waiting;
+        const questionEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'question');
+        const question = waiting && questionEvent ? { text: String(questionEvent.text || ''), options: Array.isArray(questionEvent.options) ? questionEvent.options : [] } : null;
+        const answerProblem = req.query.answer === 'gone' ? 'That question is no longer waiting for an answer. The task may have finished or been restarted; ask again.' : null;
+        const assumeProblem = req.query.assume === 'gone' ? 'Those assumptions could not be changed: the task is no longer running.' : null;
         const cls = (events.find((e) => e.step === 'plan' && !e.agent && /"(\w+)" task/.test(e.text || '')) || { text: '' }).text.match(/"(\w+)"/);
         const kind = cls ? CLASS_TEXT[cls[1]] || cls[1] : null;
         const desk = open ? store.deskFrom(events) : null;
@@ -563,29 +721,35 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
         const spans = await trace.spansFor(s, row.id);
         const followProblem = typeof req.query.follow === 'string' ? (FOLLOW_ERROR[req.query.follow] || 'That follow-up could not start. Try again in a moment.') : null;
         const planEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'plan' && taskEvents.plan(e.text));
+        const stated = planEvent ? taskEvents.plan(planEvent.text) : null;
         const plan = (t.result && t.result.plan && Array.isArray(t.result.plan.steps) && t.result.plan.steps.length ? t.result.plan : null)
-            || (planEvent ? taskEvents.plan(planEvent.text) : null);
+            || stated;
+        // The answer's result carries the steps; the plan event carries the brain's ledgers. Keep both on the page.
+        if (plan && stated && !plan.ledger) { plan.ledger = stated.ledger; plan.progress = plan.progress || stated.progress; }
         page(req, res, {
             title: row.task.length > 60 ? `${row.task.slice(0, 59)}…` : row.task,
             crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task' }],
             // How it went is the agents' session (openvibe-shared/agent-session.js, js/task.js mounts it from the events
             // below and, while the task runs, from its live stream); the attempts drawn here stay for a page without scripts.
-            scripts: ['js/task-events.js', 'js/task.js'],
-            sharedScripts: ['agent-session.js'],
+            scripts: waiting ? [] : ['js/task-events.js', 'js/task.js'],
+            sharedScripts: waiting ? [] : ['agent-session.js'],
             styles: [showcase.STYLESHEET],
             css: ['css/task.css'],
             noReferrer: true,
-            body: html`${open ? raw('<noscript><meta http-equiv="refresh" content="4"></noscript>') : ''}
-<article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${open ? '1' : ''}" data-bot="${botPages}">
+            body: html`${live ? raw('<noscript><meta http-equiv="refresh" content="4"></noscript>') : ''}
+<article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${live ? '1' : ''}" data-bot="${botPages}">
 <header class="task-head">
 <p class="task-status"><span class="pill pill-${t.state}">${STATE_TEXT[t.state]}</span>${kind ? html`<span class="chip">${kind}</span>` : ''}<span class="chip">${MODE_LABEL[t.mode]}</span><span class="chip" id="task-cost">${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${time(t.created_at)}</p>
 ${parentTask ? html`<p class="follows-on">Following up on <a href="/tasks/${parentTask.id}">${parentTask.task.length > 90 ? `${parentTask.task.slice(0, 89)}…` : parentTask.task}</a></p>` : ''}
 <h1 class="task-text">${row.task}</h1>
 </header>
+${answerProblem ? notice(answerProblem, 'warn') : ''}
+${assumeProblem ? notice(assumeProblem, 'warn') : ''}
+${question ? questionCard(row, question) : ''}
 ${outcome(t, row)}
 ${t.state === 'succeeded' ? benchBlock(row, offer) : ''}
 ${t.state === 'succeeded' ? followBlock(row, follows, followProblem) : ''}
-${open ? planCard(plan) : ''}
+${open ? planCard(plan, { editable: live || waiting, taskId: row.id }) : ''}
 ${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
 <p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
 <a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
@@ -594,13 +758,13 @@ ${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(
 <a id="last-look-link" href="${look ? `/tasks/${row.id}/look?at=${look.at}` : '#'}" target="_blank" rel="noopener" title="Open it full size"><img id="last-look-img" src="${look ? `/tasks/${row.id}/look?at=${look.at}` : ''}" alt="The screen your agent last looked at"${look && look.width ? raw(` width="${Number(look.width)}" height="${Number(look.height)}"`) : ''} loading="lazy"></a>
 <figcaption class="muted small">What your agent last saw on the screen${look ? html` · ${time(new Date(look.at).toISOString())}` : ''}</figcaption>
 </figure>` : ''}
-<section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
+${waiting ? html`<p class="muted small live-note" id="waiting-note">Waiting for your answer. The task keeps its place and its budget while you decide.</p>` : html`<section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
 ${!open && plan ? planCard(plan) : ''}
 <div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div>
 ${traceBlock(spans, row.id)}
 <script type="application/json" id="task-events">${raw(JSON.stringify(events.slice(-3000)).replace(/</g, '\\u003c'))}</script>
-${open ? html`<p class="muted small live-note" id="live-note"><span class="dot-pulse" aria-hidden="true"></span> Updating as the agent works.</p>` : ''}
-</section>
+${live ? html`<p class="muted small live-note" id="live-note"><span class="dot-pulse" aria-hidden="true"></span> Updating as the agent works.</p>` : ''}
+</section>`}
 ${t.explanation ? explanationBlock(t.explanation) : ''}
 ${deliveries.length ? deliveriesBlock(deliveries) : ''}
 <p class="muted small api-hint">In code: <code>GET /api/v1/tasks/${row.id}</code> · <a href="/docs">API</a></p>
@@ -619,16 +783,47 @@ ${table(['State', 'Endpoint', 'Delivery', 'Attempts'], rows.map((d) => [
     }
 
     /**
-     * The plan the agent works through: each sub-goal done, in hand or next, and what it assumed. A live task's card is
-     * there before the first plan (hidden), so js/task.js can fill it as the plan arrives and changes.
+     * The one question a high-risk ambiguous task may ask (stage V2-8): one tap per option, plus a box for the person's
+     * own words. A plain POST; it works without JavaScript and on a phone.
      */
-    function planCard(plan) {
+    function questionCard(row, question) {
+        return html`<section class="question-card" id="question" aria-labelledby="h-question">
+<h2 id="h-question">Before Actor starts, one question</h2>
+<p class="q-text">${question.text}</p>
+<form method="post" action="/tasks/${row.id}/answer" class="q-options">
+${question.options.map((o) => html`<button class="sc-btn q-option" type="submit" name="answer" value="${o}">${o}</button>`)}
+</form>
+<form method="post" action="/tasks/${row.id}/answer" class="q-own">
+<label for="q-own-text">Or answer in your own words</label>
+<div class="q-own-row"><input id="q-own-text" name="answer" type="text" maxlength="2000" required placeholder="Your answer…"><button class="sc-btn" type="submit">Answer</button></div>
+</form>
+<p class="muted small">One question per task, before any work starts. The answer joins this task as your words.</p>
+</section>`;
+    }
+
+    /**
+     * The plan the agent works through: each sub-goal done, in hand or next, and what it assumed. A live task's card is
+     * there before the first plan (hidden), so js/task.js can fill it as the plan arrives and changes. While the task
+     * runs, the assumptions are the person's to edit: a plain form whose send is a follow-up turn (stage V2-8).
+     */
+    function planCard(plan, opts = {}) {
         const STATE = { done: 'done', active: 'working on it', todo: 'next' };
         const steps = plan ? plan.steps : [];
+        const assumptions = plan ? plan.assumptions : [];
+        const ledger = plan && plan.ledger ? plan.ledger : null;
+        const progress = plan && plan.progress ? plan.progress : null;
         return html`<section class="plan-card" id="plan-card" aria-labelledby="h-plan"${steps.length ? '' : raw(' hidden')}>
 <h2 id="h-plan">The plan</h2>
 <ol class="plan" id="plan-steps">${steps.map((st) => html`<li class="ps is-${STATE[st.state] ? st.state : 'todo'}"><span class="ps-mark" aria-hidden="true"></span><span class="ps-goal">${st.goal}</span><span class="sr-only"> (${STATE[st.state] || 'next'})</span></li>`)}</ol>
-<p class="plan-assume" id="plan-assume"${plan && plan.assumptions.length ? '' : raw(' hidden')}>Assuming ${plan ? plan.assumptions.join(' · ') : ''}</p>
+${opts.editable ? html`<form method="post" action="/tasks/${opts.taskId}/assumptions" class="assume-form">
+<label for="assume-text">Assumptions (one per line; changing them tells the agent how to read the task)</label>
+<textarea id="assume-text" name="assumptions" rows="5" maxlength="2000">${assumptions.join('\n')}</textarea>
+<button class="sc-btn" type="submit">Update assumptions</button>
+</form>` : html`<p class="plan-assume" id="plan-assume"${assumptions.length ? '' : raw(' hidden')}>Assuming ${assumptions.join(' · ')}</p>`}
+<div class="plan-ledger" id="plan-ledger"${ledger ? '' : raw(' hidden')}>
+${ledger ? html`<p><b>Task ledger</b> ${ledger.given.length ? html`<span><span class="muted">given</span> ${ledger.given.join('; ')}</span>` : ''}${ledger.lookup.length ? html` <span><span class="muted">find</span> ${ledger.lookup.join('; ')}</span>` : ''}${ledger.derive.length ? html` <span><span class="muted">derive</span> ${ledger.derive.join('; ')}</span>` : ''}</p>` : ''}
+${progress ? html`<p class="plan-progress"><b>Progress</b> ${progress.done ? 'done' : 'not done'} · ${progress.looping ? 'looping' : 'not looping'} · ${progress.progressing ? 'moving' : 'no progress'}${progress.next ? ` · next: ${progress.next}` : ''}${progress.replans ? ` · replanned ${progress.replans}×` : ''}</p>` : ''}
+</div>
 </section>`;
     }
 
@@ -659,6 +854,7 @@ ${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
             return html`<section class="outcome outcome-bad" role="status"><h2>Actor couldn't finish this</h2><p>${friendlyError(t.error)}</p><div class="outcome-actions">${again}</div>${t.error ? html`<p class="muted small">Code <code>${t.error.code}</code></p>` : ''}</section>`;
         }
         if (t.state === 'cancelled') return html`<section class="outcome" role="status"><h2>Cancelled</h2><p>What was spent before the cancel stays spent.</p><div class="outcome-actions">${again}</div></section>`;
+        if (t.state === 'needs_you') return html`<section class="outcome outcome-wait" role="status"><h2>Waiting for you</h2><p>Actor asked one question before spending anything on this task. Answer it above, and the same task continues with your words.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
         return html`<section class="outcome outcome-live" role="status" aria-live="polite"><h2><span class="dot-pulse" aria-hidden="true"></span> <span id="live-state">${STATE_TEXT[t.state]}…</span></h2><p class="muted">This page fills in as the agent works. You can leave and come back: the task keeps running.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
     }
 
@@ -685,21 +881,30 @@ ${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
         const claims = Number(checked.claims) || 0;
         const grounded = Math.min(claims, Number(checked.grounded) || 0);
         const by = `${modelName(checked.by)}${checked.cross_family ? ', another model family' : ', the same family'}`;
+        const confMap = claimConfidences(checked);
+        const conf = checked.confidence || null;
+        const left = Math.max(0, (Number(t.budget && t.budget.per_task_usd) || 0) - (Number(t.cost && t.cost.usd) || 0));
+        const canChallenge = t.state === 'succeeded' && left >= 0.0015;
         const ext = (a) => (String(a.name || '').split('.').pop() || a.kind || 'file').slice(0, 5).toUpperCase();
         return html`<section class="outcome outcome-ok answer" aria-labelledby="h-answer"><h2 id="h-answer" class="sr-only">Answer</h2>
-<div class="prose">${raw(chipify(markdown(result.answer, { headingOffset: 2 }), evidence))}</div>
-<p class="checked-line"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span>${claims ? `Checked: ${claims} claim${claims === 1 ? '' : 's'}, ${grounded} grounded` : 'Checked'} · by ${by}</span></p>
+<div class="prose">${raw(chipify(markdown(result.answer, { headingOffset: 2 }), evidence, confMap))}</div>
+<p class="checked-line"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span>${claims ? `Checked: ${claims} claim${claims === 1 ? '' : 's'}, ${grounded} grounded` : 'Checked'}${conf ? ` · ${conf.sure || 0} sure · ${conf.likely || 0} likely · ${conf.unverified || 0} unverified${conf.unsure ? ` · ${conf.unsure} unsure` : ''}` : ''} · by ${by}</span></p>
 ${Array.isArray(result.contested) && result.contested.length ? contestedBlock(result.contested, evidence) : ''}
 ${artifacts.length ? html`<div class="files"><h3>Files</h3><ul class="file-grid">${artifacts.map((a) => html`<li class="file-card">
 <a class="fc-preview" href="${a.url}" rel="nofollow noopener" tabindex="-1" aria-hidden="true">${/^image\/(svg\+xml|png|jpe?g|gif|webp)$/.test(a.mime) ? html`<img src="${a.url}" alt="" loading="lazy">` : html`<span class="fc-ext">${ext(a)}</span>`}</a>
 <span class="fc-meta"><a class="fc-name" href="${a.url}" rel="nofollow noopener">${a.name}</a><span class="muted">${a.kind === 'chart' ? 'Chart' : 'File'} · ${bytes(a.size)}</span></span></li>`)}</ul></div>` : ''}
 ${result.sources && result.sources.length ? html`<div class="sources"><h3>Sources</h3><ul>${result.sources.map((u) => html`<li><a href="${u}" rel="nofollow ugc noopener" target="_blank">${u.replace(/^https?:\/\//, '').slice(0, 90)}</a></li>`)}</ul></div>` : ''}
 ${evidence.length ? html`<details class="evidence" id="evidence"><summary><span>Evidence</span><span class="muted">${evidence.length} item${evidence.length === 1 ? '' : 's'}: what the tools returned${cited.size ? `, ${cited.size} cited` : ''}</span></summary>
-<ol class="ev-list">${evidence.map((e) => html`<li class="ev-item${cited.has(String(e.id)) ? ' is-cited' : ''}" id="ev-${e.id}">
-<p class="ev-head"><b class="ev-n">${String(e.id).slice(1)}</b><span class="ev-tool">${toolLabel(e.tool)}</span>${inputText(e.input) ? html`<span class="ev-input">${inputText(e.input)}</span>` : ''}${e.at ? html`<time class="ev-at" datetime="${e.at}">${String(e.at).slice(11, 16)} UTC</time>` : ''}</p>
+<ol class="ev-list">${evidence.map((e) => {
+            const c = confMap.get(String(e.id)) || (claims ? 'unverified' : null);
+            return html`<li class="ev-item${cited.has(String(e.id)) ? ' is-cited' : ''}" id="ev-${e.id}">
+<p class="ev-head"><b class="ev-n">${String(e.id).slice(1)}</b><span class="ev-tool">${toolLabel(e.tool)}</span>${inputText(e.input) ? html`<span class="ev-input">${inputText(e.input)}</span>` : ''}${c ? html`<span class="ev-conf is-${c}" title="This claim is ${CONF_TEXT[c] || c}">${CONF_TEXT[c] || c}</span>` : ''}${e.at ? html`<time class="ev-at" datetime="${e.at}">${String(e.at).slice(11, 16)} UTC</time>` : ''}</p>
 ${e.text ? html`<p class="ev-text">${String(e.text).slice(0, 700)}${String(e.text).length > 700 ? '…' : ''}</p>` : ''}
 ${Array.isArray(e.refs) && e.refs.some((r) => r && r.kind === 'memory') ? html`<div class="ev-mem"><p class="ev-mem-title">Why you believe this</p><ul>${e.refs.filter((r) => r && r.kind === 'memory').slice(0, 8).map((r) => html`<li><a href="/memory#${r.id}">${r.text}</a> <span class="muted">${r.source === 'agent' ? 'your agent suggested it' : 'you wrote it'}${r.source_task && TASK_ID.test(String(r.source_task)) ? html` · from <a href="/tasks/${r.source_task}">this task</a>` : ''}</span></li>`)}</ul></div>` : ''}
-${Array.isArray(e.sources) && e.sources.length ? html`<ul class="ev-src">${e.sources.slice(0, 6).map((src) => html`<li><a href="${src.url}" rel="nofollow ugc noopener" target="_blank">${src.title || String(src.url).replace(/^https?:\/\//, '').slice(0, 80)}</a></li>`)}</ul>` : ''}</li>`)}</ol></details>` : ''}
+${Array.isArray(e.sources) && e.sources.length ? html`<ul class="ev-src">${e.sources.slice(0, 6).map((src) => html`<li><a href="${src.url}" rel="nofollow ugc noopener" target="_blank">${src.title || String(src.url).replace(/^https?:\/\//, '').slice(0, 80)}</a></li>`)}</ul>` : ''}
+${e.challenge ? html`<div class="ev-challenge-result"><b>Challenge: ${e.challenge.verdict || 'unclear'}</b>${e.challenge.why ? html` <span>${e.challenge.why}</span>` : ''}${e.challenge.query ? html`<p class="muted small">Looked for: ${e.challenge.query}</p>` : ''}</div>` : ''}
+${canChallenge && !e.challenge ? html`<p class="ev-actions"><a class="ev-challenge" href="/tasks/${t.id}/challenge?ev=${e.id}">Challenge this claim</a> <span class="muted small">a counter-evidence search; the estimate is shown first</span></p>` : ''}</li>`;
+        })}</ol></details>` : ''}
 <p class="answer-foot"><span>${agent ? agent.name : result.agent}${result.model ? html` · ${modelName(result.model)}` : ''}</span><span>${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${Number.isFinite(took) && took > 0 ? html`<span>took ${ago(took)}</span>` : ''}</p>
 </section>`;
     }
@@ -775,6 +980,10 @@ ${a.refused ? html`<details class="refused"><summary>See the answer that didn't 
 
     function stepItem(e) {
         if (e.step === 'plan') { const p = taskEvents.plan(e.text); return html`<li class="tl-item tl-plan"><span class="tl-k">Plan</span><span class="tl-v">${p ? taskEvents.planLine(p) : e.text}</span></li>`; }
+        if (e.step === 'question') return html`<li class="tl-item tl-q"><span class="tl-k">Asked</span><span class="tl-v">${e.text}</span></li>`;
+        if (e.step === 'answer') return html`<li class="tl-item tl-answer"><span class="tl-k">You said</span><span class="tl-v">${e.text}</span></li>`;
+        if (e.step === 'escalation') return html`<li class="tl-item tl-esc"><span class="tl-k">Escalated</span><span class="tl-v">${e.text}</span></li>`;
+        if (e.step === 'challenge') return html`<li class="tl-item tl-challenge"><span class="tl-k">Challenged</span><span class="tl-v">${e.text}</span></li>`;
         if (e.step === 'tool_call') return html`<li class="tl-item tl-tool"><span class="tl-k">Used</span><span class="tl-v"><code>${e.tool}</code> ${e.input || ''}</span></li>`;
         if (e.step === 'tool_result') return html`<li class="tl-item tl-result${e.is_error ? ' tl-err' : ''}"><span class="tl-k">Got</span><span class="tl-v"><span class="muted">${(e.text || '').slice(0, 220)}</span></span></li>`;
         if (/^Needs you: /.test(e.text || '')) return html`<li class="tl-item tl-needs"><span class="tl-k">Needs you</span><span class="tl-v">${withDeskLinks(String(e.text).replace(/^Needs you: /, ''))}</span></li>`;

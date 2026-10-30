@@ -27,6 +27,8 @@ const approvals = require('../agents/approvals');
 const { repoIn: codesRepoIn } = require('../agents/codes');
 const memory = require('../memory');
 const taskNotices = require('../notify/task-notices');
+const confidence = require('../runtime/brain/confidence');
+const learn = require('../runtime/brain/learn');
 
 const MAX_ATTEMPTS = 2;
 // The one loop's agent id on the event stream and in the result (the old runtime's id, kept for readers).
@@ -35,9 +37,13 @@ const LOOP_AGENT = 'openvibe-runtime';
 // What a task asked in a public chat may be (chat/asks.js): nothing that uses the person's own computers, robots or code.
 const PUBLIC_CLASSES = ['answer', 'lookup', 'research', 'web'];
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null }) {
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
+    // A question the loop asked before any tool ran (stage V2-8): the task waits in needs_you, the page shows the
+    // question, and POST /tasks/:id/answer resumes this same run with the person's words.
+    const asking = new Map();       // task id → resolve(answer)
+    const controls = new Map();     // task id → the run's control object (live assumptions)
     let stopped = false;
 
     const iso = () => new Date(now()).toISOString();
@@ -117,6 +123,25 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         return row;
     }
 
+    /**
+     * The person's answer to the one question (stage V2-8). The run is waiting in needs_you inside execute(); this
+     * resolves it, and the same run continues with the answer as the person's words.
+     */
+    async function answer(id, text) {
+        const resolve = asking.get(id);
+        if (!resolve) return false;
+        asking.delete(id);
+        resolve(String(text == null ? '' : text).slice(0, 2000));
+        return true;
+    }
+
+    /** An assumption edit on a live task's page is a follow-up turn in the same run (stage V2-8). */
+    async function assume(id, text) {
+        const control = controls.get(id);
+        if (!control || typeof control.assume !== 'function') return { ok: false, reason: 'this task is not running a plan you can edit' };
+        return await control.assume(text);
+    }
+
     function submit(id) {
         if (stopped) return;
         waiting.push(id);
@@ -165,6 +190,31 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             timer = setTimeout(abortAtEnd, Math.max(0, ends - Date.now()));
             timer.unref();
             return add;
+        };
+        // One question, before any tool (stage V2-8): the task waits in needs_you; its clock waits with the person,
+        // up to the same 15 minutes a desk hand-off gets. The answer resumes this same run.
+        const askPerson = async ({ text, options } = {}) => {
+            const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+            const list = (Array.isArray(options) ? options : []).map((o) => String(o || '').replace(/\s+/g, ' ').trim().slice(0, 120)).filter(Boolean).slice(0, 4);
+            if (!clean || list.length < 2) return null;
+            // The promise is armed before the state flips, so an answer can never arrive before the run waits for it.
+            const waiting = new Promise((resolve) => {
+                asking.set(id, resolve);
+                const onAbort = () => { asking.delete(id); resolve(null); };
+                if (signal.aborted) { onAbort(); return; }
+                signal.addEventListener('abort', onAbort, { once: true });
+            });
+            if (signal.aborted) { asking.delete(id); return null; }
+            await emit(id, { kind: 'output', step: 'question', agent: LOOP_AGENT, text: clean, options: list });
+            await setState(id, 'needs_you');
+            await tellPerson(row, 'needs_you', { what: `answer: ${clean}`, url: `${config.baseUrl}/tasks/${id}` });
+            waitForPerson(15 * 60_000);
+            const answer = await waiting;
+            asking.delete(id);
+            if (answer == null) return null;
+            await setState(id, 'running');
+            await emit(id, { kind: 'output', step: 'answer', agent: LOOP_AGENT, text: String(answer).slice(0, 2000) });
+            return answer;
         };
         const explanation = [];
         const tried = new Map();
@@ -217,6 +267,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     return { pending: true, id: ask.id, url };
                 } : null;
                 let out = null;
+                const control = {};
+                controls.set(id, control);
                 try {
                     out = await loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
@@ -224,6 +276,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
                         meter, budgetLeft, waitForPerson, requestApproval,
                         personText, agentId: ownAgent, notifyTask,
+                        askPerson, control,
                     });
                 } catch (err) {
                     if (signal && signal.aborted) throw err;
@@ -246,9 +299,17 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     // drop it, then the check runs again (at most config.loop.checkReflections passes by another family).
                     const maxRounds = config.loop && config.loop.checkReflections != null ? config.loop.checkReflections : 2;
                     let rounds = 0;
+                    let escalated = false;
                     while (!verdict.ok && !verdict.unavailable && verdict.unsupported && verdict.unsupported.length && rounds < maxRounds && budgetLeft() > 0 && out.text) {
                         rounds += 1;
-                        const revised = await loop.revise(out, verdict.unsupported);
+                        // Escalate first (stage V2-8): one tier up for this step, never the identical call. If no rung is
+                        // available, the normal revision pass runs as before.
+                        let revised = null;
+                        if (!escalated) {
+                            escalated = true;
+                            revised = await loop.escalate(out, verdict.unsupported);
+                        }
+                        if (!revised || revised === out || !revised.text || revised.text === out.text) revised = await loop.revise(out, verdict.unsupported);
                         if (!revised || revised === out || !revised.text || revised.text === out.text) break;
                         out = revised;
                         verdict = await verify(out);
@@ -272,9 +333,38 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         if (contested.length) await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Sources disagree on ${contested.length} point${contested.length === 1 ? '' : 's'}; both sides are shown with the answer.` });
                     }
                     if (verdict.ok) {
+                        // Confidence and the challenge (stage V2-8): grade every claim, counter-search the high-stakes
+                        // ones at likely/unverified. It spends against the same task budget, and the page shows it.
+                        const brain = out.brain || {};
+                        let review = null;
+                        if (Array.isArray(verdict.claims) && verdict.claims.length) {
+                            const outward = !!(out.state && out.state.brain && out.state.brain.understanding && out.state.brain.understanding.outward);
+                            try {
+                                review = await confidence.review({
+                                    claims: verdict.claims, evidence: out.evidence, task: row.task, mode: row.mode, models,
+                                    outward, signal, trace: out.state && out.state.ctx && out.state.ctx.trace,
+                                    budgetLeft, writerFamily: out.family || null, now: () => now(),
+                                    search: async (query) => (registry
+                                        ? registry.run('search_web', { query }, { config, log, signal, requester: row.requester, now })
+                                        : { text: 'no search is configured', isError: true }),
+                                });
+                                await meter(review.cost_usd);
+                                if (review.challenged) await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `Challenged ${review.challenged} high-stakes claim${review.challenged === 1 ? '' : 's'} with a counter-evidence search; ${review.unsure} could not be confirmed.`.slice(0, 2000) });
+                            } catch (err) {
+                                if (signal && signal.aborted) throw err;
+                                log.warn && log.warn('[Actor] confidence review failed (the checked answer is delivered):', (err && err.message) || err);
+                            }
+                        }
+                        await learn.recordCheck({ store: s, kind: brain.kind || 'answer', tiers: brain.tiers || [], tools: brain.tools || [], ok: true, log, now: () => now() }).catch(() => {});
                         let answer = out.text;
                         if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id);
-                        const claims = Array.isArray(verdict.claims) ? verdict.claims : [];
+                        const claims = review ? review.claims : (Array.isArray(verdict.claims) ? verdict.claims : []);
+                        const confidenceCounts = claims.reduce((out2, c) => {
+                            const k = c && c.confidence ? c.confidence : 'unverified';
+                            out2[k] = (out2[k] || 0) + 1;
+                            return out2;
+                        }, { sure: 0, likely: 0, unverified: 0, unsure: 0 });
+                        if (claims.some((c) => c && c.confidence === 'unsure')) answer += confidence.unsureLine(claims);
                         const artifacts = Array.isArray(out.artifacts) ? out.artifacts.slice(0, 20) : [];
                         const result = {
                             answer,
@@ -283,12 +373,21 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                             model: out.model || null,
                             class: cls,
                             tier: out.tier || null,
-                            checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason, claims: claims.length, grounded: claims.length - (verdict.unsupported ? verdict.unsupported.length : 0) },
-                            evidence: out.evidence || [],
+                            checked: {
+                                by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason,
+                                claims: claims.length, grounded: claims.length - (verdict.unsupported ? verdict.unsupported.length : 0),
+                                confidence: confidenceCounts,
+                                claims_detail: claims.slice(0, 40).map((c) => ({
+                                    claim: c.claim, kind: c.kind, confidence: c.confidence, high_stakes: !!c.high_stakes,
+                                    evidence: c.evidence || [], ...(c.challenge ? { challenge: c.challenge } : {}),
+                                })),
+                            },
+                            evidence: (review ? review.evidence : out.evidence) || [],
                             citations: out.citations || [],
                             artifacts,
                             plan: out.plan || null,
                             turns: out.turns || null,
+                            brain,
                             ...(contested.length ? { contested } : {}),
                         };
                         // The files and charts travel with each tool result that made them (the loop's tool_result events),
@@ -299,6 +398,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         return await setState(id, 'failed', { error_code: 'actor.check.unavailable', error_detail: `The answer could not be checked (${verdict.reason}), so it was not delivered.`, finished_at: iso() });
                     }
                     // The refused answer, kept on the task page folded away, never delivered as the answer.
+                    await learn.recordCheck({ store: s, kind: (out.brain && out.brain.kind) || 'answer', tiers: (out.brain && out.brain.tiers) || [], tools: (out.brain && out.brain.tools) || [], ok: false, log, now: () => now() }).catch(() => {});
                     await emit(id, { kind: 'output', step: 'text', agent: agentId, text: String(out.text || '').slice(0, 8000), is_error: true });
                     const bad = (verdict.unsupported || []).slice(0, 5).map((c) => c.claim).join('; ');
                     return await setState(id, 'failed', {
@@ -307,6 +407,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         finished_at: iso(),
                     });
                 } finally {
+                    controls.delete(id);
                     await loop.close(out && out.state).catch(() => {});
                 }
             }
@@ -414,7 +515,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
 
     const status = () => ({ running: running.size, waiting: waiting.length });
 
-    return { submit, cancel, stop, status, MAX_ATTEMPTS };
+    return { submit, cancel, stop, status, answer, assume, MAX_ATTEMPTS };
 }
 
 module.exports = { createEngine, MAX_ATTEMPTS };

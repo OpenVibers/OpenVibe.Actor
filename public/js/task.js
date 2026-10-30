@@ -61,6 +61,35 @@
     });
     var assume = document.getElementById('plan-assume');
     if (assume) { assume.textContent = p.assumptions.length ? 'Assuming ' + p.assumptions.join(' \u00b7 ') : ''; assume.hidden = !p.assumptions.length; }
+    // A live plan's assumptions are an editable form; do not overwrite what the person is typing.
+    var box = document.getElementById('assume-text');
+    if (box && document.activeElement !== box) box.value = p.assumptions.join('\n');
+    // The brain's ledgers ride in the plan event too (stage V2-8), so the live card keeps them current.
+    var ledger = document.getElementById('plan-ledger');
+    if (ledger) {
+      while (ledger.firstChild) ledger.removeChild(ledger.firstChild);
+      if (p.ledger) {
+        var row = el('p');
+        row.appendChild(el('b', '', 'Task ledger'));
+        var l = p.ledger;
+        [['given', l.given], ['find', l.lookup], ['derive', l.derive]].forEach(function (pair) {
+          if (!pair[1].length) return;
+          var span = el('span');
+          span.appendChild(el('span', 'muted', pair[0]));
+          span.appendChild(document.createTextNode(' ' + pair[1].join('; ')));
+          row.appendChild(document.createTextNode(' '));
+          row.appendChild(span);
+        });
+        ledger.appendChild(row);
+      }
+      if (p.progress) {
+        var line = el('p', 'plan-progress');
+        line.appendChild(el('b', '', 'Progress'));
+        line.appendChild(document.createTextNode(' ' + (p.progress.done ? 'done' : 'not done') + ' \u00b7 ' + (p.progress.looping ? 'looping' : 'not looping') + ' \u00b7 ' + (p.progress.progressing ? 'moving' : 'no progress') + (p.progress.next ? ' \u00b7 next: ' + p.progress.next : '')));
+        ledger.appendChild(line);
+      }
+      ledger.hidden = !p.ledger && !p.progress;
+    }
     card.hidden = false;
   }
 

@@ -189,7 +189,7 @@ async function failInterrupted(s) {
         `UPDATE tasks SET state = 'failed', error_code = 'actor.task.interrupted',
                 error_detail = 'Actor restarted while this task was running. Nothing was charged after the restart; ask again.',
                 finished_at = $1, result = NULL
-         WHERE state IN ('queued', 'running', 'verifying') RETURNING id`, [s.iso()]);
+         WHERE state IN ('queued', 'running', 'verifying', 'needs_you') RETURNING id`, [s.iso()]);
     return rows.map((r) => r.id);
 }
 
