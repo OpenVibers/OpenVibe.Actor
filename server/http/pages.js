@@ -334,6 +334,28 @@ ${raw(showcase.faq({ id: 'faq', items: faq }))}
         return res.redirect(303, `/tasks/${out.task.id}`);
     });
 
+    // A follow-up (Actor v2, stage V2-5b): a new task of the same person's that continues an answered one, with its
+    // question and answer in mind (store.followContext). Only from the person's own page on Actor, in the parent's mode,
+    // inside the same allowance as any task.
+    const FOLLOW_ERROR = {
+        'actor.allowance.exhausted': 'You have used today\'s free tasks. They come back at midnight UTC.',
+        'actor.budget.day_spent': 'Today\'s budget is spent. It resets at midnight UTC.',
+        'actor.capacity.spent': 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.',
+    };
+    r.post('/tasks/:id/follow-up', require('express').urlencoded({ extended: false, limit: '64kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.redirect(303, '/tasks');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('A follow-up must be sent from openvibe.actor itself.');
+        const parent = await store.getTask(s, req.params.id);
+        if (!parent || parent.requester !== requesterOf(req)) return res.status(404).type('text/plain').send('No such task');
+        if (parent.state !== 'succeeded') return res.redirect(303, `/tasks/${parent.id}`);
+        const text = String((req.body && req.body.task) || '').trim().slice(0, 20000);
+        if (!text) return res.redirect(303, `/tasks/${parent.id}#follow-up`);
+        const out = await createTask({ s, config, engine, principal: { requester: requesterOf(req), project: null }, body: { task: text, mode: parent.mode }, parentId: parent.id });
+        if (out.code) return res.redirect(303, `/tasks/${parent.id}?follow=${encodeURIComponent(out.code)}#follow-up`);
+        return res.redirect(303, `/tasks/${out.task.id}`);
+    });
+
     // ── Your tasks ───────────────────────────────────────────
     r.get('/tasks', async (req, res) => {
         if (!signedIn(req)) {
@@ -398,6 +420,10 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         const kind = cls ? CLASS_TEXT[cls[1]] || cls[1] : null;
         const desk = open ? store.deskFrom(events) : null;
         const look = looks.get(row.id);
+        const parentRow = row.parent_id ? await store.getTask(s, row.parent_id) : null;
+        const parentTask = parentRow && parentRow.requester === row.requester ? parentRow : null;
+        const follows = t.state === 'succeeded' ? await store.followUps(s, row) : [];
+        const followProblem = typeof req.query.follow === 'string' ? (FOLLOW_ERROR[req.query.follow] || 'That follow-up could not start. Try again in a moment.') : null;
         const planEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'plan' && taskEvents.plan(e.text));
         const plan = (t.result && t.result.plan && Array.isArray(t.result.plan.steps) && t.result.plan.steps.length ? t.result.plan : null)
             || (planEvent ? taskEvents.plan(planEvent.text) : null);
@@ -415,9 +441,11 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
 <article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${open ? '1' : ''}" data-bot="${botPages}">
 <header class="task-head">
 <p class="task-status"><span class="pill pill-${t.state}">${STATE_TEXT[t.state]}</span>${kind ? html`<span class="chip">${kind}</span>` : ''}<span class="chip">${MODE_LABEL[t.mode]}</span><span class="chip" id="task-cost">${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${time(t.created_at)}</p>
+${parentTask ? html`<p class="follows-on">Following up on <a href="/tasks/${parentTask.id}">${parentTask.task.length > 90 ? `${parentTask.task.slice(0, 89)}…` : parentTask.task}</a></p>` : ''}
 <h1 class="task-text">${row.task}</h1>
 </header>
 ${outcome(t, row)}
+${t.state === 'succeeded' ? followBlock(row, follows, followProblem) : ''}
 ${open ? planCard(plan) : ''}
 ${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
 <p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
@@ -461,6 +489,25 @@ ${table(['State', 'Endpoint', 'Delivery', 'Attempts'], rows.map((d) => [
 <h2 id="h-plan">The plan</h2>
 <ol class="plan" id="plan-steps">${steps.map((st) => html`<li class="ps is-${STATE[st.state] ? st.state : 'todo'}"><span class="ps-mark" aria-hidden="true"></span><span class="ps-goal">${st.goal}</span><span class="sr-only"> (${STATE[st.state] || 'next'})</span></li>`)}</ol>
 <p class="plan-assume" id="plan-assume"${plan && plan.assumptions.length ? '' : raw(' hidden')}>Assuming ${plan ? plan.assumptions.join(' · ') : ''}</p>
+</section>`;
+    }
+
+    /**
+     * Ask a follow-up: one box under the answer, the follow-ups already asked above it. The new task keeps this question
+     * and answer in mind and is checked the same way. It is a plain form: no script needed.
+     */
+    function followBlock(row, follows, problem) {
+        const STATE = { queued: 'Waiting', running: 'Working', verifying: 'Checking', succeeded: 'Done', failed: 'Not finished', cancelled: 'Cancelled' };
+        return html`<section class="follow" id="follow-up" aria-labelledby="h-follow">
+<h2 id="h-follow"${follows.length ? '' : raw(' class="sr-only"')}>${follows.length ? 'Follow-ups' : 'Ask a follow-up'}</h2>
+${follows.length ? html`<ol class="follow-list">${follows.map((f) => html`<li><a href="/tasks/${f.id}">${f.task.length > 120 ? `${f.task.slice(0, 119)}…` : f.task}</a> <span class="pill pill-${f.state}">${STATE[f.state] || f.state}</span></li>`)}</ol>` : ''}
+${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
+<form method="post" action="/tasks/${row.id}/follow-up" class="follow-form">
+<label for="follow-text" class="sr-only">Ask a follow-up</label>
+<textarea id="follow-text" name="task" rows="1" maxlength="20000" required placeholder="Ask a follow-up…"></textarea>
+<button class="sc-btn sc-primary" type="submit">Ask</button>
+</form>
+<p class="follow-hint">It keeps this question and answer in mind, and checks its answer the same way.</p>
 </section>`;
     }
 

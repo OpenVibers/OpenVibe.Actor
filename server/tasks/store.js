@@ -22,15 +22,38 @@ function subjectRef(requester) {
 
 async function insertTask(s, t) {
     await s.db.query(
-        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret, timeout_ms)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14, $15)`,
+        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret, timeout_ms, parent_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14, $15, $16)`,
         [t.id, t.requester, t.project_id || null, t.task, t.mode, t.agent || null, t.budget_task, t.budget_day, t.idem_key || null, t.idem_hash || null, t.created_at, t.via || null,
-            t.webhooks && t.webhooks.length ? JSON.stringify(t.webhooks) : null, t.webhook_secret || null, t.timeout_ms || null]);
+            t.webhooks && t.webhooks.length ? JSON.stringify(t.webhooks) : null, t.webhook_secret || null, t.timeout_ms || null, t.parent_id || null]);
     await addSpend(s, t.requester, 0, { tasks: 1 });
     return getTask(s, t.id);
 }
 
 const getTask = (s, id) => s.db.maybe('SELECT * FROM tasks WHERE id = $1', [id]);
+
+/**
+ * The conversation a follow-up continues (Actor v2, stage V2-5b): up to `depth` tasks before it, oldest first, each its
+ * question and its answer, only the same person's, only answered ones. An answer's [E#] citations belonged to its own
+ * run, so they are taken out: the new run cites only what it fetches itself. Each answer is clipped to `clip` chars.
+ */
+async function followContext(s, row, { depth = 3, clip = 3000 } = {}) {
+    const out = [];
+    let at = row && row.parent_id;
+    for (let i = 0; at && i < depth; i++) {
+        const p = await getTask(s, at);
+        if (!p || p.requester !== row.requester) break;
+        const result = p.result ? (typeof p.result === 'string' ? JSON.parse(p.result) : p.result) : null;
+        if (p.state === 'succeeded' && result && result.answer) {
+            const answer = String(result.answer).replace(/\s*\[E\d{1,3}(?:\s*,\s*E\d{1,3})*\]/g, '');
+            out.unshift({ task: String(p.task), answer: answer.length > clip ? `${answer.slice(0, clip - 1)}…` : answer });
+        }
+        at = p.parent_id;
+    }
+    return out;
+}
+/** The follow-ups of a task, oldest first: { id, task, state, created_at }. */
+const followUps = (s, row) => s.db.many('SELECT id, task, state, created_at FROM tasks WHERE parent_id = $1 AND requester = $2 ORDER BY created_at, id LIMIT 20', [row.id, row.requester]);
 const byIdempotency = (s, requester, key) => s.db.maybe('SELECT * FROM tasks WHERE requester = $1 AND idem_key = $2', [requester, key]);
 
 /** A requester's tasks, newest first; `via` narrows to the ones that service started for them. */
@@ -205,4 +228,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps };

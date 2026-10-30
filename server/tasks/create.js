@@ -18,7 +18,7 @@ function untilMidnight(nowMs) {
     return Math.ceil((Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1) - n.getTime()) / 1000);
 }
 
-async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null }) {
+async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, parentId = null }) {
     const v = contracts.validate('actor.task-create-request@1', body);
     if (!v.valid) return { status: 422, code: 'actor.task.invalid', detail: (v.errors || []).map((e) => `${e.path || e.instancePath || ''} ${e.message}`.trim()).join('; ').slice(0, 500) || 'invalid request' };
     const tier = config.allowance;
@@ -69,7 +69,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         const row = await store.insertTask(s, {
             id: s.newId('tsk'), requester: principal.requester, via: principal.via || null, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,
             budget_task: perTask, budget_day: perDay, idem_key: body.idempotency_key || null, idem_hash: body.idempotency_key ? hash : null, created_at: s.iso(),
-            webhooks, webhook_secret: ownSecret ? mintSecret() : null,
+            webhooks, webhook_secret: ownSecret ? mintSecret() : null, parent_id: parentId,
             // A task's own clock (Actor v2): 10 minutes by default; mode best may run up to an hour.
             timeout_ms: (body.mode || 'balanced') === 'best' ? config.bestTimeoutMs : config.taskTimeoutMs,
         });

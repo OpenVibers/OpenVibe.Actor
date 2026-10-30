@@ -116,6 +116,13 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     const selfReflections = loopCfg.selfReflections == null ? 2 : loopCfg.selfReflections;
 
     /** The plan: a fast-tier call when one is available, else one honest step from the task itself. */
+    // A follow-up is planned with what it follows: "and for 8 GB?" means nothing on its own.
+    const FOLLOW_NOTE = 'This follows up on the conversation above. Citations in the earlier answers belong to earlier runs: fetch again any live fact you cite.';
+    function planInput(state) {
+        if (!state.context.length) return state.task;
+        return `Earlier in this conversation:\n${state.context.map((c) => `Asked: ${clip(c.task, 600)}\nAnswered: ${clip(c.answer, 1200)}`).join('\n\n')}\n\nNow, a follow-up: ${state.task}`;
+    }
+
     async function makePlan(state, ctx) {
         const fallback = () => ({ assumptions: [], steps: [{ goal: clip(state.task.replace(/\s+/g, ' ').trim(), 200) || 'Do the task', state: 'pending' }] });
         let plan = fallback();
@@ -125,7 +132,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 tier: 'fast',
                 messages: [
                     { role: 'system', content: `You plan one task for an agent that can call tools. Reply with JSON only: {"assumptions":["..."],"steps":[{"goal":"..."}]}. Give 2 to 5 short sub-goals in the order you will do them. An assumption is only what you must suppose and the task does not say; keep the list empty when there is none. Today is ${today(now)}.` },
-                    { role: 'user', content: state.task.slice(0, 6000) },
+                    { role: 'user', content: planInput(state).slice(0, 6000) },
                 ],
                 json: true, maxTokens: 400, signal: state.signal,
             });
@@ -247,7 +254,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         };
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [] }) {
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
         // Files and charts made in this run are stored privately for the person the task is for, in Actor's own
@@ -262,13 +269,15 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const state = {
             task: String(task), requester, taskId, mode, tier, signal, messages: [], lastText: '', model: null, family: null, provider: null,
             calls: 0, ledger: createLedger({ now }), plan: { assumptions: [], steps: [] }, counts: new Map(), stopped: null, selfReflections: 0,
-            ctx,
+            ctx, context: Array.isArray(context) ? context.filter((c) => c && c.task && c.answer).slice(-3) : [],
         };
         try {
             state.plan = await makePlan(state, ctx);
             await emitPlan(state, ctx);
             state.messages.push({ role: 'system', content: SYSTEM({ date: today(now), plan: planText(state.plan), maxCalls }) });
-            state.messages.push({ role: 'user', content: state.task });
+            // A follow-up (stage V2-5b): the conversation it continues, as it went, then the new question.
+            for (const c of state.context) state.messages.push({ role: 'user', content: c.task }, { role: 'assistant', content: c.answer });
+            state.messages.push({ role: 'user', content: state.context.length ? `${FOLLOW_NOTE}\n\n${state.task}` : state.task });
             const tools = registry.definitions({ requester, mode, config, models, signal, artifacts });
             // Read from config each run so a test (or an operator's change) takes effect without rebuilding the loop.
             const maxSelf = config.loop && config.loop.selfReflections != null ? config.loop.selfReflections : selfReflections;
