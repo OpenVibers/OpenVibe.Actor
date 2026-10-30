@@ -16,6 +16,14 @@
  * Every tool result becomes one ledger item (evidence.js) and its id goes back to the model in the tool message, so
  * the answer can cite [E3]. Parallel calls are run together; their results are recorded in call order.
  *
+ * Only the tools a run was offered may run: a call to any other name is refused, whatever its scope.
+ *
+ * Sub-agents (stage V2-7, "best" mode): `delegate` hands one self-contained sub-goal to a child loop, at most 4 at
+ * once, depth 1. A child gets the parent's tools at most (narrowed by the call's `tools`, never `delegate`), a share of
+ * what is left of the budget (config.loop.subAgentShare) metered into the task, a cap on its model calls and no
+ * reflection pass. Its evidence joins the parent's ledger, renumbered, so the parent cites what the child's tools
+ * returned; the child's own summary is never evidence, so nothing reaches the answer that a tool did not return.
+ *
  * createLoop({ config, models, registry, log, store, now }) → { run(args), revise(state, claims) }
  */
 
@@ -24,6 +32,24 @@ const { createArtifactStore } = require('./artifacts');
 const { deskRun, closeDesks } = require('./tools/_person');
 
 const MAX_ANSWER_TOKENS = 5000;
+const MAX_SUB_AGENTS = 4;
+
+const DELEGATE = Object.freeze({
+    type: 'function',
+    function: {
+        name: 'delegate',
+        description: 'Hand one self-contained part of a hard task (research one subject, compare two options, gather one set of facts) to a sub-agent. It works alone with a share of your budget and of your tools, then reports back with evidence ids you can cite. Use it for independent parts only, at most 4 at once; never for a single lookup.',
+        parameters: {
+            type: 'object',
+            properties: {
+                goal: { type: 'string', description: 'What the sub-agent must find or do, in one or two sentences' },
+                tools: { type: 'array', items: { type: 'string' }, description: 'Optional: which of your tools it may use (by default all of yours except delegate)' },
+            },
+            required: ['goal'],
+        },
+    },
+});
+const CHILD_NOTE = '\n\nYou are a sub-agent working on one part of a bigger task. Do only your part, briefly, and cite [E#] for every fact. You cannot hand work to anyone else.';
 const MAX_PLAN_CHARS = 8000;
 
 const today = (now) => new Date(now()).toISOString().slice(0, 10);
@@ -105,7 +131,7 @@ const clip = (s, n) => (String(s == null ? '' : s).length > n ? `${String(s).sli
 
 function summarize(args) {
     const a = args || {};
-    const v = a.query || a.need || a.url || a.instruction || (a.tool ? `${a.tool} ${JSON.stringify(a.input || {})}` : a.robot ? `${a.robot}: ${[].concat(a.steps || []).join(', ')}`
+    const v = a.query || a.need || a.goal || a.url || a.instruction || (a.tool ? `${a.tool} ${JSON.stringify(a.input || {})}` : a.robot ? `${a.robot}: ${[].concat(a.steps || []).join(', ')}`
         : a.machine ? `${a.machine}: ${Array.isArray(a.argv) ? a.argv.join(' ') : a.path || a.what || a.action || ''}` : JSON.stringify(a));
     return clip(v, 300);
 }
@@ -185,6 +211,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const callsOut = toolCalls.slice(maxCalls).map((c) => ({ skipped: c, why: `not run: at most ${maxCalls} tool calls in one turn; make the rest in the next turn` }));
         const planned = [];
         let looping = false;
+        let delegated = 0;
         for (const call of calls) {
             const fn = call.function || {};
             let args = {};
@@ -192,7 +219,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const key = `${fn.name}|${JSON.stringify(args)}`;
             const n = (state.counts.get(key) || 0) + 1;
             state.counts.set(key, n);
-            if (n >= 3) { looping = true; planned.push({ call, name: fn.name, args, skipped: 'the same tool and input were already called twice' }); }
+            if (state.allow && !state.allow.has(fn.name)) planned.push({ call, name: fn.name, args, skipped: 'that tool is not offered for this task' });
+            else if (fn.name === DELEGATE.function.name && ++delegated > MAX_SUB_AGENTS) planned.push({ call, name: fn.name, args, skipped: `at most ${MAX_SUB_AGENTS} sub-agents at once; hand the rest over in the next turn` });
+            else if (n >= 3) { looping = true; planned.push({ call, name: fn.name, args, skipped: 'the same tool and input were already called twice' }); }
             else planned.push({ call, name: fn.name, args });
         }
         // Did this run read anything outside Actor (a page, a search, a file, another service)? Then an agent's own
@@ -204,7 +233,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             if (!TRUSTED.has(p.name) && (!tool || tool.scope !== 'private-ok')) state.readOutside = true;
         }
         const runnable = planned.filter((p) => !p.skipped);
-        const results = await Promise.all(runnable.map((p) => registry.run(p.name, p.args, ctx)));
+        const results = await Promise.all(runnable.map((p) => (p.name === DELEGATE.function.name ? runChild(state, ctx, p.args) : registry.run(p.name, p.args, ctx))));
         let i = 0;
         for (const p of planned) {
             if (p.skipped) {
@@ -215,6 +244,14 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             }
             const out = results[i++];
             await ctx.emit({ step: 'tool_call', tool: p.name, input: summarize(p.args) });
+            if (out && out.delegate) {
+                // A sub-agent's report: its answer and the evidence ids it brought into this run's ledger. The report
+                // itself is not evidence (it is a model's words), so the parent cites the ids, never the report.
+                const report = out.error ? { error: out.error } : { sub_agent: true, goal: out.goal, answer: out.answer, evidence: out.evidence };
+                state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify(report) });
+                await ctx.emit({ step: 'tool_result', tool: p.name, text: out.error || clip(`Sub-agent: ${out.calls} step${out.calls === 1 ? '' : 's'}, ${out.evidence.length} finding${out.evidence.length === 1 ? '' : 's'}. ${out.answer}`, 600), is_error: out.error ? true : undefined });
+                continue;
+            }
             const item = state.ledger.add({ tool: p.name, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs });
             state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: p.name, result: clip(out.text, resultChars) }) });
             await ctx.emit({ step: 'tool_result', tool: p.name, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
@@ -264,6 +301,94 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         };
     }
 
+    /**
+     * The loop itself, for a run or a sub-agent: a model turn, its tool calls, until an answer, the budget, the clock,
+     * a loop or (for a sub-agent) its cap on model calls.
+     */
+    async function drive(state, ctx, { reflections = 0, maxModelCalls = Infinity } = {}) {
+        const signal = state.signal;
+        for (;;) {
+            if (signal && signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'actor.task.cancelled' });
+            if (ctx.budgetLeft && ctx.budgetLeft() <= 0) {
+                state.lastText = await forceAnswer(state, ctx, 'the task reached its budget');
+                break;
+            }
+            if (state.calls >= maxModelCalls) {
+                state.lastText = await forceAnswer(state, ctx, 'the sub-agent used its steps');
+                break;
+            }
+            const r = await callModel(state, ctx, { tools: state.tools });
+            if (!r) { state.lastText = await forceAnswer(state, ctx, 'the task reached its budget'); break; }
+            state.messages.push(r.message);
+            if (r.text && r.text.trim()) state.lastText = r.text.trim();
+            if (!r.toolCalls || !r.toolCalls.length) {
+                // A draft answer: the writer's own reflection before it is delivered.
+                if (state.selfReflections < reflections && (!ctx.budgetLeft || ctx.budgetLeft() > 0)) {
+                    state.selfReflections += 1;
+                    if (state.lastText) await ctx.emit({ step: 'text', text: clip(state.lastText, 2000) });
+                    state.messages.push({ role: 'user', content: `Reflect before this is delivered. Check the draft claim by claim: which claims have no evidence? A live fact (a price, score, weather reading, count, current status, release, date) must cite an [E#] from this run. If one has no evidence and a tool can fetch it, call that tool now. If it cannot be verified, remove it or say plainly that it is unverified. Then give the final answer, keeping the citations.` });
+                    continue;
+                }
+                break;
+            }
+            if (r.text && r.text.trim()) await ctx.emit({ step: 'text', text: clip(r.text.trim(), 2000) });
+            const { looping } = await act(state, ctx, r.toolCalls);
+            if (state.depth === 0) {
+                state.plan.steps.forEach((s, i) => {
+                    if (s.state === 'active' && i < state.plan.steps.length - 1) { s.state = 'done'; state.plan.steps[i + 1].state = 'active'; }
+                });
+                await emitPlan(state, ctx);
+            }
+            if (looping) {
+                state.lastText = await forceAnswer(state, ctx, 'the same tool and input were called three times');
+                break;
+            }
+        }
+    }
+
+    /**
+     * A sub-agent for one sub-goal (stage V2-7): its own messages and ledger, the parent's tools at most, a share of
+     * what is left of the budget, no plan of its own and no reflection. Its evidence joins the parent's ledger.
+     */
+    async function runChild(parent, ctx, args) {
+        const goal = clip(String((args && args.goal) || '').replace(/\s+/g, ' ').trim(), 600);
+        if (!goal) return { delegate: true, error: 'a sub-agent needs a goal' };
+        const want = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools.map(String)) : null;
+        // Never wider than the parent: its offered tools, narrowed by the call, and never `delegate` (depth 1).
+        const tools = parent.tools.filter((t) => t.function.name !== DELEGATE.function.name && (!want || want.has(t.function.name)));
+        const share = config.loop && config.loop.subAgentShare != null ? config.loop.subAgentShare : 0.25;
+        const startLeft = ctx.budgetLeft ? ctx.budgetLeft() : Infinity;
+        const slice = Number.isFinite(startLeft) ? Math.max(0, startLeft) * share : Infinity;
+        let spent = 0;
+        const cctx = {
+            ...ctx,
+            meter: async (usd) => { spent += Number(usd) || 0; await ctx.meter(usd); },
+            budgetLeft: () => Math.min(ctx.budgetLeft ? ctx.budgetLeft() : Infinity, slice - spent),
+            // A child's steps are its parent's one `delegate` step on the page; the report says what it did.
+            emit: async () => {},
+        };
+        const child = {
+            task: goal, requester: parent.requester, taskId: parent.taskId, mode: parent.mode, tier: parent.tier, signal: parent.signal,
+            messages: [], lastText: '', model: null, family: null, provider: null, calls: 0, ledger: createLedger({ now }),
+            plan: { assumptions: [], steps: [{ goal, state: 'active' }] }, counts: new Map(), stopped: null, selfReflections: 0,
+            ctx: cctx, context: [], depth: 1, tools, allow: new Set(tools.map((t) => t.function.name)),
+        };
+        child.messages.push(
+            { role: 'system', content: SYSTEM({ date: today(now), plan: planText(child.plan), maxCalls }) + CHILD_NOTE },
+            { role: 'user', content: `${goal}\n\n(One part of a bigger task: ${clip(parent.task, 300)})` },
+        );
+        const maxModelCalls = config.loop && config.loop.subAgentCalls != null ? config.loop.subAgentCalls : 8;
+        await drive(child, cctx, { reflections: 0, maxModelCalls });
+        // Its evidence joins the parent's ledger, renumbered; its answer's citations follow the new ids.
+        const ids = new Map();
+        for (const item of child.ledger.items) {
+            const next = parent.ledger.add({ tool: item.tool, input: item.input, text: item.text, data: item.data, sources: item.sources, artifacts: item.artifacts, refs: item.refs, at: item.at });
+            ids.set(item.id, next.id);
+        }
+        const answer = clip(withoutMeta(child.lastText).replace(/\[E(\d{1,3})\]/g, (all, n) => (ids.has(`E${n}`) ? `[${ids.get(`E${n}`)}]` : '')), 3000);
+        return { delegate: true, goal, answer, evidence: [...ids.values()], calls: child.calls, spent, stopped: child.stopped || 'answer' };
+    }
+
     async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null }) {
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
@@ -276,6 +401,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             calls: 0, ledger: createLedger({ now }), plan: { assumptions: [], steps: [] }, counts: new Map(), stopped: null, selfReflections: 0,
             readOutside: false, agentId,
             ctx: null, context: Array.isArray(context) ? context.filter((c) => c && c.task && c.answer).slice(-3) : [],
+            depth: 0, tools: [], allow: null,
         };
         const ctx = {
             config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, artifacts,
@@ -292,40 +418,14 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // A follow-up (stage V2-5b): the conversation it continues, as it went, then the new question.
             for (const c of state.context) state.messages.push({ role: 'user', content: c.task }, { role: 'assistant', content: c.answer });
             state.messages.push({ role: 'user', content: state.context.length ? `${FOLLOW_NOTE}\n\n${state.task}` : state.task });
-            const tools = registry.definitions({ requester, mode, config, models, signal, artifacts, store, agentId, taskId, now });
+            const offered = registry.definitions({ requester, mode, config, models, signal, artifacts, store, agentId, taskId, now });
+            // "best" mode may hand self-contained sub-goals to sub-agents (stage V2-7); no other mode is offered it.
+            const subAgents = mode === 'best' && offered.length > 0 && !(config.loop && config.loop.subAgents === false);
+            state.tools = subAgents ? offered.concat([DELEGATE]) : offered;
+            state.allow = new Set(state.tools.map((t) => t.function.name));
             // Read from config each run so a test (or an operator's change) takes effect without rebuilding the loop.
             const maxSelf = config.loop && config.loop.selfReflections != null ? config.loop.selfReflections : selfReflections;
-            for (;;) {
-                if (signal && signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'actor.task.cancelled' });
-                if (budgetLeft && budgetLeft() <= 0) {
-                    state.lastText = await forceAnswer(state, ctx, 'the task reached its budget');
-                    break;
-                }
-                const r = await callModel(state, ctx, { tools });
-                if (!r) { state.lastText = await forceAnswer(state, ctx, 'the task reached its budget'); break; }
-                state.messages.push(r.message);
-                if (r.text && r.text.trim()) state.lastText = r.text.trim();
-                if (!r.toolCalls || !r.toolCalls.length) {
-                    // A draft answer: the writer's own reflection before it is delivered.
-                    if (state.selfReflections < maxSelf && (!budgetLeft || budgetLeft() > 0)) {
-                        state.selfReflections += 1;
-                        if (state.lastText) await ctx.emit({ step: 'text', text: clip(state.lastText, 2000) });
-                        state.messages.push({ role: 'user', content: `Reflect before this is delivered. Check the draft claim by claim: which claims have no evidence? A live fact (a price, score, weather reading, count, current status, release, date) must cite an [E#] from this run. If one has no evidence and a tool can fetch it, call that tool now. If it cannot be verified, remove it or say plainly that it is unverified. Then give the final answer, keeping the citations.` });
-                        continue;
-                    }
-                    break;
-                }
-                if (r.text && r.text.trim()) await ctx.emit({ step: 'text', text: clip(r.text.trim(), 2000) });
-                const { looping } = await act(state, ctx, r.toolCalls);
-                state.plan.steps.forEach((s, i) => {
-                    if (s.state === 'active' && i < state.plan.steps.length - 1) { s.state = 'done'; state.plan.steps[i + 1].state = 'active'; }
-                });
-                await emitPlan(state, ctx);
-                if (looping) {
-                    state.lastText = await forceAnswer(state, ctx, 'the same tool and input were called three times');
-                    break;
-                }
-            }
+            await drive(state, ctx, { reflections: maxSelf });
             state.plan.steps.forEach((s) => { s.state = 'done'; });
             await emitPlan(state, ctx);
             return resultOf(state);
@@ -355,7 +455,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (!list.length) return prev;
         if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return prev;
         state.messages.push({ role: 'user', content: `The verifier found claims in your answer with no evidence in this run:\n${list.map((c) => `- ${clip(c, 300)}`).join('\n')}\nFetch each one with a tool now if a tool can fetch it, or remove it. Then answer again, citing [E#] for every live fact.` });
-        const tools = registry.definitions({ requester: state.requester, mode: state.mode, config, models, signal: ctx.signal, artifacts: ctx.artifacts, store, agentId: state.agentId, taskId: state.taskId, now });
+        // The run's own tools and allow-list (sub-agents included in "best" mode), so a revision can do no more than the run.
+        const tools = state.tools && state.tools.length ? state.tools : registry.definitions({ requester: state.requester, mode: state.mode, config, models, signal: ctx.signal, artifacts: ctx.artifacts, store, agentId: state.agentId, taskId: state.taskId, now });
+        if (!state.allow) state.allow = new Set(tools.map((t) => t.function.name));
         const r = await callModel(state, ctx, { tools });
         if (r) {
             state.messages.push(r.message);
@@ -379,4 +481,4 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     return { run, revise, close, planText, SYSTEM };
 }
 
-module.exports = { createLoop, planText, SYSTEM, withoutMeta };
+module.exports = { createLoop, planText, SYSTEM, withoutMeta, DELEGATE, MAX_SUB_AGENTS };

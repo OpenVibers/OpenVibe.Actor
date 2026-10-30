@@ -114,7 +114,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         const saved = t.config.loop.selfReflections;
         t.config.loop.selfReflections = 0;
         t.providers.state.script = [
-            { content: 'Trying a tool.', tool_calls: [{ id: 'c3', type: 'function', function: { name: 'no_such_tool', arguments: '{}' } }] },
+            { content: 'Trying a tool.', tool_calls: [{ id: 'c3', type: 'function', function: { name: 'calculate', arguments: JSON.stringify({ expression: '2 +* )' }) } }] },
             { content: 'That step failed, but I can still answer from this run [E1].' },
         ];
         try {
@@ -122,7 +122,24 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             await t.waitFor(id);
             const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
             assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
-            assert.match(task.result.evidence[0].text, /unknown tool/);
+            assert.match(task.result.evidence[0].text, /unexpected/);
+        } finally { t.config.loop.selfReflections = saved; }
+    });
+
+    await check('a tool the run was not offered never runs and is no evidence (stage V2-7: the allow-list)', async () => {
+        t.providers.reset();
+        const saved = t.config.loop.selfReflections;
+        t.config.loop.selfReflections = 0;
+        t.providers.state.script = [
+            { content: 'Trying a tool.', tool_calls: [{ id: 'c3b', type: 'function', function: { name: 'no_such_tool', arguments: '{}' } }] },
+            { content: 'I could not do that step.' },
+        ];
+        try {
+            const id = (await create({ task: 'Try the other thing' })).json().id;
+            await t.waitFor(id);
+            const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
+            assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error));
+            assert.strictEqual(task.result.evidence.length, 0, 'a refused call is not evidence');
         } finally { t.config.loop.selfReflections = saved; }
     });
 

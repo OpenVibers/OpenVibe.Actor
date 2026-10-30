@@ -254,6 +254,22 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         await meter(verdict.cost_usd);
                         await showCheck(verdict);
                     }
+                    // Contested claims (stage V2-7b), "best" mode only: where the evidence disagrees, one judgement per
+                    // claim (two at most) lays out the sides and picks the better-supported one; the page shows both.
+                    let contested = [];
+                    if (verdict.ok && row.mode === 'best' && Array.isArray(verdict.contested) && verdict.contested.length) {
+                        const { adjudicate } = require('../runtime/adjudicate');
+                        for (const c of verdict.contested.slice(0, 2)) {
+                            if (budgetLeft() <= 0) break;
+                            try {
+                                const j = await adjudicate({ claim: c, evidence: out.evidence, task: row.task, models, writerFamily: out.family || null, signal });
+                                if (j) { await meter(j.cost_usd); if (!j.failed) contested.push({ claim: j.claim, sides: j.sides, pick: j.pick, reason: j.reason, by: j.by }); }
+                            } catch (err) {
+                                if (signal && signal.aborted) throw err;
+                            }
+                        }
+                        if (contested.length) await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Sources disagree on ${contested.length} point${contested.length === 1 ? '' : 's'}; both sides are shown with the answer.` });
+                    }
                     if (verdict.ok) {
                         let answer = out.text;
                         if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id);
@@ -272,6 +288,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                             artifacts,
                             plan: out.plan || null,
                             turns: out.turns || null,
+                            ...(contested.length ? { contested } : {}),
                         };
                         // The files and charts travel with each tool result that made them (the loop's tool_result events),
                         // and the result carries them all; a live page shows them as they land.
