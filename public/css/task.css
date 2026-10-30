@@ -102,3 +102,30 @@
 .ev-mem ul { margin: 0; padding-left: 18px; font-size: .85rem; }
 .ev-mem li { margin: .15rem 0; overflow-wrap: anywhere; }
 .ev-mem a { font-weight: 650; }
+
+/* The trace fold (Actor v2, stage V2-10): one line per call, indented under the delegate it belongs to, closed by
+   default. Twelve rows at most on the page (about one phone screen); the full list is the task's trace API. */
+.trace { margin: 1rem 0 0; padding-top: .65rem; border-top: 1px solid var(--border, #1f2d47); }
+.trace > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; cursor: pointer; font-weight: 700; font-size: .92rem; }
+.trace > summary .muted { font-weight: 400; font-size: .85rem; }
+.trace-list { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: 1px; }
+.tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto; align-items: baseline; gap: 4px 7px; padding: 3px 0; font-size: .82rem; font-variant-numeric: tabular-nums; }
+.tr-d1 { padding-left: 18px; }
+.tr-d2 { padding-left: 36px; }
+.tr-d3, .tr-d4 { padding-left: 54px; }
+.tr-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.tr-kind, .tr-ms, .tr-cost { color: var(--text-muted, #7386a3); font-size: .75rem; white-space: nowrap; }
+.tr-ms, .tr-cost { text-align: right; }
+.tr-bad { color: var(--danger-text, var(--danger, #ef4444)); font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+.tr.is-bad .tr-name { color: var(--danger-text, var(--danger, #ef4444)); }
+.trace-more { margin: .5rem 0 0; font-size: .8rem; }
+.trace-tot { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: .55rem 0 0; font-size: .8rem; font-weight: 700; color: var(--text-secondary, #96a7c2); }
+
+/* A task offered as a Bench case, and the exact preview before it is offered. */
+.bench-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 1rem 0; }
+.bench { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 1rem 0; padding: 10px 14px; border: 1px solid var(--border, #1f2d47); border-radius: 12px; background: var(--bg-card, #131c2e); }
+.bench p { margin: 0; min-width: 0; }
+.bench form { margin: 0; }
+.bench-preview-wrap h2 { margin: 1.2rem 0 .4rem; font-size: .8rem; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted, #7386a3); }
+.bench-preview { box-sizing: border-box; max-width: 100%; max-height: 40vh; margin: 0; padding: 12px 14px; overflow: auto; border: 1px solid var(--border, #1f2d47); border-radius: 12px; background: var(--bg-primary, #0a0f1c);
+  font: .85rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text-secondary, #96a7c2); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }

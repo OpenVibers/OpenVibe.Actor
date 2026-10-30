@@ -31,6 +31,9 @@ const TABLES = [
     // cascade).
     { table: 'actor_artifacts', subject: 'owner', value: (usr) => `user:${usr}`, file: 'artifacts.json', erase: 'delete',
         columns: ['id', 'task_id', 'owner', 'name', 'mime', 'size', 'created_at'] },
+    // A finished task they offered as an OpenVibe.Bench case (stage V2-10): the task text and the answer, nothing else.
+    // Before tasks, so its rows are counted before the task's cascade would take them.
+    { table: 'actor_bench_offers', subject: 'owner', value: (usr) => `user:${usr}`, file: 'bench-offers.json' },
     // Every column but webhook_secret (a task's signing secret is a credential, not the person's data).
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',
@@ -78,9 +81,30 @@ async function exportFiles(db, subject) {
     return [{ name: 'artifacts-content.json', content: out }];
 }
 
-/** The account-data handle for Actor's store (server/db.js createStore). */
-function create({ db, note = 'A task row holds the task the person asked for, in their own words.', log = console } = {}) {
-    return createAccountData({ db, service: 'actor', tables: TABLES, note, log, extraExport: exportFiles });
+/**
+ * The trace of the person's tasks (stage V2-10): one row per model, tool, check, judge and delegate call. A span has
+ * no person column of its own (it is keyed by task_id and has no text), so it is exported by joining the task's
+ * requester and is not a table-map entry. The rows go with the task on deletion (ON DELETE CASCADE).
+ */
+async function exportSpans(db, subject) {
+    const rows = await db.many(
+        `SELECT s.id, s.task_id, s.parent_id, s.kind, s.name, s.tier, s.family, s.started_at, s.ms, s.cost_usd,
+                s.tokens_in, s.tokens_out, s.ok, s.error_code, s.step
+           FROM actor_spans s JOIN tasks t ON t.id = s.task_id
+          WHERE t.requester = ANY($1::text[]) ORDER BY s.started_at DESC LIMIT 5000`,
+        [[`user:${subject}`]],
+    );
+    return rows.length ? [{ name: 'spans.json', content: rows }] : [];
 }
 
-module.exports = { create, TABLES, TOPICS, exportFiles };
+/** The parts a table map cannot say: the bytes of the person's files, and the trace of their tasks. */
+async function exportExtra(db, subject) {
+    return [...(await exportFiles(db, subject)), ...(await exportSpans(db, subject))];
+}
+
+/** The account-data handle for Actor's store (server/db.js createStore). */
+function create({ db, note = 'A task row holds the task the person asked for, in their own words.', log = console } = {}) {
+    return createAccountData({ db, service: 'actor', tables: TABLES, note, log, extraExport: exportExtra });
+}
+
+module.exports = { create, TABLES, TOPICS, exportFiles, exportSpans, exportExtra };

@@ -28,6 +28,7 @@
  */
 
 const { createLedger } = require('./evidence');
+const { createTracer, codeOf } = require('./trace');
 const { createArtifactStore } = require('./artifacts');
 const { deskRun, closeDesks } = require('./tools/_person');
 
@@ -136,6 +137,35 @@ function summarize(args) {
     return clip(v, 300);
 }
 
+/** A model call's span: the model id, tier, family, ms, cost and tokens; a failure is a code, never a message. */
+async function spanModel(trace, { tier, family, startedAt, ms, result, error, step = null }) {
+    if (!trace) return;
+    const usage = (result && result.usage) || {};
+    await trace.record({
+        kind: 'model',
+        name: (result && result.model) || 'model',
+        tier: (result && result.tier) || tier,
+        family: (result && result.family) || family,
+        startedAt,
+        ms,
+        costUsd: result && result.cost_usd,
+        tokensIn: usage.input == null ? null : usage.input,
+        tokensOut: usage.output == null ? null : usage.output,
+        ok: !error,
+        errorCode: error ? codeOf(error, 'actor.model.failed') : null,
+        step,
+    });
+}
+
+/** One tool or delegate span. The tool runner returns errors as text, so `ok` comes from its `isError`. */
+async function spanCall(trace, { kind, name, tier = null, family = null, startedAt, ms, ok, errorCode = null, step = null, id = null, parentId = undefined }) {
+    if (!trace) return;
+    await trace.record({
+        kind, name, tier, family, startedAt, ms,
+        ok: ok !== false, errorCode: ok === false ? errorCode : null, step, id, parentId,
+    });
+}
+
 function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null }) {
     const loopCfg = config.loop || {};
     const resultChars = loopCfg.toolResultChars || 6000;
@@ -153,8 +183,10 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     async function makePlan(state, ctx) {
         const fallback = () => ({ assumptions: [], steps: [{ goal: clip(state.task.replace(/\s+/g, ' ').trim(), 200) || 'Do the task', state: 'pending' }] });
         let plan = fallback();
+        let startedAt = null;
         try {
             if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return plan;
+            startedAt = now();
             const r = await models.chat({
                 tier: 'fast',
                 messages: [
@@ -163,12 +195,15 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 ],
                 json: true, maxTokens: 400, signal: state.signal,
             });
+            await spanModel(ctx.trace, { tier: 'fast', family: r.family, startedAt, ms: now() - startedAt, result: r, step: 0 });
+            startedAt = null;
             if (r.cost_usd) await ctx.meter(r.cost_usd);
             const m = String(r.text || '').match(/\{[\s\S]*\}/);
             const parsed = m ? JSON.parse(m[0]) : null;
             const steps = (parsed && Array.isArray(parsed.steps) ? parsed.steps : []).map((s) => ({ goal: clip((s && s.goal) || s, 200) })).filter((s) => s.goal).slice(0, 6);
             if (steps.length) plan = { assumptions: (Array.isArray(parsed.assumptions) ? parsed.assumptions : []).map((a) => clip(a, 200)).slice(0, 5), steps: steps.map((s) => ({ ...s, state: 'pending' })) };
         } catch (err) {
+            if (startedAt != null) await spanModel(ctx.trace, { tier: 'fast', startedAt, ms: now() - startedAt, error: err, step: 0 });
             if (state.signal && state.signal.aborted) throw err;
             if (log.warn) log.warn('[Actor] plan step fell back to the task:', (err && err.message) || err);
         }
@@ -187,13 +222,21 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (state.signal && state.signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'actor.task.cancelled' });
         if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return null;
         const defs = forceNoTools ? null : tools;
-        const r = await models.chat({
-            tier: state.tier,
-            messages: state.messages,
-            tools: defs && defs.length ? defs : null,
-            maxTokens: MAX_ANSWER_TOKENS,
-            signal: state.signal,
-        });
+        const startedAt = now();
+        let r;
+        try {
+            r = await models.chat({
+                tier: state.tier,
+                messages: state.messages,
+                tools: defs && defs.length ? defs : null,
+                maxTokens: MAX_ANSWER_TOKENS,
+                signal: state.signal,
+            });
+        } catch (err) {
+            await spanModel(ctx.trace, { tier: state.tier, family: state.family, startedAt, ms: now() - startedAt, error: err, step: state.calls + 1 });
+            throw err;
+        }
+        await spanModel(ctx.trace, { tier: state.tier, family: state.family, startedAt, ms: now() - startedAt, result: r, step: state.calls + 1 });
         await ctx.meter(r.cost_usd);
         state.model = r.model;
         state.family = r.family;
@@ -233,7 +276,32 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             if (!TRUSTED.has(p.name) && (!tool || tool.scope !== 'private-ok')) state.readOutside = true;
         }
         const runnable = planned.filter((p) => !p.skipped);
-        const results = await Promise.all(runnable.map((p) => (p.name === DELEGATE.function.name ? runChild(state, ctx, p.args) : registry.run(p.name, p.args, ctx))));
+        const results = await Promise.all(runnable.map(async (p) => {
+            if (p.name === DELEGATE.function.name) {
+                // The delegate span is the parent of everything the sub-agent does; it is written when the child ends,
+                // with the id the child's own spans already point at.
+                const id = ctx.trace ? ctx.trace.newId() : null;
+                const childTrace = ctx.trace ? ctx.trace.scoped(id) : null;
+                const startedAt = now();
+                try {
+                    const out = await runChild(state, ctx, p.args, childTrace);
+                    await spanCall(ctx.trace, { kind: 'delegate', name: 'delegate', tier: state.tier, startedAt, ms: now() - startedAt, ok: !(out && out.error), errorCode: out && out.error ? 'actor.delegate.failed' : null, step: state.calls, id });
+                    return out;
+                } catch (err) {
+                    await spanCall(ctx.trace, { kind: 'delegate', name: 'delegate', tier: state.tier, startedAt, ms: now() - startedAt, ok: false, errorCode: codeOf(err, 'actor.delegate.failed'), step: state.calls, id });
+                    throw err;
+                }
+            }
+            const startedAt = now();
+            try {
+                const out = await registry.run(p.name, p.args, ctx);
+                await spanCall(ctx.trace, { kind: 'tool', name: p.name, startedAt, ms: now() - startedAt, ok: !(out && out.isError), errorCode: out && out.isError ? 'actor.tool.failed' : null, step: state.calls });
+                return out;
+            } catch (err) {
+                await spanCall(ctx.trace, { kind: 'tool', name: p.name, startedAt, ms: now() - startedAt, ok: false, errorCode: codeOf(err, 'actor.tool.failed'), step: state.calls });
+                throw err;
+            }
+        }));
         let i = 0;
         for (const p of planned) {
             if (p.skipped) {
@@ -350,7 +418,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
      * A sub-agent for one sub-goal (stage V2-7): its own messages and ledger, the parent's tools at most, a share of
      * what is left of the budget, no plan of its own and no reflection. Its evidence joins the parent's ledger.
      */
-    async function runChild(parent, ctx, args) {
+    async function runChild(parent, ctx, args, childTrace = null) {
         const goal = clip(String((args && args.goal) || '').replace(/\s+/g, ' ').trim(), 600);
         if (!goal) return { delegate: true, error: 'a sub-agent needs a goal' };
         const want = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools.map(String)) : null;
@@ -362,6 +430,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         let spent = 0;
         const cctx = {
             ...ctx,
+            trace: childTrace || (ctx.trace ? ctx.trace.scoped(null) : null),
             meter: async (usd) => { spent += Number(usd) || 0; await ctx.meter(usd); },
             budgetLeft: () => Math.min(ctx.budgetLeft ? ctx.budgetLeft() : Infinity, slice - spent),
             // A child's steps are its parent's one `delegate` step on the page; the report says what it did.
@@ -406,6 +475,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const ctx = {
             config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, artifacts,
             store, now, agentId, personText: personText == null ? String(task) : String(personText),
+            trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),
             state: { desks: requester ? deskRun(taskId) : null },
