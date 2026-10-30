@@ -9,7 +9,8 @@
  *                                                           with webhooks, the answer carries webhook_secret once)
  *   GET  /tasks                  actor.task.list             your tasks, newest first
  *   GET  /tasks/:id              actor.task.read             one task
- *   GET  /tasks/:id/events       actor.task.read             its live stream (actor.task-event@1, Last-Event-ID)
+ *   GET  /tasks/:id/events       actor.task.read             its live stream (actor.task-event@2, Last-Event-ID)
+ *   GET  /tasks/:id/artifacts/:mediaId actor.task.read       one file or chart the task made, from Actor's own database
  *   POST /tasks/:id/cancel       actor.task.create           stop it
  *
  * A task is visible to its requester only (or to tokens of the project it belongs to); anyone else gets 404, the same
@@ -23,6 +24,7 @@ const catalog = require('../agents/catalog');
 const { heuristic } = require('../agents/classify');
 const { route, MODES } = require('../agents/router');
 const { createTask } = require('../tasks/create');
+const { findArtifact, sendArtifact } = require('../runtime/artifacts');
 const personal = require('../agents/personal');
 const approvals = require('../agents/approvals');
 const items = require('../actions/items');
@@ -226,6 +228,18 @@ function createApi(ctx) {
         const desk = await store.taskDesk(s, row);
         if (desk) out.desk = desk;
         res.json(out);
+    });
+
+    // A file or chart the task made (Actor v2, stage V2-4): the bytes are in Actor's own database, private to the
+    // task's own people. The manifest of actor.task.read (Contracts 0.249.0) names this route, so it stays; the
+    // person's own page opens the same bytes at /tasks/:id/files/:artifact, which is the link the task result and the
+    // events carry. The parameter is called mediaId because the manifest says so; the id is an artifact id.
+    r.get('/tasks/:id/artifacts/:mediaId', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        const found = await findArtifact(s.db, row.id, req.params.mediaId);
+        if (!found) return problem(req, res, 404, 'actor.artifact.not_found', 'No such file on this task.');
+        return sendArtifact(res, found);
     });
 
     r.get('/tasks/:id/events', principal.requireCapability('actor.task.read'), limits.budget('actor.task.stream'), async (req, res) => {

@@ -74,6 +74,31 @@ const evidence = [{ id: 'E1', tool: 'search_web', input: { query: 'btc price' },
         assert.deepStrictEqual(failing([{ claim: 'a definition', kind: 'general', evidence: [], supported: false }]).length, 0);
     });
 
+    await ok('a number computed by calculate or run_code is grounded by that tool, even when the checker is unsure', async () => {
+        const derived = [
+            { id: 'E1', tool: 'calculate', input: { expression: '87432*1.02' }, text: '{"value":89180.64}' },
+            { id: 'E2', tool: 'run_code', input: { language: 'javascript' }, text: '{"stdout":"3 successes in 5 runs"}' },
+            { id: 'E3', tool: 'search_web', input: { query: 'btc price' }, text: '{"price_usd":87432}' },
+        ];
+        // The checker marked them unsupported (it could not re-do the arithmetic); the citing item is a derivation.
+        const calc = { claim: 'The price rose to $89,180.64', kind: 'derived', evidence: ['E1'], supported: false };
+        const code = { claim: '3 of 5 runs were successful', kind: 'derived', evidence: ['E2'], supported: false };
+        assert.deepStrictEqual(failing([calc, code], derived), [], 'the computation is the evidence');
+        // A derived number with no citation is still ungrounded, and a live claim citing a search item but marked
+        // unsupported still fails: only the derivation tools get the exemption.
+        const uncited = { claim: 'Revenue was $89,180.64', kind: 'derived', evidence: [], supported: false };
+        assert.deepStrictEqual(failing([uncited], derived), [uncited]);
+        const live = { claim: 'The BTC price is $87,432', kind: 'live', evidence: ['E3'], supported: false };
+        assert.deepStrictEqual(failing([live], derived), [live]);
+        assert.strictEqual(failing([{ claim: 'The price is $87,432', kind: 'live', evidence: [], supported: false }], derived).length, 1);
+
+        const models = fakeModels({ verdict: { claims: [calc], ok: true, reason: 'computed in this run' } });
+        const v = await check({ task: 'How much did it rise?', answer: 'The price rose to **$89,180.64** [E1].', evidence: derived, models, writerFamily: 'openai' });
+        assert.strictEqual(v.ok, true, v.reason);
+        assert.deepStrictEqual(v.unsupported, []);
+        assert.match(SYSTEM, /A number computed by the calculate or run_code tool is grounded by that tool's evidence item/);
+    });
+
     await ok('the old "prices you cannot verify" exemption is absent from the prompt', async () => {
         assert.ok(!/do not fail an answer only because it states prices/i.test(SYSTEM));
         assert.match(SYSTEM, /A live claim with no supporting evidence is supported=false/);

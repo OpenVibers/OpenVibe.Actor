@@ -25,6 +25,12 @@ const { createAccountData, TOPICS } = require('openvibe-sdk/account-data');
  * store `user:usr_…` (server/tasks/store.js takes the requester straight from the principal).
  */
 const TABLES = [
+    // The files and charts their tasks made (Actor v2, stage V2-4): the rows go with the person, and their bytes come
+    // with them in the extra part below. The bytes are not in the row list: a part may carry 20 MB, and one person's
+    // charts must not fill it. First, so the rows are erased and counted before their tasks go (and take them with a
+    // cascade).
+    { table: 'actor_artifacts', subject: 'owner', value: (usr) => `user:${usr}`, file: 'artifacts.json', erase: 'delete',
+        columns: ['id', 'task_id', 'owner', 'name', 'mime', 'size', 'created_at'] },
     // Every column but webhook_secret (a task's signing secret is a credential, not the person's data).
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',
@@ -47,9 +53,34 @@ const TABLES = [
     { table: 'actor_chat_asks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'chat-asks.json' },
 ];
 
-/** The account-data handle for Actor's store (server/db.js createStore). */
-function create({ db, note = 'A task row holds the task the person asked for, in their own words.', log = console } = {}) {
-    return createAccountData({ db, service: 'actor', tables: TABLES, note, log });
+// What the extra part may carry: the bytes of the person's own files, base64, newest first, up to this much.
+const CONTENT_BUDGET = 4 * 1024 * 1024;
+
+/**
+ * The content of the person's artifacts (stage V2-4): every file they made, as base64, newest first, until the
+ * budget is spent. The rows themselves are in artifacts.json; this is the part that carries the bytes.
+ */
+async function exportFiles(db, subject) {
+    const rows = await db.many(
+        'SELECT id, name, mime, size, bytes FROM actor_artifacts WHERE owner = ANY($1::text[]) ORDER BY created_at DESC',
+        [[`user:${subject}`]],
+    );
+    const out = [];
+    let budget = CONTENT_BUDGET;
+    for (const r of rows || []) {
+        const bytes = Buffer.isBuffer(r.bytes) ? r.bytes : Buffer.from(r.bytes || []);
+        const content = bytes.toString('base64');
+        if (content.length > budget) continue;
+        budget -= content.length;
+        out.push({ id: r.id, name: r.name, mime: r.mime, size: Number(r.size) || bytes.length, content_base64: content });
+    }
+    if (!out.length) return [];
+    return [{ name: 'artifacts-content.json', content: out }];
 }
 
-module.exports = { create, TABLES, TOPICS };
+/** The account-data handle for Actor's store (server/db.js createStore). */
+function create({ db, note = 'A task row holds the task the person asked for, in their own words.', log = console } = {}) {
+    return createAccountData({ db, service: 'actor', tables: TABLES, note, log, extraExport: exportFiles });
+}
+
+module.exports = { create, TABLES, TOPICS, exportFiles };

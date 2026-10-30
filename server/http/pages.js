@@ -26,8 +26,10 @@ const catalog = require('../agents/catalog');
 const looks = require('../agents/looks');
 const { MODES } = require('../agents/router');
 const seo = require('openvibe-shared/seo');
+const { findArtifact, sendArtifact } = require('../runtime/artifacts');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
+
 
 const MODE_TEXT = {
     cheapest: 'The lowest cost that can do the task.',
@@ -317,6 +319,20 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         res.type(look.format === 'png' ? 'image/png' : 'image/jpeg').send(look.data);
     });
 
+    // A file or chart the task made (Actor v2, stage V2-4): the owner's own bytes, out of Actor's own database. The
+    // task's own auth decides who may open it: another person gets the same 404 as a task that does not exist.
+    //
+    // The bytes are served as they are — an SVG as image/svg+xml, an HTML page as text/html — but always in a
+    // sandbox with nothing allowed to load, and never sniffed (nosniff). Only a raster image is shown in place;
+    // an SVG or an HTML page is a download unless it is shown with <img>.
+    r.get('/tasks/:id/files/:artifact', async (req, res) => {
+        const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
+        if (!row || row.requester !== requesterOf(req)) return res.status(404).type('text').send('No such file');
+        const found = await findArtifact(s.db, row.id, req.params.artifact);
+        if (!found) return res.status(404).type('text').send('No such file');
+        return sendArtifact(res, found);
+    });
+
     r.get('/tasks/:id', async (req, res) => {
         const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
         if (!row || row.requester !== requesterOf(req)) {
@@ -402,8 +418,11 @@ ${table(['State', 'Endpoint', 'Delivery', 'Attempts'], rows.map((d) => [
     function resultBlock(result, t) {
         const agent = catalog.byId(result.agent);
         const checked = result.checked || {};
+        const bytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${Number(n) || 0} B`);
+        const artifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
         return html`<section class="outcome outcome-ok answer" aria-labelledby="h-answer"><h2 id="h-answer" class="sr-only">Answer</h2>
 <div class="prose">${raw(markdown(result.answer, { headingOffset: 2 }))}</div>
+${artifacts.length ? html`<div class="sources artifacts"><h3>Files</h3><ul>${artifacts.map((a) => html`<li><a href="${a.url}" rel="nofollow noopener">${a.name}</a> <span class="muted">${a.kind} · ${bytes(a.size)}</span>${a.mime === 'image/svg+xml' ? html`<div><img src="${a.url}" alt="${a.name}" loading="lazy" style="max-width:100%;height:auto;margin-top:8px"></div>` : ''}</li>`)}</ul></div>` : ''}
 ${result.sources && result.sources.length ? html`<div class="sources"><h3>Sources</h3><ul>${result.sources.map((u) => html`<li><a href="${u}" rel="nofollow ugc noopener" target="_blank">${u.replace(/^https?:\/\//, '').slice(0, 90)}</a></li>`)}</ul></div>` : ''}
 <p class="answer-foot"><span>${agent ? agent.name : result.agent}${result.model ? html` · <code>${result.model}</code>` : ''}</span><span>✓ checked by ${checked.by}${checked.cross_family ? ' (another model family)' : ' (same family)'}</span><span>${t.cost ? usd(t.cost.usd) : '$0'}</span></p>
 </section>`;
@@ -552,7 +571,8 @@ data: {"task_id":"tsk_…","seq":3,"kind":"output","agent":"openvibe-runtime","s
 ${table(['Route', 'Capability', 'What it does'], [
                 [html`<code>POST /api/v1/tasks</code>`, html`<code>actor.task.create</code>`, html`Create a task: <code>{ task, mode?, budget?: { per_task_usd, per_day_usd }, agent?, idempotency_key?, webhooks?: [{ url, events, secret_ref? }] }</code>. Answers 201 with the task (queued); with webhooks, also its <code>webhook_secret</code>, this once, unless every webhook names a project secret (<a href="#webhooks">webhooks</a>).`],
                 [html`<code>GET /api/v1/tasks/:id</code>`, html`<code>actor.task.read</code>`, html`The task: state, result, cost, explanation, error. While it runs on a desk of its own, <code>desk</code> (<code>url</code>: the person's page to watch it live and take it over; <code>kind</code>: <code>browser</code> or <code>desktop</code>); while it waits for its person to do a step there, <code>needs_you</code> (<code>what</code>, <code>url</code>).`],
-                [html`<code>GET /api/v1/tasks/:id/events</code>`, html`<code>actor.task.read</code>`, html`Server-sent events (<code>actor.task-event@1</code>): <code>state</code>, <code>output</code> (each step), <code>end</code>. Resumes with <code>Last-Event-ID</code>.`],
+                [html`<code>GET /api/v1/tasks/:id/events</code>`, html`<code>actor.task.read</code>`, html`Server-sent events (<code>actor.task-event@2</code>): <code>state</code>, <code>output</code> (each step; a tool result that made a file or chart carries <code>artifacts</code>), <code>end</code>. Resumes with <code>Last-Event-ID</code>.`],
+                [html`<code>GET /tasks/:id/files/:artifact</code>`, html`<code>the task's own page</code>`, html`A file or chart the task made, out of Actor's own database and private to the person who asked: their own page opens it, another person gets the same 404 as a task that does not exist.`],
                 [html`<code>POST /api/v1/tasks/:id/cancel</code>`, html`<code>actor.task.create</code>`, 'Stop it. What was spent stays spent.'],
                 [html`<code>GET /api/v1/tasks</code>`, html`<code>actor.task.list</code>`, html`Your tasks, newest first; <code>?limit=</code>, <code>?before=</code> (the <code>next</code> cursor).`],
                 [html`<code>GET /api/v1/agents</code>`, 'public', 'The agent systems, what each can do, its price and whether it works now.'],

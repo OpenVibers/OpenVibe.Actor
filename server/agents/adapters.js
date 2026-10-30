@@ -2,7 +2,7 @@
 
 /**
  * One adapter per agent system (ADR-044 §2): run(task) → { text, sources, model }. Each reports its steps through
- * `emit` (actor.task-event@1 output events) and every model call's cost through `meter(usd)` as it happens, so the
+ * `emit` (actor.task-event@2 output events) and every model call's cost through `meter(usd)` as it happens, so the
  * task's cost and the person's spend are true even when a run is cancelled half-way. `budgetLeft()` is checked
  * before every paid call; an adapter that would go over stops and says so.
  *

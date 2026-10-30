@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400" role="img" aria-labelledby="chart-title chart-desc">
+<title id="chart-title">Height vs weight</title>
+<desc id="chart-desc">“Height vs weight”. A scatter chart with 3 points.</desc>
+<rect width="640" height="400" fill="#fcfcfb"/>
+<text x="24" y="32" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="17" font-weight="600" fill="#0b0b0b" text-anchor="start">Height vs weight</text>
+<line x1="68" y1="336" x2="616" y2="336" stroke="#e1e0d9" stroke-width="1"/>
+<text x="60" y="340" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="end">1.5</text>
+<line x1="68" y1="288.67" x2="616" y2="288.67" stroke="#e1e0d9" stroke-width="1"/>
+<text x="60" y="292.67" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="end">2</text>
+<line x1="68" y1="241.33" x2="616" y2="241.33" stroke="#e1e0d9" stroke-width="1"/>
+<text x="60" y="245.33" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="end">2.5</text>
+<line x1="68" y1="194" x2="616" y2="194" stroke="#e1e0d9" stroke-width="1"/>
+<text x="60" y="198" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="end">3</text>
+<line x1="68" y1="146.67" x2="616" y2="146.67" stroke="#e1e0d9" stroke-width="1"/>
+<text x="60" y="150.67" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="end">3.5</text>
+<line x1="68" y1="99.33" x2="616" y2="99.33" stroke="#e1e0d9" stroke-width="1"/>
+<text x="60" y="103.33" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="end">4</text>
+<line x1="68" y1="52" x2="616" y2="52" stroke="#e1e0d9" stroke-width="1"/>
+<text x="60" y="56" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="end">4.5</text>
+<line x1="68" y1="336" x2="616" y2="336" stroke="#c3c2b7" stroke-width="1"/>
+<text x="68" y="356" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="middle">0.5</text>
+<text x="159.33" y="356" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="middle">1</text>
+<text x="250.67" y="356" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="middle">1.5</text>
+<text x="342" y="356" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="middle">2</text>
+<text x="433.33" y="356" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="middle">2.5</text>
+<text x="524.67" y="356" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="middle">3</text>
+<text x="616" y="356" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" font-weight="400" fill="#898781" text-anchor="middle">3.5</text>
+<circle cx="159.33" cy="288.67" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>A: (1, 2)</title></circle>
+<circle cx="342" cy="99.33" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>(2, 4)</title></circle>
+<circle cx="524.67" cy="194" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>C: (3, 3)</title></circle>
+<line x1="68" y1="52" x2="68" y2="336" stroke="#c3c2b7" stroke-width="1"/>
+<text x="342" y="380" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" font-weight="400" fill="#898781" text-anchor="middle">Height</text>
+<text x="16" y="194" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" font-weight="400" fill="#898781" text-anchor="middle" transform="rotate(-90 16 194)">Weight</text>
+</svg>

@@ -116,6 +116,14 @@ function load(env = process.env) {
             runUrl: trim(env.ACTOR_RUN_URL != null ? env.ACTOR_RUN_URL : (selfHosted ? '' : 'http://127.0.0.1:4920')),
         },
 
+        // Artifacts (Actor v2, stage V2-4): what one task may make. The bytes live in Actor's own PostgreSQL,
+        // private to the task's owner, until OpenVibe.Network keeps `media.*` out of what a hosted agent inherits
+        // and the files can move to OpenVibe.Media. 256 KB a file, 2 MB a task.
+        artifacts: {
+            maxFileBytes: Math.max(1024, int(env.ACTOR_ARTIFACT_MAX_FILE_BYTES, 256 * 1024)),
+            maxTaskBytes: Math.max(1024, int(env.ACTOR_ARTIFACT_MAX_TASK_BYTES, 2 * 1024 * 1024)),
+        },
+
         // What one person may spend without paying (plan T17: "free tier from the bounded allowance"), and the
         // operator's ceiling over everyone in one UTC day. A request above the person's tier is refused, never lowered.
         allowance: {
@@ -138,7 +146,7 @@ function load(env = process.env) {
         // (the same tool and input three times) or its answer. Reflections before answering are the writer's own;
         // `checkReflections` caps the verifier's second-family passes (the DeepSeek research: two at most).
         loop: {
-            maxToolCallsPerTurn: Math.max(1, int(env.ACTOR_LOOP_MAX_TOOL_CALLS, 8)),
+            maxToolCallsPerTurn: Math.max(1, int(env.ACTOR_LOOP_MAX_TOOL_CALLS, 12)),
             selfReflections: Math.max(0, int(env.ACTOR_LOOP_SELF_REFLECTIONS, 2)),
             checkReflections: Math.min(2, Math.max(0, int(env.ACTOR_LOOP_CHECK_REFLECTIONS, 2))),
             toolResultChars: Math.max(500, int(env.ACTOR_LOOP_TOOL_RESULT_CHARS, 6000)),

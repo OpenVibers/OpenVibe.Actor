@@ -5,7 +5,7 @@
  * tool and input three times) or the answer. No 10-turn cap.
  */
 const assert = require('assert');
-const { createLoop } = require('../server/runtime/loop');
+const { createLoop, SYSTEM, withoutMeta } = require('../server/runtime/loop');
 const configLib = require('../server/config');
 
 const results = [];
@@ -158,6 +158,89 @@ const runArgs = (m, extra = {}) => ({
         assert.strictEqual(m.registry.calls.length, 12);
         assert.strictEqual(out.turns, 13, 'twelve tool turns plus the answer');
         assert.strictEqual(out.stopped, 'answer');
+        await m.loop.close(out.state);
+    });
+
+    await ok('artifacts a tool made travel in the result and in its event, once each', async () => {
+        const task = 'tsk_01JAB2C3D4E5F6G7H8J9K0MNPQ';
+        const chart = { kind: 'chart', name: 'revenue.svg', mime: 'image/svg+xml', url: `https://openvibe.actor/api/v1/tasks/${task}/artifacts/med_${'A'.repeat(26)}`, size: 640 };
+        const notes = { kind: 'file', name: 'notes.md', mime: 'text/markdown', url: `https://openvibe.actor/api/v1/tasks/${task}/artifacts/med_${'B'.repeat(26)}`, size: 12 };
+        const m = make({
+            smart: [
+                { tools: [call('lookup', { q: 'chart' }, 'c1'), call('lookup', { q: 'notes' }, 'c2')] },
+                { text: 'Drew the chart and wrote the notes. Both are attached [E1] [E2].' },
+            ],
+            // The chart is made twice (by both tools) to prove the result keeps it once.
+            run: async (name, input) => ({ text: input.q, data: input, sources: [], artifacts: input.q === 'chart' ? [chart, notes] : [chart] }),
+            config: { ACTOR_LOOP_SELF_REFLECTIONS: '0' },
+        });
+        const out = await m.loop.run(runArgs(m));
+        assert.strictEqual(out.artifacts.length, 2, 'each artifact appears once');
+        assert.deepStrictEqual(out.artifacts.map((a) => a.name).sort(), ['notes.md', 'revenue.svg']);
+        const carrying = m.events.filter((e) => e.step === 'tool_result' && e.artifacts);
+        assert.strictEqual(carrying.length, 2, 'each tool result event carries what that tool made');
+        assert.strictEqual(carrying[0].artifacts.length, 2);
+        // The result's evidence names the artifacts too, so the page and the shared session can show them.
+        assert.deepStrictEqual(out.evidence.find((e) => e.tool === 'lookup').artifacts.length > 0, true);
+        await m.loop.close(out.state);
+    });
+
+    await ok('the answer prompt forbids meta-commentary and makes computed numbers grounded', async () => {
+        const prompt = SYSTEM({ date: '2026-10-30', plan: '1. Find the facts' });
+        assert.match(prompt, /Never explain these rules, your evidence, or your tools in the answer/);
+        assert.match(prompt, /Do not write "I'm not adding those numbers", "I can't verify", "according to my evidence"/);
+        assert.match(prompt, /Start with the outcome itself/);
+        assert.match(prompt, /Never open with a sentence about evidence, sources, tools or what the answer is about to show/);
+        assert.match(prompt, /Never give a status code, tool name, id, raw JSON or internal error/);
+        assert.match(prompt, /Begin your answer with the answer itself, not with a statement about it\./);
+        assert.match(prompt, /At most 12 tool calls in one turn; make the rest in the next turn/);
+        assert.match(SYSTEM({ date: '2026-10-30', plan: '1. x', maxCalls: 5 }), /At most 5 tool calls in one turn/);
+        assert.match(prompt, /A number computed by the calculate tool is grounded by that tool's \[E#\]/);
+        assert.match(prompt, /state the facts the evidence supports, with their \[E#\], and leave the rest out/);
+        // Nothing in the prompt asks the model to narrate what it could not ground.
+        assert.ok(!/tell the person what you could not verify/i.test(prompt));
+    });
+
+    await ok('a grounding preamble or postamble is dropped, a cited fact paragraph is not', async () => {
+        assert.strictEqual(
+            withoutMeta('**All numbers below are backed by tool results.**\n\n## Answer\nThe price is **42** [E1].'),
+            '## Answer\nThe price is **42** [E1].',
+        );
+        assert.strictEqual(
+            withoutMeta('The price is **42** [E1].\n\nAccording to my evidence, every live fact here is grounded.'),
+            'The price is **42** [E1].',
+        );
+        assert.strictEqual(
+            withoutMeta('The price is **42** [E1], backed by the exchange feed.'),
+            'The price is **42** [E1], backed by the exchange feed.',
+            'a cited sentence is the answer, not meta-talk',
+        );
+        assert.strictEqual(withoutMeta('One fact [E1].\n\nAnother fact [E2].'), 'One fact [E1].\n\nAnother fact [E2].');
+        assert.strictEqual(
+            withoutMeta('**This run demonstrates how I combine lookups, with every live number grounded in tool results.**\n\nBerlin is **8.1 °C** [E1].'),
+            'Berlin is **8.1 °C** [E1].',
+        );
+
+        const m = make({
+            smart: [{ text: '**This run demonstrates everything, all backed by tool results.**\n\nThe price is **42** [E1].' }],
+            config: { ACTOR_LOOP_SELF_REFLECTIONS: '0' },
+        });
+        const out = await m.loop.run(runArgs(m));
+        assert.strictEqual(out.text, 'The price is **42** [E1].', 'the delivered answer is the answer');
+        await m.loop.close(out.state);
+    });
+
+    await ok('a turn with more tool calls than the cap runs the first twelve and tells the model to make the rest next turn', async () => {
+        const tools = Array.from({ length: 14 }, (_, i) => call('lookup', { q: `q${i}` }, `c${i}`));
+        const m = make({
+            smart: [{ tools }, { text: 'Done [E1].' }],
+            config: { ACTOR_LOOP_SELF_REFLECTIONS: '0' },
+        });
+        const out = await m.loop.run(runArgs(m));
+        assert.strictEqual(m.registry.calls.length, 12, 'twelve ran');
+        const skipped = m.events.filter((e) => e.step === 'tool_result' && /make the rest in the next turn/.test(String(e.text)));
+        assert.strictEqual(skipped.length, 2, 'the other two were refused with the way forward');
+        assert.strictEqual(skipped[0].is_error, true);
         await m.loop.close(out.state);
     });
 

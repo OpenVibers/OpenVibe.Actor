@@ -115,10 +115,21 @@
       document.getElementById('last-look-link').setAttribute('href', src);
       lastLook.hidden = false;
     }
+    // The files and charts a tool made, as the attachments the shared session draws (openvibe-shared 4.50.0). The
+    // event itself keeps the contract's shape (actor.task-event@2, additionalProperties false), so the mapping is here.
+    function attach(e) {
+      if (!e || !Array.isArray(e.artifacts) || !e.artifacts.length) return e;
+      var atts = window.OpenVibeTaskEvents ? window.OpenVibeTaskEvents.attachments(e.artifacts) : null;
+      if (!atts) return e;
+      var copy = {};
+      for (var k in e) if (Object.prototype.hasOwnProperty.call(e, k)) copy[k] = e[k];
+      copy.attachments = atts;
+      return copy;
+    }
     function onOutput(e) {
       onDesk(e);
       onLook(e);
-      if (view) { view.push(e); return undefined; }
+      if (view) { view.push(attach(e)); return undefined; }
       if ((e.step === 'plan' || e.step === 'handoff') && e.agent) return attempt((e.text || e.agent).replace(/ takes it.*$/, ''));
       if (e.step === 'plan') return undefined;
       if (e.step === 'check') {

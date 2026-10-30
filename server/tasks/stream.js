@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Live task streams: GET /api/v1/tasks/:id/events is text/event-stream of actor.task-event@1. A reader first gets
+ * Live task streams: GET /api/v1/tasks/:id/events is text/event-stream of actor.task-event@2. A reader first gets
  * every stored event after its Last-Event-ID (or ?after=), then each new one as the engine publishes it; the stream
  * closes after the `end` event. Events are stored before they are published (tasks/store.js appendEvent), and a reader
  * subscribes before reading its backlog, so nothing falls between the two; a seq it already has is never sent twice.
