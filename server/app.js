@@ -54,6 +54,9 @@ const { createPageRoutes } = require('./http/pages');
 const { createAgentPages } = require('./http/agent-pages');
 const { createConsolePages } = require('./http/console-pages');
 const { createMemoryPages } = require('./http/memory-pages');
+const { createConnectionsPages } = require('./http/connections-pages');
+const { createA2APages } = require('./http/a2a-pages');
+const { createConnectors } = require('./connections/service');
 const { createNotifier } = require('./notify/client');
 const { createActorReadiness } = require('./observability');
 const { createCallerLimits } = require('./http/caller-limits');
@@ -101,7 +104,10 @@ async function createApp(opts = {}) {
     const checkpoints = opts.checkpoints || require('./runtime/checkpoints').createCheckpoints({ store: s, config, log, now: s.now });
     // The files and charts a task makes live in Actor's own PostgreSQL, private to the task's owner (stage V2-4), so
     // the loop needs the store, not a Media client.
-    const loop = opts.loop || createLoop({ config, models, registry, log, store: s, stats, checkpoints });
+    // The connections of a person (stage V2-11): MCP servers and A2A agents, and the tools a run may offer because
+    // of them. Every request they make goes through the egress guard (server/net/guarded-request.js).
+    const connectors = opts.connectors || createConnectors({ store: s, config, log, guard: opts.guard || {} });
+    const loop = opts.loop || createLoop({ config, models, registry, log, store: s, stats, checkpoints, connectors });
     const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: providerFetch, log });
     // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.
     // A webhook naming a project secret (ADR-056) is signed by OpenVibe.Network (server/net/secret-signer.js).
@@ -121,7 +127,7 @@ async function createApp(opts = {}) {
         createTask: (args) => createTask({ s, config, engine, webhooks, ...args }) });
     // Each personal agent's run that passed its check also goes to its owner's Vibe chat (agents/vibe-deliver.js).
     const vibeDelivery = require('./agents/vibe-deliver').createVibeDelivery({ s, config, chat: chatClient, log });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints };
+    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;
@@ -217,18 +223,31 @@ async function createApp(opts = {}) {
     app.use('/api/v1/resources', require('./registry/resource-control').router(ctx));
     app.use('/api/v1/resources', resourceIndex.router(ctx));
     app.use('/api/v1', createApi(ctx));
+    // A2A (stage V2-11): another agent hands Actor a task. The card is /.well-known/agent.json, below.
+    app.use(createA2APages(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.ACTOR_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));
     app.use(createAgentPages(ctx));
     app.use(createMemoryPages(ctx));
+    app.use(createConnectionsPages(ctx));
     app.use(createConsolePages(ctx, opts.bot || {}));
     const pageRoutes = createPageRoutes(ctx);
     // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public
     // pages. The pages themselves keep their own routes — a signed-in visitor's account bar and task box are
     // theirs — so only the manifest and twin requests reach this mount; the pages advertise the twin themselves.
     // A task page is behind a person's token: renderPublicPage deliberately returns null for it.
+    // The agent card (stage V2-11): the shared OpenVibe manifest plus the A2A half - the skills another agent may
+    // ask for and the auth a caller needs (a Network service token with actor.a2a.task, acting for a person).
+    app.get('/.well-known/agent.json', (req, res) => {
+        const layer = require('openvibe-shared/agent-layer');
+        const card = require('./connections/a2a').actorCard({ baseUrl: config.baseUrl, version: VERSION });
+        const manifest = layer.agentManifest(require('./agent-descriptor'));
+        res.set('Content-Type', 'application/json; charset=utf-8');
+        res.set('Cache-Control', 'public, max-age=300');
+        res.end(JSON.stringify({ ...manifest, ...card, skills: card.skills, a2a: { url: card.url, capabilities: card.capabilities } }));
+    });
     const agentLayer = express();
     require('openvibe-shared/agent-layer').mount(agentLayer, {
         descriptor: require('./agent-descriptor'),

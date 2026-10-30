@@ -12,6 +12,8 @@ const int = (v, def) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : de
 const num = (v, def) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : def);
 // An optional price: undefined when nobody typed one, so the provider's published card is used.
 const optNum = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : undefined);
+// A JSON list from the environment (the connector servers OpenVibe offers); a broken value is no list, never a crash.
+const jsonList = (v) => { if (!v) return []; try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } };
 
 function load(env = process.env) {
     const nodeEnv = env.NODE_ENV || 'development';
@@ -131,6 +133,15 @@ function load(env = process.env) {
             key: String(env.ACTOR_CHECKPOINT_KEY || ''),
             keep: Math.max(1, int(env.ACTOR_CHECKPOINT_KEEP, 50)),
             maxResumes: Math.max(0, int(env.ACTOR_CHECKPOINT_MAX_RESUMES, 2)),
+        },
+
+        // The connections a person added (Actor v2, stage V2-11): MCP servers and A2A agents. The token of a
+        // connection is sealed under ACTOR_CONNECTOR_KEY (64 hex characters); without a key no token is stored.
+        // ACTOR_CONNECTOR_SERVERS is a JSON list of the servers OpenVibe offers ready to turn on (Know's ov-know is
+        // one of them).
+        connectors: {
+            key: String(env.ACTOR_CONNECTOR_KEY || ''),
+            builtins: jsonList(env.ACTOR_CONNECTOR_SERVERS),
         },
 
         // What one person may spend without paying (plan T17: "free tier from the bounded allowance"), and the

@@ -26,10 +26,11 @@
  */
 const { serviceAuth, capabilities, http, ids } = require('openvibe-contracts');
 const { sameSecret } = require('../auth/local');
+const subject = require('./subject');
 
 const PRINCIPAL_SUB = /^(svc|app|mod|agent):/;
 const PROJECT_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
-const CAPABILITIES = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.agent.manage', 'actor.agent.run', 'actor.resource.read', 'actor.resource.control', 'actor.actions.read', 'actor.approval.decide'];
+const CAPABILITIES = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.agent.manage', 'actor.agent.run', 'actor.resource.read', 'actor.resource.control', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task'];
 
 function decodePayload(token) {
     const parts = String(token || '').split('.');
@@ -70,11 +71,19 @@ function createPrincipal({ config, keys }) {
                 const project = typeof r.claims.project_id === 'string' && PROJECT_RE.test(r.claims.project_id) ? r.claims.project_id : null;
                 const named = req.get('x-ov-subject');
                 if (named !== undefined) {
-                    // Only a first-party service may act for a person; a developer app or an agent acts as itself (an
-                    // app's person is its token's on_behalf_of, never a header).
+                    // A person acts for a person only when the token says so: a token that names the person itself
+                    // (on_behalf_of) acts for that person only, a token whose grant lists them (on_behalf_of_any) may
+                    // act for those, and a first-party service may act for a person it was asked to help. A developer
+                    // app or an agent otherwise acts as itself (an app's person is its token's on_behalf_of, never a
+                    // header).
                     const sub = String(r.claims.sub);
-                    if (!sub.startsWith('svc:') || r.claims.actor_type !== 'service') return { error: [403, 'subject.not_delegated', 'only a first-party service may act for a person (X-OV-Subject)'] };
                     if (!ids.isSubjectId('user', named)) return { error: [400, 'subject.invalid', 'X-OV-Subject must be a usr_… subject id'] };
+                    const named2 = subject.claimPerson(r.claims);
+                    if (named2) {
+                        if (named2 !== named) return { error: [403, 'subject.mismatch', 'this token acts for another person'] };
+                    } else if (!subject.grantPeople(r.claims).includes(named)) {
+                        if (!sub.startsWith('svc:') || r.claims.actor_type !== 'service') return { error: [403, 'subject.not_delegated', 'this token may not act for that person (X-OV-Subject)'] };
+                    }
                     return { principal: { kind: 'app', requester: `user:${named}`, via: requesterOfSub(sub), project: null, claims: r.claims } };
                 }
                 return { principal: { kind: 'app', requester: requesterOfSub(r.claims.sub), project, claims: r.claims } };

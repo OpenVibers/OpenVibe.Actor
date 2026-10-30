@@ -56,6 +56,12 @@ const TABLES = [
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
     // What they asked Actor in chat (chat/asks.js): the message it answered, the room, the task it became.
     { table: 'actor_chat_asks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'chat-asks.json' },
+    // The connections they added (stage V2-11): the servers and agents, and which of their tools are on. The token
+    // column (token_enc) is a credential, never their data, so it is not exported and not listed here.
+    {
+        table: 'actor_connections', subject: 'owner', value: (usr) => `user:${usr}`, file: 'connections.json',
+        columns: ['id', 'owner', 'kind', 'name', 'url', 'header_name', 'enabled', 'builtin', 'created_at', 'updated_at', 'last_checked_at', 'last_ok', 'last_error'],
+    },
 ];
 
 // What the extra part may carry: the bytes of the person's own files, base64, newest first, up to this much.
@@ -116,8 +122,23 @@ async function exportCheckpoints(db, subject) {
 }
 
 /** The parts a table map cannot say: the bytes of the person's files, the trace of their tasks, their saved steps. */
+/**
+ * The tools of the person's connections (stage V2-11): which tools of which server are on. A tool row has no person
+ * column of its own (it hangs on the connection), so it is exported by joining the connection's owner. No token is
+ * here: a token is a credential, not the person's data.
+ */
+async function exportConnectionTools(db, subject) {
+    const rows = await db.many(
+        `SELECT c.id AS connection_id, c.name AS connection_name, c.kind, t.name, t.description, t.enabled
+           FROM actor_connection_tools t JOIN actor_connections c ON c.id = t.connection_id
+          WHERE c.owner = ANY($1::text[]) ORDER BY c.name, t.name`,
+        [[`user:${subject}`]],
+    );
+    return rows.length ? [{ name: 'connection-tools.json', content: rows }] : [];
+}
+
 async function exportExtra(db, subject) {
-    return [...(await exportFiles(db, subject)), ...(await exportSpans(db, subject)), ...(await exportCheckpoints(db, subject))];
+    return [...(await exportFiles(db, subject)), ...(await exportSpans(db, subject)), ...(await exportCheckpoints(db, subject)), ...(await exportConnectionTools(db, subject))];
 }
 
 /** The account-data handle for Actor's store (server/db.js createStore). */
@@ -125,4 +146,4 @@ function create({ db, note = 'A task row holds the task the person asked for, in
     return createAccountData({ db, service: 'actor', tables: TABLES, note, log, extraExport: exportExtra });
 }
 
-module.exports = { create, TABLES, TOPICS, exportFiles, exportSpans, exportCheckpoints, exportExtra };
+module.exports = { create, TABLES, TOPICS, exportFiles, exportSpans, exportCheckpoints, exportConnectionTools, exportExtra };

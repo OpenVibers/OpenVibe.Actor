@@ -165,7 +165,8 @@ function fakeModels(script) {
             assert.ok(note);
             assert.strictEqual(note.status, 'suggested');
             assert.strictEqual(note.source, 'agent');
-            assert.ok(calls.some((c) => c.kind === 'task' && c.state === 'succeeded' && c.taskId === row.id), 'the person hears it is done');
+            const notice = await noticeFor(row.id);
+            assert.ok(notice && notice.state === 'succeeded', 'the person hears it is done');
         });
 
         await check('a run input cannot become an active memory; a page read in the run makes it a suggestion', async () => {
