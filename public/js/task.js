@@ -29,10 +29,15 @@
     // Only the person's own desk becomes a link (Desks plan D4): an agent reads untrusted pages, so any other address stays text.
     var botRe = (art.getAttribute('data-bot') || 'https://openvibe.bot').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     var ownDesk = new RegExp('^' + botRe + '/machines/dev_[0-9A-HJKMNP-TV-Z]{26}/screen(?:\\?desk=[a-z0-9-]{1,40})?$');
-    var view = window.OpenVibeAgentSession.mount(host, { title: (document.querySelector('.task-text') || {}).textContent || 'Task', status: art.getAttribute('data-open') === '1' ? 'running' : 'queued', follow: art.getAttribute('data-open') === '1', empty: 'Waiting for an agent to start…', link: function (u) { return ownDesk.test(u); } });
-    view.pushAll(events);
-    var pill = art.className.match(/state-([a-z_]+)/);
-    if (pill && art.getAttribute('data-open') !== '1') view.status(pill[1] === 'done' ? 'succeeded' : pill[1]);
+    var open = art.getAttribute('data-open') === '1';
+    var state = (art.className.match(/state-([a-z_]+)/) || [])[1] || (open ? 'running' : 'succeeded');
+    if (state === 'done') state = 'succeeded';
+    // A finished task mounts finished: mounting it as queued started a clock at page load, which read "0 s". Its run
+    // time comes from the events (task-events.js done line); a live one clocks from when its run really started.
+    var lines = window.OpenVibeTaskEvents ? window.OpenVibeTaskEvents.lines(events, { final: !open, state: state }) : events;
+    var startedAt = open && window.OpenVibeTaskEvents ? window.OpenVibeTaskEvents.firstAt(events) : 0;
+    var view = window.OpenVibeAgentSession.mount(host, { title: (document.querySelector('.task-text') || {}).textContent || 'Task', status: open ? 'running' : state, startedAt: startedAt || undefined, follow: open, empty: 'Waiting for an agent to start…', link: function (u) { return ownDesk.test(u); } });
+    view.pushAll(lines);
     return view;
   }
 

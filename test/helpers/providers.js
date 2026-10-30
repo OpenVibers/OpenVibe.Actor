@@ -71,7 +71,7 @@ async function startProviders() {
                     status: 'completed', model: 'gpt-5-mini-stand-in',
                     output: [
                         { type: 'web_search_call', status: 'completed', action: { type: 'search', query: 'stand-in search' } },
-                        { type: 'message', content: [{ type: 'output_text', text: `Web answer to: ${String(body.input).slice(0, 200)} (see https://example.org/source)`, annotations: [{ type: 'url_citation', url: 'https://example.org/source' }] }] },
+                        { type: 'message', content: [{ type: 'output_text', text: `Web answer to: ${String(body.input).slice(0, 200)} (see https://example.org/source)`, annotations: [{ type: 'url_citation', url: 'https://example.org/source', title: 'Example source' }] }] },
                     ],
                     usage: { input_tokens: 2000, output_tokens: 200, input_tokens_details: { cached_tokens: 0 } },
                 }));

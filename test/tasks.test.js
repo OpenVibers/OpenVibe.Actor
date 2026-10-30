@@ -54,6 +54,17 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         assert.strictEqual(task.result.agent, 'openai-agent');
         assert.deepStrictEqual(task.result.sources, ['https://example.org/source']);
         assert.strictEqual(task.result.checked.by, 'deepseek');
+        // Every hosted search is a step with both ends, and its result says what it found (a spinner otherwise).
+        const stream = (await t.get(`/api/v1/tasks/${id}/events`, { as: kim })).text;
+        const steps = [...stream.matchAll(/^data: (.*)$/gm)].map((m) => JSON.parse(m[1]));
+        const searches = steps.filter((e) => e.step === 'tool_call' && e.tool === 'web_search');
+        const found = steps.filter((e) => e.step === 'tool_result' && e.tool === 'web_search');
+        assert.ok(searches.length > 0, 'the hosted search is a step');
+        assert.strictEqual(found.length, searches.length, 'each search has its result');
+        assert.match(found[0].text, /stand-in search/, 'the result names the query');
+        assert.match(found[0].text, /Example source: https:\/\/example\.org\/source/, 'and the sources with their titles');
+        const pageHtml = (await t.get(`/tasks/${id}`, { as: kim })).text;
+        assert.match(pageHtml, /js\/task-events\.js/, 'the task page maps its events for the session view');
         // 2000 in + 200 out at gpt-5-mini plus one search, plus the classifier and the checker on DeepSeek.
         assert.ok(task.cost.usd > 0.0105 && task.cost.usd < 0.012, String(task.cost.usd));
     });

@@ -145,6 +145,8 @@ button.sc-btn.sc-primary { border: 0; }
   .tl-item { grid-template-columns: 1fr; gap: 2px; }
   .task-text { font-size: 1.25rem; }
   .outcome { padding: 14px; }
+  /* A step's label says what differs on a phone: two lines, not one ellipsis that hides the query. */
+  .task-session .ovas-sum b { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 }
 @media (prefers-reduced-motion: reduce) { .tl-item, .dot-pulse { animation: none; } .mode span { transition: none; } }
 

@@ -53,6 +53,30 @@ const summarize = (args) => {
     return String(v).slice(0, 300);
 };
 
+/**
+ * What a hosted web search turned up, for its step's result: the query and the sources the answer cites, with the
+ * titles the Responses output gives them (a search item itself carries the query only).
+ */
+const searchFound = (query, sources, citations) => {
+    const found = [];
+    const seen = new Set();
+    for (const c of citations || []) {
+        if (!c || !c.url || seen.has(c.url)) continue;
+        seen.add(c.url);
+        found.push({ title: String(c.title || ''), url: String(c.url) });
+    }
+    for (const u of sources || []) {
+        const url = String(u || '');
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        found.push({ title: '', url });
+    }
+    const head = query ? `Searched the web for "${query}".` : 'Searched the web.';
+    if (!found.length) return `${head} The answer cites no sources.`;
+    const lines = found.slice(0, 8).map((s) => `- ${s.title ? `${s.title}: ` : ''}${s.url}`);
+    return `${head} The answer cites ${found.length} source${found.length === 1 ? '' : 's'}:\n${lines.join('\n')}`.slice(0, 1200);
+};
+
 function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = console, tools: toolsOverride, codes: codesOverride }) {
     const p = config.providers;
     // The runtime reads a computer's screen through a vision model (agents/tools.js computer_screen): OpenAI's.
@@ -117,7 +141,13 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
         await emit({ step: 'text', text: 'Searching the web…' });
         const r = await openaiAgent({ instructions: AGENT_INSTRUCTIONS(), input: task, effort: mode === 'best' ? 'medium' : 'low', signal });
         await meter(r.cost_usd);
-        for (const s of r.searches) await emit({ step: 'tool_call', tool: s.kind === 'search' ? 'web_search' : `web_${s.kind}`, input: String(s.query || '').slice(0, 300) });
+        // Each search is a step with both ends: without its result the shared step view shows it running forever.
+        for (const s of r.searches) {
+            const tool = s.kind === 'search' ? 'web_search' : `web_${s.kind}`;
+            const query = String(s.query || '').slice(0, 300);
+            await emit({ step: 'tool_call', tool, input: query });
+            await emit({ step: 'tool_result', tool, text: searchFound(query, r.sources, r.citations) });
+        }
         if (!r.text) throw new ProviderError('the agent finished without an answer', { code: 'actor.agent.no_answer' });
         return { text: r.text, sources: r.sources, model: r.model };
     }
