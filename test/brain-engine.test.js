@@ -61,6 +61,18 @@ const SAME = { origin: 'https://openvibe.actor' };
             assert.ok(events.some((e) => e.step === 'plan' && /Assumptions: the short version/.test(String(e.text))), 'the assumptions lead the plan');
         });
 
+        await check('a task waiting for its one question can be cancelled', async () => {
+            t.providers.state.understand = { kind: 'action', deliverable: 'Book a table', risk: 'high', ambiguity: 0.9, question: { text: 'Which city?', options: ['Lisbon', 'Porto'] } };
+            t.providers.state.smart = 'answer';
+            const created = await t.get('/tasks', { as: bea, form: { task: 'Book a table for two on Friday', mode: 'balanced' }, headers: SAME });
+            const id = taskIdOf(created);
+            await t.waitFor(id, ['needs_you']);
+            const cancelled = await t.get(`/tasks/${id}/cancel`, { as: bea, form: { cancel: '1' }, headers: SAME });
+            assert.strictEqual(cancelled.status, 303);
+            const ended = await t.waitFor(id);
+            assert.strictEqual(ended.state, 'cancelled');
+        });
+
         await check('the assumption form edits the live plan as a follow-up turn', async () => {
             t.providers.state.understand = null;
             t.providers.state.runtime = 'hang';

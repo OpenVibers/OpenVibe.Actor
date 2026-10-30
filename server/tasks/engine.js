@@ -493,7 +493,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     /** Cancel: a queued task ends at once; a running one is aborted and ends cancelled when its call returns. */
     async function cancel(id, by) {
         const row = await store.getTask(s, id);
-        if (!row || !store.OPEN.includes(row.state)) return row;
+        // A task waiting for its one question is still running here (its run is in `running`); cancel must abort it.
+        if (!row || !(store.OPEN.includes(row.state) || row.state === 'needs_you')) return row;
         await store.updateTask(s, id, { cancel_at: iso(), cancel_by: by || null });
         const i = waiting.indexOf(id);
         if (i >= 0) {
