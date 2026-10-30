@@ -19,6 +19,21 @@
  * createLoop({ config, models, registry, log, now }) → { run(args), revise(state, claims) }
  */
 
+/**
+ * The artifacts a tool made, as the attachments the session draws (openvibe-shared's agent-session.js): the URL, the
+ * name, the kind. An artifact without a URL is not something a reader can open, so it is dropped here.
+ */
+function toAttachments(artifacts) {
+    if (!Array.isArray(artifacts)) return undefined;
+    const out = [];
+    for (const a of artifacts) {
+        if (!a || typeof a !== 'object') continue;
+        const url = String(a.url || '').trim();
+        if (!url) continue;
+        out.push({ url, name: String(a.name || a.filename || ''), mime: String(a.mime || a.mimeType || ''), kind: String(a.kind || ''), role: 'output' });
+    }
+    return out.length ? out : undefined;
+}
 const { createLedger } = require('./evidence');
 const { deskRun, closeDesks } = require('./tools/_person');
 
@@ -157,7 +172,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             await ctx.emit({ step: 'tool_call', tool: p.name, input: summarize(p.args) });
             const item = state.ledger.add({ tool: p.name, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts });
             state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: p.name, result: clip(out.text, resultChars) }) });
-            await ctx.emit({ step: 'tool_result', tool: p.name, text: clip(out.text, 600), is_error: out.isError || undefined });
+            await ctx.emit({ step: 'tool_result', tool: p.name, text: clip(out.text, 600), is_error: out.isError || undefined, attachments: toAttachments(out.artifacts) });
         }
         for (const s of callsOut) {
             const name = (s.skipped.function && s.skipped.function.name) || 'tool';
