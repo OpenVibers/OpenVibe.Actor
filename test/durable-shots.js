@@ -61,17 +61,33 @@ const THEMES = ['dark', 'light'];
         await store.appendEvent(s, a.id, { at, kind: 'output', step: 'resume', agent: 'openvibe-runtime', text: 'Picked up after a restart at step 1.' });
         await trace.createTracer({ store: s, taskId: a.id, log: quiet, now: () => s.now() }).record({ kind: 'tool', name: 'resume', startedAt: s.now(), ms: 0, ok: true, step: 1 });
 
+        // The acting card (stage V2-9 follow-up): a run stopped inside an action, waiting for the person's choice.
+        const actingId = s.newId('tsk');
+        await store.insertTask(s, { id: actingId, requester: `user:${u.subject}`, task: 'Move my rover forward one step, then tell me it moved.', mode: 'balanced', budget_task: 0.05, budget_day: 0.25, created_at: at });
+        await store.updateTask(s, actingId, { state: 'needs_you', cost_usd: 0.0004 });
+        await store.appendEvent(s, actingId, { at, kind: 'output', step: 'plan', agent: 'openvibe-runtime', text: '→ 1. Move the rover forward one step\nTask ledger: given the rover · find nothing · derive the move\nProgress: not done; not looping; moving; next Move the rover forward one step' });
+        await store.appendEvent(s, actingId, { at, kind: 'output', step: 'resume', agent: 'openvibe-runtime', text: 'Picked up after a restart at step 1.' });
+        await store.appendEvent(s, actingId, {
+            at, kind: 'output', step: 'question', agent: 'openvibe-runtime', question_kind: 'acting', tool: 'robot steps', input: 'rover: forward 1',
+            text: 'Actor was stopped while it was robot steps (rover: forward 1). It may or may not have happened. Check, then choose.',
+            options: ['Run it again', 'It happened, go on', 'Stop the task'],
+        });
+        await store.appendEvent(s, actingId, { at, kind: 'state', state: 'needs_you' });
+
         const pages = {
             resume: (await t.get(`/tasks/${a.id}`, { as: u })).text,
             fork: (await t.get(`/tasks/${a.id}/fork?step=1`, { as: u })).text,
             compare: (await t.get(`/tasks/${a.id}/compare/${b.id}`, { as: u })).text,
+            acting: (await t.get(`/tasks/${actingId}`, { as: u })).text,
         };
         if (!/Fork from step 1/.test(pages.fork)) throw new Error('fork dialog missing');
         if (!/Estimate:/.test(pages.fork)) throw new Error('fork estimate missing');
         if (!/Picked up after a restart at step 1/.test(pages.resume)) throw new Error('resume event missing');
         if (!/Compare two runs/.test(pages.compare)) throw new Error('compare page missing');
         if (!/The fixture calculation says 42/.test(pages.compare)) throw new Error('compare answers missing');
-        process.stdout.write(`pages rendered for ${a.id} and ${b.id}\n`);
+        if (!/Actor was stopped mid-action/.test(pages.acting)) throw new Error('acting card missing');
+        for (const option of ['Run it again', 'It happened, go on', 'Stop the task']) if (!pages.acting.includes(option)) throw new Error(`acting card option missing: ${option}`);
+        process.stdout.write(`pages rendered for ${a.id}, ${b.id} and ${actingId}\n`);
 
         const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome' });
         const heights = {};
@@ -103,6 +119,7 @@ const THEMES = ['dark', 'light'];
                     };
                     await open(`/tasks/${a.id}`, 'resume-event');
                     await open(`/tasks/${a.id}/fork?step=1`, 'fork-dialog');
+                    await open(`/tasks/${actingId}`, 'acting-card');
                     await open(`/tasks/${a.id}/compare/${b.id}`, 'compare-answer');
                     if (width === 390) {
                         await page.click('label[for="cmp-steps"]');

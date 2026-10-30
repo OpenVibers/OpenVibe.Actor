@@ -268,7 +268,7 @@ function savedStepsBlock(row, saved, spans) {
 }
 
 /** The fork dialog: one change, the estimate first, and the task's own allowance in plain words. */
-function forkDialog(row, checkpoint, { tiers = [], tools = [] } = {}) {
+function forkDialog(row, checkpoint, { tiers = [], tools = [], actingAfter = [] } = {}) {
     const instruction = stepInstruction(row, checkpoint);
     const perTask = Number(row.budget_task) || 0.05;
     return html`<section class="fork-card" aria-labelledby="h-fork">
@@ -285,6 +285,7 @@ function forkDialog(row, checkpoint, { tiers = [], tools = [] } = {}) {
 <div class="fork-row"><label for="fork-tool">Tool</label><select id="fork-tool" name="tool">${tools.map((t) => html`<option value="${t}">${toolLabel(t)}</option>`)}</select></div>
 </fieldset>
 <p class="fork-estimate"><b>Estimate:</b> about ${usd(forkEstimate(row, checkpoint, 'smart'))} typical for this run, and at most ${usd(perTask)}. The real cost is metered, and shown when it ends.</p>
+${actingAfter.length ? html`<p class="fork-again"><b>A fork can do these again:</b> ${actingAfter.map((name) => `${toolLabel(name)} (${name})`).join(', ')}. They change something in the world; check them yourself after the fork, or take one off the allowed list below.</p>` : ''}
 <div class="fork-actions"><button class="sc-btn sc-primary" type="submit">Fork this run</button> <a class="sc-btn" href="/tasks/${row.id}">Cancel</a></div>
 </form>
 </section>`;
@@ -609,6 +610,7 @@ ${raw(showcase.faq({ id: 'faq', items: faq }))}
         'actor.allowance.exhausted': 'You have used today\'s free tasks. They come back at midnight UTC.',
         'actor.budget.day_spent': 'Today\'s budget is spent. It resets at midnight UTC.',
         'actor.capacity.spent': 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.',
+        acting: 'That step was stopped mid-action, so it cannot be forked. Pick an earlier saved step.',
     }[code] || 'That fork could not start. Try again in a moment.');
 
     r.get('/tasks/:id/fork', async (req, res) => {
@@ -622,6 +624,16 @@ ${raw(showcase.faq({ id: 'faq', items: faq }))}
         if (!Number.isInteger(step) || step < 0) return res.redirect(303, `/tasks/${row.id}#steps`);
         const checkpoint = await checkpoints.at(row.id, step).catch(() => null);
         if (!checkpoint) return page(req, res, { title: 'That step is not saved', body: html`<h1>That step is not saved</h1><p>That step is no longer saved (the last 50 are kept), so it cannot be forked. Pick another saved step on <a href="/tasks/${row.id}#steps">the task</a>.</p>` }, 404);
+        if (Array.isArray(checkpoint.state && checkpoint.state.acting) && checkpoint.state.acting.length) {
+            return page(req, res, { title: 'That step stopped mid-action', body: html`<h1>That step stopped mid-action</h1><p>Actor was interrupted while an action was running at this step, so a fork from it could not tell whether the action happened. Pick an earlier saved step on <a href="/tasks/${row.id}#steps">the task</a>.</p>` }, 404);
+        }
+        // The acting tools used after this step: a fork replays them, and the person must see that before confirming.
+        const latest = await checkpoints.last(row.id).catch(() => null);
+        const before = Array.isArray(checkpoint.state && checkpoint.state.ledger) ? checkpoint.state.ledger.length : 0;
+        const actingAfter = latest && Number(latest.step) > step && latest.state && Array.isArray(latest.state.ledger)
+            ? [...new Set(latest.state.ledger.slice(before).map((e) => e && e.tool).filter(Boolean))]
+                .filter((name) => { const tool = ctx.registry && ctx.registry.get ? ctx.registry.get(name) : null; return Boolean(tool && tool.acts === true); })
+            : [];
         const tiers = availableTiers();
         const tools = forkTools(checkpoint);
         const problem = typeof req.query.error === 'string' ? forkProblem(req.query.error) : null;
@@ -631,7 +643,7 @@ ${raw(showcase.faq({ id: 'faq', items: faq }))}
             styles: [showcase.STYLESHEET],
             css: ['css/task.css'],
             noReferrer: true,
-            body: html`${problem ? notice(problem, 'warn') : ''}${forkDialog(row, checkpoint, { tiers, tools })}`,
+            body: html`${problem ? notice(problem, 'warn') : ''}${forkDialog(row, checkpoint, { tiers, tools, actingAfter })}`,
         });
     });
 
@@ -645,6 +657,9 @@ ${raw(showcase.faq({ id: 'faq', items: faq }))}
         const step = Number((req.body && req.body.step));
         const checkpoint = Number.isInteger(step) ? await checkpoints.at(parent.id, step).catch(() => null) : null;
         if (!checkpoint) return res.redirect(303, `/tasks/${parent.id}?fork=gone#steps`);
+        if (Array.isArray(checkpoint.state && checkpoint.state.acting) && checkpoint.state.acting.length) {
+            return res.redirect(303, `/tasks/${parent.id}/fork?step=${step}&error=acting`);
+        }
         const change = String((req.body && req.body.change) || 'instruction');
         let forkChange = null;
         let mode = parent.mode;
@@ -972,7 +987,12 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
         const waiting = row.state === 'needs_you';
         const open = live || waiting;
         const questionEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'question');
-        const question = waiting && questionEvent ? { text: String(questionEvent.text || ''), options: Array.isArray(questionEvent.options) ? questionEvent.options : [] } : null;
+        const question = waiting && questionEvent ? {
+            text: String(questionEvent.text || ''),
+            options: Array.isArray(questionEvent.options) ? questionEvent.options : [],
+            // The resume card (stage V2-9): the run was stopped inside an action, not before it started.
+            kind: questionEvent.question_kind === 'acting' ? 'acting' : 'question',
+        } : null;
         const answerProblem = req.query.answer === 'gone' ? 'That question is no longer waiting for an answer. The task may have finished or been restarted; ask again.' : null;
         const assumeProblem = req.query.assume === 'gone' ? 'Those assumptions could not be changed: the task is no longer running.' : null;
         const cls = (events.find((e) => e.step === 'plan' && !e.agent && /"(\w+)" task/.test(e.text || '')) || { text: '' }).text.match(/"(\w+)"/);
@@ -1020,12 +1040,12 @@ ${answerProblem ? notice(answerProblem, 'warn') : ''}
 ${assumeProblem ? notice(assumeProblem, 'warn') : ''}
 ${forkProblem ? notice(forkProblem, 'warn') : ''}
 ${question ? questionCard(row, question) : ''}
-${outcome(t, row)}
+${outcome(t, row, { acting: question && question.kind === 'acting' })}
 ${t.state === 'succeeded' ? benchBlock(row, offer) : ''}
 ${t.state === 'succeeded' ? followBlock(row, follows, followProblem) : ''}
 ${savedStepsBlock(row, saved, spans)}
 ${relatedRunsBlock(row, { forks, others })}
-${open ? planCard(plan, { editable: live || waiting, taskId: row.id }) : ''}
+${open ? planCard(plan, { editable: live || (waiting && !(question && question.kind === 'acting')), taskId: row.id }) : ''}
 ${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
 <p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
 <a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
@@ -1063,17 +1083,18 @@ ${table(['State', 'Endpoint', 'Delivery', 'Attempts'], rows.map((d) => [
      * own words. A plain POST; it works without JavaScript and on a phone.
      */
     function questionCard(row, question) {
-        return html`<section class="question-card" id="question" aria-labelledby="h-question">
-<h2 id="h-question">Before Actor starts, one question</h2>
+        const acting = question.kind === 'acting';
+        return html`<section class="question-card${acting ? ' question-act' : ''}" id="question" aria-labelledby="h-question">
+<h2 id="h-question">${acting ? 'Actor was stopped mid-action' : 'Before Actor starts, one question'}</h2>
 <p class="q-text">${question.text}</p>
 <form method="post" action="/tasks/${row.id}/answer" class="q-options">
 ${question.options.map((o) => html`<button class="sc-btn q-option" type="submit" name="answer" value="${o}">${o}</button>`)}
 </form>
-<form method="post" action="/tasks/${row.id}/answer" class="q-own">
+${acting ? html`<p class="muted small">Check what happened before choosing. <b>It happened, go on</b> records that it did, without running the tool again; <b>Run it again</b> deliberately runs it once more.</p>` : html`<form method="post" action="/tasks/${row.id}/answer" class="q-own">
 <label for="q-own-text">Or answer in your own words</label>
 <div class="q-own-row"><input id="q-own-text" name="answer" type="text" maxlength="2000" required placeholder="Your answer…"><button class="sc-btn" type="submit">Answer</button></div>
 </form>
-<p class="muted small">One question per task, before any work starts. The answer joins this task as your words.</p>
+<p class="muted small">One question per task, before any work starts. The answer joins this task as your words.</p>`}
 </section>`;
     }
 
@@ -1125,13 +1146,14 @@ ${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
     }
 
     /** The outcome card: the first thing under the task. */
-    function outcome(t, row) {
+    function outcome(t, row, { acting = false } = {}) {
         if (t.state === 'succeeded') return resultBlock(t.result, t);
         const again = html`<form method="post" action="/tasks" class="inline"><input type="hidden" name="task" value="${row.task}"><input type="hidden" name="mode" value="best"><button class="sc-btn sc-primary" type="submit">Try again in Best mode</button></form> <a class="sc-btn" href="/#task">New task</a>`;
         if (t.state === 'failed') {
             return html`<section class="outcome outcome-bad" role="status"><h2>Actor couldn't finish this</h2><p>${friendlyError(t.error)}</p><div class="outcome-actions">${again}</div>${t.error ? html`<p class="muted small">Code <code>${t.error.code}</code></p>` : ''}</section>`;
         }
         if (t.state === 'cancelled') return html`<section class="outcome" role="status"><h2>Cancelled</h2><p>What was spent before the cancel stays spent.</p><div class="outcome-actions">${again}</div></section>`;
+        if (t.state === 'needs_you' && acting) return html`<section class="outcome outcome-wait" role="status"><h2>Waiting for you</h2><p>Actor was stopped while it was doing something that may have happened. Check it yourself, then choose above: run it again, record that it happened, or stop the task. The task keeps its place and its budget while you decide.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
         if (t.state === 'needs_you') return html`<section class="outcome outcome-wait" role="status"><h2>Waiting for you</h2><p>Actor asked one question before spending anything on this task. Answer it above, and the same task continues with your words.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
         return html`<section class="outcome outcome-live" role="status" aria-live="polite"><h2><span class="dot-pulse" aria-hidden="true"></span> <span id="live-state">${STATE_TEXT[t.state]}…</span></h2><p class="muted">This page fills in as the agent works. You can leave and come back: the task keeps running.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
     }
@@ -1146,6 +1168,8 @@ ${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
             'actor.check.unavailable': 'The answer could not be checked, so it was not delivered. Try again in a minute.',
             'actor.task.timeout': 'It ran too long and was stopped.',
             'actor.task.interrupted': 'Actor restarted while this was running. Nothing more was charged; ask again.',
+            'actor.acting.unresolved': 'Actor was stopped before an action finished, and no choice came before the task ended, so it was not run again. The action may or may not have happened; check it yourself.',
+            'actor.checkpoint.invalid': 'The saved step could not be read, so the task was not run again from the beginning. The action may or may not have happened; check it yourself.',
         };
         return plain[err.code] || err.detail;
     }

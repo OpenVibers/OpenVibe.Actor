@@ -229,7 +229,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         };
         // One question, before any tool (stage V2-8): the task waits in needs_you; its clock waits with the person,
         // up to the same 15 minutes a desk hand-off gets. The answer resumes this same run.
-        const askPerson = async ({ text, options } = {}) => {
+        const askPerson = async ({ text, options, questionKind = 'question', tool = null, input = null } = {}) => {
             const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 300);
             const list = (Array.isArray(options) ? options : []).map((o) => String(o || '').replace(/\s+/g, ' ').trim().slice(0, 120)).filter(Boolean).slice(0, 4);
             if (!clean || list.length < 2) return null;
@@ -241,9 +241,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 signal.addEventListener('abort', onAbort, { once: true });
             });
             if (signal.aborted) { asking.delete(id); return null; }
-            await emit(id, { kind: 'output', step: 'question', agent: LOOP_AGENT, text: clean, options: list });
+            // `question_kind: 'acting'` is the resume card (stage V2-9): the run stopped inside an action and the person
+            // chooses whether to run it again, believe it happened, or stop. The event itself stays actor.task-event.
+            await emit(id, {
+                kind: 'output', step: 'question', agent: LOOP_AGENT, text: clean, options: list,
+                ...(questionKind === 'acting' ? { question_kind: 'acting', tool: tool || null, input: input || null } : {}),
+            });
             await setState(id, 'needs_you');
-            await tellPerson(row, 'needs_you', { what: `answer: ${clean}`, url: `${config.baseUrl}/tasks/${id}` });
+            await tellPerson(row, 'needs_you', { what: `${questionKind === 'acting' ? 'choose for an interrupted action' : 'answer'}: ${clean}`, url: `${config.baseUrl}/tasks/${id}` });
             waitForPerson(15 * 60_000);
             const answer = await waiting;
             asking.delete(id);
@@ -332,11 +337,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     });
                 } catch (err) {
                     if (signal && signal.aborted) throw err;
+                    // The person chose "Stop the task" on an interrupted action (stage V2-9): end it cancelled, not failed.
+                    if (err && err.code === 'actor.task.cancelled') return await setState(id, 'cancelled', { finished_at: iso() });
                     const detail = (err && err.message) || String(err);
                     const code = err && err.code === 'actor.model.unavailable' ? 'actor.model.unavailable'
                         : err && err.code === 'actor.budget.exceeded' ? 'actor.budget.exceeded'
                             : err && err.code === 'actor.checkpoint.invalid' ? 'actor.checkpoint.invalid'
-                                : 'actor.agent.failed';
+                                : err && err.code === 'actor.acting.unresolved' ? 'actor.acting.unresolved'
+                                    : 'actor.agent.failed';
                     return await setState(id, 'failed', { error_code: code, error_detail: detail.slice(0, 2000), finished_at: iso() });
                 }
                 try {

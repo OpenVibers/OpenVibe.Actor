@@ -37,6 +37,7 @@ module.exports = {
         additionalProperties: false,
     },
     scope: 'person',
+    acts: true,
     costUsd: 0,
     timeoutMs: 5000,
     available: (ctx) => Boolean(ctx && ctx.store),

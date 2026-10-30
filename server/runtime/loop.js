@@ -36,6 +36,7 @@ const { taskLedger, createProgress, replan, ledgerText } = require('./brain/ledg
 const { allowedTiers, loadPrior, chooseTier, orderTools, STEP_KINDS } = require('./brain/choose');
 const { createEscalations } = require('./brain/escalate');
 const { snapshot: snapshotState, restore: restoreState } = require('./checkpoint-state');
+const { stripSecrets, redactText } = require('./checkpoints');
 const learn = require('./brain/learn');
 
 const MAX_ANSWER_TOKENS = 5000;
@@ -308,6 +309,14 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             if (!TRUSTED.has(p.name) && (!tool || tool.scope !== 'private-ok')) state.readOutside = true;
         }
         const runnable = planned.filter((p) => !p.skipped);
+        // An acting call changes something in the world. Write its intent and checkpoint it BEFORE it starts, so a
+        // restart can ask the person rather than run it a second time (stage V2-9 follow-up). A read-only call runs
+        // as before: it is safe to repeat, and nothing is marked for it.
+        const acting = runnable.filter((p) => isActing(p.name));
+        if (acting.length) {
+            state.acting = acting.map((p) => ({ call_id: p.call.id, tool: p.name, input: p.args, step: state.calls, started_at: new Date(now()).toISOString() }));
+            await saveCheckpoint(state, ctx);
+        }
         const results = await Promise.all(runnable.map(async (p) => {
             if (p.name === DELEGATE.function.name) {
                 // The delegate span is the parent of everything the sub-agent does; it is written when the child ends,
@@ -369,6 +378,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             }
         }
         if (state.brain) state.brain.withheld = null;   // the refusal is for one turn; the tool is never removed
+        // Every result (or refusal) of this turn is recorded now; a later checkpoint supersedes the pre-act one.
+        state.acting = [];
         for (const s of callsOut) {
             const name = (s.skipped.function && s.skipped.function.name) || 'tool';
             await ctx.emit({ step: 'tool_call', tool: name, input: summarize({}) });
@@ -572,7 +583,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (!goal) return { delegate: true, error: 'a sub-agent needs a goal' };
         const want = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools.map(String)) : null;
         // Never wider than the parent: its offered tools, narrowed by the call, and never `delegate` (depth 1).
-        const tools = parent.tools.filter((t) => t.function.name !== DELEGATE.function.name && (!want || want.has(t.function.name)));
+        // A child never gets an acting tool (stage V2-9): it has no checkpoint of its own, so a crash inside it could
+        // repeat the action without the person's card. The parent keeps its acting tools and is the one that acts.
+        const tools = parent.tools.filter((t) => t.function.name !== DELEGATE.function.name
+            && (!want || want.has(t.function.name))
+            && !isActing(t.function.name));
         const share = config.loop && config.loop.subAgentShare != null ? config.loop.subAgentShare : 0.25;
         const startLeft = ctx.budgetLeft ? ctx.budgetLeft() : Infinity;
         const slice = Number.isFinite(startLeft) ? Math.max(0, startLeft) * share : Infinity;
@@ -624,6 +639,115 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             if (log && log.warn) log.warn('[Actor] checkpoint not written (the task goes on):', (err && err.message) || err);
             return null;
         }
+    }
+
+    /** Does this tool change something outside the model's own reasoning? The module says `acts: true`. */
+    function isActing(name) {
+        const tool = typeof registry.get === 'function' ? registry.get(name) : null;
+        return Boolean(tool && tool.acts === true);
+    }
+
+    /** One line for an acting card: the tool input with credential-shaped fields and tokens removed. */
+    function actingSummary(input) {
+        try { return redactText(clip(summarize(stripSecrets(input)), 180)); } catch { return ''; }
+    }
+
+    /** What the person chose on an acting card. Only an explicit "again" re-runs; anything unclear stops the task. */
+    function actingChoice(answer) {
+        const said = String(answer == null ? '' : answer).trim().toLowerCase();
+        if (/^run it again$/.test(said) || /\brun\b.*\bagain\b/.test(said)) return 'again';
+        if (/^it happened, go on$/.test(said) || /\bhappened\b/.test(said) || /\bgo on\b/.test(said)) return 'happened';
+        return 'stop';
+    }
+
+    /**
+     * A resume found an acting tool call that had started but had not returned (stage V2-9 follow-up). Nothing is
+     * re-run automatically: the person gets one card per call, with "Run it again", "It happened, go on" and "Stop the
+     * task". Every tool call of that same assistant turn is answered too — the read-only calls that shared it are simply
+     * run (safe to repeat), so the conversation stays valid and the run can go on. The result of an acting call the
+     * person says happened is recorded as a person-confirmed result, never as a tool output.
+     */
+    async function resolveActing(state, ctx, askPerson) {
+        const pending = (Array.isArray(state.acting) ? state.acting : []).filter((x) => x && x.call_id);
+        if (!pending.length) return;
+        if (typeof askPerson !== 'function') throw Object.assign(new Error('the run was stopped mid-action and there is no person to ask'), { code: 'actor.acting.unresolved' });
+        const byCall = new Map(pending.map((p) => [String(p.call_id), p]));
+        let assistant = null;
+        for (let i = state.messages.length - 1; i >= 0 && !assistant; i--) {
+            const m = state.messages[i];
+            if (m && m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.some((c) => byCall.has(String(c.id)))) assistant = m;
+        }
+        if (!assistant) throw Object.assign(new Error('the saved step has no tool call to continue'), { code: 'actor.checkpoint.invalid' });
+        const calls = assistant.tool_calls || [];
+        const choices = new Map();
+        for (const intent of pending) {
+            const label = String(intent.tool || 'a tool').replace(/_/g, ' ');
+            const what = actingSummary(intent.input);
+            const secret = /\[redacted|\[not stored/.test(JSON.stringify(intent.input || {}));
+            const text = `Actor was stopped while it was ${label}${what ? ` (${what})` : ''}. It may or may not have happened. Check, then choose.${secret ? ' Its input had a secret that is not stored, so it cannot be run again from here.' : ''}`;
+            const answer = await askPerson({ text: clip(text, 300), options: ['Run it again', 'It happened, go on', 'Stop the task'], task: state.task, questionKind: 'acting', tool: label, input: what });
+            if (answer == null) throw Object.assign(new Error('the person did not answer before the task had to stop; the action was not run again'), { code: 'actor.acting.unresolved' });
+            const choice = actingChoice(answer);
+            if (choice === 'stop') throw Object.assign(new Error('the person stopped the task after it was interrupted mid-action'), { code: 'actor.task.cancelled' });
+            choices.set(String(intent.call_id), choice);
+        }
+
+        const note = (name, ok) => {
+            if (!state.brain) return;
+            state.brain.toolRuns = (state.brain.toolRuns || 0) + 1;
+            if (name) state.brain.tools.add(name);
+            state.brain.steps.push({ step_kind: 'work', tier: state.tier, tool: name || null, ok });
+        };
+        const record = async (name, args, out, id, startedAt) => {
+            const item = state.ledger.add({ tool: name, input: args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
+            state.messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ evidence: item.id, tool: name, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
+            await ctx.emit({ step: 'tool_result', tool: name, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
+            await spanCall(ctx.trace, { kind: 'tool', name, startedAt, ms: now() - startedAt, ok: !(out && out.isError), errorCode: out && out.isError ? 'actor.tool.failed' : null, step: state.calls });
+            note(name, !(out && out.isError));
+        };
+        const recordError = async (name, args, id, text) => {
+            const clean = redactText(clip(text, 300));
+            const item = state.ledger.add({ tool: name, input: args, text: clean, data: null });
+            state.messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ error: clean, tool: name, evidence: item.id }) });
+            await ctx.emit({ step: 'tool_result', tool: name, text: clean, is_error: true });
+            note(name, false);
+        };
+
+        for (const call of calls) {
+            const id = String(call && call.id);
+            if (!id) continue;
+            if (state.messages.some((m) => m.role === 'tool' && String(m.tool_call_id) === id)) continue;
+            const name = (call.function && call.function.name) || 'tool';
+            let args = {};
+            try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { args = {}; }
+            await ctx.emit({ step: 'tool_call', tool: name, input: summarize(args) });
+            const choice = choices.get(id);
+            const redacted = /\[redacted|\[not stored/.test(JSON.stringify(args));
+            const startedAt = now();
+            if (choice === 'happened') {
+                const text = 'The person said it happened; Actor did not run it again.';
+                const item = state.ledger.add({ tool: name, input: args, text, data: { confirmed_by_person: true } });
+                state.messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ evidence: item.id, tool: name, result: text }) });
+                await ctx.emit({ step: 'tool_result', tool: name, text });
+                note(name, true);
+            } else if (choice === 'again' && redacted) {
+                await recordError(name, args, id, 'the saved input contained a secret that is not stored, so Actor did not run it again. Check it yourself.');
+            } else if (!choice && isActing(name)) {
+                // The safety net: an acting call with no recorded choice is never run on a resume.
+                await recordError(name, args, id, 'this action had no answer recorded, so Actor did not run it; check it yourself.');
+            } else {
+                try {
+                    const out = await registry.run(name, args, ctx);
+                    await record(name, args, out, id, startedAt);
+                } catch (err) {
+                    await spanCall(ctx.trace, { kind: 'tool', name, startedAt, ms: now() - startedAt, ok: false, errorCode: codeOf(err, 'actor.tool.failed'), step: state.calls });
+                    await recordError(name, args, id, `the tool failed: ${(err && err.message) || err}`);
+                }
+            }
+        }
+        if (state.brain) state.brain.withheld = null;
+        state.acting = [];
+        await saveCheckpoint(state, ctx);
     }
 
     function forkText(fork) {
@@ -692,6 +816,14 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (!state.plan || !Array.isArray(state.plan.steps)) state.plan = { assumptions: [], steps: [] };
         if (forced) { state.tier = forced; state.baseTier = forced; state.fixedTier = true; }
         else if (!models.resolve(state.tier).available) state.tier = baseTier;
+
+        // A resumed run that was stopped inside an acting tool call asks the person before anything else. This also
+        // answers the read-only calls of that same turn, so the model sees a complete conversation afterwards. A fork
+        // may not start on such a step: the fork page refuses it, and this is the same rule for any other caller.
+        if (Array.isArray(state.acting) && state.acting.length) {
+            if (fork) throw Object.assign(new Error('that step stopped mid-action, so it cannot be forked'), { code: 'actor.checkpoint.invalid' });
+            await resolveActing(state, ctx, askPerson);
+        }
 
         if (fork) {
             const change = fork.change || {};
@@ -766,7 +898,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const state = {
             task: String(task), requester, taskId, mode, tier, signal, messages: [], lastText: '', model: null, family: null, provider: null,
             calls: 0, ledger: createLedger({ now }), plan: { assumptions: [], steps: [] }, counts: new Map(), stopped: null, selfReflections: 0,
-            readOutside: false, agentId, baseTier: tier, answered: false,
+            readOutside: false, agentId, baseTier: tier, answered: false, acting: [],
             ctx: null, context: Array.isArray(context) ? context.filter((c) => c && c.task && c.answer).slice(-3) : [],
             depth: 0, tools: [], allow: null,
             // The brain (stage V2-8): what understand found, the two ledgers, the learned prior and the cascade.

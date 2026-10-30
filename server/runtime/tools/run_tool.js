@@ -7,6 +7,7 @@ module.exports = {
     description: 'Run one OpenVibe.Tools tool by id with its input object (use find_tools first to see the input).',
     input: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool', 'input'] },
     scope: 'public',
+    acts: true,
     costUsd: 0,
     timeoutMs: 40_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.toolsUrl),

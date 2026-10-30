@@ -135,6 +135,9 @@
 .question-card { margin: 0 0 1.4rem; padding: 16px 18px 14px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 45%, var(--border, #1f2d47));
   background: color-mix(in srgb, var(--accent, #3b82f6) 7%, var(--bg-card, #131c2e)); }
 .question-card > h2 { margin: 0 0 .45rem; font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-light, #60a5fa); }
+/* The resume card (stage V2-9): an action may have happened, so it reads as a warning, not a question before work. */
+.question-card.question-act { border-color: color-mix(in srgb, var(--warning, #f59e0b) 50%, var(--border, #1f2d47)); background: color-mix(in srgb, var(--warning, #f59e0b) 7%, var(--bg-card, #131c2e)); }
+.question-card.question-act > h2 { color: var(--warning-text, var(--warning, #f59e0b)); }
 .q-text { margin: 0 0 .8rem; font-size: 1.02rem; font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; }
 .q-options { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 .8rem; }
 .q-options .q-option { flex: 1 1 12rem; min-width: 0; min-height: 44px; padding: 8px 14px; box-sizing: border-box; white-space: normal; text-align: left; overflow-wrap: anywhere; }
@@ -201,6 +204,8 @@
 .fork-row label { font-weight: 650; }
 .fork-row select { min-height: 38px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--border-light, #2c3d5c); background: var(--bg-secondary, #101828); color: var(--text-primary, #e6edf7); font: inherit; }
 .fork-estimate { margin: 1rem 0 .6rem; padding: .65rem .8rem; border-radius: 10px; border-left: 2px solid var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 7%, transparent); }
+.fork-again { margin: .5rem 0 .8rem; padding: .65rem .8rem; border-radius: 10px; border-left: 2px solid var(--warning, #f59e0b); background: color-mix(in srgb, var(--warning, #f59e0b) 8%, transparent); font-size: .9rem; line-height: 1.45; overflow-wrap: anywhere; }
+.fork-again b { color: var(--warning-text, var(--warning, #f59e0b)); }
 .fork-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .fork-actions .sc-btn { min-height: 42px; }
 
