@@ -1,0 +1,49 @@
+{
+  "type": "standard",
+  "title": "Marie Curie",
+  "displaytitle": "<span lang=\"en\" dir=\"ltr\"><span class=\"mw-page-title-main\">Marie Curie</span></span>",
+  "namespace": {
+    "id": 0,
+    "text": ""
+  },
+  "wikibase_item": "Q7186",
+  "titles": {
+    "canonical": "Marie_Curie",
+    "normalized": "Marie Curie",
+    "display": "<span lang=\"en\" dir=\"ltr\"><span class=\"mw-page-title-main\">Marie Curie</span></span>"
+  },
+  "pageid": 20408,
+  "thumbnail": {
+    "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c8/Marie_Curie_c._1920s.jpg/330px-Marie_Curie_c._1920s.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+    "width": 330,
+    "height": 448
+  },
+  "originalimage": {
+    "source": "https://upload.wikimedia.org/wikipedia/commons/c/c8/Marie_Curie_c._1920s.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail_unscaled",
+    "width": 1549,
+    "height": 2105
+  },
+  "lang": "en",
+  "dir": "ltr",
+  "revision": "1382609933",
+  "tid": "dd837495-d39a-11f1-a20a-5bc5eb35dd29",
+  "timestamp": "2026-10-29T13:15:52Z",
+  "description": "Polish-French physicist and chemist (1867–1934)",
+  "description_source": "local",
+  "content_urls": {
+    "desktop": {
+      "page": "https://en.wikipedia.org/wiki/Marie_Curie",
+      "revisions": "https://en.wikipedia.org/wiki/Marie_Curie?action=history",
+      "edit": "https://en.wikipedia.org/wiki/Marie_Curie?action=edit",
+      "talk": "https://en.wikipedia.org/wiki/Talk:Marie_Curie"
+    },
+    "mobile": {
+      "page": "https://en.wikipedia.org/wiki/Marie_Curie",
+      "revisions": "https://en.wikipedia.org/wiki/Special:History/Marie_Curie",
+      "edit": "https://en.wikipedia.org/wiki/Marie_Curie?action=edit",
+      "talk": "https://en.wikipedia.org/wiki/Talk:Marie_Curie"
+    }
+  },
+  "extract": "Maria Salomea Skłodowska Curie, better known as Marie Curie, was a Polish and naturalised-French physicist and chemist. She shared the 1903 Nobel Prize in Physics with her husband, Pierre Curie, \"for their joint researches on the radioactivity phenomena discovered by Professor Henri Becquerel\". She won the 1911 Nobel Prize in Chemistry \"[for] the discovery of the elements radium and polonium, by the isolation of radium and the study of the nature and compounds of this remarkable element\".",
+  "extract_html": "<p><b>Maria Salomea Skłodowska Curie</b>, better known as <b>Marie Curie</b>, was a Polish and naturalised-French physicist and chemist. She shared the 1903 Nobel Prize in Physics with her husband, Pierre Curie, \"for their joint researches on the radioactivity phenomena discovered by Professor Henri Becquerel\". She won the 1911 Nobel Prize in Chemistry \"[for] the discovery of the elements radium and polonium, by the isolation of radium and the study of the nature and compounds of this remarkable element\".</p>"
+}
