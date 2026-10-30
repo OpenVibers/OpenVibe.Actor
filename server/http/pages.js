@@ -18,6 +18,7 @@ const { asyncRouter } = require('./router');
 const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const { sameOrigin } = require('./principal');
 const { html, raw, table, notice, time, badge } = require('../render/html');
+const { foldBlock } = require('../render/short');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
 const store = require('../tasks/store');
@@ -486,10 +487,17 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
 <section class="sc-sec hm-task" id="task" aria-labelledby="h-task"><h2 id="h-task">Give Actor a task</h2>
 ${box}
 ${raw(starts)}</section>
-<section class="sc-sec" id="agents" aria-labelledby="h-agents"><h2 id="h-agents">The agents</h2>
+${raw(foldBlock({
+        id: 'agents',
+        head: '<h2 id="h-agents">The agents</h2>',
+        html: String(html`<section class="sc-sec" id="agents" aria-labelledby="h-agents">
 <p class="sc-lede">Every agent Actor can route to, what it charges and whether it is working right now. <a href="/agents">What each one is, its modes and details</a>.</p>
-${raw(kit.list(agents.map((a) => kit.row({ href: `/agents#${a.id}`, title: a.name, badge: a.available ? kit.badge('working', 'ok') : kit.badge('not here yet'), sub: `${priceText(a.rate_card)}${a.model ? ` · ${a.model}` : ''}` }))))}</section>
-<section class="sc-sec hm-more" aria-labelledby="h-how"><h2 id="h-how">How it works</h2>
+${raw(kit.list(agents.map((a) => kit.row({ href: `/agents#${a.id}`, title: a.name, badge: a.available ? kit.badge('working', 'ok') : kit.badge('not here yet'), sub: `${priceText(a.rate_card)}${a.model ? ` · ${a.model}` : ''}` }))))}</section>`),
+    }))}
+${raw(foldBlock({
+        id: 'how',
+        head: '<h2 id="h-how">How it works</h2>',
+        html: String(html`<section class="sc-sec hm-more" aria-labelledby="h-how">
 ${fold({ id: 'route', title: 'How a task finds its agent', meta: '5 steps', body: showcase.steps({
                 items: [
                     { title: 'Sort the task', text: 'An answer, a lookup, research, a live web search, code, your own robot or your own computer: that decides what an agent must be able to do.' },
@@ -522,8 +530,14 @@ ${fold({ id: 'api', title: 'Hand it tasks from your own code', meta: 'curl, Java
                     { label: 'JavaScript (openvibe-sdk)', lang: 'js', code: "import { createClient } from 'openvibe-sdk/core';\nimport { createActorClient } from 'openvibe-sdk/actor';\n\nconst actor = createActorClient(\n    createClient({ credentials: 'include' }));\nconst task = await actor.tasks.create({\n    task: 'Summarize the latest Node.js release',\n});\nfor await (const e of actor.tasks.events(task.id)) {\n    console.log(e.event, e.data);\n}" },
                 ],
             }) + String(html`<p class="hm-api-more"><a class="sc-btn sc-primary" href="/docs">Read the API</a></p>`) })}
-</section>
-${raw(showcase.faq({ id: 'faq', items: faq }))}
+</section>`),
+    }))}
+${raw(foldBlock({
+        id: 'faq',
+        bare: true,
+        head: '<h2>Questions</h2>',
+        html: showcase.faq({ id: 'faq', items: faq }),
+    }))}
 <div class="hm-net">${raw(showcase.apps({ id: 'network', title: 'Part of OpenVibe', lede: 'One account across every OpenVibe site. Related places to go next:', items: related }))}</div>`,
         };
     }
