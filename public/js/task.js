@@ -81,13 +81,9 @@
         labelled('To work out:', l.derive.length ? l.derive.join('; ') : 'none');
       }
       if (p.progress) {
-        var stuck = (p.progress.stuck === true || p.progress.progressing === false) ? 'yes' : 'no';
-        var line = el('p', 'plan-progress');
-        line.appendChild(el('b', '', 'Done:')); line.appendChild(document.createTextNode(' ' + (p.progress.done ? 'yes' : 'no') + ' \u00b7 '));
-        line.appendChild(el('b', '', 'Stuck:')); line.appendChild(document.createTextNode(' ' + stuck + ' \u00b7 '));
-        line.appendChild(el('b', '', 'Next:')); line.appendChild(document.createTextNode(' ' + (p.progress.next || 'none')));
-        ledger.appendChild(line);
-        if (p.progress.stopped) labelled('Stopped:', p.progress.stopped, 'plan-stopped');
+        // Each labelled line shows its value only: a separator after the value would dangle on a phone.
+        var rows = (window.OpenVibeTaskEvents && window.OpenVibeTaskEvents.progressRows) ? window.OpenVibeTaskEvents.progressRows(p.progress) : [];
+        rows.forEach(function (row) { labelled(row.label, row.value, row.cls); });
       }
       ledger.hidden = !p.ledger && !p.progress;
     }

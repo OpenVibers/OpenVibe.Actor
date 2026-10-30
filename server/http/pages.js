@@ -993,6 +993,8 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
             // The resume card (stage V2-9): the run was stopped inside an action, not before it started.
             kind: questionEvent.question_kind === 'acting' ? 'acting' : 'question',
         } : null;
+        // The acting card (stage V2-9) says the task is waiting once; the box under it must not say it again.
+        const actingCard = Boolean(question && question.kind === 'acting');
         const answerProblem = req.query.answer === 'gone' ? 'That question is no longer waiting for an answer. The task may have finished or been restarted; ask again.' : null;
         const assumeProblem = req.query.assume === 'gone' ? 'Those assumptions could not be changed: the task is no longer running.' : null;
         const cls = (events.find((e) => e.step === 'plan' && !e.agent && /"(\w+)" task/.test(e.text || '')) || { text: '' }).text.match(/"(\w+)"/);
@@ -1040,7 +1042,7 @@ ${answerProblem ? notice(answerProblem, 'warn') : ''}
 ${assumeProblem ? notice(assumeProblem, 'warn') : ''}
 ${forkProblem ? notice(forkProblem, 'warn') : ''}
 ${question ? questionCard(row, question) : ''}
-${outcome(t, row, { acting: question && question.kind === 'acting' })}
+${outcome(t, row, { acting: actingCard })}
 ${t.state === 'succeeded' ? benchBlock(row, offer) : ''}
 ${t.state === 'succeeded' ? followBlock(row, follows, followProblem) : ''}
 ${savedStepsBlock(row, saved, spans)}
@@ -1054,7 +1056,7 @@ ${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(
 <a id="last-look-link" href="${look ? `/tasks/${row.id}/look?at=${look.at}` : '#'}" target="_blank" rel="noopener" title="Open it full size"><img id="last-look-img" src="${look ? `/tasks/${row.id}/look?at=${look.at}` : ''}" alt="The screen your agent last looked at"${look && look.width ? raw(` width="${Number(look.width)}" height="${Number(look.height)}"`) : ''} loading="lazy"></a>
 <figcaption class="muted small">What your agent last saw on the screen${look ? html` · ${time(new Date(look.at).toISOString())}` : ''}</figcaption>
 </figure>` : ''}
-${waiting ? html`<p class="muted small live-note" id="waiting-note">Waiting for your answer. The task keeps its place and its budget while you decide.</p>` : html`<section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
+${waiting ? html`<p class="muted small live-note" id="waiting-note">Waiting for your answer.${actingCard ? '' : ' The task keeps its place and its budget while you decide.'}</p>` : html`<section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
 ${!open && plan ? planCard(plan) : ''}
 <div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div>
 ${traceBlock(spans, row.id)}
@@ -1121,7 +1123,7 @@ ${opts.editable ? html`<form method="post" action="/tasks/${opts.taskId}/assumpt
 ${ledger ? html`<p><b>Given:</b> ${ledger.given.length ? ledger.given.join('; ') : 'none'}</p>
 <p><b>To find:</b> ${ledger.lookup.length ? ledger.lookup.join('; ') : 'none'}</p>
 <p><b>To work out:</b> ${ledger.derive.length ? ledger.derive.join('; ') : 'none'}</p>` : ''}
-${progress ? html`<p class="plan-progress"><b>Done:</b> ${progress.done ? 'yes' : 'no'} · <b>Stuck:</b> ${progress.stuck === true || progress.progressing === false ? 'yes' : 'no'} · <b>Next:</b> ${progress.next || 'none'}</p>${progress.stopped ? html`<p class="plan-stopped"><b>Stopped:</b> ${progress.stopped}</p>` : ''}` : ''}
+${progress ? taskEvents.progressRows(progress).map((row) => html`<p class="${row.cls}"><b>${row.label}</b> ${row.value}</p>`) : ''}
 </div>
 </section>`;
     }
@@ -1153,7 +1155,8 @@ ${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
             return html`<section class="outcome outcome-bad" role="status"><h2>Actor couldn't finish this</h2><p>${friendlyError(t.error)}</p><div class="outcome-actions">${again}</div>${t.error ? html`<p class="muted small">Code <code>${t.error.code}</code></p>` : ''}</section>`;
         }
         if (t.state === 'cancelled') return html`<section class="outcome" role="status"><h2>Cancelled</h2><p>What was spent before the cancel stays spent.</p><div class="outcome-actions">${again}</div></section>`;
-        if (t.state === 'needs_you' && acting) return html`<section class="outcome outcome-wait" role="status"><h2>Waiting for you</h2><p>Actor was stopped while it was doing something that may have happened. Check it yourself, then choose above: run it again, record that it happened, or stop the task. The task keeps its place and its budget while you decide.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
+        // The acting card above already says what was stopped; this box keeps only what the person can do here.
+        if (t.state === 'needs_you' && acting) return html`<section class="outcome outcome-wait" role="status"><h2>Waiting for you</h2><p>The task keeps its place and its budget while you decide.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
         if (t.state === 'needs_you') return html`<section class="outcome outcome-wait" role="status"><h2>Waiting for you</h2><p>Actor asked one question before spending anything on this task. Answer it above, and the same task continues with your words.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
         return html`<section class="outcome outcome-live" role="status" aria-live="polite"><h2><span class="dot-pulse" aria-hidden="true"></span> <span id="live-state">${STATE_TEXT[t.state]}…</span></h2><p class="muted">This page fills in as the agent works. You can leave and come back: the task keeps running.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
     }

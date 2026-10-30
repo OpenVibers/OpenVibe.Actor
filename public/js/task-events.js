@@ -111,6 +111,21 @@
         });
         return out.steps.length || out.ledger ? out : null;
     }
+    /**
+     * The progress row of the ledger (stage V2-8): each labelled line shows its value only. A separator after the value
+     * would dangle on a phone, where every label sits on its own line.
+     */
+    function progressRows(progress) {
+        if (!progress) return [];
+        var stuck = (progress.stuck === true || progress.progressing === false) ? 'yes' : 'no';
+        var rows = [
+            { label: 'Done:', value: progress.done ? 'yes' : 'no', cls: 'plan-progress' },
+            { label: 'Stuck:', value: stuck, cls: 'plan-progress' },
+            { label: 'Next:', value: progress.next || 'none', cls: 'plan-progress' },
+        ];
+        if (progress.stopped) rows.push({ label: 'Stopped:', value: String(progress.stopped), cls: 'plan-stopped' });
+        return rows;
+    }
     /** The divider a plan draws in the session: the step in hand, or the whole plan done. */
     function planLine(p) {
         if (!p || !p.steps.length) return null;
@@ -234,5 +249,5 @@
         return out.replace(/[.?!]*$/, '') + '.';
     }
 
-    return { lines: lines, firstAt: firstAt, duration: duration, attachments: attachments, plan: plan, planLine: planLine, assumingLine: assumingLine, lowerFirst: lowerFirst };
+    return { lines: lines, firstAt: firstAt, duration: duration, attachments: attachments, plan: plan, planLine: planLine, assumingLine: assumingLine, lowerFirst: lowerFirst, progressRows: progressRows };
 });
