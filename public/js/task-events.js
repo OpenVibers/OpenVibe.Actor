@@ -186,6 +186,8 @@
                 out.push(withAgent(e.is_error ? { t: 'note', level: 'error', text: text } : { t: 'text', text: text }, e));
                 continue;
             }
+            if (e.step === 'resume') { out.push(withAgent({ t: 'note', level: 'info', text: 'Resumed: ' + text }, e)); continue; }
+            if (e.step === 'fork') { out.push(withAgent({ t: 'note', level: 'info', text: text }, e)); continue; }
             if (e.step === 'plan') {
                 var stated = plan(text), divider = stated ? planLine(stated) : text;
                 if (divider && divider !== lastPlan) out.push(withAgent({ t: 'step', text: divider }, e));

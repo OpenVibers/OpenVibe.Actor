@@ -43,6 +43,7 @@ module.exports = {
         required: ['content'],
     },
     scope: 'person',
+    acts: true,
     costUsd: 0,
     timeoutMs: 30_000,
     available: (ctx) => Boolean(ctx && ctx.artifacts && ctx.artifacts.available),

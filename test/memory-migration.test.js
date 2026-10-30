@@ -42,7 +42,7 @@ const owner = 'user:usr_01JZ0000000000000000000AAA';
             [agentMemoryId, agentId, owner, oldStyleText, 'agent', now]);
         // 0017 on top of the running schema.
         const second = await db.migrate({ dir: MIGRATIONS });
-        assert.deepStrictEqual(second.applied.map((m) => m.id), ['0017', '0018', '0019', '0020']);
+        assert.deepStrictEqual(second.applied.map((m) => m.id), ['0017', '0018', '0019', '0020', '0021']);
 
         await check('an old-style INSERT still works after 0017, and a 900-character row is intact', async () => {
             const old = await db.maybe('SELECT id, text, origin, status, kind, uses FROM actor_agent_memory WHERE id = $1', [agentMemoryId]);

@@ -29,6 +29,7 @@ const seo = require('openvibe-shared/seo');
 const { findArtifact, sendArtifact } = require('../runtime/artifacts');
 const trace = require('../runtime/trace');
 const benchOffers = require('../tasks/bench-offers');
+const compareRuns = require('../tasks/compare');
 const confidence = require('../runtime/brain/confidence');
 const taskEvents = require('../../public/js/task-events');
 const { noLooks, hasLooks } = require('openvibe-sdk/no-looks');
@@ -182,7 +183,7 @@ const priceText = (rc) => (rc.input_usd_per_mtok === 0 && rc.output_usd_per_mtok
  * call, indented under the delegate it belongs to, with its time and cost. A failed span says "failed" in words. At
  * most one phone screen of rows; the full list is the task's trace API. Server-rendered, so it works without JS.
  */
-function traceBlock(spans, taskId) {
+function traceBlock(spans, taskId, id = 'trace') {
     if (!spans.length) return '';
     const totals = trace.totals(spans);
     const byId = new Map(spans.map((s) => [s.id, s]));
@@ -200,7 +201,7 @@ function traceBlock(spans, taskId) {
     const shown = spans.slice(0, TRACE_ROWS);
     const failed = spans.filter((s) => s.ok === false).length;
     const nameOf = (s) => (s.kind === 'model' || s.kind === 'check' || s.kind === 'judge' ? modelName(s.name) : toolLabel(s.name));
-    return html`<details class="trace" id="trace">
+    return html`<details class="trace" id="${id}">
 <summary><span>Trace</span><span class="muted">${spans.length} call${spans.length === 1 ? '' : 's'}${failed ? `, ${failed} failed` : ''}</span></summary>
 <ol class="trace-list">${shown.map((s) => html`<li class="tr tr-${s.kind} tr-d${depthOf(s)}${s.ok === false ? ' is-bad' : ''}"${s.error_code ? raw(` title="${String(s.error_code).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)}"`) : ''}>
 <span class="tr-name">${nameOf(s)}</span><span class="tr-kind">${TRACE_KIND[s.kind] || s.kind}</span><span class="tr-ms">${msText(s.ms)}</span><span class="tr-cost">${usd(s.cost_usd)}</span>${s.ok === false ? html`<span class="tr-bad">failed</span>` : ''}
@@ -219,9 +220,164 @@ function benchBlock(row, offer) {
     return html`<p class="bench-line" id="bench"><a class="sc-btn" href="/tasks/${row.id}/offer-bench">Offer as a Bench case</a> <span class="muted small">Share this task and its answer with OpenVibe.Bench. Evidence, files, memory and the trace are never shared.</span></p>`;
 }
 
+// ── Durable runs (stage V2-9): saved steps, fork, compare ──
+const FORK_TIER = { fast: 'Fast', smart: 'Smart', best: 'Best' };
+const tierFactor = (tier) => (tier === 'fast' ? 0.6 : tier === 'best' ? 3 : 1);
+const shortText = (text, n) => { const t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+
+/**
+ * What a fork will likely cost, from the run it forks: the parent's own cost per turn, the turns it still had after
+ * the chosen step, and a multiplier for the tier picked. An estimate, shown before anything runs; the task's own
+ * allowance is the hard cap and the meter is the truth.
+ */
+function forkEstimate(row, checkpoint, tier = 'smart') {
+    const result = row.result ? (typeof row.result === 'string' ? JSON.parse(row.result) : row.result) : null;
+    const turns = Math.max(1, Number(result && result.turns) || 1);
+    const perTurn = (Number(row.cost_usd) || 0) / turns;
+    const after = Math.max(2, turns - Number(checkpoint && checkpoint.step ? checkpoint.step : 0) + 2);
+    const estimate = Math.max(0.0005, perTurn * after * tierFactor(tier));
+    return Math.min(estimate, Number(row.budget_task) || 0.05);
+}
+
+/** The plan instruction a fork of this step starts from: the step in hand, else the run's own task. */
+function stepInstruction(row, checkpoint) {
+    const plan = checkpoint && checkpoint.state && checkpoint.state.plan;
+    const steps = plan && Array.isArray(plan.steps) ? plan.steps : [];
+    const active = steps.find((s) => s && s.state === 'active') || steps[0];
+    return active && active.goal ? String(active.goal) : String(row.task || '');
+}
+
+/** A span's readable name, for the saved step it belongs to. */
+function spanLabel(span) {
+    if (!span) return 'the step';
+    return span.kind === 'model' || span.kind === 'check' || span.kind === 'judge' ? modelName(span.name) : toolLabel(span.name);
+}
+
+/** The saved steps of a finished task, each with a "Fork from here" of its own. */
+function savedStepsBlock(row, saved, spans) {
+    if (!saved || !saved.length) return '';
+    return html`<section class="saved" id="steps" aria-labelledby="h-steps">
+<h2 id="h-steps">Steps saved</h2>
+<p class="muted small">Every step is checkpointed. Fork any step to run on from it with one change: another tier, one tool off the allowed list, or an edited instruction.</p>
+<ol class="saved-list">${saved.map((cp) => {
+        const here = (spans || []).filter((sp) => Number(sp.step) === Number(cp.step));
+        const last = here[here.length - 1];
+        return html`<li class="saved-step"><span class="saved-n">Step ${cp.step}</span><span class="saved-what">${last ? spanLabel(last) : 'saved'}</span><span class="muted small saved-at">${time(cp.created_at)}</span><a class="sc-btn saved-fork" href="/tasks/${row.id}/fork?step=${cp.step}">Fork from here</a></li>`;
+    })}</ol>
+</section>`;
+}
+
+/** The fork dialog: one change, the estimate first, and the task's own allowance in plain words. */
+function forkDialog(row, checkpoint, { tiers = [], tools = [], actingAfter = [] } = {}) {
+    const instruction = stepInstruction(row, checkpoint);
+    const perTask = Number(row.budget_task) || 0.05;
+    return html`<section class="fork-card" aria-labelledby="h-fork">
+<h2 id="h-fork">Fork from step ${checkpoint.step}</h2>
+<p>A fork is a new task. It starts from this step's checkpoint, with the evidence and plan it already had, and gets its own budget: <b>${usd(perTask)}</b>, the same free allowance as any task. Only this step's saved state is used; your parent task stays as it is.</p>
+<form method="post" action="/tasks/${row.id}/fork" class="fork-form">
+<input type="hidden" name="step" value="${checkpoint.step}">
+<fieldset class="fork-changes"><legend>One change</legend>
+<label class="fork-change"><input type="radio" name="change" value="instruction" checked><span><b>Edit this step's instruction</b><small>The run continues with your wording instead of the one it had.</small></span></label>
+<textarea name="instruction" rows="3" maxlength="2000" aria-label="The edited instruction">${instruction}</textarea>
+<label class="fork-change"><input type="radio" name="change" value="tier"><span><b>Run on another tier</b><small>${tiers.map((t) => `${FORK_TIER[t] || t} ~${usd(forkEstimate(row, checkpoint, t))}`).join(' · ')}</small></span></label>
+<div class="fork-row"><label for="fork-tier">Tier</label><select id="fork-tier" name="tier">${tiers.map((t) => html`<option value="${t}"${t === 'best' ? raw(' selected') : ''}>${FORK_TIER[t] || t} (~${usd(forkEstimate(row, checkpoint, t))})</option>`)}</select></div>
+<label class="fork-change"><input type="radio" name="change" value="tool"><span><b>Take one tool off the allowed list</b><small>The fork may use this run's tools at most, never more.</small></span></label>
+<div class="fork-row"><label for="fork-tool">Tool</label><select id="fork-tool" name="tool">${tools.map((t) => html`<option value="${t}">${toolLabel(t)}</option>`)}</select></div>
+</fieldset>
+<p class="fork-estimate"><b>Estimate:</b> about ${usd(forkEstimate(row, checkpoint, 'smart'))} typical for this run, and at most ${usd(perTask)}. The real cost is metered, and shown when it ends.</p>
+${actingAfter.length ? html`<p class="fork-again"><b>A fork can do these again:</b> ${actingAfter.map((name) => `${toolLabel(name)} (${name})`).join(', ')}. They change something in the world; check them yourself after the fork, or take one off the allowed list below.</p>` : ''}
+<div class="fork-actions"><button class="sc-btn sc-primary" type="submit">Fork this run</button> <a class="sc-btn" href="/tasks/${row.id}">Cancel</a></div>
+</form>
+</section>`;
+}
+
+/** A link to compare this run with another of the person's. */
+function compareLink(row, other) {
+    return html`<a class="sc-btn cmp-link" href="/tasks/${row.id}/compare/${other.id}">Compare with ${shortText(other.task, 60)}</a>`;
+}
+
+/** The forks of this run and other runs to compare with; nothing when there is nothing to show. */
+function relatedRunsBlock(row, { forks = [], others = [] } = {}) {
+    const seen = new Set([row.id]);
+    const links = [];
+    for (const f of forks) {
+        if (seen.has(f.id)) continue;
+        seen.add(f.id);
+        links.push(html`<li><a href="/tasks/${f.id}">Fork from step ${f.fork_of_step}</a> <span class="muted small">${shortText(f.task, 70)}</span> ${compareLink(row, f)}</li>`);
+    }
+    for (const o of others) {
+        if (seen.has(o.id)) continue;
+        seen.add(o.id);
+        links.push(html`<li>${compareLink(row, o)} <span class="muted small">${shortText(o.task, 70)}</span></li>`);
+    }
+    if (!links.length) return '';
+    return html`<section class="related-runs" id="related" aria-labelledby="h-related">
+<h2 id="h-related">${forks.length ? 'Forks and other runs' : 'Compare this run'}</h2>
+<p class="muted small">The two answers side by side, with their cost, time, steps and the claims that differ.</p>
+<ul class="related-list">${links}</ul>
+</section>`;
+}
+
+/**
+ * The compare page (stage V2-9): two runs of the person's, side by side. On a phone the three parts are chips
+ * (Answer, Steps, Cost) using the radio + :has() pattern of OpenVibe.Tools (#151), so it stays one screen; a wider
+ * screen shows all three. Every panel is server-rendered and works without JavaScript.
+ */
+function comparePage(rowA, rowB, cmp, { spansA = [], spansB = [] } = {}) {
+    const answer = (run) => html`<div class="cmp-answer prose">${run.answer ? raw(markdown(run.answer, { headingOffset: 3 })) : html`<p class="muted">No answer: this run ended ${run.state}.</p>`}</div>
+${run.claims.length ? html`<p class="muted small">${run.claims.length} claim${run.claims.length === 1 ? '' : 's'} checked${run.check.by ? ` by ${modelName(run.check.by)}` : ''} · ${run.check.grounded} grounded</p>` : ''}`;
+    const claimLine = (c) => html`<li><span class="cmp-claim">${c.claim}</span> <span class="ev-conf is-${c.confidence || 'unverified'}">${CONF_TEXT[c.confidence] || c.confidence || 'unverified'}</span>${Array.isArray(c.evidence) && c.evidence.length ? html` <span class="muted small">${c.evidence.join(', ')}</span>` : ''}</li>`;
+    const diff = cmp.claims;
+    const bench = (run) => (run.bench.offered ? html`<a href="/tasks/${run.id}#bench">Offered as a Bench case</a>` : html`<span class="muted">Not offered as a Bench case</span>`);
+    return html`<article class="compare" data-a="${rowA.id}" data-b="${rowB.id}">
+<header class="cmp-head"><h1>Compare two runs</h1><p class="muted small">Both are yours. Their answers, cost, time, steps and the claims that differ.</p></header>
+<div class="cmp-pick" role="radiogroup" aria-label="What to compare">
+<input type="radio" name="cmp-pick" id="cmp-answer" checked><label for="cmp-answer">Answer</label>
+<input type="radio" name="cmp-pick" id="cmp-steps"><label for="cmp-steps">Steps</label>
+<input type="radio" name="cmp-pick" id="cmp-cost"><label for="cmp-cost">Cost</label>
+</div>
+<div class="cmp-panel cmp-panel-answer">
+<div class="cmp-grid">
+<section class="cmp-run cmp-a" aria-labelledby="cmp-a-h"><header><h2 id="cmp-a-h"><a href="/tasks/${rowA.id}">Run A</a></h2><p class="muted small">${shortText(rowA.task, 120)}</p></header>${answer(cmp.a)}
+${diff.only_a.length || diff.only_b.length || diff.changed.length ? html`<div class="cmp-diff"><h3>Claims that differ</h3>
+${diff.only_a.length ? html`<div class="cmp-side"><h4>Only run A</h4><ul>${diff.only_a.map((c) => claimLine(c))}</ul></div>` : ''}
+${diff.only_b.length ? html`<div class="cmp-side"><h4>Only run B</h4><ul>${diff.only_b.map((c) => claimLine(c))}</ul></div>` : ''}
+${diff.changed.length ? html`<div class="cmp-side"><h4>Both, graded differently</h4><ul>${diff.changed.map((c) => html`<li><span class="cmp-claim">${c.claim}</span> <span class="ev-conf is-${c.a.confidence}">A ${CONF_TEXT[c.a.confidence] || c.a.confidence}</span> <span class="ev-conf is-${c.b.confidence}">B ${CONF_TEXT[c.b.confidence] || c.b.confidence}</span></li>`)}</ul></div>` : ''}
+</div>` : html`<p class="muted small cmp-same">The checked claims do not differ.</p>`}
+</section>
+<section class="cmp-run cmp-b" aria-labelledby="cmp-b-h"><header><h2 id="cmp-b-h"><a href="/tasks/${rowB.id}">Run B</a></h2><p class="muted small">${shortText(rowB.task, 120)}</p></header>${answer(cmp.b)}
+${diff.only_a.length || diff.only_b.length || diff.changed.length ? html`<p class="muted small">The claims that differ are listed under run A.</p>` : ''}
+</section>
+</div>
+</div>
+<div class="cmp-panel cmp-panel-steps">
+<div class="cmp-grid">
+<section class="cmp-run cmp-a"><h2>Run A steps</h2>${traceBlock(spansA, rowA.id, 'trace-a')}${!spansA.length ? html`<p class="muted small">No trace was recorded.</p>` : ''}</section>
+<section class="cmp-run cmp-b"><h2>Run B steps</h2>${traceBlock(spansB, rowB.id, 'trace-b')}${!spansB.length ? html`<p class="muted small">No trace was recorded.</p>` : ''}</section>
+</div>
+</div>
+<div class="cmp-panel cmp-panel-cost">
+<div class="cmp-grid">
+${[['a', cmp.a, rowA], ['b', cmp.b, rowB]].map(([side, run, row]) => html`<section class="cmp-run cmp-${side}"><h2>Run ${side.toUpperCase()} cost</h2>
+<table class="cmp-cost"><tbody>
+<tr><th>Cost</th><td>${usd(run.cost_usd)} of ${usd(Number(row.budget_task) || 0)}</td></tr>
+<tr><th>Time</th><td>${msText(run.time_ms)}</td></tr>
+<tr><th>Steps</th><td>${run.turns} model turn${run.turns === 1 ? '' : 's'} · ${run.tool_calls} tool call${run.tool_calls === 1 ? '' : 's'}</td></tr>
+<tr><th>State</th><td>${run.state}</td></tr>
+<tr><th>Bench</th><td>${bench(run)}</td></tr>
+</tbody></table></section>`)}
+</div>
+</div>
+<p class="cmp-foot muted small">Run A started ${time(rowA.created_at)} · Run B started ${time(rowB.created_at)}</p>
+</article>`;
+}
+
 
 function createPageRoutes(ctx) {
     const { config, s, engine } = ctx;
+    // Durable runs (stage V2-9): the sealed checkpoints are the engine's, read here only for their step metadata.
+    const checkpoints = ctx.checkpoints || null;
+    const checkpointsOn = Boolean(checkpoints && checkpoints.enabled);
     const r = asyncRouter();
     const PUBLIC_CACHE = cache.htmlHeaders({ maxAge: 300 });
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
@@ -435,6 +591,130 @@ ${raw(showcase.faq({ id: 'faq', items: faq }))}
         const out = await createTask({ s, config, engine, principal: { requester: requesterOf(req), project: null }, body: { task: text, mode: parent.mode }, parentId: parent.id });
         if (out.code) return res.redirect(303, `/tasks/${parent.id}?follow=${encodeURIComponent(out.code)}#follow-up`);
         return res.redirect(303, `/tasks/${out.task.id}`);
+    });
+
+    // ── Durable runs (stage V2-9): fork from a saved step, and compare two runs ──────
+    // Both are owner-only; a stranger gets the same 404 as a task that does not exist. The fork form is a plain POST
+    // from this origin, with the estimate shown before anything spends.
+    const FORK_TIERS = ['fast', 'smart', 'best'];
+    const finished = (row) => row && !store.OPEN.includes(row.state) && row.state !== 'needs_you';
+    const availableTiers = () => FORK_TIERS.filter((tier) => {
+        try { return ctx.models && ctx.models.resolve(tier).available; } catch { return false; }
+    });
+    const forkTools = (checkpoint) => {
+        const names = checkpoint && checkpoint.state && Array.isArray(checkpoint.state.allow) ? checkpoint.state.allow
+            : (checkpoint && checkpoint.state && Array.isArray(checkpoint.state.tools) ? checkpoint.state.tools : []);
+        return [...new Set(names)].filter((n) => n !== 'delegate' && n !== 'fork' && n !== 'resume' && (!ctx.registry || ctx.registry.has(n))).sort();
+    };
+    const forkProblem = (code) => ({
+        'actor.allowance.exhausted': 'You have used today\'s free tasks. They come back at midnight UTC.',
+        'actor.budget.day_spent': 'Today\'s budget is spent. It resets at midnight UTC.',
+        'actor.capacity.spent': 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.',
+        acting: 'That step was stopped mid-action, so it cannot be forked. Pick an earlier saved step.',
+    }[code] || 'That fork could not start. Try again in a moment.');
+
+    r.get('/tasks/:id/fork', async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.redirect(303, '/tasks');
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req)) return page(req, res, { title: 'Task not found', body: html`<h1>Task not found</h1><p>There is no task here that belongs to you.</p>` }, 404);
+        if (!finished(row)) return res.redirect(303, `/tasks/${row.id}`);
+        if (!checkpointsOn) return page(req, res, { title: 'Fork from here', body: html`<h1>Fork from here</h1><p>Forking needs checkpoints, and this Actor does not have <code>ACTOR_CHECKPOINT_KEY</code> set.</p><p><a class="sc-btn" href="/tasks/${row.id}">Back to the task</a></p>` }, 404);
+        const step = Number(req.query.step);
+        if (!Number.isInteger(step) || step < 0) return res.redirect(303, `/tasks/${row.id}#steps`);
+        const checkpoint = await checkpoints.at(row.id, step).catch(() => null);
+        if (!checkpoint) return page(req, res, { title: 'That step is not saved', body: html`<h1>That step is not saved</h1><p>That step is no longer saved (the last 50 are kept), so it cannot be forked. Pick another saved step on <a href="/tasks/${row.id}#steps">the task</a>.</p>` }, 404);
+        if (Array.isArray(checkpoint.state && checkpoint.state.acting) && checkpoint.state.acting.length) {
+            return page(req, res, { title: 'That step stopped mid-action', body: html`<h1>That step stopped mid-action</h1><p>Actor was interrupted while an action was running at this step, so a fork from it could not tell whether the action happened. Pick an earlier saved step on <a href="/tasks/${row.id}#steps">the task</a>.</p>` }, 404);
+        }
+        // The acting tools used after this step: a fork replays them, and the person must see that before confirming.
+        const latest = await checkpoints.last(row.id).catch(() => null);
+        const before = Array.isArray(checkpoint.state && checkpoint.state.ledger) ? checkpoint.state.ledger.length : 0;
+        const actingAfter = latest && Number(latest.step) > step && latest.state && Array.isArray(latest.state.ledger)
+            ? [...new Set(latest.state.ledger.slice(before).map((e) => e && e.tool).filter(Boolean))]
+                .filter((name) => { const tool = ctx.registry && ctx.registry.get ? ctx.registry.get(name) : null; return Boolean(tool && tool.acts === true); })
+            : [];
+        const tiers = availableTiers();
+        const tools = forkTools(checkpoint);
+        const problem = typeof req.query.error === 'string' ? forkProblem(req.query.error) : null;
+        return page(req, res, {
+            title: `Fork from step ${step}`,
+            crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task', href: `/tasks/${row.id}` }, { label: 'Fork' }],
+            styles: [showcase.STYLESHEET],
+            css: ['css/task.css'],
+            noReferrer: true,
+            body: html`${problem ? notice(problem, 'warn') : ''}${forkDialog(row, checkpoint, { tiers, tools, actingAfter })}`,
+        });
+    });
+
+    r.post('/tasks/:id/fork', require('express').urlencoded({ extended: false, limit: '64kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.redirect(303, '/tasks');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('A fork must be sent from openvibe.actor itself.');
+        const parent = await store.getTask(s, req.params.id);
+        if (!parent || parent.requester !== requesterOf(req)) return res.status(404).type('text/plain').send('No such task');
+        if (!finished(parent) || !checkpointsOn) return res.redirect(303, `/tasks/${parent.id}`);
+        const step = Number((req.body && req.body.step));
+        const checkpoint = Number.isInteger(step) ? await checkpoints.at(parent.id, step).catch(() => null) : null;
+        if (!checkpoint) return res.redirect(303, `/tasks/${parent.id}?fork=gone#steps`);
+        if (Array.isArray(checkpoint.state && checkpoint.state.acting) && checkpoint.state.acting.length) {
+            return res.redirect(303, `/tasks/${parent.id}/fork?step=${step}&error=acting`);
+        }
+        const change = String((req.body && req.body.change) || 'instruction');
+        let forkChange = null;
+        let mode = parent.mode;
+        if (change === 'instruction') {
+            const text = String((req.body && req.body.instruction) || '').trim().slice(0, 2000);
+            if (!text) return res.redirect(303, `/tasks/${parent.id}/fork?step=${step}&error=instruction`);
+            forkChange = { kind: 'instruction', instruction: text };
+        } else if (change === 'tier') {
+            const tier = String((req.body && req.body.tier) || '');
+            if (!availableTiers().includes(tier)) return res.redirect(303, `/tasks/${parent.id}/fork?step=${step}&error=tier`);
+            forkChange = { kind: 'tier', tier };
+            // A stronger tier makes this a "best" run, with its longer clock and its sub-agents. A weaker one keeps the
+            // parent's mode, so its other limits do not change by surprise.
+            if (tier === 'best') mode = 'best';
+        } else if (change === 'tool') {
+            const tool = String((req.body && req.body.tool) || '');
+            if (!forkTools(checkpoint).includes(tool)) return res.redirect(303, `/tasks/${parent.id}/fork?step=${step}&error=tool`);
+            forkChange = { kind: 'tool', tool };
+        } else {
+            return res.redirect(303, `/tasks/${parent.id}/fork?step=${step}&error=change`);
+        }
+        const out = await createTask({
+            s, config, engine,
+            principal: { requester: requesterOf(req), project: null },
+            body: { task: parent.task, mode },
+            parentId: parent.id, forkOfStep: step, forkChange,
+        });
+        if (out.code) return res.redirect(303, `/tasks/${parent.id}/fork?step=${step}&error=${encodeURIComponent(out.code)}`);
+        return res.redirect(303, `/tasks/${out.task.id}`);
+    });
+
+    r.get('/tasks/:id/compare/:otherId', async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id) || !TASK_ID.test(req.params.otherId)) return res.redirect(303, '/tasks');
+        const rowA = await store.getTask(s, req.params.id);
+        const rowB = await store.getTask(s, req.params.otherId);
+        const owner = requesterOf(req);
+        // Owner checks on both: a stranger, or a task that is not theirs, gets the same 404 as no task at all.
+        if (!rowA || !rowB || rowA.requester !== owner || rowB.requester !== owner) {
+            return page(req, res, { title: 'Task not found', body: html`<h1>Task not found</h1><p>There is no task here that belongs to you.</p>` }, 404);
+        }
+        if (rowA.id === rowB.id) return res.redirect(303, `/tasks/${rowA.id}`);
+        const [spansA, spansB, offerA, offerB] = await Promise.all([
+            trace.spansFor(s, rowA.id), trace.spansFor(s, rowB.id),
+            benchOffers.get(s, rowA.id, owner), benchOffers.get(s, rowB.id, owner),
+        ]);
+        const cmp = compareRuns.compare(rowA, rowB, { spansA, spansB, offerA, offerB, now: s.now() });
+        return page(req, res, {
+            title: 'Compare two runs',
+            crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task', href: `/tasks/${rowA.id}` }, { label: 'Compare' }],
+            styles: [showcase.STYLESHEET],
+            css: ['css/task.css'],
+            noReferrer: true,
+            body: comparePage(rowA, rowB, cmp, { spansA, spansB }),
+        });
     });
 
     // ── The one question, the assumptions, the Challenge (stage V2-8) ──────
@@ -707,7 +987,12 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
         const waiting = row.state === 'needs_you';
         const open = live || waiting;
         const questionEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'question');
-        const question = waiting && questionEvent ? { text: String(questionEvent.text || ''), options: Array.isArray(questionEvent.options) ? questionEvent.options : [] } : null;
+        const question = waiting && questionEvent ? {
+            text: String(questionEvent.text || ''),
+            options: Array.isArray(questionEvent.options) ? questionEvent.options : [],
+            // The resume card (stage V2-9): the run was stopped inside an action, not before it started.
+            kind: questionEvent.question_kind === 'acting' ? 'acting' : 'question',
+        } : null;
         const answerProblem = req.query.answer === 'gone' ? 'That question is no longer waiting for an answer. The task may have finished or been restarted; ask again.' : null;
         const assumeProblem = req.query.assume === 'gone' ? 'Those assumptions could not be changed: the task is no longer running.' : null;
         const cls = (events.find((e) => e.step === 'plan' && !e.agent && /"(\w+)" task/.test(e.text || '')) || { text: '' }).text.match(/"(\w+)"/);
@@ -717,6 +1002,12 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
         const parentRow = row.parent_id ? await store.getTask(s, row.parent_id) : null;
         const parentTask = parentRow && parentRow.requester === row.requester ? parentRow : null;
         const follows = t.state === 'succeeded' ? await store.followUps(s, row) : [];
+        // The saved steps (stage V2-9) and the runs this one can be compared with. A running task has no fork dialog.
+        const saved = !open && checkpointsOn ? await checkpoints.list(row.id) : [];
+        const forks = row.state === 'queued' ? [] : await store.forks(s, row);
+        const others = !open && (row.state === 'succeeded' || row.state === 'failed')
+            ? await store.recentSucceeded(s, row.requester, row.id, 4) : [];
+        const forkProblem = req.query.fork === 'gone' ? 'That saved step is no longer there, so it could not be forked. Pick another step below.' : null;
         const offer = t.state === 'succeeded' ? await benchOffers.get(s, row.id, requesterOf(req)) : null;
         const spans = await trace.spansFor(s, row.id);
         const followProblem = typeof req.query.follow === 'string' ? (FOLLOW_ERROR[req.query.follow] || 'That follow-up could not start. Try again in a moment.') : null;
@@ -740,16 +1031,21 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
 <article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${live ? '1' : ''}" data-bot="${botPages}">
 <header class="task-head">
 <p class="task-status"><span class="pill pill-${t.state}">${STATE_TEXT[t.state]}</span>${kind ? html`<span class="chip">${kind}</span>` : ''}<span class="chip">${MODE_LABEL[t.mode]}</span><span class="chip" id="task-cost">${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${time(t.created_at)}</p>
-${parentTask ? html`<p class="follows-on">Following up on <a href="/tasks/${parentTask.id}">${parentTask.task.length > 90 ? `${parentTask.task.slice(0, 89)}…` : parentTask.task}</a></p>` : ''}
+${parentTask ? html`<p class="follows-on">${row.fork_of_step != null
+            ? html`Forked from step ${row.fork_of_step} of <a href="/tasks/${parentTask.id}">${parentTask.task.length > 90 ? `${parentTask.task.slice(0, 89)}…` : parentTask.task}</a> · ${compareLink(row, parentTask)}`
+            : html`Following up on <a href="/tasks/${parentTask.id}">${parentTask.task.length > 90 ? `${parentTask.task.slice(0, 89)}…` : parentTask.task}</a>`}</p>` : ''}
 <h1 class="task-text">${row.task}</h1>
 </header>
 ${answerProblem ? notice(answerProblem, 'warn') : ''}
 ${assumeProblem ? notice(assumeProblem, 'warn') : ''}
+${forkProblem ? notice(forkProblem, 'warn') : ''}
 ${question ? questionCard(row, question) : ''}
-${outcome(t, row)}
+${outcome(t, row, { acting: question && question.kind === 'acting' })}
 ${t.state === 'succeeded' ? benchBlock(row, offer) : ''}
 ${t.state === 'succeeded' ? followBlock(row, follows, followProblem) : ''}
-${open ? planCard(plan, { editable: live || waiting, taskId: row.id }) : ''}
+${savedStepsBlock(row, saved, spans)}
+${relatedRunsBlock(row, { forks, others })}
+${open ? planCard(plan, { editable: live || (waiting && !(question && question.kind === 'acting')), taskId: row.id }) : ''}
 ${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
 <p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
 <a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
@@ -787,17 +1083,18 @@ ${table(['State', 'Endpoint', 'Delivery', 'Attempts'], rows.map((d) => [
      * own words. A plain POST; it works without JavaScript and on a phone.
      */
     function questionCard(row, question) {
-        return html`<section class="question-card" id="question" aria-labelledby="h-question">
-<h2 id="h-question">Before Actor starts, one question</h2>
+        const acting = question.kind === 'acting';
+        return html`<section class="question-card${acting ? ' question-act' : ''}" id="question" aria-labelledby="h-question">
+<h2 id="h-question">${acting ? 'Actor was stopped mid-action' : 'Before Actor starts, one question'}</h2>
 <p class="q-text">${question.text}</p>
 <form method="post" action="/tasks/${row.id}/answer" class="q-options">
 ${question.options.map((o) => html`<button class="sc-btn q-option" type="submit" name="answer" value="${o}">${o}</button>`)}
 </form>
-<form method="post" action="/tasks/${row.id}/answer" class="q-own">
+${acting ? html`<p class="muted small">Check what happened before choosing. <b>It happened, go on</b> records that it did, without running the tool again; <b>Run it again</b> deliberately runs it once more.</p>` : html`<form method="post" action="/tasks/${row.id}/answer" class="q-own">
 <label for="q-own-text">Or answer in your own words</label>
 <div class="q-own-row"><input id="q-own-text" name="answer" type="text" maxlength="2000" required placeholder="Your answer…"><button class="sc-btn" type="submit">Answer</button></div>
 </form>
-<p class="muted small">One question per task, before any work starts. The answer joins this task as your words.</p>
+<p class="muted small">One question per task, before any work starts. The answer joins this task as your words.</p>`}
 </section>`;
     }
 
@@ -849,13 +1146,14 @@ ${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
     }
 
     /** The outcome card: the first thing under the task. */
-    function outcome(t, row) {
+    function outcome(t, row, { acting = false } = {}) {
         if (t.state === 'succeeded') return resultBlock(t.result, t);
         const again = html`<form method="post" action="/tasks" class="inline"><input type="hidden" name="task" value="${row.task}"><input type="hidden" name="mode" value="best"><button class="sc-btn sc-primary" type="submit">Try again in Best mode</button></form> <a class="sc-btn" href="/#task">New task</a>`;
         if (t.state === 'failed') {
             return html`<section class="outcome outcome-bad" role="status"><h2>Actor couldn't finish this</h2><p>${friendlyError(t.error)}</p><div class="outcome-actions">${again}</div>${t.error ? html`<p class="muted small">Code <code>${t.error.code}</code></p>` : ''}</section>`;
         }
         if (t.state === 'cancelled') return html`<section class="outcome" role="status"><h2>Cancelled</h2><p>What was spent before the cancel stays spent.</p><div class="outcome-actions">${again}</div></section>`;
+        if (t.state === 'needs_you' && acting) return html`<section class="outcome outcome-wait" role="status"><h2>Waiting for you</h2><p>Actor was stopped while it was doing something that may have happened. Check it yourself, then choose above: run it again, record that it happened, or stop the task. The task keeps its place and its budget while you decide.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
         if (t.state === 'needs_you') return html`<section class="outcome outcome-wait" role="status"><h2>Waiting for you</h2><p>Actor asked one question before spending anything on this task. Answer it above, and the same task continues with your words.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
         return html`<section class="outcome outcome-live" role="status" aria-live="polite"><h2><span class="dot-pulse" aria-hidden="true"></span> <span id="live-state">${STATE_TEXT[t.state]}…</span></h2><p class="muted">This page fills in as the agent works. You can leave and come back: the task keeps running.</p><form method="post" action="/tasks/${row.id}/cancel" class="inline"><button class="sc-btn" type="submit">Cancel</button></form></section>`;
     }
@@ -863,11 +1161,15 @@ ${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
     /** What went wrong, for a person; the code stays visible underneath for anyone who needs it. */
     function friendlyError(err) {
         if (!err) return 'It stopped without saying why.';
+        // The resume cap has its own words (stage V2-9): a generic "Actor restarted" would hide why it stopped.
+        if (err.code === 'actor.task.interrupted' && /interrupted twice/.test(String(err.detail || ''))) return err.detail;
         const plain = {
             'actor.agents.exhausted': 'No agent gave an answer that passed its check, so nothing unchecked was shown to you. Trying again in Best mode starts with the strongest agent.',
             'actor.check.unavailable': 'The answer could not be checked, so it was not delivered. Try again in a minute.',
             'actor.task.timeout': 'It ran too long and was stopped.',
             'actor.task.interrupted': 'Actor restarted while this was running. Nothing more was charged; ask again.',
+            'actor.acting.unresolved': 'Actor was stopped before an action finished, and no choice came before the task ended, so it was not run again. The action may or may not have happened; check it yourself.',
+            'actor.checkpoint.invalid': 'The saved step could not be read, so the task was not run again from the beginning. The action may or may not have happened; check it yourself.',
         };
         return plain[err.code] || err.detail;
     }
@@ -985,6 +1287,8 @@ ${a.refused ? html`<details class="refused"><summary>See the answer that didn't 
         if (e.step === 'plan') { const p = taskEvents.plan(e.text); return html`<li class="tl-item tl-plan"><span class="tl-k">Plan</span><span class="tl-v">${p ? taskEvents.planLine(p) : e.text}</span></li>`; }
         if (e.step === 'question') return html`<li class="tl-item tl-q"><span class="tl-k">Asked</span><span class="tl-v">${e.text}</span></li>`;
         if (e.step === 'answer') return html`<li class="tl-item tl-answer"><span class="tl-k">You said</span><span class="tl-v">${e.text}</span></li>`;
+        if (e.step === 'resume') return html`<li class="tl-item tl-resume"><span class="tl-k">Resumed</span><span class="tl-v">${e.text}</span></li>`;
+        if (e.step === 'fork') return html`<li class="tl-item tl-fork"><span class="tl-k">Forked</span><span class="tl-v">${e.text}</span></li>`;
         if (e.step === 'escalation') return html`<li class="tl-item tl-esc"><span class="tl-k">Escalated</span><span class="tl-v">${e.text}</span></li>`;
         if (e.step === 'challenge') return html`<li class="tl-item tl-challenge"><span class="tl-k">Challenged</span><span class="tl-v">${e.text}</span></li>`;
         if (e.step === 'tool_call') return html`<li class="tl-item tl-tool"><span class="tl-k">Used</span><span class="tl-v"><code>${e.tool}</code> ${e.input || ''}</span></li>`;

@@ -11,6 +11,7 @@
  *     description: 'Current weather …',          // what the model reads
  *     input: { type: 'object', properties: { place: { type: 'string' } }, required: ['place'] },  // JSON schema
  *     scope: 'public',                           // public | person | private-ok
+ *     acts: true,                                // changes something outside the model: a checkpoint pauses a resume
  *     costUsd: 0,                                // estimated per call, for the planner
  *     timeoutMs: 15_000,
  *     async run(input, ctx) {                    // ctx: { fetch, signal, requester, emit, meter, config, log, artifacts }
@@ -22,6 +23,11 @@
  *   public      anyone; it may reach the public network
  *   person      only a signed-in person's task (the tool acts for them)
  *   private-ok  no network: it is the only kind private mode offers
+ *
+ * `acts: true` says the tool changes something outside the model's own reasoning: it writes, sends, starts or moves
+ * something (a robot, a computer, a desk, a coding task, a file, a memory, or another tool that may). The loop records
+ * a started mark and checkpoints it before such a call, so a restart never runs it again without the person deciding.
+ * A read-only tool omits it (or says false). Every module must decide: test/tool-acts.test.js lists the whole set.
  *
  * The loader validates every module's shape at boot. In tests a bad module throws (a broken file fails tests, never
  * production); in production it is logged and skipped. Fixtures, helpers (`_name.js`) and non-JavaScript files are
@@ -55,6 +61,7 @@ function validateTool(mod) {
     else if (mod.input.type !== 'object') errors.push('input.type must be "object"');
     else if (mod.input.properties != null && !isObject(mod.input.properties)) errors.push('input.properties must be an object');
     if (!SCOPES.includes(mod.scope)) errors.push(`scope: one of ${SCOPES.join(', ')}`);
+    if (mod.acts != null && typeof mod.acts !== 'boolean') errors.push('acts: true or false (omit it for a read-only tool)');
     if (mod.costUsd != null && !(Number.isFinite(mod.costUsd) && mod.costUsd >= 0)) errors.push('costUsd: a number, 0 or more');
     if (mod.timeoutMs != null && !(Number.isInteger(mod.timeoutMs) && mod.timeoutMs > 0 && mod.timeoutMs <= MAX_TIMEOUT_MS)) errors.push(`timeoutMs: an integer from 1 to ${MAX_TIMEOUT_MS}`);
     if (typeof mod.run !== 'function') errors.push('run: a function (input, ctx)');
@@ -162,7 +169,7 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
 
 /** A tool result as the loop, the ledger and the check use it. */
 function normalize(out) {
-    const empty = { text: '', data: null, sources: [], artifacts: [], refs: [], isError: false };
+    const empty = { text: '', data: null, sources: [], artifacts: [], refs: [], isError: false, secret: false };
     if (out == null) return empty;
     if (typeof out === 'string') return { ...empty, text: out };
     if (typeof out !== 'object') return { ...empty, text: String(out) };
@@ -179,7 +186,7 @@ function normalize(out) {
             source: r.source == null ? null : String(r.source).slice(0, 32), source_task: r.source_task == null ? null : String(r.source_task).slice(0, 64),
             agent_id: r.agent_id == null ? null : String(r.agent_id).slice(0, 64),
         })) : [];
-    return { text, data, sources, artifacts, refs, isError: out.isError === true };
+    return { text, data, sources, artifacts, refs, isError: out.isError === true, secret: out.secret === true };
 }
 
 module.exports = { createRegistry, validateTool, allowedBy, normalize, SCOPES, MAX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS };

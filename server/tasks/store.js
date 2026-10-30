@@ -22,10 +22,11 @@ function subjectRef(requester) {
 
 async function insertTask(s, t) {
     await s.db.query(
-        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret, timeout_ms, parent_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14, $15, $16)`,
+        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret, timeout_ms, parent_id, fork_of_step, fork_change)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18::jsonb)`,
         [t.id, t.requester, t.project_id || null, t.task, t.mode, t.agent || null, t.budget_task, t.budget_day, t.idem_key || null, t.idem_hash || null, t.created_at, t.via || null,
-            t.webhooks && t.webhooks.length ? JSON.stringify(t.webhooks) : null, t.webhook_secret || null, t.timeout_ms || null, t.parent_id || null]);
+            t.webhooks && t.webhooks.length ? JSON.stringify(t.webhooks) : null, t.webhook_secret || null, t.timeout_ms || null, t.parent_id || null,
+            t.fork_of_step == null ? null : Number(t.fork_of_step), t.fork_change ? JSON.stringify(t.fork_change) : null]);
     await addSpend(s, t.requester, 0, { tasks: 1 });
     return getTask(s, t.id);
 }
@@ -52,8 +53,15 @@ async function followContext(s, row, { depth = 3, clip = 3000 } = {}) {
     }
     return out;
 }
-/** The follow-ups of a task, oldest first: { id, task, state, created_at }. */
-const followUps = (s, row) => s.db.many('SELECT id, task, state, created_at FROM tasks WHERE parent_id = $1 AND requester = $2 ORDER BY created_at, id LIMIT 20', [row.id, row.requester]);
+/** The follow-ups of a task, oldest first: { id, task, state, created_at }. A fork is not a follow-up. */
+const followUps = (s, row) => s.db.many('SELECT id, task, state, created_at FROM tasks WHERE parent_id = $1 AND requester = $2 AND fork_of_step IS NULL ORDER BY created_at, id LIMIT 20', [row.id, row.requester]);
+/** The forks of a task (stage V2-9), newest first: { id, task, state, created_at, fork_of_step, fork_change }. */
+const forks = (s, row) => s.db.many('SELECT id, task, state, created_at, fork_of_step, fork_change FROM tasks WHERE parent_id = $1 AND requester = $2 AND fork_of_step IS NOT NULL ORDER BY created_at, id LIMIT 20', [row.id, row.requester]);
+/** A person's other finished runs, for the compare links on a task page. */
+const recentSucceeded = (s, requester, exceptId, limit = 5) => s.db.many(
+    "SELECT id, task, created_at FROM tasks WHERE requester = $1 AND state = 'succeeded' AND id <> $2 ORDER BY id DESC LIMIT $3",
+    [requester, exceptId, Math.max(1, limit)],
+);
 const byIdempotency = (s, requester, key) => s.db.maybe('SELECT * FROM tasks WHERE requester = $1 AND idem_key = $2', [requester, key]);
 
 /** A requester's tasks, newest first; `via` narrows to the ones that service started for them. */
@@ -72,7 +80,7 @@ async function listTasks(s, requester, { limit = 20, before = null, via = null }
 async function updateTask(s, id, patch) {
     const cols = Object.keys(patch);
     if (!cols.length) return getTask(s, id);
-    const json = new Set(['result', 'explanation']);
+    const json = new Set(['result', 'explanation', 'fork_change']);
     const sets = cols.map((c, i) => `${c} = $${i + 2}${json.has(c) ? '::jsonb' : ''}`);
     const vals = cols.map((c) => (json.has(c) && patch[c] != null ? JSON.stringify(patch[c]) : patch[c]));
     await s.db.query(`UPDATE tasks SET ${sets.join(', ')} WHERE id = $1`, [id, ...vals]);
@@ -183,13 +191,27 @@ async function spendDays(s, requester, days = 7) {
     return keys.map((day) => ({ day, usd: by.has(day) ? Number(by.get(day).usd) : 0, tasks: by.has(day) ? Number(by.get(day).tasks) : 0 }));
 }
 
-/** At boot: a task a stopped process left open did not finish, and is not re-run behind the person's back. */
-async function failInterrupted(s) {
-    const rows = await s.db.many(
-        `UPDATE tasks SET state = 'failed', error_code = 'actor.task.interrupted',
-                error_detail = 'Actor restarted while this task was running. Nothing was charged after the restart; ask again.',
-                finished_at = $1, result = NULL
-         WHERE state IN ('queued', 'running', 'verifying', 'needs_you') RETURNING id`, [s.iso()]);
+/** Every task a stopped process left open: the boot's resume pass looks at each one (stage V2-9). */
+const openTasks = (s) => s.db.many(
+    "SELECT * FROM tasks WHERE state IN ('queued', 'running', 'verifying', 'needs_you') ORDER BY id",
+);
+
+/**
+ * At boot: the tasks the resume pass could not continue (no checkpoint, the resume cap, checkpoints off) are failed
+ * rather than re-run behind the person's back. `ids` narrows it to those; `detail` says why when it is not the default.
+ */
+async function failInterrupted(s, { ids = null, detail = null } = {}) {
+    const args = [s.iso(), detail || 'Actor restarted while this task was running. Nothing was charged after the restart; ask again.'];
+    let sql = `UPDATE tasks SET state = 'failed', error_code = 'actor.task.interrupted',
+                error_detail = $2, finished_at = $1, result = NULL
+         WHERE state IN ('queued', 'running', 'verifying', 'needs_you')`;
+    if (Array.isArray(ids)) {
+        if (!ids.length) return [];
+        args.push(ids);
+        sql += ' AND id = ANY($3::text[])';
+    }
+    sql += ' RETURNING id';
+    const rows = await s.db.many(sql, args);
     return rows.map((r) => r.id);
 }
 
@@ -228,4 +250,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };

@@ -10,6 +10,7 @@ module.exports = {
     description: 'Ask the person to do one step themselves on your own desk: a sign-in, a CAPTCHA, a code sent to their phone, a payment, or anything you must not or cannot do yourself. Get the page to that step first (your desk started with computer_desk). They get a link to watch the desk and take it over; this waits until they have used it and stopped (a few minutes at most), then tells you to look again before you go on. Never ask for a password, code or card number in your answer instead.',
     input: { type: 'object', properties: { machine, what: { type: 'string', description: 'the step, in one plain sentence, for example "Sign in to your Google account in the browser."' } }, required: ['machine', 'what'] },
     scope: 'person',
+    acts: true,
     costUsd: 0,
     timeoutMs: 700_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.botUrl && personOf(ctx.requester)),

@@ -12,10 +12,11 @@ const store = require('./tasks/store');
 const PRUNE_EVERY_MS = 6 * 60 * 60_000;
 
 /**
- * The process stop (openvibe-sdk/service): the HTTP drain runs, then running tasks are stopped and recorded as
- * interrupted (the person can ask again; nothing re-runs behind their back), the Events subscriptions stop, the JWKS
- * refresher stops and the store closes. Exported so a test can inject `exit` and `signals: false`. `extra` is what the
- * product adds (the Events subscriptions); a test that passes none keeps the skeleton's order.
+ * The process stop (openvibe-sdk/service): the HTTP drain runs, then running tasks are aborted and their rows left open
+ * so the next boot can resume them from their last checkpoint (stage V2-9), the Events subscriptions stop, the JWKS
+ * refresher stops and the store closes. Without ACTOR_CHECKPOINT_KEY the next boot marks the open rows interrupted,
+ * exactly as before. Exported so a test can inject `exit` and `signals: false`. `extra` is what the product adds (the
+ * Events subscriptions); a test that passes none keeps the skeleton's order.
  */
 function createLifecycle({ server, ctx, exit, signals, timers = [], extra = [] }) {
     return gracefulStop({
@@ -27,11 +28,13 @@ function createLifecycle({ server, ctx, exit, signals, timers = [], extra = [] }
 async function start() {
     const { app, ctx } = await createApp();
     const { config } = ctx;
-    // A task a stopped process left open did not finish: it is recorded so, never re-run.
-    const interrupted = await store.failInterrupted(ctx.s);
-    if (interrupted.length) console.warn(`[Actor] ${interrupted.length} task(s) interrupted by the last stop were marked failed`);
-    // Their webhooks hear `failed` like any other end; deliveries a stop left half-sent go out again (same delivery id).
-    for (const id of interrupted) await ctx.webhooks.enqueue(id, 'failed').catch((err) => console.warn('[Actor] webhook enqueue failed:', id, err && err.message));
+    // A task a stopped process left open is resumed from its last checkpoint when it has one (stage V2-9); a task
+    // with no checkpoint, or past the resume cap, is recorded as interrupted, never re-run from the beginning. Without
+    // ACTOR_CHECKPOINT_KEY this is the old behaviour: every open task is marked interrupted.
+    const boot = await ctx.engine.resumeInterrupted();
+    if (boot.resumed.length) console.warn(`[Actor] ${boot.resumed.length} task(s) resumed from a checkpoint after a restart`);
+    if (boot.requeued.length) console.warn(`[Actor] ${boot.requeued.length} queued task(s) started again after a restart`);
+    if (boot.failed.length) console.warn(`[Actor] ${boot.failed.length} task(s) interrupted by the last stop were marked failed`);
     await ctx.webhooks.recover();
     ctx.webhooks.start();
     // Replies to "@actor …" in chat (chat/asks.js), posted once their task has ended.
