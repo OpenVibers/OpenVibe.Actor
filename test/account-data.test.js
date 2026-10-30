@@ -116,7 +116,7 @@ async function makeArtifact(t, subject, taskId, name, content) {
             assert.strictEqual(memRow.text, 'A private note.');
             assert.strictEqual(memRow.kind, 'fact');
             assert.strictEqual(memRow.status, 'active');
-            assert.strictEqual(memRow.source, 'person');
+            assert.strictEqual(memRow.origin, 'person', 'the export carries the table column');
             const tasks = part.body.files.find((f) => f.name === 'tasks.json').content;
             assert.strictEqual(tasks.length, 1);
             assert.strictEqual(tasks[0].task, 'person-a');

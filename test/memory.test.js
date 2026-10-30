@@ -65,10 +65,12 @@ const ownerA = `user:${A}`;
         await check('the migration extends actor_agent_memory: person-wide rows, source, status, uses, and the index', async () => {
             const cols = await s.db.many("SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'actor_agent_memory'");
             const by = new Map(cols.map((c) => [c.column_name, c.is_nullable]));
-            ['id', 'owner', 'text', 'kind', 'source', 'status', 'source_task', 'created_at', 'updated_at', 'last_used_at', 'uses', 'agent_id'].forEach((c) => assert.ok(by.has(c), `missing column ${c}`));
+            ['id', 'owner', 'text', 'kind', 'origin', 'status', 'source_task', 'created_at', 'updated_at', 'last_used_at', 'uses', 'agent_id'].forEach((c) => assert.ok(by.has(c), `missing column ${c}`));
             assert.strictEqual(by.get('agent_id'), 'YES', 'a memory may belong to no agent: it is the person\'s own');
-            assert.ok(by.has('source'));
-            assert.ok(!by.has('origin'), 'the old column name is gone');
+            assert.ok(by.has('origin'), 'the old release still writes origin');
+            assert.ok(!by.has('source'), 'no rename: the column keeps its 0005 name');
+            const cons = await s.db.many("SELECT conname FROM pg_constraint WHERE conrelid = 'actor_agent_memory'::regclass");
+            assert.ok(!cons.some((c) => /text_500/.test(c.conname)), 'no tighter length check on old rows');
             const idx = await s.db.many("SELECT indexname FROM pg_indexes WHERE tablename = 'actor_agent_memory'");
             assert.ok(idx.some((i) => /owner_status/.test(i.indexname)), 'the (owner, status) index');
         });
@@ -191,24 +193,61 @@ const ownerA = `user:${A}`;
         const archived = (await memory.add(t.ctx.s, { owner: ownA, text: 'Old note.', kind: 'fact', source: 'person' })).row;
         await memory.decide(t.ctx.s, ownA, archived.id, 'archive');
 
-        await check('/memory is signed-in only, works without JavaScript, and shows active, suggested and archived rows', async () => {
+        await check('/memory is signed-in only, is a short tabbed page, and shows only the open tab', async () => {
             assert.strictEqual((await t.get('/memory')).status, 303);
+            // One use of the active memory, so its row can say so.
+            await memory.recall(t.ctx.s, ownA, 'metric units', { now: Date.now() });
             const page = await t.get('/memory', { as: a });
             assert.strictEqual(page.status, 200);
             assert.match(page.text, /<form method="post" action="\/memory" class="mem-add">/);
-            ['I prefer metric units.', 'The person uses dark mode.', 'Old note.'].forEach((text) => assert.ok(page.text.includes(text), text));
-            assert.match(page.text, new RegExp(`id="${active.id}"`));
+            assert.match(page.text, /<details class="mem-how"><summary>How memory works<\/summary>/);
+            assert.match(page.text, /What Actor remembers about you\. Only your own words become active; anything else waits here for you\./);
+            assert.match(page.text, /Up to 500 characters\. Never a password, key or card number\./);
+            // The default tab is Suggested when there is one; only that list is in the page.
+            assert.match(page.text, /aria-current="page"/);
+            assert.ok(page.text.includes('href="/memory?tab=active"') && page.text.includes('href="/memory?tab=archived"'), 'all tabs are links');
+            assert.ok(page.text.includes(`id="${suggested.id}"`));
+            assert.ok(!page.text.includes(`id="${active.id}"`) && !page.text.includes(`id="${archived.id}"`), 'only the open tab');
             assert.match(page.text, new RegExp(`action="/memory/${suggested.id}/accept"`));
             assert.match(page.text, new RegExp(`action="/memory/${suggested.id}/decline"`));
-            assert.match(page.text, new RegExp(`action="/memory/${active.id}/archive"`));
-            assert.match(page.text, new RegExp(`action="/memory/${archived.id}/restore"`));
+            assert.match(page.text, /suggested by your agent/);
             assert.ok(page.text.includes(`href="/tasks/${taskId}"`), 'where it came from');
-            assert.match(page.text, /You wrote it/);
-            assert.match(page.text, /Your agent suggested it/);
-            assert.match(page.text, /not used yet|last used/);
+            assert.match(page.text, /<time datetime="[^"]+">(today|yesterday|Oct 30)<\/time>/, 'the date only, no time');
+            // Active tab: the person's rows, their menu, and used once.
+            const activePage = await t.get('/memory?tab=active', { as: a });
+            assert.ok(activePage.text.includes(`id="${active.id}"`));
+            assert.ok(!activePage.text.includes(`id="${suggested.id}"`) && !activePage.text.includes(`id="${archived.id}"`));
+            assert.match(activePage.text, new RegExp(`action="/memory/${active.id}/archive"`));
+            assert.match(activePage.text, /you wrote it/);
+            assert.match(activePage.text, /used once/);
+            assert.match(activePage.text, /aria-label="More actions for this memory"/);
+            // Archived tab: its row comes back with Restore.
+            const archivedPage = await t.get('/memory?tab=archived', { as: a });
+            assert.ok(archivedPage.text.includes(`id="${archived.id}"`));
+            assert.match(archivedPage.text, new RegExp(`action="/memory/${archived.id}/restore"`));
             // Another person never sees these rows.
             const other = await t.get('/memory', { as: b });
             [active.id, suggested.id, archived.id].forEach((id) => assert.ok(!other.text.includes(`id="${id}"`), id));
+        });
+
+        await check('a longer row from the old release is listed, its edit form shows it whole, and a save over 500 is refused', async () => {
+            const longText = 'A long memory from before the limit. '.repeat(30).slice(0, 900);
+            assert.strictEqual(longText.length, 900);
+            const longId = t.ctx.s.newId('mem');
+            // The old release's INSERT: only its columns, no kind/status/uses.
+            await t.ctx.s.db.query('INSERT INTO actor_agent_memory (id, agent_id, owner, text, origin, created_at, updated_at) VALUES ($1, NULL, $2, $3, $4, $5, $5)',
+                [longId, ownA, longText, 'person', t.ctx.s.iso()]);
+            const shown = await t.get('/memory?tab=active', { as: a });
+            assert.strictEqual(shown.status, 200);
+            assert.ok(shown.text.includes(longText), 'the whole 900-character row is listed');
+            assert.ok(shown.text.includes('</textarea>'), 'the edit form renders');
+            const refused = await t.get(`/memory/${longId}/edit`, { as: a, form: { text: longText, kind: 'fact' }, headers: SAME });
+            assert.strictEqual(refused.status, 303);
+            assert.match(refused.headers.get('location'), /problem=/);
+            assert.match(decodeURIComponent(refused.headers.get('location')), /at most 500/);
+            const after = await memory.get(t.ctx.s, ownA, longId);
+            assert.strictEqual(after.text.length, 900, 'the old text is untouched');
+            await memory.remove(t.ctx.s, ownA, longId);
         });
 
         await check('the page adds, edits, accepts, declines, archives, restores and deletes through plain forms', async () => {
@@ -246,8 +285,10 @@ const ownerA = `user:${A}`;
             const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'memory.css'), 'utf8');
             assert.ok(!/#[0-9a-f]{3,8}\b/i.test(css), 'no hex colour in memory.css');
             assert.ok(!/\brgba?\(/.test(css), 'no literal rgb() colour');
-            assert.match(css, /grid-template-columns: minmax\(0, 1fr\)/);
+            assert.match(css, /\.mem-list\.ovk-list \{ overflow: visible;/);
             assert.match(css, /@media \(max-width: 30rem\)/);
+            assert.match(css, /min-height: 36px/);
+            assert.match(css, /min-height: 44px/);
         });
 
         await check('a cited memory on the task page opens its row, with its source', async () => {

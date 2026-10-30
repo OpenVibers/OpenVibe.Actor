@@ -1,52 +1,81 @@
-/* OpenVibe.Actor /memory (Actor v2, stage V2-6). Loaded by that page only. Every colour is a Shared theme token: the
-   page follows the visitor's dark or light theme and never carries a hex value of its own. One column at every width,
-   so 320 px has nothing to scroll sideways. */
-.mem-head-page { max-width: 46rem; margin: 1rem 0 1.25rem; }
-.mem-eyebrow { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent-light); }
-.mem-lede { margin: .25rem 0 0; color: var(--text-secondary); }
-.mem-panel, .mem-sec { margin: 1.25rem 0; min-width: 0; }
-.mem-panel > h2, .mem-sec > h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem .6rem; margin: 0 0 .55rem; font-size: 1.15rem; }
-.mem-count { font-size: .78rem; font-weight: 600; color: var(--text-muted); }
-.mem-note { margin: -.2rem 0 .7rem; font-size: .88rem; color: var(--text-secondary); }
-.mem-empty { margin: .2rem 0; padding: .9rem 1rem; border: 1px dashed var(--border-light); border-radius: 12px; color: var(--text-secondary); }
-.mem-add, .mem-edit form { display: flex; flex-direction: column; align-items: stretch; gap: .55rem; max-width: 46rem; }
-.mem-add { margin: 0 0 .35rem; }
-.mem-add label, .mem-edit label { display: flex; flex-direction: column; gap: .25rem; font-weight: 650; font-size: .92rem; min-width: 0; }
-.mem-hint { font-size: .8rem; font-weight: 400; color: var(--text-secondary); }
-.mem-add textarea, .mem-add select, .mem-edit textarea, .mem-edit select {
-    width: 100%; max-width: 100%; box-sizing: border-box; padding: .5rem .6rem; border-radius: 8px; font: inherit; font-size: .92rem;
+/* OpenVibe.Actor /memory (Actor v2, stage V2-6). Loaded by that page only. Every colour is a Shared theme token, so
+   it follows dark and light and carries no hex of its own. One column at every width: 320 px has nothing to scroll
+   sideways. The list is the Shared kit's (kit.css: ovk-list/ovk-row), made compact for a phone page of one or two
+   screens; the tabs are kit.tabs. */
+.mem-head-page { max-width: 46rem; margin: .5rem 0 .8rem; }
+.mem-head-page h1 { margin: .2rem 0 .3rem; font-size: 1.6rem; }
+.mem-lede { margin: 0; color: var(--text-secondary); line-height: 1.45; }
+.mem-how { margin-top: .45rem; }
+.mem-how > summary { display: inline-flex; align-items: center; min-height: 36px; cursor: pointer; color: var(--accent-light); font-weight: 650; font-size: .88rem; }
+.mem-how p { margin: .35rem 0 0; max-width: 42rem; color: var(--text-secondary); font-size: .88rem; line-height: 1.5; }
+.mem-add-wrap { margin: .55rem 0 .75rem; }
+.mem-add-wrap > h2 { margin: 0 0 .3rem; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.mem-add { display: flex; align-items: center; gap: .5rem; max-width: 46rem; }
+.mem-add input, .mem-add select, .mem-edit input, .mem-edit textarea, .mem-edit select {
+    box-sizing: border-box; padding: .45rem .6rem; border-radius: 8px; font: inherit; font-size: .9rem;
     color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-light);
 }
-.mem-add textarea, .mem-edit textarea { resize: vertical; }
-.mem-add button, .mem-edit button { align-self: flex-start; }
-.mem-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; }
-.mem { min-width: 0; overflow-wrap: anywhere; padding: .9rem 1rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-card); }
-.mem-suggested { border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); background: color-mix(in srgb, var(--warning) 6%, var(--bg-card)); }
-.mem-archived { opacity: .86; }
-.mem-head { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; margin: 0 0 .35rem; }
-.mem-kind { font-size: .72rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--accent-light); }
-.mem-kind-preference { color: var(--accent-light); }
-.mem-kind-instruction { color: var(--warning-text); }
-.mem-wait { font-size: .78rem; color: var(--warning-text); font-weight: 650; }
-.mem-text { margin: .15rem 0 .4rem; font-size: 1rem; line-height: 1.5; white-space: pre-wrap; }
-.mem-meta { margin: 0; font-size: .82rem; line-height: 1.55; color: var(--text-secondary); }
-.mem-meta a { color: inherit; }
-.mem-forms { display: flex; flex-wrap: wrap; align-items: baseline; gap: .45rem .8rem; margin-top: .55rem; }
-.mem-forms form { margin: 0; }
+.mem-add input { flex: 1 1 auto; min-width: 0; }
+.mem-add select { flex: 0 0 auto; }
+.mem-add .mem-btn { flex: 0 0 auto; }
+.mem-hint { margin: .3rem 0 0; font-size: .75rem; color: var(--text-muted); }
+.mem-add-wrap + .ovk-tabs { margin-top: 0; }
+.mem-list.ovk-list { overflow: visible; margin-bottom: 0; }
+.mem-row { position: relative; min-width: 0; overflow-wrap: anywhere; }
+.mem-row.ovk-row--static { min-height: 0; padding: 8px 10px; gap: 10px; }
+.mem-row .ovk-row-main { gap: 2px; }
+.mem-row .ovk-row-top { align-items: baseline; gap: 8px; }
+.mem-text { flex: 1 1 auto; min-width: 0; font-weight: 400; line-height: 1.42; overflow-wrap: anywhere; }
+.mem-meta { color: var(--text-muted); font-size: .78rem; line-height: 1.35; }
+.mem-meta time { font-size: .74rem; }
+.mem-row .ovk-row-sub > span:first-child { white-space: normal; overflow: visible; text-overflow: clip; }
+.mem-meta a { color: inherit; text-decoration: underline; }
+.mem-trail { display: flex; align-items: center; gap: .25rem; flex: none; position: relative; }
+.mem-trail form { display: flex; margin: 0; }
 .mem-btn {
-    font: inherit; font-size: .82rem; font-weight: 600; min-height: 2rem; padding: .35rem .75rem; border-radius: 8px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-height: 36px;
+    padding: .25rem .65rem; border-radius: 8px; font: inherit; font-size: .8rem; font-weight: 650; cursor: pointer;
     color: var(--text-primary); background: transparent; border: 1px solid var(--border-light);
 }
 .mem-btn:hover { border-color: var(--accent); }
 .mem-primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent-strong); }
 .mem-primary:hover { filter: brightness(1.08); }
 .mem-danger { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 55%, var(--border-light)); }
-.mem-edit { flex-basis: 100%; min-width: 0; }
-.mem-edit > summary { cursor: pointer; font-size: .85rem; color: var(--accent-light); }
-.mem-edit form { margin-top: .5rem; }
-.mem-foot { margin: 1.6rem 0 0; font-size: .9rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+.mem-menu { position: relative; }
+.mem-menu > summary { list-style: none; }
+.mem-menu > summary::-webkit-details-marker { display: none; }
+.mem-more {
+    display: inline-grid; place-items: center; box-sizing: border-box; width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid var(--border-light); background: transparent; color: var(--text-secondary);
+    font-size: 1.1rem; font-weight: 800; line-height: 1; cursor: pointer;
+}
+.mem-more:hover, .mem-more:focus-visible { border-color: var(--accent); color: var(--text-primary); }
+.mem-menu-body {
+    position: absolute; right: 0; top: calc(100% + 4px); z-index: 70; display: grid; gap: .3rem;
+    min-width: 13rem; max-width: calc(100vw - 2rem); padding: .4rem; border-radius: 12px;
+    border: 1px solid var(--border-light); background: var(--bg-card); box-shadow: var(--shadow-lg, 0 8px 32px var(--border));
+}
+.mem-menu-body form { margin: 0; }
+.mem-menu-body .mem-btn { width: 100%; justify-content: flex-start; text-align: left; }
+.mem-edit { border-top: 1px solid var(--border); margin-top: .2rem; padding-top: .25rem; }
+.mem-edit > summary { display: flex; align-items: center; min-height: 36px; cursor: pointer; font-size: .84rem; font-weight: 650; color: var(--accent-light); }
+.mem-edit form { display: flex; flex-direction: column; gap: .4rem; padding: .2rem; }
+.mem-edit label { display: flex; flex-direction: column; gap: .2rem; font-size: .8rem; font-weight: 650; }
+.mem-edit textarea { width: 100%; resize: vertical; }
+.mem-edit select { width: 100%; }
+.mem-edit .mem-btn { align-self: flex-start; }
+.mem-foot { margin: 1rem 0 0; font-size: .85rem; color: var(--text-muted); overflow-wrap: anywhere; }
 @media (max-width: 30rem) {
-    .mem { padding: .8rem .85rem; }
-    .mem-btn { min-height: 2.5rem; }
-    .mem-forms { gap: .5rem; }
+    .mem-add { flex-direction: column; align-items: stretch; }
+    .mem-add select, .mem-add .mem-btn { width: 100%; }
+    .mem-btn, .mem-more { min-height: 44px; }
+    .mem-more { width: 44px; height: 44px; }
+    .mem-row.ovk-row--static { padding: 8px; gap: 8px; }
+    .mem-row.mem-suggested { flex-wrap: wrap; }
+    .mem-row.mem-suggested .mem-trail { flex-basis: 100%; justify-content: flex-end; margin-top: 2px; }
+    .mem-meta { font-size: .76rem; }
+}
+@media (pointer: coarse) {
+    .mem-btn, .mem-more { min-height: 44px; }
+    .mem-more { width: 44px; height: 44px; }
 }

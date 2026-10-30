@@ -108,12 +108,14 @@ function whyRefused(text, { kind = 'fact' } = {}) {
 }
 
 const fromRow = (r) => (r ? {
-    id: r.id, owner: r.owner, agent_id: r.agent_id || null, text: r.text, kind: r.kind, source: r.source, status: r.status,
+    id: r.id, owner: r.owner, agent_id: r.agent_id || null, text: r.text, kind: r.kind, source: r.origin, status: r.status,
     source_task: r.source_task || null, created_at: r.created_at, updated_at: r.updated_at,
     last_used_at: r.last_used_at || null, uses: Number(r.uses) || 0,
 } : null);
 
-const select = 'id, owner, agent_id, text, kind, source, status, source_task, created_at, updated_at, last_used_at, uses';
+// The column keeps the name it had in 0005 (`origin`): an expand migration may not rename it while the old release
+// still runs. The code and the API call the same value `source` (fromRow maps it).
+const select = 'id, owner, agent_id, text, kind, origin, status, source_task, created_at, updated_at, last_used_at, uses';
 
 /**
  * Write one memory. `source` says who it came from; an agent-written note is a suggestion unless the caller explicitly
@@ -133,7 +135,7 @@ async function add(s, { owner, agentId = null, text, kind = 'fact', source = 'pe
             if (!agent) return { error: 'No such agent.' };
             const count = Number(await s.db.value('SELECT count(*) FROM actor_agent_memory WHERE agent_id = $1', [agentId]));
             if (count >= MAX_PER_AGENT) {
-                const oldest = await s.db.maybe("SELECT id FROM actor_agent_memory WHERE agent_id = $1 AND source = 'agent' ORDER BY created_order LIMIT 1", [agentId]);
+                const oldest = await s.db.maybe("SELECT id FROM actor_agent_memory WHERE agent_id = $1 AND origin = 'agent' ORDER BY created_order LIMIT 1", [agentId]);
                 if (!oldest) return { limit: true, error: 'This agent\'s memory is full of notes you wrote; delete one first.' };
                 await s.db.query('DELETE FROM actor_agent_memory WHERE id = $1', [oldest.id]);
             }
@@ -144,14 +146,14 @@ async function add(s, { owner, agentId = null, text, kind = 'fact', source = 'pe
         const prior = await s.db.maybe('SELECT * FROM actor_agent_memory WHERE owner = $1 AND agent_id IS NOT DISTINCT FROM $2 AND lower(text) = lower($3) LIMIT 1', [owner, agentId, body]);
         if (prior) {
             // The person saying it again makes their own earlier suggestion theirs, rather than adding a duplicate.
-            if (source === 'person' && (prior.status !== 'active' || prior.source !== 'person')) {
-                const row = await s.db.maybe('UPDATE actor_agent_memory SET status = $1, kind = $2, source = $3, source_task = COALESCE($4, source_task), updated_at = $5 WHERE id = $6 RETURNING ' + select,
+            if (source === 'person' && (prior.status !== 'active' || prior.origin !== 'person')) {
+                const row = await s.db.maybe('UPDATE actor_agent_memory SET status = $1, kind = $2, origin = $3, source_task = COALESCE($4, source_task), updated_at = $5 WHERE id = $6 RETURNING ' + select,
                     ['active', kind, 'person', sourceTask, s.iso(), prior.id]);
                 return { row: fromRow(row), duplicate: true };
             }
             return { row: fromRow(prior), duplicate: true };
         }
-        const row = await s.db.maybe(`INSERT INTO actor_agent_memory (id, agent_id, owner, text, kind, source, status, source_task, created_at, updated_at, last_used_at, uses)
+        const row = await s.db.maybe(`INSERT INTO actor_agent_memory (id, agent_id, owner, text, kind, origin, status, source_task, created_at, updated_at, last_used_at, uses)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,NULL,0) RETURNING ${select}`,
         [s.newId('mem'), agentId, owner, body, kind, source, state, sourceTask, s.iso()]);
         return { row: fromRow(row) };
