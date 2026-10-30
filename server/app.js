@@ -91,9 +91,13 @@ async function createApp(opts = {}) {
     const models = opts.models || createModels({ config, rates: catalog.RATES, fetchImpl: providerFetch, log });
     const registry = opts.registry || createRegistry({ log, strict: config.nodeEnv === 'test', fetchImpl: providerFetch });
     await models.warm().catch((err) => log.warn('[Actor] model listing failed:', err && err.message));
+    // Live per-tool/per-model numbers (stage V2-10), one aggregate over actor_spans cached for 5 minutes: the brain's
+    // step choice (V2-8) reads the same object the public /api/v1/stats routes do. Created before the loop, which
+    // passes it to the bandit.
+    const stats = opts.stats || createStats({ store: s, log });
     // The files and charts a task makes live in Actor's own PostgreSQL, private to the task's owner (stage V2-4), so
     // the loop needs the store, not a Media client.
-    const loop = opts.loop || createLoop({ config, models, registry, log, store: s });
+    const loop = opts.loop || createLoop({ config, models, registry, log, store: s, stats });
     const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: providerFetch, log });
     // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.
     // A webhook naming a project secret (ADR-056) is signed by OpenVibe.Network (server/net/secret-signer.js).
@@ -104,10 +108,7 @@ async function createApp(opts = {}) {
     });
     // Network notifications ("tell me when it's done"): off without a client secret, never able to fail a task.
     const notifier = opts.notifier || createNotifier({ config, fetchImpl, log });
-    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier });
-    // Live per-tool/per-model numbers (stage V2-10), one aggregate over actor_spans cached for 5 minutes: the brain's
-    // step choice (V2-8) reads the same object the public /api/v1/stats routes do.
-    const stats = opts.stats || createStats({ store: s, log });
+    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier, registry });
     const principal = createPrincipal({ config, keys });
     const projects = opts.projects || require('./identity/projects').createProjects({ config });
     // Ask Actor from chat (chat/asks.js): chat.message.created through the events consumer below, replies through Chat.

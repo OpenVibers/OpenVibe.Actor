@@ -12,6 +12,7 @@ const store = require('./store');
 const catalog = require('../agents/catalog');
 const { checkWebhookUrl } = require('../net/webhook-post');
 const { mintSecret } = require('./webhooks');
+const learn = require('../runtime/brain/learn');
 
 function untilMidnight(nowMs) {
     const n = new Date(nowMs);
@@ -51,6 +52,9 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         }
     }
     const retryAfter = untilMidnight(s.now());
+    // A follow-up that says the answer was wrong teaches the router a failure and leaves the person a suggested
+    // memory (stage V2-8); it never changes what they asked for.
+    const parent = parentId ? await store.getTask(s, parentId) : null;
     // Check and insert in one transaction under the day's spend-row locks, counting what open tasks may still spend:
     // concurrent creations cannot all pass on the same reading and overrun the person's or the operator's cap.
     const out = await s.tx(async () => {
@@ -77,6 +81,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     });
     // The engine starts the task only once its row has committed; a webhook that asked for `queued` hears it now.
     if (out.status === 201) {
+        if (parent) await learn.correction({ store: s, parent, text: body.task, now: () => s.now() }).catch(() => {});
         if (webhooks.length && webhookQueue) await webhookQueue.enqueue(out.task.id, 'queued');
         engine.submit(out.task.id);
     }

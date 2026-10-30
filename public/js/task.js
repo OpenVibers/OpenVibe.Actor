@@ -60,7 +60,37 @@
       list.appendChild(li);
     });
     var assume = document.getElementById('plan-assume');
-    if (assume) { assume.textContent = p.assumptions.length ? 'Assuming ' + p.assumptions.join(' \u00b7 ') : ''; assume.hidden = !p.assumptions.length; }
+    if (assume) { assume.textContent = p.assumptions.length && window.OpenVibeTaskEvents.assumingLine ? window.OpenVibeTaskEvents.assumingLine(p.assumptions) : ''; assume.hidden = !p.assumptions.length; }
+    // A live plan's assumptions are an editable form; do not overwrite what the person is typing.
+    var box = document.getElementById('assume-text');
+    if (box && document.activeElement !== box) box.value = p.assumptions.join('\n');
+    // The brain's ledgers ride in the plan event too (stage V2-8), so the live card keeps them current.
+    var ledger = document.getElementById('plan-ledger');
+    if (ledger) {
+      while (ledger.firstChild) ledger.removeChild(ledger.firstChild);
+      function labelled(label, value, cls) {
+        var row = el('p', cls || '');
+        row.appendChild(el('b', '', label));
+        row.appendChild(document.createTextNode(' ' + value));
+        ledger.appendChild(row);
+      }
+      if (p.ledger) {
+        var l = p.ledger;
+        labelled('Given:', l.given.length ? l.given.join('; ') : 'none');
+        labelled('To find:', l.lookup.length ? l.lookup.join('; ') : 'none');
+        labelled('To work out:', l.derive.length ? l.derive.join('; ') : 'none');
+      }
+      if (p.progress) {
+        var stuck = (p.progress.stuck === true || p.progress.progressing === false) ? 'yes' : 'no';
+        var line = el('p', 'plan-progress');
+        line.appendChild(el('b', '', 'Done:')); line.appendChild(document.createTextNode(' ' + (p.progress.done ? 'yes' : 'no') + ' \u00b7 '));
+        line.appendChild(el('b', '', 'Stuck:')); line.appendChild(document.createTextNode(' ' + stuck + ' \u00b7 '));
+        line.appendChild(el('b', '', 'Next:')); line.appendChild(document.createTextNode(' ' + (p.progress.next || 'none')));
+        ledger.appendChild(line);
+        if (p.progress.stopped) labelled('Stopped:', p.progress.stopped, 'plan-stopped');
+      }
+      ledger.hidden = !p.ledger && !p.progress;
+    }
     card.hidden = false;
   }
 

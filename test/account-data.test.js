@@ -15,6 +15,13 @@ const personal = require('../server/agents/personal');
 const { TABLES } = require('../server/identity/account-data');
 const { testDb } = require('./helpers/db');
 
+// Tables a person does not own. The brain's outcomes are counts keyed by task kind, tier, step kind and tool: no
+// person column, no task text, so deletion has nothing to erase there and the export names no one.
+const EXEMPT = {
+    account_data_events: 'the ledger of requests itself: which export and deletion Actor applied',
+    actor_brain_outcomes: 'counts of outcomes by task kind, tier and tool: no person column and no task text',
+};
+
 const A = 'usr_01JZ0000000000000000000AAA';
 const B = 'usr_01JZ0000000000000000000BBB';
 const OLD = 'usr_01JZ0000000000000000000MRG';
@@ -91,11 +98,17 @@ async function makeOffer(t, subject, taskId, text = 'A bench case') {
     await check('every table that names a person is covered or exempted with a reason', async () => {
         const d = await testDb();
         try {
-            const missing = await uncovered(d.db, {
-                tables: TABLES,
-                exempt: {account_data_events: 'the ledger of requests itself: which export and deletion Actor applied'},
-            });
+            const missing = await uncovered(d.db, { tables: TABLES, exempt: EXEMPT });
             assert.deepStrictEqual(missing, [], `a table with a person column is neither covered nor exempted: ${missing.join(', ')}`);
+        } finally { await d.close(); }
+    });
+
+    await check('the brain outcomes table is counts only: the account-data guard has nothing of a person to find', async () => {
+        const d = await testDb();
+        try {
+            const cols = await d.db.many("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'actor_brain_outcomes'");
+            assert.deepStrictEqual(cols.map((c) => c.column_name).sort(), ['failures', 'id', 'step_kind', 'successes', 'task_kind', 'tier', 'tool', 'updated_at']);
+            assert.deepStrictEqual(await uncovered(d.db, { tables: TABLES, exempt: EXEMPT }), [], 'no table with a person column is uncovered');
         } finally { await d.close(); }
     });
 

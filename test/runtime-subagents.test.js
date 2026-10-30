@@ -11,6 +11,8 @@
  */
 const assert = require('assert');
 const { createLoop, DELEGATE, MAX_SUB_AGENTS } = require('../server/runtime/loop');
+const { orderTools } = require('../server/runtime/brain/choose');
+const { createEscalations } = require('../server/runtime/brain/escalate');
 const configLib = require('../server/config');
 
 const results = [];
@@ -25,7 +27,7 @@ const reply = ({ text = '', tools = [], cost = 0.0001 } = {}) => ({
 const isChild = (req) => String((req.messages[0] || {}).content || '').includes('You are a sub-agent');
 const toolNames = (req) => (req.tools || []).map((t) => t.function.name);
 
-function make({ parent, child, mode = 'best', config = {}, budget = 1 } = {}) {
+function make({ parent, child, mode = 'best', config = {}, budget = 1, stats = null } = {}) {
     const chats = [];
     const ran = [];
     let p = 0;
@@ -48,7 +50,7 @@ function make({ parent, child, mode = 'best', config = {}, budget = 1 } = {}) {
         run: async (name, input) => { ran.push({ name, input }); return { text: JSON.stringify({ name, input, value: 42 }), data: { name, input }, sources: [{ url: `https://example.org/${name}/${input.q || ''}`, title: name }] }; },
     };
     const cfg = configLib.load({ NODE_ENV: 'test', ACTOR_LOOP_SELF_REFLECTIONS: '0', ...config });
-    const loop = createLoop({ config: cfg, models, registry, log: { warn() {}, log() {} } });
+    const loop = createLoop({ config: cfg, models, registry, log: { warn() {}, log() {} }, stats });
     let spent = 0;
     const events = [];
     const args = {
@@ -146,6 +148,24 @@ const toolMessages = (chats) => {
         });
         await capped.loop.run(capped.args);
         assert.strictEqual(capped.chats.filter(isChild).length, 3, 'two steps, then the answer from what it found');
+    });
+
+    await ok('the brain never widens the allow-list: a demoted or escalated tool is one already offered', async () => {
+        const stats = {
+            tools: async () => [{ name: 'fetch', n: 30, successRate: 0.2, meanCostUsd: 0.0001 }],
+            forModel: async () => ({ n: 0, successRate: null, meanCostUsd: 0.0001 }),
+        };
+        const m = make({ mode: 'balanced', stats, parent: (n) => (n === 0 ? { tools: [call('fetch', { q: 'x' })] } : { text: 'Done [E1].' }) });
+        const out = await m.loop.run(m.args);
+        assert.ok(out.state.allow.has('fetch'), 'the demoted tool is still offered');
+        assert.ok(m.ran.some((r) => r.name === 'fetch'), 'and still runnable');
+        const defs = m.chats.find((c) => /You are OpenVibe Actor's agent/.test(String(c.messages[0].content))).tools;
+        assert.deepStrictEqual([...out.state.allow].sort(), defs.map((d) => d.function.name).sort(), 'allow is exactly the offered set');
+        const reordered = orderTools(defs, [{ name: 'fetch', n: 30, successRate: 0.2 }]);
+        assert.deepStrictEqual(reordered.tools.map((d) => d.function.name).sort(), defs.map((d) => d.function.name).sort(), 'reordering adds and removes nothing');
+        const esc = createEscalations();
+        const rung = esc.plan({ stepKey: 'x', mode: 'balanced', currentTier: 'smart', currentTool: 'lookup', toolNames: defs.map((d) => d.function.name) });
+        assert.ok(rung && defs.some((d) => d.function.name === rung.tool), 'an escalated tool is offered');
     });
 
     if (results.length) { console.log(`\n${results.length} failed`); process.exit(1); }
