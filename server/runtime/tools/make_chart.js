@@ -15,6 +15,7 @@ function slugName(raw) {
     const base = String(raw || 'chart')
         .replace(/[\\/]+/g, '-')
         .replace(/[^A-Za-z0-9._-]+/g, '-')
+        .replace(/-{2,}/g, '-')
         .replace(/^[-.]+|[-.]+$/g, '')
         .replace(/\.[A-Za-z0-9]{1,8}$/, '')
         .slice(0, 100);

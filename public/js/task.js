@@ -2,7 +2,9 @@
  * call and its result), each agent that tried, its checks and hand-offs, from the events the page carries and, while the
  * task runs, from its live stream (GET /api/v1/tasks/:id/events, actor.task-event@1). Without it, a running task's steps
  * are drawn the way the server renders a finished one. When the task ends the page reloads to show the outcome. Without
- * this script the page refreshes itself every few seconds (<noscript>). */
+ * this script the page refreshes itself every few seconds (<noscript>).
+ * The task page v2 (stage V2-5): the plan card follows the plan as the agent states and revises it, and a citation chip
+ * in the answer opens the evidence behind it (without this script the chip is a link to the same place). */
 (function () {
   'use strict';
   var LABEL = { tool_call: 'Used', tool_result: 'Got', text: 'Note' };
@@ -41,7 +43,55 @@
     return view;
   }
 
+  // The plan card: drawn again from each plan the agent states (task-events.js reads it back), DOM nodes only.
+  var PLAN_STATE = { done: 'done', active: 'working on it', todo: 'next' };
+  function paintPlan(text) {
+    var card = document.getElementById('plan-card');
+    var p = card && window.OpenVibeTaskEvents ? window.OpenVibeTaskEvents.plan(text) : null;
+    if (!p) return;
+    var list = document.getElementById('plan-steps');
+    while (list.firstChild) list.removeChild(list.firstChild);
+    p.steps.forEach(function (st) {
+      var li = el('li', 'ps is-' + (PLAN_STATE[st.state] ? st.state : 'todo'));
+      var mark = el('span', 'ps-mark'); mark.setAttribute('aria-hidden', 'true');
+      li.appendChild(mark);
+      li.appendChild(el('span', 'ps-goal', st.goal));
+      li.appendChild(el('span', 'sr-only', ' (' + (PLAN_STATE[st.state] || 'next') + ')'));
+      list.appendChild(li);
+    });
+    var assume = document.getElementById('plan-assume');
+    if (assume) { assume.textContent = p.assumptions.length ? 'Assuming ' + p.assumptions.join(' \u00b7 ') : ''; assume.hidden = !p.assumptions.length; }
+    card.hidden = false;
+  }
+
+  // A citation chip opens the Evidence fold at its item, scrolls to it and marks it a moment; the URL keeps the item.
+  function evidence() {
+    if (document.documentElement.dataset.evBound) return;
+    document.documentElement.dataset.evBound = '1';
+    document.addEventListener('click', function (e) {
+      var chip = e.target.closest ? e.target.closest('a.ev[data-ev]') : null;
+      if (!chip) return;
+      var item = document.getElementById('ev-' + chip.getAttribute('data-ev'));
+      var fold = document.getElementById('evidence');
+      if (!item || !fold) return;
+      e.preventDefault();
+      fold.open = true;
+      document.querySelectorAll('.ev-item.is-flash').forEach(function (n) { n.classList.remove('is-flash'); });
+      document.querySelectorAll('a.ev.is-on').forEach(function (n) { n.classList.remove('is-on'); });
+      item.classList.add('is-flash', 'is-open');
+      chip.classList.add('is-on');
+      try { history.replaceState(null, '', '#ev-' + chip.getAttribute('data-ev')); } catch (err) { /* a sandboxed frame */ }
+      var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      item.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' });
+      setTimeout(function () { item.classList.remove('is-flash'); chip.classList.remove('is-on'); }, 2400);
+    });
+    // Opened at an item (a shared link, or the back button): the fold opens there too.
+    var at = /^#ev-E\d{1,3}$/.test(location.hash) ? document.getElementById(location.hash.slice(1)) : null;
+    if (at && document.getElementById('evidence')) { document.getElementById('evidence').open = true; at.classList.add('is-open'); }
+  }
+
   function start() {
+    evidence();
     var art0 = document.querySelector('article.task');
     var view = art0 ? session(art0) : null;
     var art = document.querySelector('article.task[data-open="1"]');
@@ -129,6 +179,7 @@
     function onOutput(e) {
       onDesk(e);
       onLook(e);
+      if (e.step === 'plan') paintPlan(e.text);
       if (view) { view.push(attach(e)); return undefined; }
       if ((e.step === 'plan' || e.step === 'handoff') && e.agent) return attempt((e.text || e.agent).replace(/ takes it.*$/, ''));
       if (e.step === 'plan') return undefined;

@@ -6,8 +6,10 @@
  *   - every call gets an id, and its result (with the time between them, where both carry one) lands on it;
  *   - identical consecutive calls (same tool, same input) fold into one line with a count ("×2");
  *   - a task that has ended settles any call it never answered as done, with "No result was recorded for this step."
- *   - the run's real time is the task's own: first event → last event, on the done line.
- * Pure (no DOM), so test/task-events.test.js can prove each rule.
+ *   - the run's real time is the task's own: first event → last event, on the done line;
+ *   - a plan the loop states becomes one divider naming the step in hand ("Step 2 of 4 · Read the pages"), so the
+ *     calls under it read as that step's (Actor v2, stage V2-5); plan(text) reads the plan back for the plan card.
+ * Pure (no DOM), so test/task-events.test.js can prove each rule. The server requires it too (server/http/pages.js).
  */
 (function (root, factory) {
     'use strict';
@@ -69,9 +71,32 @@
      * time); opts.state is its final state (the done line is ok only when "succeeded"); opts.durationMs overrides the
      * computed time.
      */
+    // A plan as the loop states it (server/runtime/loop.js planText): an optional "Assumptions: a; b" line, then one line
+    // a step, "\u2713 1. goal" (done), "\u2192 2. goal" (in hand) or "\u00b7 3. goal" (next). → { assumptions, steps } or null.
+    var PLAN_LINE = /^([\u2713\u2192\u00b7]) (\d+)\. (.+)$/;
+    function plan(text) {
+        var out = { assumptions: [], steps: [] };
+        String(text || '').split('\n').forEach(function (raw) {
+            var line = raw.trim(), m = PLAN_LINE.exec(line);
+            if (m) out.steps.push({ goal: m[3], state: m[1] === '\u2713' ? 'done' : m[1] === '\u2192' ? 'active' : 'todo' });
+            else if (/^Assumptions: /.test(line)) out.assumptions = line.slice(13).split('; ').filter(Boolean);
+        });
+        return out.steps.length ? out : null;
+    }
+    /** The divider a plan draws in the session: the step in hand, or the whole plan done. */
+    function planLine(p) {
+        if (!p || !p.steps.length) return null;
+        var at = -1;
+        p.steps.forEach(function (st, k) { if (at < 0 && st.state === 'active') at = k; });
+        if (at >= 0) return 'Step ' + (at + 1) + ' of ' + p.steps.length + ' \u00b7 ' + p.steps[at].goal;
+        var done = p.steps.every(function (st) { return st.state === 'done'; });
+        return done ? 'Every step of the plan is done' : 'A plan of ' + p.steps.length + ' steps';
+    }
+
     function lines(events, opts) {
         opts = opts || {};
         var out = [];
+        var lastPlan = null;  // the last plan divider, so a plan restated with the same step in hand draws nothing
         var open = {};      // tool name → calls of that tool still waiting for their result
         var last = null;    // the last call, for folding an identical next one
         var folded = null;  // the result of a folded call, which must not become a step of its own
@@ -133,7 +158,12 @@
                 out.push(withAgent(e.is_error ? { t: 'note', level: 'error', text: text } : { t: 'text', text: text }, e));
                 continue;
             }
-            if (e.step === 'plan') { out.push(withAgent({ t: 'step', text: text }, e)); continue; }
+            if (e.step === 'plan') {
+                var stated = plan(text), divider = stated ? planLine(stated) : text;
+                if (divider && divider !== lastPlan) out.push(withAgent({ t: 'step', text: divider }, e));
+                lastPlan = divider;
+                continue;
+            }
             if (e.step === 'handoff') { out.push(withAgent({ t: 'handoff', from: null, to: e.agent || null, reason: text }, e)); continue; }
             if (e.step === 'check') { out.push(withAgent({ t: 'note', level: /^checked/i.test(text) ? 'info' : 'warning', text: text }, e)); continue; }
             if (text) out.push(withAgent({ t: 'text', text: text }, e));
@@ -150,5 +180,5 @@
         return out;
     }
 
-    return { lines: lines, firstAt: firstAt, duration: duration, attachments: attachments };
+    return { lines: lines, firstAt: firstAt, duration: duration, attachments: attachments, plan: plan, planLine: planLine };
 });
