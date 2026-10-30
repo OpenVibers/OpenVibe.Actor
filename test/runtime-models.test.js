@@ -114,6 +114,14 @@ const quiet = { log() {}, warn() {} };
         assert.ok(Math.abs(r.cost_usd - (1000 * 1 + 500 * 2) / 1e6) < 1e-9, String(r.cost_usd));
     });
 
+    await ok('DeepSeek Flash leads its family when the provider offers it (the owner prefers it to Pro)', async () => {
+        const { fetchImpl } = fakeFetch({ openai: ['gpt-5.1', 'gpt-5-nano'], deepseek: ['deepseek-v4-pro', 'deepseek-flash', 'deepseek-chat'] });
+        const models = createModels({ config: configLib.load(baseEnv), rates: RATES, fetchImpl, log: quiet });
+        const t = await models.warm();
+        assert.strictEqual(t.check.provider, 'deepseek');
+        assert.strictEqual(t.check.model, 'deepseek-flash');
+    });
+
     await ok('a research agent or a dated snapshot is not a chat model; fast takes the cheapest small one first', async () => {
         const { fetchImpl } = fakeFetch({
             openai: ['o4-mini-deep-research', 'gpt-5.1', 'gpt-5-nano', 'gpt-4o-mini', 'o3-mini', 'gpt-5.1-2025-11-13'],
@@ -124,7 +132,7 @@ const quiet = { log() {}, warn() {} };
         assert.strictEqual(t.fast.model, 'gpt-5-nano', 'nano before mini before the rest');
         assert.strictEqual(t.smart.model, 'gpt-5.1');
         assert.strictEqual(t.check.provider, 'deepseek');
-        assert.strictEqual(t.check.model, 'deepseek-v4-pro', 'the newest DeepSeek chat model leads its family');
+        assert.strictEqual(t.check.model, 'deepseek-v4-pro', 'without Flash on offer, Pro leads what is left');
         const listed = models.modelList().map((m) => m.model);
         assert.ok(!listed.includes('o4-mini-deep-research') && !listed.includes('gpt-5.1-2025-11-13'), listed.join(', '));
     });
