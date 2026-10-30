@@ -94,6 +94,7 @@ const TOOL_LABEL = {
     convert_time: 'Time zones', geocode: 'Place lookup', place_info: 'Place', sports_scores: 'Sports scores',
     calculate: 'Calculator', make_file: 'File', make_chart: 'Chart', run_tool: 'OpenVibe tool', find_tools: 'Find a tool',
     codes_task: 'Coding task', robot_steps: 'Robot', list_my_robots: 'Your robots', list_my_computers: 'Your computers',
+    delegate: 'Sub-agent',
 };
 const toolLabel = (name) => TOOL_LABEL[name] || String(name || 'tool').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 // A model id as people say it: "deepseek:deepseek-flash" → "DeepSeek Flash", "openai:gpt-5.1" → "GPT-5.1".
