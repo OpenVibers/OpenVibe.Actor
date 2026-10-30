@@ -15,6 +15,15 @@ const { boot, check, done } = require('./helpers/boot');
 
 const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide'];
 const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
+// Routes added after the pinned contracts release but covered by an existing grant (or public on purpose). The trace is
+// the task's own read, so actor.task.read decides it exactly as it decides GET /api/v1/tasks/:id. The live-stats reads
+// answer names and aggregate numbers only (never a person or a task), so they need no grant; a later release may add
+// actor.stats.read.
+const ROUTE_EXTENSIONS = new Map([
+    ['GET /api/v1/tasks/:id/trace', 'actor.task.read'],
+    ['GET /api/v1/stats/tools', null],
+    ['GET /api/v1/stats/models', null],
+]);
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 const INDEX_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-index.js'), 'utf8');
 const CONTROL_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-control.js'), 'utf8');
@@ -96,7 +105,11 @@ function codeRoutes() {
                 assert.ok(routes.has(r), `${id} says ${r}, but the code registers no such route`);
             }
         }
-        for (const r of routes.keys()) assert.ok(declared.has(r), `the code registers ${r}, which no capability lists`);
+        for (const [r, guard] of ROUTE_EXTENSIONS) {
+            assert.ok(routes.has(r), `${r} is registered`);
+            assert.strictEqual(routes.get(r).guard, guard, `${r} is guarded by ${guard}`);
+        }
+        for (const r of routes.keys()) if (!ROUTE_EXTENSIONS.has(r)) assert.ok(declared.has(r), `the code registers ${r}, which no capability lists`);
     });
 
     await check('each guarded route requires the capability that lists it; the agent reads are public', () => {

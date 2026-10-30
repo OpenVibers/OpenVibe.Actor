@@ -236,6 +236,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     const verify = async (current) => checkClaims({
                         task: row.task, answer: current.text, evidence: current.evidence, models,
                         writerFamily: current.family || null, signal, now: () => now(),
+                        trace: current.state && current.state.ctx && current.state.ctx.trace,
                     });
                     let verdict = await verify(out);
                     await meter(verdict.cost_usd);
@@ -262,7 +263,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         for (const c of verdict.contested.slice(0, 2)) {
                             if (budgetLeft() <= 0) break;
                             try {
-                                const j = await adjudicate({ claim: c, evidence: out.evidence, task: row.task, models, writerFamily: out.family || null, signal });
+                                const j = await adjudicate({ claim: c, evidence: out.evidence, task: row.task, models, writerFamily: out.family || null, signal, now: () => now(), trace: out.state && out.state.ctx && out.state.ctx.trace });
                                 if (j) { await meter(j.cost_usd); if (!j.failed) contested.push({ claim: j.claim, sides: j.sides, pick: j.pick, reason: j.reason, by: j.by }); }
                             } catch (err) {
                                 if (signal && signal.aborted) throw err;

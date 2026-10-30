@@ -27,7 +27,10 @@ const looks = require('../agents/looks');
 const { MODES } = require('../agents/router');
 const seo = require('openvibe-shared/seo');
 const { findArtifact, sendArtifact } = require('../runtime/artifacts');
+const trace = require('../runtime/trace');
+const benchOffers = require('../tasks/bench-offers');
 const taskEvents = require('../../public/js/task-events');
+const { noLooks, hasLooks } = require('openvibe-sdk/no-looks');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -98,6 +101,14 @@ const TOOL_LABEL = {
     delegate: 'Sub-agent',
 };
 const toolLabel = (name) => TOOL_LABEL[name] || String(name || 'tool').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+// The trace fold (stage V2-10): one line per span, at most this many on the page (a phone screen); the API has all.
+const TRACE_ROWS = 12;
+const TRACE_KIND = { model: 'model', tool: 'tool', check: 'check', judge: 'judge', delegate: 'sub-agent' };
+const msText = (n) => {
+    const ms = Math.max(0, Number(n) || 0);
+    if (ms < 1000) return `${Math.round(ms)} ms`;
+    return ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : ago(ms);
+};
 // A model id as people say it: "deepseek:deepseek-flash" → "DeepSeek Flash", "openai:gpt-5.1" → "GPT-5.1".
 const BRANDS = { deepseek: 'DeepSeek', gpt: 'GPT', openai: 'OpenAI', minimax: 'MiniMax', claude: 'Claude', gemini: 'Gemini', qwen: 'Qwen', glm: 'GLM', kimi: 'Kimi' };
 function modelName(id) {
@@ -145,6 +156,49 @@ function chipify(htmlText, evidence) {
 }
 const perM = (n) => (n === 0 ? 'free' : `$${Number(n).toFixed(2)}`);
 const priceText = (rc) => (rc.input_usd_per_mtok === 0 && rc.output_usd_per_mtok === 0 ? 'Free (OpenVibe hardware)' : `${perM(rc.input_usd_per_mtok)} in · ${perM(rc.output_usd_per_mtok)} out per 1M tokens${rc.per_call_usd ? ` · ${usd(rc.per_call_usd)} a search` : ''}`);
+
+/**
+ * The trace fold under the steps (stage V2-10): closed by default, one line per model, tool, check, judge or sub-agent
+ * call, indented under the delegate it belongs to, with its time and cost. A failed span says "failed" in words. At
+ * most one phone screen of rows; the full list is the task's trace API. Server-rendered, so it works without JS.
+ */
+function traceBlock(spans, taskId) {
+    if (!spans.length) return '';
+    const totals = trace.totals(spans);
+    const byId = new Map(spans.map((s) => [s.id, s]));
+    const depthOf = (s) => {
+        let depth = 0;
+        let cur = s;
+        const seen = new Set();
+        while (cur && cur.parent_id && byId.has(cur.parent_id) && !seen.has(cur.id) && depth < 4) {
+            seen.add(cur.id);
+            depth += 1;
+            cur = byId.get(cur.parent_id);
+        }
+        return depth;
+    };
+    const shown = spans.slice(0, TRACE_ROWS);
+    const failed = spans.filter((s) => s.ok === false).length;
+    const nameOf = (s) => (s.kind === 'model' || s.kind === 'check' || s.kind === 'judge' ? modelName(s.name) : toolLabel(s.name));
+    return html`<details class="trace" id="trace">
+<summary><span>Trace</span><span class="muted">${spans.length} call${spans.length === 1 ? '' : 's'}${failed ? `, ${failed} failed` : ''}</span></summary>
+<ol class="trace-list">${shown.map((s) => html`<li class="tr tr-${s.kind} tr-d${depthOf(s)}${s.ok === false ? ' is-bad' : ''}"${s.error_code ? raw(` title="${String(s.error_code).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)}"`) : ''}>
+<span class="tr-name">${nameOf(s)}</span><span class="tr-kind">${TRACE_KIND[s.kind] || s.kind}</span><span class="tr-ms">${msText(s.ms)}</span><span class="tr-cost">${usd(s.cost_usd)}</span>${s.ok === false ? html`<span class="tr-bad">failed</span>` : ''}
+</li>`)}</ol>
+${spans.length > shown.length ? html`<p class="trace-more muted">And ${spans.length - shown.length} more call${spans.length - shown.length === 1 ? '' : 's'} in <a href="/api/v1/tasks/${taskId}/trace">the full trace</a>.</p>` : ''}
+<p class="trace-tot"><span>Model ${usd(totals.model_cost_usd)}</span><span>Tools ${usd(totals.tool_cost_usd)}</span><span>Time ${msText(totals.ms)}</span></p>
+</details>`;
+}
+
+/** The Bench offer button on a finished task, or the offer it already made and its withdraw form. */
+function benchBlock(row, offer) {
+    if (offer) {
+        return html`<section class="bench" id="bench"><p><b>Offered as a Bench case.</b> <span class="muted small">Its task and answer were offered to OpenVibe.Bench; nothing else was shared.</span></p>
+<form method="post" action="/tasks/${row.id}/bench-offer/withdraw"><button class="sc-btn" type="submit">Withdraw the offer</button></form></section>`;
+    }
+    return html`<p class="bench-line" id="bench"><a class="sc-btn" href="/tasks/${row.id}/offer-bench">Offer as a Bench case</a> <span class="muted small">Share this task and its answer with OpenVibe.Bench. Evidence, files, memory and the trace are never shared.</span></p>`;
+}
+
 
 function createPageRoutes(ctx) {
     const { config, s, engine } = ctx;
@@ -371,6 +425,7 @@ ${raw(showcase.faq({ id: 'faq', items: faq }))}
         const before = typeof req.query.before === 'string' && TASK_ID.test(req.query.before) ? req.query.before : null;
         const pageRows = await store.listTasks(s, requesterOf(req), { limit: 30, before });
         const today = await store.spendToday(s, requesterOf(req));
+        const offers = await benchOffers.list(s, requesterOf(req));
         page(req, res, {
             title: 'Your tasks', crumbs: [{ label: 'Your tasks' }], styles: [showcase.STYLESHEET],
             body: html`<h1>Your tasks</h1>
@@ -380,6 +435,12 @@ ${table(['Task', 'State', 'Agent', 'Cost', 'Started'], pageRows.rows.map((t) => 
                 const result = t.result ? (typeof t.result === 'string' ? JSON.parse(t.result) : t.result) : null;
                 return [html`<a href="/tasks/${t.id}">${t.task.length > 90 ? `${t.task.slice(0, 89)}…` : t.task}</a>`, badge(t.state, STATE_KIND[t.state]), result ? (catalog.byId(result.agent) || {}).name || result.agent : '—', usd(t.cost_usd == null ? null : Number(t.cost_usd)), time(t.created_at)];
             }), { empty: 'No tasks yet.' })}
+${offers.length ? html`<h2>Offered as Bench cases</h2>
+${table(['Case', 'Offered', ''], offers.map((o) => [
+                html`<a href="/tasks/${o.task_id}">${o.text.length > 90 ? `${o.text.slice(0, 89)}…` : o.text}</a>`,
+                time(o.offered_at),
+                html`<form method="post" action="/tasks/${o.task_id}/bench-offer/withdraw"><button class="sc-btn" type="submit">Withdraw</button></form>`,
+            ]))}` : ''}
 ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</a></p>` : ''}`,
         });
     });
@@ -414,6 +475,74 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         return sendArtifact(res, found);
     });
 
+    // ── A task as a Bench case (stage V2-10) ──────────────────
+    // The button on a finished task opens this preview: exactly the task text and the final answer, never the evidence,
+    // files, memory or trace. Only its owner sees it, and only a POST from that page (checked same-origin) offers it.
+    const BENCH_ERROR = {
+        'actor.bench.looks': 'That answer describes how someone looks, so it cannot be shared as a public case. The task stays yours and nothing was offered.',
+        'actor.bench.no_answer': 'This task has no answer to offer.',
+    };
+    async function benchPage(req, res, { error = null } = {}) {
+        const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
+        if (!row || row.requester !== requesterOf(req)) {
+            return page(req, res, { title: 'Task not found', crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task' }], body: html`<h1>Task not found</h1><p>There is no task here that belongs to you.</p>` }, 404);
+        }
+        const result = row.result ? (typeof row.result === 'string' ? JSON.parse(row.result) : row.result) : null;
+        if (row.state !== 'succeeded' || !result || !result.answer) return res.redirect(303, `/tasks/${row.id}`);
+        const existing = await benchOffers.get(s, row.id, requesterOf(req));
+        const clean = noLooks(String(result.answer));
+        const blocked = hasLooks(clean);
+        const why = error ? (BENCH_ERROR[error] || 'The offer could not be made. Try again in a moment.') : (blocked ? BENCH_ERROR['actor.bench.looks'] : null);
+        return page(req, res, {
+            title: 'Offer as a Bench case',
+            crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task', href: `/tasks/${row.id}` }, { label: 'Offer as a Bench case' }],
+            styles: [showcase.STYLESHEET], css: ['css/task.css'], noReferrer: true,
+            body: html`<h1>Offer as a Bench case</h1>
+<p class="muted">This is exactly what would be shared with OpenVibe.Bench: the task and the final answer. Nothing else leaves Actor. OpenVibe.Bench has no case intake yet, so the offer waits here until the handover.</p>
+${why ? notice(why, 'warn') : ''}
+<section class="bench-preview-wrap">
+<h2>Task</h2>
+<pre class="bench-preview">${row.task}</pre>
+<h2>Answer</h2>
+<pre class="bench-preview">${clean}</pre>
+</section>
+<p class="muted small">Not shared: the evidence, the files, your memory, the trace, your account.</p>
+${existing ? html`<div class="notice" role="status">Already offered ${time(existing.offered_at)}.</div>
+<form method="post" action="/tasks/${row.id}/bench-offer/withdraw"><button class="sc-btn" type="submit">Withdraw the offer</button></form>`
+        : blocked ? html`<p><a class="sc-btn" href="/tasks/${row.id}">Back to the task</a></p>`
+            : html`<form method="post" action="/tasks/${row.id}/offer-bench" class="inline"><button class="sc-btn sc-primary" type="submit">Confirm and offer</button></form> <a class="sc-btn" href="/tasks/${row.id}">Cancel</a>`}`,
+        });
+    }
+
+    r.get('/tasks/:id/offer-bench', async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        const error = typeof req.query.error === 'string' ? req.query.error.slice(0, 64) : null;
+        return benchPage(req, res, { error });
+    });
+
+    r.post('/tasks/:id/offer-bench', require('express').urlencoded({ extended: false, limit: '64kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.redirect(303, '/tasks');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('An offer must be sent from openvibe.actor itself.');
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req)) return res.status(404).type('text/plain').send('No such task');
+        const result = row.result ? (typeof row.result === 'string' ? JSON.parse(row.result) : row.result) : null;
+        if (row.state !== 'succeeded' || !result || !result.answer) return res.redirect(303, `/tasks/${row.id}`);
+        const out = await benchOffers.offer(s, { taskId: row.id, owner: row.requester, text: row.task, answer: result.answer, now: () => s.now() });
+        if (out.error) return res.redirect(303, `/tasks/${row.id}/offer-bench?error=${encodeURIComponent(out.error)}`);
+        return res.redirect(303, `/tasks/${row.id}#bench`);
+    });
+
+    r.post('/tasks/:id/bench-offer/withdraw', require('express').urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.redirect(303, '/tasks');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('A withdrawal must come from openvibe.actor itself.');
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req)) return res.status(404).type('text/plain').send('No such task');
+        await benchOffers.withdraw(s, row.id, row.requester);
+        return res.redirect(303, `/tasks/${row.id}#bench`);
+    });
+
     r.get('/tasks/:id', async (req, res) => {
         const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
         if (!row || row.requester !== requesterOf(req)) {
@@ -430,6 +559,8 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         const parentRow = row.parent_id ? await store.getTask(s, row.parent_id) : null;
         const parentTask = parentRow && parentRow.requester === row.requester ? parentRow : null;
         const follows = t.state === 'succeeded' ? await store.followUps(s, row) : [];
+        const offer = t.state === 'succeeded' ? await benchOffers.get(s, row.id, requesterOf(req)) : null;
+        const spans = await trace.spansFor(s, row.id);
         const followProblem = typeof req.query.follow === 'string' ? (FOLLOW_ERROR[req.query.follow] || 'That follow-up could not start. Try again in a moment.') : null;
         const planEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'plan' && taskEvents.plan(e.text));
         const plan = (t.result && t.result.plan && Array.isArray(t.result.plan.steps) && t.result.plan.steps.length ? t.result.plan : null)
@@ -452,6 +583,7 @@ ${parentTask ? html`<p class="follows-on">Following up on <a href="/tasks/${pare
 <h1 class="task-text">${row.task}</h1>
 </header>
 ${outcome(t, row)}
+${t.state === 'succeeded' ? benchBlock(row, offer) : ''}
 ${t.state === 'succeeded' ? followBlock(row, follows, followProblem) : ''}
 ${open ? planCard(plan) : ''}
 ${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
@@ -465,6 +597,7 @@ ${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(
 <section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
 ${!open && plan ? planCard(plan) : ''}
 <div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div>
+${traceBlock(spans, row.id)}
 <script type="application/json" id="task-events">${raw(JSON.stringify(events.slice(-3000)).replace(/</g, '\\u003c'))}</script>
 ${open ? html`<p class="muted small live-note" id="live-note"><span class="dot-pulse" aria-hidden="true"></span> Updating as the agent works.</p>` : ''}
 </section>
@@ -725,16 +858,18 @@ data: {"task_id":"tsk_…","seq":3,"kind":"output","agent":"openvibe-runtime","s
 <h2 id="auth">Who can call it</h2>
 <ul><li><strong>A person</strong>: their OpenVibe Network token as <code>Authorization: Bearer</code> (or this site's sign-in). Tasks are theirs and use their free tier.</li>
 <li><strong>An app or agent</strong>: a Network token for audience <code>openvibe.actor</code> with the <code>actor.task.*</code> capability the route needs, granted on <a href="https://openvibe.services">OpenVibe.Services</a>. Tasks belong to the app's project.</li>
-<li><strong>Anyone</strong>: <code>GET /api/v1/agents</code> and <code>POST /api/v1/route</code> need no token.</li></ul>
+<li><strong>Anyone</strong>: <code>GET /api/v1/agents</code>, <code>POST /api/v1/route</code> and the live stats (<code>GET /api/v1/stats/tools</code>, <code>GET /api/v1/stats/models</code>) need no token.</li></ul>
 ${table(['Route', 'Capability', 'What it does'], [
                 [html`<code>POST /api/v1/tasks</code>`, html`<code>actor.task.create</code>`, html`Create a task: <code>{ task, mode?, budget?: { per_task_usd, per_day_usd }, agent?, idempotency_key?, webhooks?: [{ url, events, secret_ref? }] }</code>. Answers 201 with the task (queued); with webhooks, also its <code>webhook_secret</code>, this once, unless every webhook names a project secret (<a href="#webhooks">webhooks</a>).`],
                 [html`<code>GET /api/v1/tasks/:id</code>`, html`<code>actor.task.read</code>`, html`The task: state, result, cost, explanation, error. While it runs on a desk of its own, <code>desk</code> (<code>url</code>: the person's page to watch it live and take it over; <code>kind</code>: <code>browser</code> or <code>desktop</code>); while it waits for its person to do a step there, <code>needs_you</code> (<code>what</code>, <code>url</code>).`],
                 [html`<code>GET /api/v1/tasks/:id/events</code>`, html`<code>actor.task.read</code>`, html`Server-sent events (<code>actor.task-event@2</code>): <code>state</code>, <code>output</code> (each step; a tool result that made a file or chart carries <code>artifacts</code>), <code>end</code>. Resumes with <code>Last-Event-ID</code>.`],
+                [html`<code>GET /api/v1/tasks/:id/trace</code>`, html`<code>actor.task.read</code>`, html`The span numbers and names only: each model, tool, check, judge and sub-agent call with its kind, name, tier, family, start, ms, cost, tokens, ok, error code and loop step, plus model cost, tool cost and time. Another person gets the same 404 as a task that does not exist.`],
                 [html`<code>GET /tasks/:id/files/:artifact</code>`, html`<code>the task's own page</code>`, html`A file or chart the task made, out of Actor's own database and private to the person who asked: their own page opens it, another person gets the same 404 as a task that does not exist.`],
                 [html`<code>POST /api/v1/tasks/:id/cancel</code>`, html`<code>actor.task.create</code>`, 'Stop it. What was spent stays spent.'],
                 [html`<code>GET /api/v1/tasks</code>`, html`<code>actor.task.list</code>`, html`Your tasks, newest first; <code>?limit=</code>, <code>?before=</code> (the <code>next</code> cursor).`],
                 [html`<code>GET /api/v1/agents</code>`, 'public', 'The agent systems, what each can do, its price and whether it works now.'],
                 [html`<code>POST /api/v1/route</code>`, 'public', html`<code>{ task, mode? }</code> → which agent would take it and why, for every candidate. Nothing runs and nothing is charged.`],
+                [html`<code>GET /api/v1/stats/tools</code>, <code>GET /api/v1/stats/models</code>`, 'public', html`Live per-tool and per-model numbers over the last 7 days: <code>{ name, n, successRate, p50ms, p90ms, meanCostUsd, lastFailureAt }</code>. Names and numbers only, and only rows with <code>n >= 20</code>, so no one person's use shows.`],
             ])}
 ${raw(showcase.code({ title: 'Create a task, then watch it', samples: [{ label: 'Create', lang: 'bash', code: create }, { label: 'Watch', lang: 'bash', code: watch }] }))}
 <h2 id="webhooks">Webhooks</h2>

@@ -26,6 +26,7 @@ const { createAdapters } = require('./agents/adapters');
 const { createModels } = require('./runtime/models');
 const { createRegistry } = require('./runtime/tools');
 const { createLoop } = require('./runtime/loop');
+const { createStats } = require('./runtime/stats');
 const { createEngine } = require('./tasks/engine');
 const { createWebhooks } = require('./tasks/webhooks');
 const { createChatClient } = require('./chat/client');
@@ -104,6 +105,9 @@ async function createApp(opts = {}) {
     // Network notifications ("tell me when it's done"): off without a client secret, never able to fail a task.
     const notifier = opts.notifier || createNotifier({ config, fetchImpl, log });
     const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier });
+    // Live per-tool/per-model numbers (stage V2-10), one aggregate over actor_spans cached for 5 minutes: the brain's
+    // step choice (V2-8) reads the same object the public /api/v1/stats routes do.
+    const stats = opts.stats || createStats({ store: s, log });
     const principal = createPrincipal({ config, keys });
     const projects = opts.projects || require('./identity/projects').createProjects({ config });
     // Ask Actor from chat (chat/asks.js): chat.message.created through the events consumer below, replies through Chat.
@@ -112,7 +116,7 @@ async function createApp(opts = {}) {
         createTask: (args) => createTask({ s, config, engine, webhooks, ...args }) });
     // Each personal agent's run that passed its check also goes to its owner's Vibe chat (agents/vibe-deliver.js).
     const vibeDelivery = require('./agents/vibe-deliver').createVibeDelivery({ s, config, chat: chatClient, log });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier };
+    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;

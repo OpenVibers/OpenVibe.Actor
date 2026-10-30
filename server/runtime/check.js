@@ -20,6 +20,8 @@
  * A checker that cannot run is `unavailable: true` and the engine must not deliver the answer.
  */
 
+const { codeOf } = require('./trace');
+
 const SYSTEM = `You verify an AI agent's answer before a person sees it. The answer must be grounded in the evidence its tools returned in this run. Reply with JSON only:
 {"claims":[{"claim":"<the claim, one sentence>","kind":"live|general|person|derived","evidence":["E1"],"supported":true|false,"contested":true|false}],"ok":true|false,"reason":"<one short sentence>"}
 
@@ -77,7 +79,7 @@ function failing(claims, evidence = []) {
     });
 }
 
-async function check({ task, answer, evidence = [], models, writerFamily = null, signal, now = () => Date.now(), maxTokens = 3000 }) {
+async function check({ task, answer, evidence = [], models, writerFamily = null, signal, now = () => Date.now(), maxTokens = 3000, trace = null }) {
     const today = new Date(now()).toISOString().slice(0, 10);
     // Another family first. If that family is configured but cannot give a verdict, the same family gets one turn
     // (the old check behaved this way): the result says it was not cross-family, never that it was.
@@ -91,7 +93,9 @@ async function check({ task, answer, evidence = [], models, writerFamily = null,
     let cost = 0;
     let last = 'no checker gave a verdict';
     for (const { d, cross } of attempts) {
+        let startedAt = null;
         try {
+            startedAt = now();
             const r = await models.chat({
                 tier: 'check', provider: d.provider, model: d.model,
                 messages: [
@@ -100,6 +104,8 @@ async function check({ task, answer, evidence = [], models, writerFamily = null,
                 ],
                 json: true, maxTokens, signal,
             });
+            if (trace) await trace.record({ kind: 'check', name: r.model || d.model, tier: 'check', family: r.family || d.family, startedAt, ms: now() - startedAt, costUsd: r.cost_usd, tokensIn: (r.usage && r.usage.input) || null, tokensOut: (r.usage && r.usage.output) || null, ok: true });
+            startedAt = null;
             cost += r.cost_usd || 0;
             const m = String(r.text || '').match(/\{[\s\S]*\}/);
             let parsed = null;
@@ -123,6 +129,7 @@ async function check({ task, answer, evidence = [], models, writerFamily = null,
                 by: d.family, model: r.model, cross, cost_usd: cost,
             };
         } catch (err) {
+            if (startedAt != null && trace) await trace.record({ kind: 'check', name: d.model || 'check', tier: 'check', family: d.family, startedAt, ms: now() - startedAt, ok: false, errorCode: codeOf(err, 'actor.check.failed') });
             if (signal && signal.aborted) throw err;
             last = `${d.family} could not check (${(err && err.message) || err})`.slice(0, 300);
         }

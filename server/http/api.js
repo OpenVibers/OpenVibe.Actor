@@ -25,6 +25,7 @@ const { heuristic } = require('../agents/classify');
 const { route, MODES } = require('../agents/router');
 const { createTask } = require('../tasks/create');
 const { findArtifact, sendArtifact } = require('../runtime/artifacts');
+const trace = require('../runtime/trace');
 const personal = require('../agents/personal');
 const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
@@ -86,6 +87,11 @@ function createApi(ctx) {
 
     // ── The catalog and the dry run (public) ─────────────────
     r.get('/agents', limits.reads('actor.agent.read'), (req, res) => res.json(catalog.listResult(config, ctx.models)));
+
+    // Live per-tool and per-model numbers (stage V2-10), public: names and numbers only, and only rows with n >= 20 so
+    // no one person's use shows. The brain (V2-8) reads ctx.stats directly and is not held to that floor.
+    r.get('/stats/tools', limits.reads('actor.stats.read'), async (_req, res) => res.json({ tools: await ctx.stats.publicTools() }));
+    r.get('/stats/models', limits.reads('actor.stats.read'), async (_req, res) => res.json({ models: await ctx.stats.publicModels() }));
 
     // A person's own agents live under /me: /agents stays the public catalog of agent systems (actor.agent.read).
     r.get('/me/agents', principal.requireCapability('actor.agent.manage'), (req, res, next) => owner(req, res, next), limits.reads('actor.agent.manage'), async (req, res) => {
@@ -230,6 +236,15 @@ function createApi(ctx) {
         const desk = await store.taskDesk(s, row);
         if (desk) out.desk = desk;
         res.json(out);
+    });
+
+    // The task's trace (stage V2-10): the numbers and names of its model, tool, check and delegate calls, to its own
+    // people. Another person gets the same 404 as a task that does not exist.
+    r.get('/tasks/:id/trace', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        const spans = await trace.spansFor(s, row.id);
+        res.json({ task_id: row.id, spans, totals: trace.totals(spans) });
     });
 
     // A file or chart the task made (Actor v2, stage V2-4): the bytes are in Actor's own database, private to the

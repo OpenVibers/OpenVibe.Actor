@@ -115,6 +115,16 @@ function fakeModels(script) {
 
     // ── A scheduled personal agent on the v2 loop ─────────────
     const calls = [];
+    // The notice is sent just after the task's end state is written, so a test that has seen the state waits for it.
+    const noticeFor = async (taskId, ms = 5000) => {
+        const until = Date.now() + ms;
+        while (Date.now() < until) {
+            const c = calls.find((x) => x.kind === 'task' && x.taskId === taskId);
+            if (c) return c;
+            await new Promise((r) => setTimeout(r, 25));
+        }
+        return null;
+    };
     const notifier = {
         enabled: true,
         taskEnded: async (a) => { calls.push({ kind: 'task', ...a }); return { sent: true }; },
@@ -187,7 +197,7 @@ function fakeModels(script) {
             assert.strictEqual(success.status, 201);
             const okRow = await t.waitFor(success.json().id);
             assert.strictEqual(okRow.state, 'succeeded');
-            const okCall = calls.find((c) => c.kind === 'task' && c.taskId === okRow.id);
+            const okCall = await noticeFor(okRow.id);
             assert.ok(okCall, 'a notification for the finished task');
             assert.strictEqual(okCall.state, 'succeeded');
             assert.strictEqual(okCall.subject, u.subject);
@@ -204,7 +214,7 @@ function fakeModels(script) {
             assert.strictEqual(bad.status, 201);
             const badRow = await t.waitFor(bad.json().id);
             assert.strictEqual(badRow.state, 'failed');
-            const badCall = calls.find((c) => c.kind === 'task' && c.taskId === badRow.id);
+            const badCall = await noticeFor(badRow.id);
             assert.ok(badCall, 'a notification for the failed task');
             assert.strictEqual(badCall.state, 'failed');
             assert.ok(/This one cannot run/.test(badCall.title));
