@@ -550,6 +550,7 @@ ${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
         return html`<section class="outcome outcome-ok answer" aria-labelledby="h-answer"><h2 id="h-answer" class="sr-only">Answer</h2>
 <div class="prose">${raw(chipify(markdown(result.answer, { headingOffset: 2 }), evidence))}</div>
 <p class="checked-line"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span>${claims ? `Checked: ${claims} claim${claims === 1 ? '' : 's'}, ${grounded} grounded` : 'Checked'} · by ${by}</span></p>
+${Array.isArray(result.contested) && result.contested.length ? contestedBlock(result.contested, evidence) : ''}
 ${artifacts.length ? html`<div class="files"><h3>Files</h3><ul class="file-grid">${artifacts.map((a) => html`<li class="file-card">
 <a class="fc-preview" href="${a.url}" rel="nofollow noopener" tabindex="-1" aria-hidden="true">${/^image\/(svg\+xml|png|jpe?g|gif|webp)$/.test(a.mime) ? html`<img src="${a.url}" alt="" loading="lazy">` : html`<span class="fc-ext">${ext(a)}</span>`}</a>
 <span class="fc-meta"><a class="fc-name" href="${a.url}" rel="nofollow noopener">${a.name}</a><span class="muted">${a.kind === 'chart' ? 'Chart' : 'File'} · ${bytes(a.size)}</span></span></li>`)}</ul></div>` : ''}
@@ -561,6 +562,20 @@ ${e.text ? html`<p class="ev-text">${String(e.text).slice(0, 700)}${String(e.tex
 ${Array.isArray(e.sources) && e.sources.length ? html`<ul class="ev-src">${e.sources.slice(0, 6).map((src) => html`<li><a href="${src.url}" rel="nofollow ugc noopener" target="_blank">${src.title || String(src.url).replace(/^https?:\/\//, '').slice(0, 80)}</a></li>`)}</ul>` : ''}</li>`)}</ol></details>` : ''}
 <p class="answer-foot"><span>${agent ? agent.name : result.agent}${result.model ? html` · ${modelName(result.model)}` : ''}</span><span>${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${Number.isFinite(took) && took > 0 ? html`<span>took ${ago(took)}</span>` : ''}</p>
 </section>`;
+    }
+
+    /**
+     * Where the sources disagree (stage V2-7b): each contested claim with its sides, the evidence chips behind each,
+     * and which side the evidence supports better (or that it cannot be settled), in a calm card under the check line.
+     */
+    function contestedBlock(list, evidence) {
+        const known = new Set((evidence || []).map((e) => String(e.id)));
+        const chips = (ids) => ids.filter((id) => known.has(id)).map((id) => html`<a class="ev" href="#ev-${id}" data-ev="${id}" aria-label="Evidence ${id.slice(1)}">${id.slice(1)}</a>`);
+        return html`<details class="contested" open><summary>Sources disagree on ${list.length} point${list.length === 1 ? '' : 's'}</summary>
+${list.map((c) => html`<div class="ct-item"><p class="ct-claim">${c.claim}</p>
+<ul class="ct-sides">${c.sides.map((s, i) => html`<li class="${c.pick === i ? 'is-pick' : ''}"><span class="ct-says">${s.says}</span><span class="evs">${chips(s.evidence)}</span>${c.pick === i ? html`<span class="ct-badge">Better supported</span>` : ''}</li>`)}</ul>
+<p class="ct-why">${c.pick == null ? 'The evidence cannot settle it. ' : ''}${c.reason}</p></div>`)}
+</details>`;
     }
 
     /**
