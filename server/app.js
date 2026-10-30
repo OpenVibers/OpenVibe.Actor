@@ -52,6 +52,8 @@ const resourceIndex = require('./registry/resource-index');
 const { createPageRoutes } = require('./http/pages');
 const { createAgentPages } = require('./http/agent-pages');
 const { createConsolePages } = require('./http/console-pages');
+const { createMemoryPages } = require('./http/memory-pages');
+const { createNotifier } = require('./notify/client');
 const { createActorReadiness } = require('./observability');
 const { createCallerLimits } = require('./http/caller-limits');
 const accountDataLib = require('./identity/account-data');
@@ -68,7 +70,8 @@ const { createPgTelemetrySink } = require('openvibe-sdk/telemetry');
  * opts: config, store, now (clock), fetchImpl (Network), providerFetch (model providers and OpenVibe services), log,
  * limitsNow, callerLimits (false: count nobody, tests only), valkey, adapters (tests: stand-in agents),
  * accountSend (a stand-in for Network's internal routes; tests only), webhookPost (a stand-in for the guarded webhook
- * poster; tests only), bot ({ robots, computers }: stand-ins for the Console's OpenVibe.Bot reads; tests only)
+ * poster; tests only), bot ({ robots, computers }: stand-ins for the Console's OpenVibe.Bot reads; tests only),
+ * notifier (a stand-in for Network notifications; tests only)
  */
 async function createApp(opts = {}) {
     const config = opts.config || configLib.load();
@@ -98,7 +101,9 @@ async function createApp(opts = {}) {
         s, config, now: s.now, log, signer,
         post: opts.webhookPost || createWebhookPoster({ userAgent: `OpenVibe.Actor/${VERSION} (+https://openvibe.actor/docs#webhooks)`, timeoutMs: config.webhooks.timeoutMs }),
     });
-    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop });
+    // Network notifications ("tell me when it's done"): off without a client secret, never able to fail a task.
+    const notifier = opts.notifier || createNotifier({ config, fetchImpl, log });
+    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier });
     const principal = createPrincipal({ config, keys });
     const projects = opts.projects || require('./identity/projects').createProjects({ config });
     // Ask Actor from chat (chat/asks.js): chat.message.created through the events consumer below, replies through Chat.
@@ -107,7 +112,7 @@ async function createApp(opts = {}) {
         createTask: (args) => createTask({ s, config, engine, webhooks, ...args }) });
     // Each personal agent's run that passed its check also goes to its owner's Vibe chat (agents/vibe-deliver.js).
     const vibeDelivery = require('./agents/vibe-deliver').createVibeDelivery({ s, config, chat: chatClient, log });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop };
+    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;
@@ -208,6 +213,7 @@ async function createApp(opts = {}) {
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.ACTOR_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));
     app.use(createAgentPages(ctx));
+    app.use(createMemoryPages(ctx));
     app.use(createConsolePages(ctx, opts.bot || {}));
     const pageRoutes = createPageRoutes(ctx);
     // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public

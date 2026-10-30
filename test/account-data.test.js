@@ -112,7 +112,11 @@ async function makeArtifact(t, subject, taskId, name, content) {
             assert.strictEqual(content.length, 1, 'only A\'s file content');
             assert.strictEqual(Buffer.from(content[0].content_base64, 'base64').toString('utf8'), 'A private notes');
             assert.strictEqual(part.body.files.find((f) => f.name === 'agents.json').content[0].name, 'A helper');
-            assert.strictEqual(part.body.files.find((f) => f.name === 'agent-memory.json').content[0].text, 'A private note.');
+            const memRow = part.body.files.find((f) => f.name === 'agent-memory.json').content[0];
+            assert.strictEqual(memRow.text, 'A private note.');
+            assert.strictEqual(memRow.kind, 'fact');
+            assert.strictEqual(memRow.status, 'active');
+            assert.strictEqual(memRow.origin, 'person', 'the export carries the table column');
             const tasks = part.body.files.find((f) => f.name === 'tasks.json').content;
             assert.strictEqual(tasks.length, 1);
             assert.strictEqual(tasks[0].task, 'person-a');

@@ -64,7 +64,8 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
                 const notes = await personal.memory(fake.ctx.s, `user:${who.subject}`, made.row.id);
                 assert.strictEqual(notes.length, 1);
                 assert.strictEqual(notes[0].text, 'Likes Mars');
-                assert.strictEqual(notes[0].origin, 'agent');
+                assert.strictEqual(notes[0].source, 'agent');
+                assert.strictEqual(notes[0].status, 'suggested', 'an agent-written note waits for the person');
             } finally { await fake.close(); }
         });
     } finally { await t.close(); }

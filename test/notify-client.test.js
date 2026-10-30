@@ -28,6 +28,30 @@ const reply = (status, body) => new Response(JSON.stringify(body), { status, hea
         assert.deepStrictEqual(await n.needsYou({ subject: ME, what: 'x', url: 'http://evil.example/' }), { sent: false, reason: 'bad_input' }, 'only an https link');
     });
 
+    await check('a task end names the task and the outcome and links to its page', async () => {
+        const calls = [];
+        const fetchImpl = async (url, init = {}) => {
+            calls.push({ url: String(url), method: init.method || 'GET', body: init.body ? JSON.parse(init.body) : null });
+            if (String(url).includes('/internal/identity/resolve')) return reply(200, { network_user_id: 42 });
+            return reply(200, { ok: true });
+        };
+        const n = createNotifier({ config, fetchImpl, tokens, log: { warn() {} } });
+        const taskId = 'tsk_01M4W5JBFEG3QG9ER8W1A2K0RX';
+        const url = `https://openvibe.actor/tasks/${taskId}`;
+        assert.deepStrictEqual(await n.taskEnded({ subject: ME, state: 'succeeded', taskId, title: 'Say hello.', url }), { sent: true });
+        const done = calls.find((c) => c.method === 'POST').body;
+        assert.strictEqual(done.type, 'AGENT_TASK_DONE');
+        assert.match(done.message, /Done: Say hello\./);
+        assert.strictEqual(done.url, url);
+        assert.deepStrictEqual(done.rich_content, { task_id: taskId, state: 'succeeded' });
+        calls.length = 0;
+        await n.taskEnded({ subject: ME, state: 'failed', taskId, title: 'Plan the trip', url, detail: 'It ran too long.' });
+        const failed = calls.find((c) => c.method === 'POST').body;
+        assert.strictEqual(failed.type, 'AGENT_TASK_FAILED');
+        assert.match(failed.message, /Not finished: Plan the trip — It ran too long\./);
+        assert.deepStrictEqual(await n.taskEnded({ subject: ME, state: 'failed', taskId: 'nope', title: 'x', url }), { sent: false, reason: 'bad_input' });
+    });
+
     await check('a failure is an answer, never a throw; off without a client secret', async () => {
         const n = createNotifier({ config, fetchImpl: async () => { throw new Error('down'); }, tokens, log: { warn() {} } });
         assert.deepStrictEqual(await n.needsYou({ subject: ME, what: 'x', url: 'https://openvibe.bot/x' }), { sent: false, reason: 'error' });

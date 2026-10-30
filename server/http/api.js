@@ -26,6 +26,7 @@ const { route, MODES } = require('../agents/router');
 const { createTask } = require('../tasks/create');
 const { findArtifact, sendArtifact } = require('../runtime/artifacts');
 const personal = require('../agents/personal');
+const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
 const items = require('../actions/items');
 
@@ -158,12 +159,13 @@ function createApi(ctx) {
     });
     r.patch('/me/agents/:id/memory/:mem', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (!row) return;
-        const value = (req.body || {}).text;
-        if (!personal.MEM_ID.test(req.params.mem)) return problem(req, res, 404, 'actor.agent.not_found', 'No such note.');
-        if (typeof value !== 'string' || !value.trim() || value.length > 1000) return problem(req, res, 422, 'actor.agent.invalid', 'memory text must be 1–1000 characters.');
-        const note = await s.db.maybe('UPDATE actor_agent_memory SET text = $1, updated_at = $2 WHERE id = $3 AND agent_id = $4 AND owner = $5 RETURNING *', [value.trim(), s.iso(), req.params.mem, row.id, row.owner]);
-        if (!note) return problem(req, res, 404, 'actor.agent.not_found', 'No such note.');
-        res.json(note);
+        if (!memoryStore.MEM_ID.test(String(req.params.mem || ''))) return problem(req, res, 404, 'actor.agent.not_found', 'No such note.');
+        const found = await s.db.maybe('SELECT id FROM actor_agent_memory WHERE id = $1 AND agent_id = $2 AND owner = $3', [req.params.mem, row.id, row.owner]);
+        if (!found) return problem(req, res, 404, 'actor.agent.not_found', 'No such note.');
+        const out = await memoryStore.edit(s, row.owner, found.id, { text: (req.body || {}).text });
+        if (!out) return problem(req, res, 404, 'actor.agent.not_found', 'No such note.');
+        if (out.error) return problem(req, res, 422, 'actor.agent.invalid', out.error);
+        res.json(out.row);
     });
     r.delete('/me/agents/:id/memory/:mem', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (!row) return;

@@ -19,7 +19,7 @@ const DEFAULT_CLIP = 6000;
 function createLedger({ now = () => Date.now(), clip = DEFAULT_CLIP } = {}) {
     const items = [];
 
-    function add({ tool, input = null, text = '', data = null, sources = [], artifacts = [], at = null } = {}) {
+    function add({ tool, input = null, text = '', data = null, sources = [], artifacts = [], refs = [], at = null } = {}) {
         const id = `E${items.length + 1}`;
         const item = {
             id,
@@ -29,6 +29,8 @@ function createLedger({ now = () => Date.now(), clip = DEFAULT_CLIP } = {}) {
             data: data === undefined ? null : data,
             sources: Array.isArray(sources) ? sources.filter((s) => s && typeof s.url === 'string').slice(0, 20) : [],
             artifacts: Array.isArray(artifacts) ? artifacts.slice(0, 20) : [],
+            // Rows the task page can open (a memory a cited answer leaned on): the index, never the store.
+            refs: Array.isArray(refs) ? refs.slice(0, 20) : [],
             at: at || new Date(now()).toISOString(),
         };
         items.push(item);
@@ -66,7 +68,7 @@ function createLedger({ now = () => Date.now(), clip = DEFAULT_CLIP } = {}) {
     function forResult() {
         return items.map((e) => ({
             id: e.id, tool: e.tool, input: e.input, text: e.text.slice(0, 2000),
-            sources: e.sources, artifacts: e.artifacts, at: e.at,
+            sources: e.sources, artifacts: e.artifacts, refs: e.refs, at: e.at,
         }));
     }
 
