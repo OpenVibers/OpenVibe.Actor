@@ -3,11 +3,11 @@
 /**
  * Task artifacts (Actor v2, stage V2-4): the files and charts a tool makes, kept in Actor's own PostgreSQL.
  *
- * Why they are not on OpenVibe.Media yet: Actor hosts people's agents, and OpenVibe.Network lets a hosted agent hold
- * what its host holds, so a Media grant on Actor would open Actor's whole tenant to every agent (Network #432 pins
- * "no Media grant for the agent host"). Until Network keeps `media.*` out of what a hosted agent inherits, the bytes
- * stay in Actor's own database (migrations/0015_actor_artifacts.sql), private to the task's owner. They move to
- * Media when Network does.
+ * Why they are not on OpenVibe.Media yet: Actor holds no Media grant (Network's DEFAULT_GRANTS). An agent Actor hosts
+ * could not reach Actor's tenant even if it did (its token names only its project's namespaces, Network #434), but
+ * every file would still be read with Actor's own token, so this database's owner check is the one that matters.
+ * Until a Media grant for Actor is worth having, the bytes stay here (migrations/0015_actor_artifacts.sql), private to
+ * the task's owner.
  *
  *   actor_artifacts (id, task_id, owner, name, mime, size, bytes, created_at)
  *

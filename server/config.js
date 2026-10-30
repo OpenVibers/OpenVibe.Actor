@@ -117,8 +117,7 @@ function load(env = process.env) {
         },
 
         // Artifacts (Actor v2, stage V2-4): what one task may make. The bytes live in Actor's own PostgreSQL,
-        // private to the task's owner, until OpenVibe.Network keeps `media.*` out of what a hosted agent inherits
-        // and the files can move to OpenVibe.Media. 256 KB a file, 2 MB a task.
+        // private to the task's owner (server/runtime/artifacts.js says why not Media yet). 256 KB a file, 2 MB a task.
         artifacts: {
             maxFileBytes: Math.max(1024, int(env.ACTOR_ARTIFACT_MAX_FILE_BYTES, 256 * 1024)),
             maxTaskBytes: Math.max(1024, int(env.ACTOR_ARTIFACT_MAX_TASK_BYTES, 2 * 1024 * 1024)),

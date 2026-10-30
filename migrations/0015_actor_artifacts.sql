@@ -1,10 +1,9 @@
 -- phase: expand
 -- Actor v2, stage V2-4: the files and charts a task makes, kept in Actor's own PostgreSQL.
 --
--- They are not on OpenVibe.Media yet: Actor hosts people's agents, and OpenVibe.Network lets a hosted agent hold
--- what its host holds, so a Media grant on Actor would open Actor's whole tenant to every agent (Network #432 pins
--- "no Media grant for the agent host"). Until Network keeps media.* out of what hosted agents inherit, the bytes stay
--- here, private to the task's owner, and they move to Media when it does.
+-- They are not on OpenVibe.Media: Actor holds no Media grant, and every read would be with Actor's own token, so the
+-- owner check here is the one that matters (server/runtime/artifacts.js). The bytes stay here, private to the task's
+-- owner.
 --
 -- owner is the person the task was for (user:usr_...), the same shape tasks.requester has, so the rows are exported
 -- and deleted with the person (server/identity/account-data.js). A row goes with its task (ON DELETE CASCADE).
