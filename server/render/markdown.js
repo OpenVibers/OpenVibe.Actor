@@ -33,7 +33,7 @@ function markdown(src, { headingOffset = 1 } = {}) {
     let list = null;   // { type: 'ul' | 'ol', items: [] }
     let fence = null;
     const flushPara = () => { if (para.length) { out.push(`<p>${inline(para.join(' '))}</p>`); para = []; } };
-    const flushList = () => { if (list) { out.push(`<${list.type}>${list.items.map((i) => `<li>${inline(i)}</li>`).join('')}</${list.type}>`); list = null; } };
+    const flushList = () => { if (list && list.items.length) out.push(`<${list.type}>${list.items.map((i) => `<li>${inline(i)}</li>`).join('')}</${list.type}>`); list = null; };
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         if (fence) {
@@ -59,16 +59,19 @@ function markdown(src, { headingOffset = 1 } = {}) {
             out.push(`<h${level}>${inline(h[2])}</h${level}>`);
             continue;
         }
+        // A model that ends on a bare marker ("-" or "1.") or an empty item ("- ") leaves an empty bullet otherwise.
+        if (/^\s*(?:[-*]|\d+\.)\s*$/.test(line)) continue;
         const li = line.match(/^\s*(?:[-*]|(\d+)\.)\s+(.*)$/);
         if (li) {
             flushPara();
+            if (!li[2].trim()) continue;
             const type = li[1] ? 'ol' : 'ul';
             if (!list || list.type !== type) { flushList(); list = { type, items: [] }; }
             list.items.push(li[2]);
             continue;
         }
         if (!line.trim()) { flushPara(); flushList(); continue; }
-        if (list && /^\s{2,}\S/.test(line)) { list.items[list.items.length - 1] += ` ${line.trim()}`; continue; }
+        if (list && list.items.length && /^\s{2,}\S/.test(line)) { list.items[list.items.length - 1] += ` ${line.trim()}`; continue; }
         flushList();
         para.push(line.trim());
     }

@@ -88,6 +88,21 @@ function sourcesOf(output, text) {
     return [...new Set(urls.map((u) => u.replace(/\?utm_source=openai$/, '')))].slice(0, 20);
 }
 
+/** The answer's citations with their titles, as the Responses output carries them (url_citation annotations). */
+function citationsOf(output) {
+    const out = [];
+    for (const item of output || []) {
+        if (item.type !== 'message') continue;
+        for (const c of item.content || []) {
+            for (const a of c.annotations || []) {
+                if (!a || a.type !== 'url_citation' || !a.url) continue;
+                out.push({ url: String(a.url).replace(/\?utm_source=openai$/, ''), title: String(a.title || '') });
+            }
+        }
+    }
+    return out;
+}
+
 function responsesAgent({ baseUrl, apiKey, model, rates, fetchImpl = globalThis.fetch, timeoutMs = 150_000 }) {
     return async function run({ instructions, input, effort = 'low', maxOutputTokens = 4000, signal } = {}) {
         const body = { model, instructions, input, tools: [{ type: 'web_search' }], reasoning: { effort }, max_output_tokens: maxOutputTokens };
@@ -98,8 +113,8 @@ function responsesAgent({ baseUrl, apiKey, model, rates, fetchImpl = globalThis.
         const u = j.usage || {};
         const usage = { input: u.input_tokens || 0, cached: (u.input_tokens_details && u.input_tokens_details.cached_tokens) || 0, output: u.output_tokens || 0, calls: searches.filter((s) => s.kind === 'search').length };
         if (j.status && j.status !== 'completed' && !text) throw new ProviderError(`the agent stopped (${j.status}${j.incomplete_details ? `: ${j.incomplete_details.reason}` : ''})`);
-        return { text, sources: sourcesOf(output, text), searches, model: j.model || model, usage, cost_usd: priceUsage(rates, usage) };
+        return { text, sources: sourcesOf(output, text), citations: citationsOf(output), searches, model: j.model || model, usage, cost_usd: priceUsage(rates, usage) };
     };
 }
 
-module.exports = { chatClient, responsesAgent, priceUsage, sourcesOf, ProviderError };
+module.exports = { chatClient, responsesAgent, priceUsage, sourcesOf, citationsOf, ProviderError };

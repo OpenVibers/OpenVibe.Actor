@@ -335,7 +335,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
             crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task' }],
             // How it went is the agents' session (openvibe-shared/agent-session.js, js/task.js mounts it from the events
             // below and, while the task runs, from its live stream); the attempts drawn here stay for a page without scripts.
-            scripts: ['js/task.js'],
+            scripts: ['js/task-events.js', 'js/task.js'],
             sharedScripts: ['agent-session.js'],
             styles: [showcase.STYLESHEET],
             noReferrer: true,
