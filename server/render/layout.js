@@ -17,6 +17,7 @@ const frame = require('openvibe-shared/frame');
 const shell = require('openvibe-shared/shell');
 const cache = require('openvibe-shared/cache-policy');
 const { html, raw, esc } = require('./html');
+const { foldBlock } = require('./short');
 
 const NETWORK_URL = 'https://openvibe.network';
 const SITE_NAME = 'OpenVibe.Actor';
@@ -111,7 +112,12 @@ ${render(scripts)}
 <main id="main" class="page">
 ${render(crumbs)}
 ${render(o.body)}
-${o.path === '/' ? frame.shipped({ service: 'actor', title: `Recently shipped on ${SITE_NAME}` }) : ''}
+${o.path === '/' ? foldBlock({
+        id: 'shipped',
+        bare: true,
+        head: `<h2>Recently shipped on ${SITE_NAME}</h2>`,
+        html: frame.shipped({ service: 'actor', title: `Recently shipped on ${SITE_NAME}` }),
+    }) : ''}
 </main>
 <script>
 window.__OV_PAGE = ${JSON.stringify({ navbar: nav, footer }).replace(/</g, '\\u003c')};

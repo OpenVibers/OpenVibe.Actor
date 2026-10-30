@@ -41,3 +41,34 @@
 .sc-code { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
 @media (max-width: 520px) { .sc-code pre { white-space: pre-wrap; overflow-wrap: anywhere; } }
 @media (max-width: 420px) { .sc-hero, .sc-sec, .sc-cta { padding-left: 16px; padding-right: 16px; } }
+
+/* The fold (the owner's short-pages rule, 2026-10-30): a part a reader rarely needs. On a phone it is closed — the
+   title row is a 44 px target that opens it — and where there is room it is open and looks like the section it
+   replaces. A checkbox and a label, no script: the part stays in the page for the crawlers. */
+.fold { margin-top: 26px; }
+.fold-toggle { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.fold-h { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+.fold-h > h2 { margin: 0; font-size: clamp(22px, 2.6vw, 30px); letter-spacing: -.02em; flex: 1 1 auto; }
+.fold-h:focus-within { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
+.fold-mark { flex: none; }
+.fold-mark::after { content: "+"; font-size: 20px; font-weight: 400; color: var(--text-muted, #7386a3); }
+.fold-toggle:checked ~ .fold-h .fold-mark::after { content: "\2212"; }
+.fold-body { display: none; }
+.fold-toggle:checked ~ .fold-body { display: block; }
+.fold-body > .sc-sec { margin-top: 16px; }
+/* The title row names the part, so a part that keeps its own heading gives way to it on a phone (and keeps it where
+   there is room). */
+@media (max-width: 640px) {
+  .fold-bare .fold-body > section > h2, .fold-bare .fold-body > .sc-sec > h2, .fold-bare .fold-body .ov-shipped-home h3 { display: none; }
+}
+.fold:not(.fold-bare) .fold-body .ov-shipped-home h3 { display: none; }
+@media (min-width: 641px) {
+    .fold { margin-top: 56px; }
+    .fold-toggle { display: none; }
+    .fold-h { min-height: 0; margin-bottom: 10px; cursor: default; }
+    .fold-mark { display: none; }
+    .fold-body { display: block; }
+    .fold-bare > .fold-h { display: none; }
+    .fold-bare { margin-top: 0; }
+    .fold:not(.fold-bare) .fold-body > .sc-sec { margin-top: 0; }
+}
