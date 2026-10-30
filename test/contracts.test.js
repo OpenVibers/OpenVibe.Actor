@@ -4,7 +4,7 @@
  * released `actor` service manifest and its five capability manifests are checked against the code: the domain,
  * port, health and ready paths, the capabilities (routes in server/http/api.js and server/registry/resource-index.js, each
  * route guarded by the one capability it names), no events but the account ones (ADR-033), and the shapes Actor answers with (the contracts'
- * actor.agent-list-result@1, platform.placement-result@1 and platform.task@1).
+ * actor.agent-list-result@2, platform.placement-result@1 and platform.task@1).
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -126,7 +126,10 @@ function codeRoutes() {
             const kim = t.network.addUser('kim');
             const agents = await t.get('/api/v1/agents');
             assert.strictEqual(agents.status, 200);
-            assert.deepStrictEqual(contracts.validate('actor.agent-list-result@1', agents.json()).errors, []);
+            const listing = agents.json();
+            assert.deepStrictEqual(contracts.validate('actor.agent-list-result@2', listing).errors, []);
+            // Every @1 field keeps its place for this version, so an @1-shaped answer still validates as @1.
+            assert.deepStrictEqual(contracts.validate('actor.agent-list-result@1', { agents: listing.agents }).errors, []);
             const routed = await t.get('/api/v1/route', { json: { task: 'Write a short poem about the sea', mode: 'cheapest' } });
             assert.strictEqual(routed.status, 200, routed.text);
             const body = routed.json();

@@ -2,7 +2,7 @@
 
 /**
  * The agent systems Actor routes a task to (ADR-044 §2): what each can do, its trust class, its rate card and whether
- * it can take a task now. GET /api/v1/agents is this list (actor.agent-list-result@1); the router turns each into an
+ * it can take a task now. GET /api/v1/agents is this list (actor.agent-list-result@2); the router turns each into an
  * openvibe-sdk/placement offer (toOffer) so the planner picks by capability first, then by the mode's objective.
  *
  * Rate cards are typed in from the provider's own price page by a person, with the page and the day it was checked;
@@ -133,7 +133,7 @@ function typicalCost(agentId, config = null) {
     return (t.in * r.input_usd_per_mtok + t.out * r.output_usd_per_mtok) / 1e6 + t.calls * (r.per_call_usd || 0);
 }
 
-/** GET /api/v1/agents: actor.agent-list-result@1. */
+/** The agent rows of actor.agent-list-result (the @1 shape): one per system, with its trust, price and availability. */
 function list(config) {
     return AGENTS.map((listed) => {
         const a = effective(listed, config);
@@ -144,6 +144,19 @@ function list(config) {
         if (av.reason) row.reason = av.reason;
         return row;
     });
+}
+
+/**
+ * GET /api/v1/agents: actor.agent-list-result@2. Every @1 field keeps its place; v2 adds the tiers the one loop
+ * resolves its models to and the models this server's keys reach (server/runtime/models.js).
+ */
+function listResult(config, models = null) {
+    const out = { agents: list(config) };
+    if (models) {
+        out.tiers = models.tierList();
+        out.models = models.modelList();
+    }
+    return out;
 }
 
 /**
@@ -184,4 +197,4 @@ const RATES = {
     local: { input_usd_per_mtok: 0, output_usd_per_mtok: 0 },
 };
 
-module.exports = { AGENTS, TYPICAL, RATES, availability, list, toOffer, typicalCost, modelOf, byId, effective, runtimeOverride, VERIFIED };
+module.exports = { AGENTS, TYPICAL, RATES, availability, list, listResult, toOffer, typicalCost, modelOf, byId, effective, runtimeOverride, VERIFIED };

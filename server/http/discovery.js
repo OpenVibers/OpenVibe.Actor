@@ -94,7 +94,7 @@ function createDiscoveryRoutes(ctx) {
                     { title: 'What shipped on OpenVibe.Actor', url: abs('/updates') },
                 ] },
                 { title: 'Machine-readable', links: [
-                    { title: 'The agents (JSON)', url: abs('/api/v1/agents'), note: 'actor.agent-list-result@1' },
+                    { title: 'The agents (JSON)', url: abs('/api/v1/agents'), note: 'actor.agent-list-result@2' },
                     { title: 'The agent manifest (JSON)', url: abs('/.well-known/agent.json'), note: 'what this site tells an agent about itself' },
                     { title: 'The free tier (JSON)', url: abs('/limits.json') },
                     { title: 'Sitemap', url: abs('/sitemap.xml') },

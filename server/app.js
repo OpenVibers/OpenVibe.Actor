@@ -23,6 +23,9 @@ const { createKeyStore } = require('./auth/keys');
 const { createSso } = require('./auth/sso');
 const catalog = require('./agents/catalog');
 const { createAdapters } = require('./agents/adapters');
+const { createModels } = require('./runtime/models');
+const { createRegistry } = require('./runtime/tools');
+const { createLoop } = require('./runtime/loop');
 const { createEngine } = require('./tasks/engine');
 const { createWebhooks } = require('./tasks/webhooks');
 const { createChatClient } = require('./chat/client');
@@ -78,7 +81,14 @@ async function createApp(opts = {}) {
     if (config.selfHosted.on) checkSelfHosted(config);
     const sso = config.selfHosted.on ? createLocalSignIn({ config, now: s.now }) : createSso({ config, keys, fetchImpl, now: s.now, log });
     const stream = createTaskStream({ log });
-    const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: opts.providerFetch || globalThis.fetch, log });
+    const providerFetch = opts.providerFetch || globalThis.fetch;
+    // Actor v2: one model layer (tiers), one tool registry (every module in runtime/tools) and one loop. The tools
+    // are validated strictly in tests, leniently in production; the model lists are read once at boot.
+    const models = opts.models || createModels({ config, rates: catalog.RATES, fetchImpl: providerFetch, log });
+    const registry = opts.registry || createRegistry({ log, strict: config.nodeEnv === 'test', fetchImpl: providerFetch });
+    await models.warm().catch((err) => log.warn('[Actor] model listing failed:', err && err.message));
+    const loop = opts.loop || createLoop({ config, models, registry, log });
+    const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: providerFetch, log });
     // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.
     // A webhook naming a project secret (ADR-056) is signed by OpenVibe.Network (server/net/secret-signer.js).
     const signer = opts.secretSigner || require('./net/secret-signer').createSecretSigner({ config, fetchImpl });
@@ -86,7 +96,7 @@ async function createApp(opts = {}) {
         s, config, now: s.now, log, signer,
         post: opts.webhookPost || createWebhookPoster({ userAgent: `OpenVibe.Actor/${VERSION} (+https://openvibe.actor/docs#webhooks)`, timeoutMs: config.webhooks.timeoutMs }),
     });
-    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log });
+    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop });
     const principal = createPrincipal({ config, keys });
     const projects = opts.projects || require('./identity/projects').createProjects({ config });
     // Ask Actor from chat (chat/asks.js): chat.message.created through the events consumer below, replies through Chat.
@@ -95,7 +105,7 @@ async function createApp(opts = {}) {
         createTask: (args) => createTask({ s, config, engine, webhooks, ...args }) });
     // Each personal agent's run that passed its check also goes to its owner's Vibe chat (agents/vibe-deliver.js).
     const vibeDelivery = require('./agents/vibe-deliver').createVibeDelivery({ s, config, chat: chatClient, log });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery };
+    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;

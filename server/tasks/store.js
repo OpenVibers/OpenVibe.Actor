@@ -22,10 +22,10 @@ function subjectRef(requester) {
 
 async function insertTask(s, t) {
     await s.db.query(
-        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14)`,
+        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret, timeout_ms)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14, $15)`,
         [t.id, t.requester, t.project_id || null, t.task, t.mode, t.agent || null, t.budget_task, t.budget_day, t.idem_key || null, t.idem_hash || null, t.created_at, t.via || null,
-            t.webhooks && t.webhooks.length ? JSON.stringify(t.webhooks) : null, t.webhook_secret || null]);
+            t.webhooks && t.webhooks.length ? JSON.stringify(t.webhooks) : null, t.webhook_secret || null, t.timeout_ms || null]);
     await addSpend(s, t.requester, 0, { tasks: 1 });
     return getTask(s, t.id);
 }

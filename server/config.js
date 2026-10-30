@@ -10,6 +10,8 @@ require('dotenv').config();
 const trim = (s) => String(s || '').replace(/\/+$/, '');
 const int = (v, def) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : def);
 const num = (v, def) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : def);
+// An optional price: undefined when nobody typed one, so the provider's published card is used.
+const optNum = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : undefined);
 
 function load(env = process.env) {
     const nodeEnv = env.NODE_ENV || 'development';
@@ -68,8 +70,8 @@ function load(env = process.env) {
         // The model providers behind the agent systems (server/agents/catalog.js). A provider without its key is
         // listed as unavailable, with the reason; nothing is invented. Keys are the operator's.
         providers: {
-            deepseek: { apiKey: env.ACTOR_DEEPSEEK_API_KEY || '', baseUrl: trim(env.ACTOR_DEEPSEEK_BASE_URL || 'https://api.deepseek.com'), model: env.ACTOR_DEEPSEEK_MODEL || 'deepseek-flash' },
-            openai: { apiKey: env.ACTOR_OPENAI_API_KEY || '', baseUrl: trim(env.ACTOR_OPENAI_BASE_URL || 'https://api.openai.com/v1'), model: env.ACTOR_OPENAI_MODEL || 'gpt-5-mini', checkModel: env.ACTOR_OPENAI_CHECK_MODEL || 'gpt-5-nano', groundedCheckModel: env.ACTOR_OPENAI_GROUNDED_CHECK_MODEL || 'gpt-5-mini', visionModel: env.ACTOR_OPENAI_VISION_MODEL || '' },
+            deepseek: { apiKey: env.ACTOR_DEEPSEEK_API_KEY || '', baseUrl: trim(env.ACTOR_DEEPSEEK_BASE_URL || 'https://api.deepseek.com'), model: env.ACTOR_DEEPSEEK_MODEL || 'deepseek-flash', inputUsdPerMtok: optNum(env.ACTOR_DEEPSEEK_INPUT_USD_PER_MTOK), outputUsdPerMtok: optNum(env.ACTOR_DEEPSEEK_OUTPUT_USD_PER_MTOK) },
+            openai: { apiKey: env.ACTOR_OPENAI_API_KEY || '', baseUrl: trim(env.ACTOR_OPENAI_BASE_URL || 'https://api.openai.com/v1'), model: env.ACTOR_OPENAI_MODEL || 'gpt-5-mini', checkModel: env.ACTOR_OPENAI_CHECK_MODEL || 'gpt-5-nano', groundedCheckModel: env.ACTOR_OPENAI_GROUNDED_CHECK_MODEL || 'gpt-5-mini', visionModel: env.ACTOR_OPENAI_VISION_MODEL || '', inputUsdPerMtok: optNum(env.ACTOR_OPENAI_INPUT_USD_PER_MTOK), outputUsdPerMtok: optNum(env.ACTOR_OPENAI_OUTPUT_USD_PER_MTOK) },
             local: { url: trim(env.ACTOR_LOCAL_LLM_URL || ''), model: env.ACTOR_LOCAL_LLM_MODEL || '' },
             // The runtime's model on any OpenAI-compatible endpoint (Ollama, llama.cpp, vLLM, another provider) instead
             // of DeepSeek: a self-hosted Actor's usual choice. Priced per million tokens at what the operator says
@@ -78,6 +80,26 @@ function load(env = process.env) {
                 url: trim(env.ACTOR_RUNTIME_URL || ''), model: env.ACTOR_RUNTIME_MODEL || '', apiKey: env.ACTOR_RUNTIME_API_KEY || '',
                 inputUsdPerMtok: Math.max(0, num(env.ACTOR_RUNTIME_INPUT_USD_PER_MTOK, 0)), outputUsdPerMtok: Math.max(0, num(env.ACTOR_RUNTIME_OUTPUT_USD_PER_MTOK, 0)),
             },
+            // Any other OpenAI-compatible endpoint (Actor v2, models.js): tiers may name `compatible:<model>`. Empty
+            // turns it off. Priced at what the operator says.
+            compatible: {
+                baseUrl: trim(env.ACTOR_COMPAT_URL || ''), apiKey: env.ACTOR_COMPAT_API_KEY || '', model: env.ACTOR_COMPAT_MODEL || '',
+                inputUsdPerMtok: Math.max(0, num(env.ACTOR_COMPAT_INPUT_USD_PER_MTOK, 0)), outputUsdPerMtok: Math.max(0, num(env.ACTOR_COMPAT_OUTPUT_USD_PER_MTOK, 0)),
+            },
+        },
+        // The one agent loop's model tiers (server/runtime/models.js). A tier may be pinned as `provider:model`
+        // (provider one of openai, deepseek, runtime, compatible, local). Absent, the tier takes the strongest model
+        // each configured key offers, in providerOrder, from the provider's own model list at boot.
+        models: {
+            tiers: {
+                fast: env.ACTOR_MODEL_FAST || '',
+                smart: env.ACTOR_MODEL_SMART || '',
+                best: env.ACTOR_MODEL_BEST || '',
+                check: env.ACTOR_MODEL_CHECK || '',
+                vision: env.ACTOR_MODEL_VISION || '',
+            },
+            providerOrder: String(env.ACTOR_MODEL_PROVIDER_ORDER || 'openai,deepseek,runtime,compatible,local').split(',').map((x) => x.trim()).filter(Boolean),
+            listTimeoutMs: Math.max(500, int(env.ACTOR_MODEL_LIST_TIMEOUT_MS, 5000)),
         },
         // The OpenVibe services the runtime acts through.
         services: {
@@ -108,8 +130,19 @@ function load(env = process.env) {
         },
         // Tasks running at once in this process; more wait queued.
         maxRunning: Math.max(1, int(env.ACTOR_MAX_RUNNING, 4)),
-        // A task that runs longer than this is stopped and fails (actor.task.timeout).
-        taskTimeoutMs: Math.max(10_000, int(env.ACTOR_TASK_TIMEOUT_MS, 180_000)),
+        // A task's own clock (Actor v2): the row keeps its timeout_ms at creation. The default is 10 minutes; a "best"
+        // task may run up to an hour. Older rows (and a task without the column) use taskTimeoutMs.
+        taskTimeoutMs: Math.max(10_000, int(env.ACTOR_TASK_TIMEOUT_MS, 600_000)),
+        bestTimeoutMs: Math.max(10_000, int(env.ACTOR_BEST_TASK_TIMEOUT_MS, 3_600_000)),
+        // The one agent loop (server/runtime/loop.js). No turn cap: it stops on the budget, the task's clock, a loop
+        // (the same tool and input three times) or its answer. Reflections before answering are the writer's own;
+        // `checkReflections` caps the verifier's second-family passes (the DeepSeek research: two at most).
+        loop: {
+            maxToolCallsPerTurn: Math.max(1, int(env.ACTOR_LOOP_MAX_TOOL_CALLS, 8)),
+            selfReflections: Math.max(0, int(env.ACTOR_LOOP_SELF_REFLECTIONS, 2)),
+            checkReflections: Math.min(2, Math.max(0, int(env.ACTOR_LOOP_CHECK_REFLECTIONS, 2))),
+            toolResultChars: Math.max(500, int(env.ACTOR_LOOP_TOOL_RESULT_CHARS, 6000)),
+        },
         // Task webhooks (server/tasks/webhooks.js): how often due deliveries are sent, and how long one may take.
         webhooks: {
             intervalMs: Math.max(1000, int(env.ACTOR_WEBHOOK_INTERVAL_MS, 5000)),

@@ -22,15 +22,18 @@ const catalog = require('../agents/catalog');
 const { classify, heuristic } = require('../agents/classify');
 const { route, whyNone } = require('../agents/router');
 const { check } = require('../agents/check');
+const { check: checkClaims } = require('../runtime/check');
 const approvals = require('../agents/approvals');
 const { repoIn: codesRepoIn } = require('../agents/codes');
 
 const MAX_ATTEMPTS = 2;
+// The one loop's agent id on the event stream and in the result (the old runtime's id, kept for readers).
+const LOOP_AGENT = 'openvibe-runtime';
 
 // What a task asked in a public chat may be (chat/asks.js): nothing that uses the person's own computers, robots or code.
 const PUBLIC_CLASSES = ['answer', 'lookup', 'research', 'web'];
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console }) {
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
     let stopped = false;
@@ -88,8 +91,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         };
         const budgetLeft = () => budget - spent;
         const abortAtEnd = () => { if (running.has(id)) running.get(id).abort('timeout'); };
-        let ends = Date.now() + config.taskTimeoutMs;
-        let timer = setTimeout(abortAtEnd, config.taskTimeoutMs);
+        // The task's own clock (Actor v2): set at creation (10 minutes by default, up to an hour for mode best).
+        const timeoutMs = Math.max(10_000, Number(row.timeout_ms) || config.taskTimeoutMs);
+        let ends = Date.now() + timeoutMs;
+        let timer = setTimeout(abortAtEnd, timeoutMs);
         timer.unref();
         // Desks plan D4: a task that handed its person a step on its desk (a sign-in, a CAPTCHA, a payment) waits for
         // them; its clock waits too, up to PERSON_WAIT_MAX_MS in all. Answers how long it may wait (0: no more).
@@ -111,6 +116,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         const raise = (agent) => { if (agent && agent.quality === 'high') floor = 'high'; else if (agent && agent.quality === 'standard' && floor !== 'high') floor = 'standard'; };
         try {
             await setState(id, 'running', { cost_usd: 0, free_usd: 0 });
+            // A task with no budget spends nothing: not even a classification call.
+            if (budget <= 0) {
+                return await setState(id, 'failed', { error_code: 'actor.budget.exceeded', error_detail: 'This task has a $0 budget, so nothing ran. Give it a budget above $0.', finished_at: iso() });
+            }
             // What kind of task this is. Private mode never sends the text anywhere to find out.
             let cls;
             if (row.mode === 'private' || !adapters.checkers.deepseek) {
@@ -126,6 +135,104 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             const fromChat = row.via === 'chat';
             if (fromChat && !PUBLIC_CLASSES.includes(cls)) {
                 return await setState(id, 'failed', { error_code: 'actor.task.not_public', error_detail: 'Asked in a public chat, Actor uses public tools only: ask on openvibe.actor to use your own computers, robots or code.', finished_at: iso() });
+            }
+
+            // Actor v2: every non-private task that is not code-only runs through the one loop. Private mode keeps
+            // the local model with no network tools, and a coding task keeps the Codes agent (which the loop can also
+            // reach as codes_task). Approval inbox, budgets, cancel, webhooks and the event stream are unchanged.
+            if (loop && models && row.mode !== 'private' && cls !== 'code') {
+                const agentId = LOOP_AGENT;
+                explanation.push({ selected: agentId, objective: row.mode === 'best' ? 'correctness' : 'balanced', reasons: [`the one agent loop (${row.mode === 'best' ? 'best' : 'smart'} tier)`], candidates: [], decided_at: iso() });
+                await store.updateTask(s, id, { explanation });
+                await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: 'The agent starts with a plan, then works through it.' });
+                // A personal agent's run that would start coding work on its owner's machine asks first (approvals.js).
+                const requestApproval = /^agent:agt_/.test(String(row.via || '')) ? async ({ kind, summary, payload }) => {
+                    const ask = await approvals.request(s, { owner: row.requester, agentId: row.via.slice(6), taskId: id, kind, summary, payload });
+                    const url = `${config.baseUrl}/me/approvals/${ask.id}`;
+                    await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Your agent wants to ${summary.toLowerCase()} Nothing runs until you approve it: ${url}` });
+                    return { pending: true, id: ask.id, url };
+                } : null;
+                let out = null;
+                try {
+                    out = await loop.run({
+                        task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
+                        emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
+                        meter, budgetLeft, waitForPerson, requestApproval,
+                    });
+                } catch (err) {
+                    if (signal && signal.aborted) throw err;
+                    const why = (err && err.message) || String(err);
+                    const code = err && err.code === 'actor.model.unavailable' ? 'actor.model.unavailable' : err && err.code === 'actor.budget.exceeded' ? 'actor.budget.exceeded' : 'actor.agent.failed';
+                    return await setState(id, 'failed', { error_code: code, error_detail: why.slice(0, 2000), finished_at: iso() });
+                }
+                try {
+                    await setState(id, 'verifying', { agentForEvent: agentId });
+                    const verify = async (current) => checkClaims({
+                        task: row.task, answer: current.text, evidence: current.evidence, models,
+                        writerFamily: current.family || null, signal, now: () => now(),
+                    });
+                    let verdict = await verify(out);
+                    await meter(verdict.cost_usd);
+                    const showCheck = (v) => emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${v.ok ? 'Checked' : 'Check failed'}${v.by ? ` by ${v.by}${v.cross ? '' : ' (same family)'}` : ''}: ${v.reason || ''}`.slice(0, 2000), is_error: !v.ok });
+                    await showCheck(verdict);
+                    // A live claim with no evidence never reaches the person: the loop gets one turn to fetch it or
+                    // drop it, then the check runs again (at most config.loop.checkReflections passes by another family).
+                    const maxRounds = config.loop && config.loop.checkReflections != null ? config.loop.checkReflections : 2;
+                    let rounds = 0;
+                    while (!verdict.ok && !verdict.unavailable && verdict.unsupported && verdict.unsupported.length && rounds < maxRounds && budgetLeft() > 0 && out.text) {
+                        rounds += 1;
+                        const revised = await loop.revise(out, verdict.unsupported);
+                        if (!revised || revised === out || !revised.text || revised.text === out.text) break;
+                        out = revised;
+                        verdict = await verify(out);
+                        await meter(verdict.cost_usd);
+                        await showCheck(verdict);
+                    }
+                    if (verdict.ok) {
+                        let answer = out.text;
+                        if (row.via && /^agent:agt_/.test(row.via)) {
+                            // A personal agent's closing lines, in either order: REMEMBER: and IMPROVE: (agents/personal.js).
+                            const personal = require('../agents/personal');
+                            for (let i = 0; i < 2; i++) {
+                                const match = answer.match(/(?:^|\n)(REMEMBER|IMPROVE): ([^\n]*)[ \t]*$/);
+                                if (!match) break;
+                                answer = answer.slice(0, match.index).trimEnd();
+                                const text = match[2].trim();
+                                if (!text || text.length > 300) continue;
+                                if (match[1] === 'REMEMBER') await personal.addMemory(s, row.requester, row.via.slice(6), text, 'agent');
+                                else await personal.addProposal(s, row.requester, row.via.slice(6), text, id);
+                            }
+                        }
+                        const claims = Array.isArray(verdict.claims) ? verdict.claims : [];
+                        const result = {
+                            answer,
+                            sources: out.sources || [],
+                            agent: agentId,
+                            model: out.model || null,
+                            class: cls,
+                            tier: out.tier || null,
+                            checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason, claims: claims.length, grounded: claims.length - (verdict.unsupported ? verdict.unsupported.length : 0) },
+                            evidence: out.evidence || [],
+                            citations: out.citations || [],
+                            plan: out.plan || null,
+                            turns: out.turns || null,
+                        };
+                        return await setState(id, 'succeeded', { result, finished_at: iso() });
+                    }
+                    if (verdict.unavailable) {
+                        return await setState(id, 'failed', { error_code: 'actor.check.unavailable', error_detail: `The answer could not be checked (${verdict.reason}), so it was not delivered.`, finished_at: iso() });
+                    }
+                    // The refused answer, kept on the task page folded away, never delivered as the answer.
+                    await emit(id, { kind: 'output', step: 'text', agent: agentId, text: String(out.text || '').slice(0, 8000), is_error: true });
+                    const bad = (verdict.unsupported || []).slice(0, 5).map((c) => c.claim).join('; ');
+                    return await setState(id, 'failed', {
+                        error_code: 'actor.check.ungrounded',
+                        error_detail: `The answer claimed ${(verdict.unsupported || []).length} live fact(s) with no evidence from its tools${bad ? ` (${bad})` : ''}, so it was not delivered.`.slice(0, 2000),
+                        finished_at: iso(),
+                    });
+                } finally {
+                    await loop.close(out && out.state).catch(() => {});
+                }
             }
 
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -209,7 +316,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             if (signal.aborted) {
                 if (signal.reason === 'shutdown') return undefined;    // stop() records it as interrupted
                 if (signal.reason === 'cancelled') return await setState(id, 'cancelled', { finished_at: iso() });
-                return await setState(id, 'failed', { error_code: 'actor.task.timeout', error_detail: `The task ran longer than ${Math.round(config.taskTimeoutMs / 1000)} seconds and was stopped.`, finished_at: iso() });
+                return await setState(id, 'failed', { error_code: 'actor.task.timeout', error_detail: `The task ran longer than ${Math.round(timeoutMs / 1000)} seconds and was stopped.`, finished_at: iso() });
             }
             log.error('[Actor] task failed unexpectedly:', id, err && err.message);
             return await setState(id, 'failed', { error_code: 'actor.internal', error_detail: 'Something went wrong on Actor\'s side. Nothing more will be charged for this task.', finished_at: iso() });

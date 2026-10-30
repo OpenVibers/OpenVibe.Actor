@@ -70,6 +70,8 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
             id: s.newId('tsk'), requester: principal.requester, via: principal.via || null, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,
             budget_task: perTask, budget_day: perDay, idem_key: body.idempotency_key || null, idem_hash: body.idempotency_key ? hash : null, created_at: s.iso(),
             webhooks, webhook_secret: ownSecret ? mintSecret() : null,
+            // A task's own clock (Actor v2): 10 minutes by default; mode best may run up to an hour.
+            timeout_ms: (body.mode || 'balanced') === 'best' ? config.bestTimeoutMs : config.taskTimeoutMs,
         });
         return { status: 201, task: row };
     });

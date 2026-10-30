@@ -29,7 +29,7 @@ const TABLES = [
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',
         columns: ['id', 'requester', 'project_id', 'task', 'mode', 'agent', 'budget_task', 'budget_day', 'state', 'result', 'error_code', 'error_detail',
-            'cost_usd', 'free_usd', 'explanation', 'cancel_at', 'cancel_by', 'last_seq', 'idem_key', 'idem_hash', 'created_at', 'finished_at', 'via', 'webhooks'],
+            'cost_usd', 'free_usd', 'explanation', 'cancel_at', 'cancel_by', 'last_seq', 'idem_key', 'idem_hash', 'created_at', 'finished_at', 'timeout_ms', 'via', 'webhooks'],
     },
     // The person's own per-UTC-day spend accounting. Deleted: nothing in Actor keeps a person's spend record for a
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is

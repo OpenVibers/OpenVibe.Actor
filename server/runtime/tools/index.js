@@ -30,8 +30,9 @@
  * createRegistry({ dir, log, strict, config, fetchImpl }) → {
  *   tools, byName, errors, definitions(ctx), run(name, input, ctx), get(name), has(name), report()
  * }
- * `definitions({ requester, mode, signal })` answers the OpenAI function tools the model may call, filtered by
- * scope: private mode sees only private-ok tools; a task with no signed-in requester never sees `person` tools.
+ * `definitions(ctx)` answers the OpenAI function tools the model may call, filtered by scope: private mode sees only
+ * private-ok tools; a task with no signed-in requester never sees `person` tools. A module may also export
+ * `available(ctx)` to narrow itself further (a service that is not connected this boot).
  */
 
 const fs = require('fs');
@@ -39,7 +40,7 @@ const path = require('path');
 
 const SCOPES = ['public', 'person', 'private-ok'];
 const NAME = /^[a-z][a-z0-9_]{1,63}$/;
-const MAX_TIMEOUT_MS = 120_000;
+const MAX_TIMEOUT_MS = 900_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -117,10 +118,12 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
     const get = (name) => byName.get(name) || null;
     const has = (name) => byName.has(name);
 
-    /** The OpenAI function definitions for this task, filtered by scope. */
-    function definitions({ requester = null, mode = null } = {}) {
+    /** The OpenAI function definitions for this task, filtered by scope and by the module's optional `available(ctx)`. */
+    function definitions(ctx = {}) {
+        const { requester = null, mode = null } = ctx;
         return [...byName.values()]
             .filter((t) => allowedBy(t.scope, { requester, mode }))
+            .filter((t) => (typeof t.available === 'function' ? t.available(ctx) !== false : true))
             .map((t) => ({
                 type: 'function',
                 function: { name: t.name, description: t.description, parameters: t.input },
