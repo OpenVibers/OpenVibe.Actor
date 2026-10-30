@@ -817,43 +817,48 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (forced) { state.tier = forced; state.baseTier = forced; state.fixedTier = true; }
         else if (!models.resolve(state.tier).available) state.tier = baseTier;
 
-        // A resumed run that was stopped inside an acting tool call asks the person before anything else. This also
-        // answers the read-only calls of that same turn, so the model sees a complete conversation afterwards. A fork
-        // may not start on such a step: the fork page refuses it, and this is the same rule for any other caller.
-        if (Array.isArray(state.acting) && state.acting.length) {
-            if (fork) throw Object.assign(new Error('that step stopped mid-action, so it cannot be forked'), { code: 'actor.checkpoint.invalid' });
-            await resolveActing(state, ctx, askPerson);
-        }
-
-        if (fork) {
-            const change = fork.change || {};
-            if (change.kind === 'tool' && change.tool) {
-                state.messages.push({ role: 'user', content: `The person took ${change.tool} off the tools you may use from this step on. Continue without it, and do not ask for it.` });
-            } else if (change.kind === 'instruction') {
-                state.messages.push({ role: 'user', content: `The person edited step ${fork.step}'s instruction for this run: ${clip(change.instruction, 2000)}\nContinue from here with that change.` });
+        try {
+            // A resumed run that was stopped inside an acting tool call asks the person before anything else. This also
+            // answers the read-only calls of that same turn, so the model sees a complete conversation afterwards. A fork
+            // may not start on such a step: the fork page refuses it, and this is the same rule for any other caller.
+            if (Array.isArray(state.acting) && state.acting.length) {
+                if (fork) throw Object.assign(new Error('that step stopped mid-action, so it cannot be forked'), { code: 'actor.checkpoint.invalid' });
+                await resolveActing(state, ctx, askPerson);
             }
-            await ctx.emit({ step: 'fork', text: forkText(fork) });
-            await spanCall(ctx.trace, { kind: 'tool', name: 'fork', startedAt: now(), ms: 0, ok: true, step: fork.step });
-        }
-        if (resume) {
-            await ctx.emit({ step: 'resume', text: `Picked up after a restart at step ${resume.step}.` });
-            await spanCall(ctx.trace, { kind: 'tool', name: 'resume', startedAt: now(), ms: 0, ok: true, step: resume.step });
-        }
 
-        // The live assumptions form, on a resumed run too.
-        if (control && typeof control === 'object') {
-            const applyAssumptions = async (text) => {
-                const list = String(text == null ? '' : text).split(/[\n;]+/).map((a) => clip(a, 200)).filter(Boolean).slice(0, 5);
-                if (!list.length) return { ok: false, reason: 'no assumptions were given' };
-                state.plan.assumptions = list;
-                state.messages.push({ role: 'user', content: `The person edited the plan's assumptions: ${list.join('; ')}. Use these from now on; do not restate them in the answer.` });
-                await emitPlan(state, ctx);
-                return { ok: true, assumptions: state.plan.assumptions };
-            };
-            control.pending = [];
-            control.assume = applyAssumptions;
-            control.plan = () => state.plan;
-            for (const text of control.pending.splice(0)) await applyAssumptions(text);
+            if (fork) {
+                const change = fork.change || {};
+                if (change.kind === 'tool' && change.tool) {
+                    state.messages.push({ role: 'user', content: `The person took ${change.tool} off the tools you may use from this step on. Continue without it, and do not ask for it.` });
+                } else if (change.kind === 'instruction') {
+                    state.messages.push({ role: 'user', content: `The person edited step ${fork.step}'s instruction for this run: ${clip(change.instruction, 2000)}\nContinue from here with that change.` });
+                }
+                await ctx.emit({ step: 'fork', text: forkText(fork) });
+                await spanCall(ctx.trace, { kind: 'tool', name: 'fork', startedAt: now(), ms: 0, ok: true, step: fork.step });
+            }
+            if (resume) {
+                await ctx.emit({ step: 'resume', text: `Picked up after a restart at step ${resume.step}.` });
+                await spanCall(ctx.trace, { kind: 'tool', name: 'resume', startedAt: now(), ms: 0, ok: true, step: resume.step });
+            }
+
+            // The live assumptions form, on a resumed run too.
+            if (control && typeof control === 'object') {
+                const applyAssumptions = async (text) => {
+                    const list = String(text == null ? '' : text).split(/[\n;]+/).map((a) => clip(a, 200)).filter(Boolean).slice(0, 5);
+                    if (!list.length) return { ok: false, reason: 'no assumptions were given' };
+                    state.plan.assumptions = list;
+                    state.messages.push({ role: 'user', content: `The person edited the plan's assumptions: ${list.join('; ')}. Use these from now on; do not restate them in the answer.` });
+                    await emitPlan(state, ctx);
+                    return { ok: true, assumptions: state.plan.assumptions };
+                };
+                control.pending = [];
+                control.assume = applyAssumptions;
+                control.plan = () => state.plan;
+                for (const text of control.pending.splice(0)) await applyAssumptions(text);
+            }
+        } catch (err) {
+            await close(state).catch(() => {});
+            throw err;
         }
 
         try {
