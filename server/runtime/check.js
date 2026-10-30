@@ -27,7 +27,7 @@ For each claim give:
 - kind "live": a fact that changes and a tool could fetch — a price, a score, the weather, a current count or status, the latest release, today's date, current personnel.
 - kind "general": stable knowledge that no live tool is needed for (definitions, history, how something works).
 - kind "person": something on the person's own machines, robots or files.
-- kind "derived": arithmetic or a summary; it must cite the evidence it derives from.
+- kind "derived": arithmetic or a summary; it must cite the evidence it derives from. A number computed by the calculate or run_code tool is grounded by that tool's evidence item: mark it derived, cite that id and set supported=true.
 - evidence: the ids of the evidence items that state the same fact. An item supports a claim only when it actually contains that fact; a search result that merely mentions the topic does not support a number.
 - supported: true only when at least one evidence item supports it, or it is general knowledge. A live claim with no supporting evidence is supported=false. Never mark a live claim supported because it sounds plausible or matches what you believe.
 Set ok=false when any live or person claim is unsupported. Do not fail for style, opinions, or a reasonable summary of supported evidence.
@@ -53,12 +53,22 @@ function evidenceBlock(evidence, limit = 12000) {
     return '';
 }
 
-/** Every claim that fails the rule, whether the model said so or not. */
-function failing(claims) {
+/** The tools whose whole job is to derive a number from the evidence the run already has. */
+const DERIVATION_TOOLS = new Set(['calculate', 'run_code']);
+
+/**
+ * Every claim that fails the rule, whether the model said so or not. `evidence` is the run's items (or a ledger):
+ * a claim that cites a calculate or run_code item is grounded by that item even if the checker was unsure — the
+ * number was computed in this run, which is exactly what "derived from evidence" means.
+ */
+function failing(claims, evidence = []) {
+    const items = Array.isArray(evidence) ? evidence : (evidence && Array.isArray(evidence.items) ? evidence.items : []);
+    const toolOf = new Map(items.filter((e) => e && e.id).map((e) => [String(e.id), String(e.tool || '')]));
     return claims.filter((c) => {
         if (!c || typeof c !== 'object') return false;
         const kind = String(c.kind || '').toLowerCase();
         const cites = Array.isArray(c.evidence) ? c.evidence.filter(Boolean) : [];
+        if (cites.some((id) => DERIVATION_TOOLS.has(toolOf.get(String(id))))) return false;
         if (kind === 'live' || kind === 'person') return c.supported !== true || cites.length === 0;
         if (kind === 'derived') return c.supported === false && cites.length === 0 && /price|score|weather|count|today|current|latest|\d/.test(String(c.claim || ''));
         return c.supported === false && kind !== 'general';
@@ -99,7 +109,7 @@ async function check({ task, answer, evidence = [], models, writerFamily = null,
                 evidence: Array.isArray(c && c.evidence) ? c.evidence.filter((x) => /^E\d+$/.test(String(x))).slice(0, 10) : [],
                 supported: (c && c.supported) === true,
             }));
-            const unsupported = failing(claims);
+            const unsupported = failing(claims, evidence);
             const ok = parsed.ok === true && unsupported.length === 0;
             return {
                 ok,

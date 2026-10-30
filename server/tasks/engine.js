@@ -204,6 +204,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                             }
                         }
                         const claims = Array.isArray(verdict.claims) ? verdict.claims : [];
+                        const artifacts = Array.isArray(out.artifacts) ? out.artifacts.slice(0, 20) : [];
                         const result = {
                             answer,
                             sources: out.sources || [],
@@ -214,9 +215,12 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                             checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason, claims: claims.length, grounded: claims.length - (verdict.unsupported ? verdict.unsupported.length : 0) },
                             evidence: out.evidence || [],
                             citations: out.citations || [],
+                            artifacts,
                             plan: out.plan || null,
                             turns: out.turns || null,
                         };
+                        // The files and charts travel with each tool result that made them (the loop's tool_result events),
+                        // and the result carries them all; a live page shows them as they land.
                         return await setState(id, 'succeeded', { result, finished_at: iso() });
                     }
                     if (verdict.unavailable) {
@@ -298,7 +302,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                             else await personal.addProposal(s, row.requester, row.via.slice(6), text, id);
                         }
                     }
-                    const result = { answer, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };
+                    const result = { answer, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, artifacts: Array.isArray(out.artifacts) ? out.artifacts : [], checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };
                     return await setState(id, 'succeeded', { result, finished_at: iso() });
                 }
                 if (verdict.unavailable) {

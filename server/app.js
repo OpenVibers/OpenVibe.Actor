@@ -87,7 +87,9 @@ async function createApp(opts = {}) {
     const models = opts.models || createModels({ config, rates: catalog.RATES, fetchImpl: providerFetch, log });
     const registry = opts.registry || createRegistry({ log, strict: config.nodeEnv === 'test', fetchImpl: providerFetch });
     await models.warm().catch((err) => log.warn('[Actor] model listing failed:', err && err.message));
-    const loop = opts.loop || createLoop({ config, models, registry, log });
+    // The files and charts a task makes live in Actor's own PostgreSQL, private to the task's owner (stage V2-4), so
+    // the loop needs the store, not a Media client.
+    const loop = opts.loop || createLoop({ config, models, registry, log, store: s });
     const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: providerFetch, log });
     // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.
     // A webhook naming a project secret (ADR-056) is signed by OpenVibe.Network (server/net/secret-signer.js).

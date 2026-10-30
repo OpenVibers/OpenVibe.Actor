@@ -6,8 +6,8 @@
  * the tool, its input, what it answered, its sources and when.
  *
  *   const ledger = createLedger({ now });
- *   const item = ledger.add({ tool, input, text, data, sources, at });
- *   ledger.items                     // [ { id:'E1', tool, input, text, data, sources, at } ]
+ *   const item = ledger.add({ tool, input, text, data, sources, artifacts, at });
+ *   ledger.items                     // [ { id:'E1', tool, input, text, data, sources, artifacts, at } ]
  *   ledger.citations(answer)         // ['E3'] — the ids the answer cites, in order, existing only
  *   ledger.forPrompt(limit)          // the items as the model and the checker read them
  *
@@ -66,7 +66,7 @@ function createLedger({ now = () => Date.now(), clip = DEFAULT_CLIP } = {}) {
     function forResult() {
         return items.map((e) => ({
             id: e.id, tool: e.tool, input: e.input, text: e.text.slice(0, 2000),
-            sources: e.sources, at: e.at,
+            sources: e.sources, artifacts: e.artifacts, at: e.at,
         }));
     }
 

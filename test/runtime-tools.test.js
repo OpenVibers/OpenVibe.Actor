@@ -110,6 +110,15 @@ const good = (name, scope = 'public') => `module.exports = {
         const person = names({ config: withBot, requester: 'user:usr_01JAB2C3D4E5F6G7H8J9K0MNPT' });
         for (const n of ['list_my_robots', 'robot_steps', 'list_my_computers', 'computer_run', 'computer_desk', 'hand_to_person', 'codes_task', 'computer_screen']) assert.ok(person.includes(n), n);
         assert.deepStrictEqual(names({ config: withBot, requester: 'user:usr_01JAB2C3D4E5F6G7H8J9K0MNPT', mode: 'private' }), [], 'private mode has no network tools');
+        // Files and charts need the signed-in person and a Media store. A public-chat task has no requester, so the
+        // person gate never opens; a server without Media has nothing to store into.
+        const store = { available: true, maxBytes: 1024 * 1024 };
+        const withFiles = names({ config: withBot, requester: 'user:usr_01JAB2C3D4E5F6G7H8J9K0MNPT', artifacts: store });
+        assert.ok(withFiles.includes('make_file') && withFiles.includes('make_chart'), 'offered with a person and Media');
+        assert.ok(!anon.includes('make_file') && !anon.includes('make_chart'), 'a public-chat task gets no files');
+        const noStore = names({ config: withBot, requester: 'user:usr_01JAB2C3D4E5F6G7H8J9K0MNPT' });
+        assert.ok(!noStore.includes('make_file') && !noStore.includes('make_chart'), 'no Media, no files');
+        assert.ok(!names({ config: withBot, requester: 'user:usr_01JAB2C3D4E5F6G7H8J9K0MNPT', artifacts: { available: false } }).includes('make_file'));
         const off = names({ config: noBot, requester: 'user:usr_01JAB2C3D4E5F6G7H8J9K0MNPT' });
         assert.ok(!off.includes('list_my_robots') && !off.includes('codes_task') && !off.includes('search_web'), 'a service this boot lacks is not offered');
         const runNoPerson = await reg.run('list_my_robots', {}, { config: withBot });

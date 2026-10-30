@@ -59,6 +59,15 @@ async function makeTask(t, subject, title) {
     return id;
 }
 
+/** One file a task made: a row in Actor's own artifact table (Actor v2, stage V2-4), owned by the person. */
+async function makeArtifact(t, subject, taskId, name, content) {
+    const s = t.ctx.s;
+    await s.db.query(
+        'INSERT INTO actor_artifacts (id, task_id, owner, name, mime, size, bytes, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7::bytea, $8)',
+        [s.newId('art'), taskId, `user:${subject}`, name, 'text/markdown', Buffer.byteLength(content), Buffer.from(content, 'utf8'), s.iso()],
+    );
+}
+
 (async () => {
     await check('every table that names a person is covered or exempted with a reason', async () => {
         const d = await testDb();
@@ -76,8 +85,10 @@ async function makeTask(t, subject, title) {
         const sender = createNetworkSender({ networkInternalUrl: stub.url, clientId: 'actor', clientSecret: 'actor-secret' });
         const t = await boot({ env: { ACTOR_EVENTS_SECRET: SECRET }, accountSend: sender });
         try {
-            await makeTask(t, A, 'person-a');
-            await makeTask(t, B, 'person-b');
+            const aTask = await makeTask(t, A, 'person-a');
+            const bTask = await makeTask(t, B, 'person-b');
+            await makeArtifact(t, A, aTask, 'notes.md', 'A private notes');
+            await makeArtifact(t, B, bTask, 'other.md', 'B private notes');
             const ownAgent = (await personal.create(t.ctx.s, t.config, `user:${A}`, { name: 'A helper', instructions: 'Help A.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
             await personal.addMemory(t.ctx.s, `user:${A}`, ownAgent.id, 'A private note.');
             const otherAgent = (await personal.create(t.ctx.s, t.config, `user:${B}`, { name: 'B helper', instructions: 'Help B.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
@@ -91,7 +102,15 @@ async function makeTask(t, subject, title) {
             assert.ok(part, 'the part was pushed to Network');
             assert.strictEqual(part.auth, 'Bearer tok_actor', 'with this service\'s own token');
             assert.strictEqual(part.body.subject, A);
-            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['agent-memory.json', 'agents.json', 'spend.json', 'tasks.json']);
+            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['agent-memory.json', 'agents.json', 'artifacts-content.json', 'artifacts.json', 'spend.json', 'tasks.json']);
+            const artifacts = part.body.files.find((f) => f.name === 'artifacts.json').content;
+            assert.strictEqual(artifacts.length, 1, 'only A\'s artifact row');
+            assert.strictEqual(artifacts[0].name, 'notes.md');
+            assert.strictEqual(artifacts[0].owner, `user:${A}`);
+            assert.strictEqual(artifacts[0].bytes, undefined, 'the bytes travel in their own part, not in the row');
+            const content = part.body.files.find((f) => f.name === 'artifacts-content.json').content;
+            assert.strictEqual(content.length, 1, 'only A\'s file content');
+            assert.strictEqual(Buffer.from(content[0].content_base64, 'base64').toString('utf8'), 'A private notes');
             assert.strictEqual(part.body.files.find((f) => f.name === 'agents.json').content[0].name, 'A helper');
             assert.strictEqual(part.body.files.find((f) => f.name === 'agent-memory.json').content[0].text, 'A private note.');
             const tasks = part.body.files.find((f) => f.name === 'tasks.json').content;
@@ -113,7 +132,9 @@ async function makeTask(t, subject, title) {
         const t = await boot({ env: { ACTOR_EVENTS_SECRET: SECRET }, accountSend: sender });
         try {
             const aTask = await makeTask(t, A, 'person-a');
-            await makeTask(t, B, 'person-b');
+            const bTask = await makeTask(t, B, 'person-b');
+            await makeArtifact(t, A, aTask, 'notes.md', 'A private notes');
+            await makeArtifact(t, B, bTask, 'other.md', 'B private notes');
             const agent = (await personal.create(t.ctx.s, t.config, `user:${A}`, { name: 'Erase me', instructions: 'Help A.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
             await personal.addMemory(t.ctx.s, `user:${A}`, agent.id, 'Erase this.');
             const db = t.ctx.s.db;
@@ -127,13 +148,15 @@ async function makeTask(t, subject, title) {
             assert.strictEqual(await count('SELECT count(*)::int FROM spend_daily WHERE requester = $1', [`user:${A}`]), 0, 'their spend rows are gone');
             assert.strictEqual(await count('SELECT count(*)::int FROM actor_agents WHERE owner = $1', [`user:${A}`]), 0);
             assert.strictEqual(await count('SELECT count(*)::int FROM actor_agent_memory WHERE owner = $1', [`user:${A}`]), 0);
+            assert.strictEqual(await count('SELECT count(*)::int FROM actor_artifacts WHERE owner = $1', [`user:${A}`]), 0, 'their files are gone');
+            assert.strictEqual(await count('SELECT count(*)::int FROM actor_artifacts WHERE owner = $1', [`user:${B}`]), 1, 'someone else\'s file stays');
             assert.strictEqual(await count('SELECT count(*)::int FROM tasks WHERE requester = $1', [`user:${B}`]), 1, 'someone else\'s task stays');
             assert.strictEqual(await count('SELECT count(*)::int FROM spend_daily WHERE requester = $1', [`user:${B}`]), 1, 'someone else\'s spend stays');
             assert.strictEqual(await count("SELECT count(*)::int FROM spend_daily WHERE requester = '*'"), 1, 'the operator\'s `*` ceiling row is kept');
 
             const confirmation = stub.calls.find((c) => c.url === `/internal/account-deletions/${DEL}/confirmations`);
             assert.ok(confirmation, 'the confirmation was sent');
-            assert.deepStrictEqual(confirmation.body.erased, { tasks: 1, spend_daily: 1, actor_agent_memory: 1, actor_agents: 1 });
+            assert.deepStrictEqual(confirmation.body.erased, { actor_artifacts: 1, tasks: 1, spend_daily: 1, actor_agent_memory: 1, actor_agents: 1 });
             assert.deepStrictEqual(confirmation.body.retained, {});
             assert.ok(!Number.isNaN(Date.parse(confirmation.body.completed_at)));
 

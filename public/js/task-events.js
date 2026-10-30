@@ -48,6 +48,23 @@
     }
 
     /**
+     * The artifacts a tool made, as the attachments the shared session draws (openvibe-shared 4.50.0). Actor's task
+     * events are a public contract (actor.task-event@2, additionalProperties false), so the mapping happens here,
+     * on the page, and not on the event the service sends.
+     */
+    function attachments(artifacts) {
+        var out = [];
+        for (var i = 0; i < (artifacts || []).length; i++) {
+            var a = artifacts[i];
+            if (!a || typeof a !== 'object') continue;
+            var url = String(a.url || '').trim();
+            if (!url) continue;
+            out.push({ url: url, name: String(a.name || ''), mime: String(a.mime || ''), size: Number(a.size) || 0, kind: String(a.kind || 'file'), role: 'output' });
+        }
+        return out.length ? out : undefined;
+    }
+
+    /**
      * events → lines. opts.final says the task has ended (settle unanswered calls, add the done line with the run's
      * time); opts.state is its final state (the done line is ok only when "succeeded"); opts.durationMs overrides the
      * computed time.
@@ -101,6 +118,8 @@
                 var waiting = queue && queue.length ? queue.shift() : null;
                 if (!waiting) continue;   // a result without its call (a page cut short) is not a step
                 var line = withAgent({ t: 'tool_result', id: waiting.id, name: resultTool, ok: !e.is_error, output: cut(e.text, 8000) }, e);
+                var atts = attachments(e.artifacts);
+                if (atts) line.attachments = atts;
                 var seen = at(e);
                 if (seen != null && waiting.at != null && seen > waiting.at) line.duration_ms = seen - waiting.at;
                 out.push(line);
@@ -131,5 +150,5 @@
         return out;
     }
 
-    return { lines: lines, firstAt: firstAt, duration: duration };
+    return { lines: lines, firstAt: firstAt, duration: duration, attachments: attachments };
 });

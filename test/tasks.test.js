@@ -258,7 +258,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         const all = await t.get(`/api/v1/tasks/${id}/events`, { as: kim });
         assert.strictEqual(all.headers.get('content-type'), 'text/event-stream; charset=utf-8');
         const events = [...all.text.matchAll(/^data: (.*)$/gm)].map((m) => JSON.parse(m[1]));
-        for (const e of events) assert.ok(contracts.validate('actor.task-event@1', e).valid, JSON.stringify(e));
+        for (const e of events) assert.ok(contracts.validate('actor.task-event@2', e).valid, JSON.stringify(e));
         assert.deepStrictEqual(events.map((e) => e.seq), events.map((_, i) => i + 1));
         assert.strictEqual(events[events.length - 1].kind, 'end');
         const after = await t.get(`/api/v1/tasks/${id}/events`, { as: kim, headers: { 'last-event-id': String(events.length - 1) } });
