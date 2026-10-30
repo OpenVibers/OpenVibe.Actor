@@ -34,6 +34,7 @@ const { deskRun, closeDesks } = require('./tools/_person');
 const { understand } = require('./brain/understand');
 const { taskLedger, createProgress, replan, ledgerText } = require('./brain/ledger');
 const { allowedTiers, loadPrior, chooseTier, orderTools, STEP_KINDS } = require('./brain/choose');
+const { shortlistTools } = require('./brain/shortlist');
 const { createEscalations } = require('./brain/escalate');
 const { snapshot: snapshotState, restore: restoreState } = require('./checkpoint-state');
 const { stripSecrets, redactText } = require('./checkpoints');
@@ -176,7 +177,20 @@ async function spanCall(trace, { kind, name, tier = null, family = null, started
     });
 }
 
-function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null }) {
+function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null, connectors = null }) {
+    /** The connector tools of this person (stage V2-11): empty when there are none or no person. */
+    async function connectorTools({ requester, mode }) {
+        const empty = { definitions: [], byAlias: new Map() };
+        if (!connectors || typeof connectors.toolsFor !== 'function') return empty;
+        if (mode === 'private') return empty;
+        try {
+            const out = await connectors.toolsFor({ requester, mode });
+            return { definitions: (out && out.definitions) || [], byAlias: (out && out.byAlias) || new Map() };
+        } catch (err) {
+            if (log && log.warn) log.warn('[Actor] connector tools unavailable:', (err && err.message) || err);
+            return empty;
+        }
+    }
     const loopCfg = config.loop || {};
     const resultChars = loopCfg.toolResultChars || 6000;
     const maxCalls = loopCfg.maxToolCallsPerTurn || 8;
@@ -248,7 +262,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     async function callModel(state, ctx, { tools, forceNoTools = false, stepKind = 'work' } = {}) {
         if (state.signal && state.signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'actor.task.cancelled' });
         if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return null;
-        const defs = forceNoTools ? null : tools;
+        const defs = forceNoTools ? null : shortlistTools(tools, state);
         const startedAt = now();
         let r;
         try {
@@ -312,7 +326,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // An acting call changes something in the world. Write its intent and checkpoint it BEFORE it starts, so a
         // restart can ask the person rather than run it a second time (stage V2-9 follow-up). A read-only call runs
         // as before: it is safe to repeat, and nothing is marked for it.
-        const acting = runnable.filter((p) => isActing(p.name));
+        const acting = runnable.filter((p) => isActing(p.name, ctx));
         if (acting.length) {
             state.acting = acting.map((p) => ({ call_id: p.call.id, tool: p.name, input: p.args, step: state.calls, started_at: new Date(now()).toISOString() }));
             await saveCheckpoint(state, ctx);
@@ -587,7 +601,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // repeat the action without the person's card. The parent keeps its acting tools and is the one that acts.
         const tools = parent.tools.filter((t) => t.function.name !== DELEGATE.function.name
             && (!want || want.has(t.function.name))
-            && !isActing(t.function.name));
+            && !isActing(t.function.name, ctx));
         const share = config.loop && config.loop.subAgentShare != null ? config.loop.subAgentShare : 0.25;
         const startLeft = ctx.budgetLeft ? ctx.budgetLeft() : Infinity;
         const slice = Number.isFinite(startLeft) ? Math.max(0, startLeft) * share : Infinity;
@@ -642,7 +656,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     }
 
     /** Does this tool change something outside the model's own reasoning? The module says `acts: true`. */
-    function isActing(name) {
+    function isActing(name, ctx = null) {
+        // A connector tool (stage V2-11) is not in the registry: it is built for this run, and the run's own map
+        // says whether it acts.
+        const dynamic = ctx && ctx.dynamicTools ? ctx.dynamicTools.get(name) : null;
+        if (dynamic) return dynamic.acts === true;
         const tool = typeof registry.get === 'function' ? registry.get(name) : null;
         return Boolean(tool && tool.acts === true);
     }
@@ -732,7 +750,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 note(name, true);
             } else if (choice === 'again' && redacted) {
                 await recordError(name, args, id, 'the saved input contained a secret that is not stored, so Actor did not run it again. Check it yourself.');
-            } else if (!choice && isActing(name)) {
+            } else if (!choice && isActing(name, ctx)) {
                 // The safety net: an acting call with no recorded choice is never run on a resume.
                 await recordError(name, args, id, 'this action had no answer recorded, so Actor did not run it; check it yourself.');
             } else {
@@ -791,6 +809,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),
+            // The connector tools of this run (stage V2-11) and the failures that switch a server off.
+            dynamicTools: new Map(),
+            connectorState: { failures: new Map(), disabled: new Set() },
             // The budget already spent by the run before the restart; the engine adds the new calls to it.
             spent: typeof spent === 'function' ? spent : () => Number(resume && resume.state ? resume.state.spent : 0) || 0,
             state: { desks: requester ? deskRun(taskId) : null },
@@ -801,7 +822,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // The live tool list, at most the checkpoint's allow-list. A tool the registry no longer offers is dropped; the
         // delegate is kept only for a "best" run that already had it (never added by a fork).
         const offered = registry.definitions({ requester, mode, config, models, signal, artifacts, store, agentId, taskId, now });
-        const byName = new Map(offered.map((d) => [d.function.name, d]));
+        // The connector tools of this person (stage V2-11), at most the checkpoint's allow-list.
+        const dynamic = await connectorTools({ requester, mode });
+        ctx.dynamicTools = dynamic.byAlias;
+        const offeredAll = offered.concat(dynamic.definitions);
+        const byName = new Map(offeredAll.map((d) => [d.function.name, d]));
         const allowedNames = state.allow instanceof Set ? state.allow : new Set(Array.isArray(state.allow) ? state.allow : []);
         const savedNames = Array.isArray(state.tools) && state.tools.length ? state.tools : [...allowedNames];
         let names = savedNames.filter((name) => byName.has(name) && (allowedNames.size ? allowedNames.has(name) : true));
@@ -920,6 +945,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),
+            // The connector tools of this run (stage V2-11) and the failures that switch a server off.
+            dynamicTools: new Map(),
+            connectorState: { failures: new Map(), disabled: new Set() },
             // What the task has spent so far, for the checkpoint (the loop waits on budgetLeft, not the total).
             spent: typeof spent === 'function' ? spent : () => 0,
             state: { desks: requester ? deskRun(taskId) : null },
@@ -959,9 +987,13 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // Which tools are offered first: the demoted ones last, never removed (stage V2-8). Below about 40 tools
             // the model sees them all — no LLM picker and no embedding shortlist here.
             const offered = registry.definitions({ requester, mode, config, models, signal, artifacts, store, agentId, taskId, now });
+            // The connections of this person (stage V2-11): the MCP tools they turned on and ask_agent for their agents.
+            const dynamic = await connectorTools({ requester, mode });
+            ctx.dynamicTools = dynamic.byAlias;
+            const offeredAll = offered.concat(dynamic.definitions);
             let statsRows = [];
             if (stats) { try { statsRows = await stats.tools(); } catch { statsRows = []; } }
-            const ordered = orderTools(offered, statsRows);
+            const ordered = orderTools(offeredAll, statsRows);
             state.brain.demoted = ordered.demoted;
             // "best" mode may hand self-contained sub-goals to sub-agents (stage V2-7); no other mode is offered it.
             const subAgents = mode === 'best' && ordered.tools.length > 0 && !(config.loop && config.loop.subAgents === false);

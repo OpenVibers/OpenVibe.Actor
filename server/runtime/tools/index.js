@@ -143,7 +143,10 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
      * with no signed-in person, and private mode refuses any tool that is not private-ok.
      */
     async function run(name, input, ctx = {}) {
-        const tool = byName.get(name);
+        // A connector tool (stage V2-11: an MCP server or an A2A agent) is not a file in this folder: the run built
+        // it for this person and passes it in the context, so only the tools this run may use are here.
+        const dynamic = ctx && ctx.dynamicTools ? ctx.dynamicTools.get(name) : null;
+        const tool = byName.get(name) || dynamic;
         if (!tool) return { text: JSON.stringify({ error: `unknown tool ${name}` }), data: null, sources: [], isError: true };
         if (!allowedBy(tool.scope, ctx)) return { text: JSON.stringify({ error: `tool ${name} is not available for this task` }), data: null, sources: [], isError: true };
         const signal = ctx.signal;
