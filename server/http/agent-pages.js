@@ -7,6 +7,7 @@ const { html, raw, time } = require('../render/html');
 const { send } = require('../render/layout');
 const personal = require('../agents/personal');
 const approvals = require('../agents/approvals');
+const memoryStore = require('../memory');
 
 function createAgentPages(ctx) {
     const { config, s } = ctx;
@@ -81,7 +82,7 @@ function createAgentPages(ctx) {
         const chosen = TEMPLATES.find((x) => x.id === req.query.template) || null;
         page(req, res, 'Your agents', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · personal agents · alpha</p><h1>Your agents</h1>
 <p class="pa-lede">An agent is a task you set up once: standing instructions, a memory you can read and edit, and a schedule. Every run is an ordinary Actor task, with the same routing, checks, costs and limits.</p>
-<p><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> · what your agents asked to do while you were away.</p></header>
+<p><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> · what your agents asked to do while you were away · <a href="/memory">Memory</a></p></header>
 ${agents.length ? html`<ul class="pa-cards">${agents.map((a) => html`<li class="pa-card"><a href="/me/agents/${a.id}"><strong>${a.name}</strong></a>
 <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span>
 <span class="pa-when">${when(a)}</span>${a.last_run_at ? html`<span class="pa-when">Last run ${time(a.last_run_at)}</span>` : ''}</li>`)}</ul>`
@@ -165,12 +166,13 @@ ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}" class="pa-actions"><button type="submit" name="decision" value="apply" class="pa-btn pa-primary">Add to its instructions</button> <button type="submit" name="decision" value="dismiss" class="pa-btn">Dismiss</button></form></li>`)}</ul>` : ''}
 ${applied.length ? html`<details><summary>Added lately</summary><ul class="pa-notes">${applied.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Added ${time(p.decided_at)}</p>
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}"><button type="submit" name="decision" value="undo" class="pa-danger-link">Undo</button></form></li>`)}</ul></details>` : ''}</section>` : ''}
-<section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check.</p>
-${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta">${n.origin === 'agent' ? 'Written by the agent' : 'Written by you'} · ${time(n.created_at)}</p>
-<details><summary>Edit or delete</summary><form method="post" action="/me/agents/${a.id}/memory/${n.id}/edit"><label>Note <input name="text" maxlength="1000" value="${n.text}"></label><button type="submit" class="pa-btn">Save</button></form>
+<section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Only active notes go into a run. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check; its note is a suggestion until you accept it on <a href="/memory">Memory</a>.</p>
+${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta"><span class="pill ${n.status === 'suggested' ? 'pill-running' : n.status === 'archived' ? 'pill-failed' : 'pill-succeeded'}">${n.status === 'suggested' ? 'Suggested' : n.status === 'archived' ? 'Archived' : 'Active'}</span> ${n.source === 'agent' ? 'Written by the agent' : 'Written by you'} · ${n.kind} · ${time(n.created_at)}${n.last_used_at ? html` · last used ${time(n.last_used_at)}` : ''}</p>
+${n.status === 'suggested' ? html`<form method="post" action="/memory/${n.id}/accept" class="pa-actions"><button type="submit" class="pa-btn pa-primary">Accept</button> <button type="submit" class="pa-btn" formaction="/memory/${n.id}/decline">Decline</button></form>` : ''}
+<details><summary>Edit or delete</summary><form method="post" action="/me/agents/${a.id}/memory/${n.id}/edit"><label>Note <input name="text" maxlength="${require('../memory').MAX_TEXT}" value="${n.text}"></label><button type="submit" class="pa-btn">Save</button></form>
 <form method="post" action="/me/agents/${a.id}/memory/${n.id}/delete"><button type="submit" class="pa-danger-link">Delete note</button></form></details></li>`)}</ul>` : html`<p class="muted">Nothing remembered yet.</p>`}
-<form method="post" action="/me/agents/${a.id}/memory"><label>Add a note <textarea name="text" maxlength="1000" required rows="2" placeholder="I prefer answers in bullet points."></textarea></label><button type="submit" class="pa-btn">Add note</button></form>
-${notes.length ? html`<p><a href="/me/agents/${a.id}/forget" class="pa-danger-link">Forget everything</a></p>` : html`<p class="pa-hint"><a href="/me/agents/${a.id}/forget">Forget everything</a></p>`}</section>
+<form method="post" action="/me/agents/${a.id}/memory"><label>Add a note <textarea name="text" maxlength="${require('../memory').MAX_TEXT}" required rows="2" placeholder="I prefer answers in bullet points."></textarea></label><button type="submit" class="pa-btn">Add note</button></form>
+${notes.length ? html`<p><a href="/memory">See all your memory</a> · <a href="/me/agents/${a.id}/forget" class="pa-danger-link">Forget everything</a></p>` : html`<p class="pa-hint"><a href="/memory">Memory</a> · <a href="/me/agents/${a.id}/forget">Forget everything</a></p>`}</section>
 <section class="pa-panel"><h2>Settings</h2><form method="post" action="/me/agents/${a.id}/edit">${form(a)}<button type="submit" class="pa-btn pa-primary">Save settings</button></form>
 <form method="post" action="/me/agents/${a.id}/delete" class="pa-delete"><button type="submit" class="pa-danger-link">Delete this agent</button> <span class="pa-hint">Its memory goes with it; its past runs stay on your task list.</span></form></section>`);
     });
@@ -184,7 +186,16 @@ ${notes.length ? html`<p><a href="/me/agents/${a.id}/forget" class="pa-danger-li
     r.post('/me/agents/:id/delete', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [a.id, a.owner]); res.redirect(303, '/me/agents'); });
     r.post('/me/agents/:id/run', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; const out = await personal.run(ctx, a, req.body.input || ''); if (out.code) return page(req, res, 'Run refused', html`<h1>Run refused</h1><p>${out.detail}</p><p><a href="/me/agents/${a.id}">Back to agent</a></p>`, out.status); res.redirect(303, `/tasks/${out.task.id}`); });
     r.post('/me/agents/:id/memory', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; const out = await personal.addMemory(s, a.owner, a.id, req.body.text); if (!out.row) return page(req, res, 'Memory refused', html`<h1>Memory refused</h1><p>${out.error || 'Memory is full.'}</p>`, out.limit ? 429 : 422); res.redirect(303, `/me/agents/${a.id}`); });
-    r.post('/me/agents/:id/memory/:mem/edit', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; const value = req.body.text; if (typeof value !== 'string' || !value.trim() || value.length > 1000) return page(req, res, 'Invalid memory', html`<h1>Invalid memory</h1>`, 422); const n = await s.db.maybe('UPDATE actor_agent_memory SET text = $1, updated_at = $2 WHERE id = $3 AND agent_id = $4 AND owner = $5 RETURNING id', [value.trim(), s.iso(), req.params.mem, a.id, a.owner]); if (!n) return page(req, res, 'Note not found', html`<h1>Note not found</h1>`, 404); res.redirect(303, `/me/agents/${a.id}`); });
+    r.post('/me/agents/:id/memory/:mem/edit', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const note = await s.db.maybe('SELECT id FROM actor_agent_memory WHERE id = $1 AND agent_id = $2 AND owner = $3', [req.params.mem, a.id, a.owner]);
+        if (!note) return page(req, res, 'Note not found', html`<h1>Note not found</h1>`, 404);
+        const out = await memoryStore.edit(s, a.owner, note.id, { text: req.body.text });
+        if (!out) return page(req, res, 'Note not found', html`<h1>Note not found</h1>`, 404);
+        if (out.error) return page(req, res, 'Memory refused', html`<h1>Memory refused</h1><p>${out.error}</p>`, 422);
+        res.redirect(303, `/me/agents/${a.id}`);
+    });
     r.post('/me/agents/:id/memory/:mem/delete', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; await s.db.query('DELETE FROM actor_agent_memory WHERE id = $1 AND agent_id = $2 AND owner = $3', [req.params.mem, a.id, a.owner]); res.redirect(303, `/me/agents/${a.id}`); });
     r.get('/me/agents/:id/forget', async (req, res) => { if (!signed(req)) return login(req, res); const a = await find(req, res); if (!a) return; page(req, res, 'Forget memory', html`<h1>Forget all memory for ${a.name}?</h1><form method="post" action="/me/agents/${a.id}/forget"><button type="submit">Forget everything</button></form><p><a href="/me/agents/${a.id}">Cancel</a></p>`); });
     r.post('/me/agents/:id/forget', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; await s.db.query('DELETE FROM actor_agent_memory WHERE agent_id = $1 AND owner = $2', [a.id, a.owner]); res.redirect(303, `/me/agents/${a.id}`); });

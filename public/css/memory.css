@@ -1,0 +1,52 @@
+/* OpenVibe.Actor /memory (Actor v2, stage V2-6). Loaded by that page only. Every colour is a Shared theme token: the
+   page follows the visitor's dark or light theme and never carries a hex value of its own. One column at every width,
+   so 320 px has nothing to scroll sideways. */
+.mem-head-page { max-width: 46rem; margin: 1rem 0 1.25rem; }
+.mem-eyebrow { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent-light); }
+.mem-lede { margin: .25rem 0 0; color: var(--text-secondary); }
+.mem-panel, .mem-sec { margin: 1.25rem 0; min-width: 0; }
+.mem-panel > h2, .mem-sec > h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem .6rem; margin: 0 0 .55rem; font-size: 1.15rem; }
+.mem-count { font-size: .78rem; font-weight: 600; color: var(--text-muted); }
+.mem-note { margin: -.2rem 0 .7rem; font-size: .88rem; color: var(--text-secondary); }
+.mem-empty { margin: .2rem 0; padding: .9rem 1rem; border: 1px dashed var(--border-light); border-radius: 12px; color: var(--text-secondary); }
+.mem-add, .mem-edit form { display: flex; flex-direction: column; align-items: stretch; gap: .55rem; max-width: 46rem; }
+.mem-add { margin: 0 0 .35rem; }
+.mem-add label, .mem-edit label { display: flex; flex-direction: column; gap: .25rem; font-weight: 650; font-size: .92rem; min-width: 0; }
+.mem-hint { font-size: .8rem; font-weight: 400; color: var(--text-secondary); }
+.mem-add textarea, .mem-add select, .mem-edit textarea, .mem-edit select {
+    width: 100%; max-width: 100%; box-sizing: border-box; padding: .5rem .6rem; border-radius: 8px; font: inherit; font-size: .92rem;
+    color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-light);
+}
+.mem-add textarea, .mem-edit textarea { resize: vertical; }
+.mem-add button, .mem-edit button { align-self: flex-start; }
+.mem-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; }
+.mem { min-width: 0; overflow-wrap: anywhere; padding: .9rem 1rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-card); }
+.mem-suggested { border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); background: color-mix(in srgb, var(--warning) 6%, var(--bg-card)); }
+.mem-archived { opacity: .86; }
+.mem-head { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; margin: 0 0 .35rem; }
+.mem-kind { font-size: .72rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--accent-light); }
+.mem-kind-preference { color: var(--accent-light); }
+.mem-kind-instruction { color: var(--warning-text); }
+.mem-wait { font-size: .78rem; color: var(--warning-text); font-weight: 650; }
+.mem-text { margin: .15rem 0 .4rem; font-size: 1rem; line-height: 1.5; white-space: pre-wrap; }
+.mem-meta { margin: 0; font-size: .82rem; line-height: 1.55; color: var(--text-secondary); }
+.mem-meta a { color: inherit; }
+.mem-forms { display: flex; flex-wrap: wrap; align-items: baseline; gap: .45rem .8rem; margin-top: .55rem; }
+.mem-forms form { margin: 0; }
+.mem-btn {
+    font: inherit; font-size: .82rem; font-weight: 600; min-height: 2rem; padding: .35rem .75rem; border-radius: 8px; cursor: pointer;
+    color: var(--text-primary); background: transparent; border: 1px solid var(--border-light);
+}
+.mem-btn:hover { border-color: var(--accent); }
+.mem-primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent-strong); }
+.mem-primary:hover { filter: brightness(1.08); }
+.mem-danger { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 55%, var(--border-light)); }
+.mem-edit { flex-basis: 100%; min-width: 0; }
+.mem-edit > summary { cursor: pointer; font-size: .85rem; color: var(--accent-light); }
+.mem-edit form { margin-top: .5rem; }
+.mem-foot { margin: 1.6rem 0 0; font-size: .9rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+@media (max-width: 30rem) {
+    .mem { padding: .8rem .85rem; }
+    .mem-btn { min-height: 2.5rem; }
+    .mem-forms { gap: .5rem; }
+}

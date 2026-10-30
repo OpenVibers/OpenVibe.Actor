@@ -162,15 +162,24 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
 
 /** A tool result as the loop, the ledger and the check use it. */
 function normalize(out) {
-    if (out == null) return { text: '', data: null, sources: [], artifacts: [], isError: false };
-    if (typeof out === 'string') return { text: out, data: null, sources: [], artifacts: [], isError: false };
-    if (typeof out !== 'object') return { text: String(out), data: null, sources: [], artifacts: [], isError: false };
+    const empty = { text: '', data: null, sources: [], artifacts: [], refs: [], isError: false };
+    if (out == null) return empty;
+    if (typeof out === 'string') return { ...empty, text: out };
+    if (typeof out !== 'object') return { ...empty, text: String(out) };
     const data = out.data === undefined ? null : out.data;
     let text = typeof out.text === 'string' ? out.text : '';
     if (!text && data != null) text = JSON.stringify(data);
     const sources = Array.isArray(out.sources) ? out.sources.filter((s) => s && typeof s.url === 'string').slice(0, 20) : [];
     const artifacts = Array.isArray(out.artifacts) ? out.artifacts.slice(0, 20) : [];
-    return { text, data, sources, artifacts, isError: out.isError === true };
+    // A tool may point at a row the task page can open (stage V2-6: a memory a cited answer leaned on). Only the
+    // fields the page renders are kept, so a tool can never smuggle a whole object into a task result.
+    const refs = Array.isArray(out.refs) ? out.refs.filter((r) => r && typeof r === 'object' && typeof r.kind === 'string' && typeof r.id === 'string')
+        .slice(0, 20).map((r) => ({
+            kind: r.kind.slice(0, 32), id: r.id.slice(0, 64), text: String(r.text == null ? '' : r.text).slice(0, 500),
+            source: r.source == null ? null : String(r.source).slice(0, 32), source_task: r.source_task == null ? null : String(r.source_task).slice(0, 64),
+            agent_id: r.agent_id == null ? null : String(r.agent_id).slice(0, 64),
+        })) : [];
+    return { text, data, sources, artifacts, refs, isError: out.isError === true };
 }
 
 module.exports = { createRegistry, validateTool, allowedBy, normalize, SCOPES, MAX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS };

@@ -25,6 +25,8 @@ const { check } = require('../agents/check');
 const { check: checkClaims } = require('../runtime/check');
 const approvals = require('../agents/approvals');
 const { repoIn: codesRepoIn } = require('../agents/codes');
+const memory = require('../memory');
+const taskNotices = require('../notify/task-notices');
 
 const MAX_ATTEMPTS = 2;
 // The one loop's agent id on the event stream and in the result (the old runtime's id, kept for readers).
@@ -33,12 +35,65 @@ const LOOP_AGENT = 'openvibe-runtime';
 // What a task asked in a public chat may be (chat/asks.js): nothing that uses the person's own computers, robots or code.
 const PUBLIC_CLASSES = ['answer', 'lookup', 'research', 'web'];
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null }) {
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
     let stopped = false;
 
     const iso = () => new Date(now()).toISOString();
+    const subjectOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
+
+    /** The task as a person would name it in a notification (a personal run is its agent, not its whole prompt). */
+    async function taskTitle(row) {
+        const via = String(row.via || '');
+        if (/^agent:agt_/.test(via)) {
+            const agent = await s.db.maybe('SELECT name FROM actor_agents WHERE id = $1 AND owner = $2', [via.slice(6), row.requester]).catch(() => null);
+            if (agent) return agent.name;
+        }
+        const t = String(row.task || '').replace(/^Personal agent instructions[\s\S]*?\n\n/, '').replace(/\s+/g, ' ').trim();
+        return (t.length > 160 ? `${t.slice(0, 159)}…` : t) || 'Your task';
+    }
+
+    /**
+     * "Tell me when it's done": one Network notification per task per outcome. The row in actor_task_notices is the
+     * claim, so a retried end or a second hand-off in one run never tells the person twice. It never fails a task.
+     */
+    async function tellPerson(row, kind, detail = {}) {
+        if (!notifier || !row) return;
+        const subject = subjectOf(row.requester);
+        if (!subject) return;
+        try {
+            if (!(await taskNotices.once(s, row.id, kind))) return;
+            if (kind === 'needs_you') {
+                await notifier.needsYou({ subject, what: detail.what, title: await taskTitle(row), url: detail.url || `${config.baseUrl}/tasks/${row.id}` });
+            } else {
+                await notifier.taskEnded({
+                    subject, state: kind, taskId: row.id, title: await taskTitle(row),
+                    url: `${config.baseUrl}/tasks/${row.id}`, detail: kind === 'failed' ? (row.error_detail || row.error_code || null) : null,
+                });
+            }
+        } catch (err) { log.warn && log.warn('[Actor] task notification failed:', row.id, err && err.message); }
+    }
+
+    /**
+     * The closing REMEMBER:/IMPROVE: lines (agents/personal.js), in either order. A REMEMBER line is an agent-written
+     * note, so it is always a suggestion now: a run that read a page can put words in the agent's mouth, and only the
+     * person's own words may make an active memory (stage V2-6).
+     */
+    async function absorbClosingLines(answer, row, taskId) {
+        let text = answer;
+        const personal = require('../agents/personal');
+        for (let i = 0; i < 2; i++) {
+            const match = text.match(/(?:^|\n)(REMEMBER|IMPROVE): ([^\n]*)[ \t]*$/);
+            if (!match) break;
+            text = text.slice(0, match.index).trimEnd();
+            const line = match[2].trim();
+            if (!line || line.length > 300) continue;
+            if (match[1] === 'REMEMBER') await memory.add(s, { owner: row.requester, agentId: row.via.slice(6), text: line, source: 'agent', status: 'suggested', sourceTask: taskId });
+            else await personal.addProposal(s, row.requester, row.via.slice(6), line, taskId);
+        }
+        return text;
+    }
 
     async function emit(id, body) {
         const event = await store.appendEvent(s, id, { at: iso(), ...body });
@@ -50,6 +105,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         const ended = ['succeeded', 'failed', 'cancelled'].includes(state);
         await emit(id, { kind: ended ? 'end' : 'state', state, ...(agentForEvent ? { agent: agentForEvent } : {}) });
         if (ended) stream.end(id);
+        // "Tell me when it's done" (stage V2-6): done or failed, once per task. Cancelled is the person's own action.
+        if (ended && row && (state === 'succeeded' || state === 'failed')) await tellPerson(row, state);
         // Webhooks that asked for this state hear it; a delivery never holds the task up or fails it.
         if (webhooks && row && row.webhooks) {
             try {
@@ -142,6 +199,12 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // reach as codes_task). Approval inbox, budgets, cancel, webhooks and the event stream are unchanged.
             if (loop && models && row.mode !== 'private' && cls !== 'code') {
                 const agentId = LOOP_AGENT;
+                // The person-authored part of the task (never a run input that may come from a watch or a webhook),
+                // and the personal agent this run is for, so the memory tools scope their writes.
+                const ownAgent = /^agent:agt_/.test(String(row.via || '')) ? row.via.slice(6) : null;
+                const personText = ownAgent ? require('../agents/personal').personText(row.task)
+                    : (row.via == null || row.via === 'chat' ? row.task : '');
+                const notifyTask = (kind, detail) => tellPerson(row, kind, detail || {});
                 explanation.push({ selected: agentId, objective: row.mode === 'best' ? 'correctness' : 'balanced', reasons: [`the one agent loop (${row.mode === 'best' ? 'best' : 'smart'} tier)`], candidates: [], decided_at: iso() });
                 await store.updateTask(s, id, { explanation });
                 await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: 'The agent starts with a plan, then works through it.' });
@@ -150,6 +213,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     const ask = await approvals.request(s, { owner: row.requester, agentId: row.via.slice(6), taskId: id, kind, summary, payload });
                     const url = `${config.baseUrl}/me/approvals/${ask.id}`;
                     await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Your agent wants to ${summary.toLowerCase()} Nothing runs until you approve it: ${url}` });
+                    await tellPerson(row, 'needs_you', { what: `approve: ${summary}`, url });
                     return { pending: true, id: ask.id, url };
                 } : null;
                 let out = null;
@@ -159,6 +223,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         context: row.parent_id ? await store.followContext(s, row) : [],
                         emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
                         meter, budgetLeft, waitForPerson, requestApproval,
+                        personText, agentId: ownAgent, notifyTask,
                     });
                 } catch (err) {
                     if (signal && signal.aborted) throw err;
@@ -191,19 +256,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     }
                     if (verdict.ok) {
                         let answer = out.text;
-                        if (row.via && /^agent:agt_/.test(row.via)) {
-                            // A personal agent's closing lines, in either order: REMEMBER: and IMPROVE: (agents/personal.js).
-                            const personal = require('../agents/personal');
-                            for (let i = 0; i < 2; i++) {
-                                const match = answer.match(/(?:^|\n)(REMEMBER|IMPROVE): ([^\n]*)[ \t]*$/);
-                                if (!match) break;
-                                answer = answer.slice(0, match.index).trimEnd();
-                                const text = match[2].trim();
-                                if (!text || text.length > 300) continue;
-                                if (match[1] === 'REMEMBER') await personal.addMemory(s, row.requester, row.via.slice(6), text, 'agent');
-                                else await personal.addProposal(s, row.requester, row.via.slice(6), text, id);
-                            }
-                        }
+                        if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id);
                         const claims = Array.isArray(verdict.claims) ? verdict.claims : [];
                         const artifacts = Array.isArray(out.artifacts) ? out.artifacts.slice(0, 20) : [];
                         const result = {
@@ -260,6 +313,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     });
                     const url = `${config.baseUrl}/me/approvals/${ask.id}`;
                     await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Your agent wants to start a coding task on your own machine. Nothing runs until you approve it: ${url}` });
+                    await tellPerson(row, 'needs_you', { what: `approve: start a coding task in ${codesRepoIn(row.task)}`, url });
                     const result = {
                         answer: `Your agent asked to start a coding task on your own machine (OpenVibe.Codes) in ${codesRepoIn(row.task)}. Nothing has run: approve or decline it at ${url}. The request expires in ${approvals.EXPIRES_DAYS} days.`,
                         sources: [url], agent: agentId, model: null, class: cls, approval: { id: ask.id, url },
@@ -289,20 +343,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
                 if (verdict.ok) {
                     let answer = out.text;
-                    if (row.via && /^agent:agt_/.test(row.via)) {
-                        // A personal agent's closing lines, in either order: REMEMBER: (a memory note) and IMPROVE: (a
-                        // line it suggests for its instructions, which waits for the person). Both come off the answer.
-                        const personal = require('../agents/personal');
-                        for (let i = 0; i < 2; i++) {
-                            const match = answer.match(/(?:^|\n)(REMEMBER|IMPROVE): ([^\n]*)[ \t]*$/);
-                            if (!match) break;
-                            answer = answer.slice(0, match.index).trimEnd();
-                            const text = match[2].trim();
-                            if (!text || text.length > 300) continue;
-                            if (match[1] === 'REMEMBER') await personal.addMemory(s, row.requester, row.via.slice(6), text, 'agent');
-                            else await personal.addProposal(s, row.requester, row.via.slice(6), text, id);
-                        }
-                    }
+                    if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id);
                     const result = { answer, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, artifacts: Array.isArray(out.artifacts) ? out.artifacts : [], checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };
                     return await setState(id, 'succeeded', { result, finished_at: iso() });
                 }

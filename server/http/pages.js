@@ -93,6 +93,7 @@ const TOOL_LABEL = {
     weather_now: 'Weather', market_quote: 'Market price', currency_convert: 'Currency', time_in: 'Local time',
     convert_time: 'Time zones', geocode: 'Place lookup', place_info: 'Place', sports_scores: 'Sports scores',
     calculate: 'Calculator', make_file: 'File', make_chart: 'Chart', run_tool: 'OpenVibe tool', find_tools: 'Find a tool',
+    recall: 'Memory', remember: 'Memory',
     codes_task: 'Coding task', robot_steps: 'Robot', list_my_robots: 'Your robots', list_my_computers: 'Your computers',
 };
 const toolLabel = (name) => TOOL_LABEL[name] || String(name || 'tool').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
@@ -128,8 +129,13 @@ function chipify(htmlText, evidence) {
     const chip = (id) => {
         const e = known.get(id);
         const n = id.slice(1);
-        const label = `Evidence ${n}: ${toolLabel(e.tool)}${inputText(e.input) ? `, ${inputText(e.input)}` : ''}`.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-        return `<a class="ev" href="#ev-${id}" data-ev="${id}" aria-label="${label}" title="${label}">${n}</a>`;
+        // A recall result is a list of the person's memories: when it holds exactly one, the chip opens that memory's
+        // row on /memory, with where it came from ("why do you believe this?"); a list opens the evidence block, which
+        // links every row.
+        const refs = (Array.isArray(e.refs) ? e.refs : []).filter((r) => r && r.kind === 'memory');
+        const one = refs.length === 1 ? refs[0] : null;
+        const label = (one ? `Memory: ${one.text}` : `Evidence ${n}: ${toolLabel(e.tool)}${inputText(e.input) ? `, ${inputText(e.input)}` : ''}`).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+        return `<a class="ev" href="${one ? `/memory#${one.id}` : `#ev-${id}`}" data-ev="${id}" aria-label="${label}" title="${label}">${n}</a>`;
     };
     return String(htmlText).split(/(<pre[\s\S]*?<\/pre>|<code[\s\S]*?<\/code>)/).map((part, i) => (i % 2 ? part : part.replace(/\[(E\d{1,3}(?:\s*,\s*E\d{1,3})*)\]/g, (all, ids) => {
         const list = ids.split(/\s*,\s*/);
@@ -367,7 +373,7 @@ ${raw(showcase.faq({ id: 'faq', items: faq }))}
         page(req, res, {
             title: 'Your tasks', crumbs: [{ label: 'Your tasks' }], styles: [showcase.STYLESHEET],
             body: html`<h1>Your tasks</h1>
-<p class="muted">Today: ${today.tasks} of ${tier.tasksPerDay} free tasks, ${usd(today.usd)} of ${usd(tier.perDayUsd)}. Tasks are kept ${store.RETENTION_DAYS} days.</p>
+<p class="muted">Today: ${today.tasks} of ${tier.tasksPerDay} free tasks, ${usd(today.usd)} of ${usd(tier.perDayUsd)}. Tasks are kept ${store.RETENTION_DAYS} days. · <a href="/memory">Memory</a></p>
 ${taskForm(req.viewer)}
 ${table(['Task', 'State', 'Agent', 'Cost', 'Started'], pageRows.rows.map((t) => {
                 const result = t.result ? (typeof t.result === 'string' ? JSON.parse(t.result) : t.result) : null;
@@ -557,6 +563,7 @@ ${evidence.length ? html`<details class="evidence" id="evidence"><summary><span>
 <ol class="ev-list">${evidence.map((e) => html`<li class="ev-item${cited.has(String(e.id)) ? ' is-cited' : ''}" id="ev-${e.id}">
 <p class="ev-head"><b class="ev-n">${String(e.id).slice(1)}</b><span class="ev-tool">${toolLabel(e.tool)}</span>${inputText(e.input) ? html`<span class="ev-input">${inputText(e.input)}</span>` : ''}${e.at ? html`<time class="ev-at" datetime="${e.at}">${String(e.at).slice(11, 16)} UTC</time>` : ''}</p>
 ${e.text ? html`<p class="ev-text">${String(e.text).slice(0, 700)}${String(e.text).length > 700 ? '…' : ''}</p>` : ''}
+${Array.isArray(e.refs) && e.refs.some((r) => r && r.kind === 'memory') ? html`<div class="ev-mem"><p class="ev-mem-title">Why you believe this</p><ul>${e.refs.filter((r) => r && r.kind === 'memory').slice(0, 8).map((r) => html`<li><a href="/memory#${r.id}">${r.text}</a> <span class="muted">${r.source === 'agent' ? 'your agent suggested it' : 'you wrote it'}${r.source_task && TASK_ID.test(String(r.source_task)) ? html` · from <a href="/tasks/${r.source_task}">this task</a>` : ''}</span></li>`)}</ul></div>` : ''}
 ${Array.isArray(e.sources) && e.sources.length ? html`<ul class="ev-src">${e.sources.slice(0, 6).map((src) => html`<li><a href="${src.url}" rel="nofollow ugc noopener" target="_blank">${src.title || String(src.url).replace(/^https?:\/\//, '').slice(0, 80)}</a></li>`)}</ul>` : ''}</li>`)}</ol></details>` : ''}
 <p class="answer-foot"><span>${agent ? agent.name : result.agent}${result.model ? html` · ${modelName(result.model)}` : ''}</span><span>${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${Number.isFinite(took) && took > 0 ? html`<span>took ${ago(took)}</span>` : ''}</p>
 </section>`;

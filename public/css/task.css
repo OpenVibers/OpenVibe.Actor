@@ -83,3 +83,10 @@
 .follow-hint { margin: .45rem 0 0 4px; font-size: .82rem; color: var(--text-muted, #7386a3); }
 
 @media (prefers-reduced-motion: reduce) { .ps, .ps.is-active .ps-mark { animation: none; } .ev, .ev-item { transition: none; } }
+
+/* A cited memory (Actor v2, stage V2-6): what the answer leaned on, opening the row on /memory with its source. */
+.ev-mem { margin: .5rem 0 0; padding: .5rem .65rem; border-left: 2px solid var(--accent); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.ev-mem-title { margin: 0 0 .25rem; font-size: .78rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--accent-light); }
+.ev-mem ul { margin: 0; padding-left: 18px; font-size: .85rem; }
+.ev-mem li { margin: .15rem 0; overflow-wrap: anywhere; }
+.ev-mem a { font-weight: 650; }

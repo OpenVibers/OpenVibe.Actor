@@ -103,7 +103,8 @@ async function handToPerson(person, a, ctx, core) {
     const granted = ctx.waitForPerson ? ctx.waitForPerson(PERSON_WAIT_MS) : 0;
     if (!granted) return { done: false, note: 'This task has already waited for the person as long as it may: tell them in your answer what is left for them to do, with the link.', watch };
     if (ctx.emit) await ctx.emit({ step: 'text', text: `Needs you: ${what} Open your agent's desk, take it over, do it, then let go: ${watch}` });
-    if (core.notify.enabled) core.notify.needsYou({ subject: person, what, url: watch }).catch(() => {});
+    // One per task, through the engine's claim (notify/task-notices.js); a failed push never holds the task up.
+    if (ctx.notifyTask) ctx.notifyTask('needs_you', { what, url: watch }).catch(() => {});
     const started = Date.now();
     const end = started + granted;
     let took = false;
