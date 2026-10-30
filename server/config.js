@@ -149,6 +149,11 @@ function load(env = process.env) {
             selfReflections: Math.max(0, int(env.ACTOR_LOOP_SELF_REFLECTIONS, 2)),
             checkReflections: Math.min(2, Math.max(0, int(env.ACTOR_LOOP_CHECK_REFLECTIONS, 2))),
             toolResultChars: Math.max(500, int(env.ACTOR_LOOP_TOOL_RESULT_CHARS, 6000)),
+            // Sub-agents (stage V2-7), "best" mode only: a self-contained sub-goal runs as a child loop with a share
+            // of what is left of the budget and a cap on its model calls. At most 4 at once, depth 1.
+            subAgents: env.ACTOR_LOOP_SUB_AGENTS !== '0',
+            subAgentShare: Math.min(0.5, Math.max(0.05, Number(env.ACTOR_LOOP_SUB_AGENT_SHARE) || 0.25)),
+            subAgentCalls: Math.max(1, int(env.ACTOR_LOOP_SUB_AGENT_CALLS, 8)),
         },
         // Task webhooks (server/tasks/webhooks.js): how often due deliveries are sent, and how long one may take.
         webhooks: {
