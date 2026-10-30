@@ -154,7 +154,7 @@ async function createApp(opts = {}) {
     // ── Machine endpoints ───────────────────────────────────
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'openvibe-actor', version: VERSION, tasks: engine.status(), streams: stream.status().streams }));
     release.mount(app, { registry: metrics.registry });
-    const readiness = createActorReadiness({ s, config, engine, release: release.release, valkey });
+    const readiness = createActorReadiness({ s, config, engine, release: release.release, valkey, sso });
     app.get('/api/ready', readiness.handler);
 
     // ── Who is asking (verified offline; refreshed when expired) ──

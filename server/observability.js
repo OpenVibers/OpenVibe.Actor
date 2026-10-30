@@ -12,7 +12,7 @@ const { jwksStatus } = require('openvibe-sdk/auth');
 const { createReadiness } = require('openvibe-shared/ready');
 const catalog = require('./agents/catalog');
 
-function createActorReadiness({ s, config, engine, valkey = null, release = null }) {
+function createActorReadiness({ s, config, engine, valkey = null, release = null, sso = null }) {
     return createReadiness({
         service: 'actor',
         release,
@@ -44,6 +44,18 @@ function createActorReadiness({ s, config, engine, valkey = null, release = null
                 },
             },
             { name: 'oauth_client', required: false, check: () => (config.oauth.clientSecret ? true : 'OV_OAUTH_CLIENT_SECRET unset: sign-in cannot complete') },
+            {
+                // Does the Network accept this site's OAuth client? 'invalid' means the id or the secret is wrong:
+                // the service must not stay ready on a sign-in that cannot work. 'unknown' (the Network did not
+                // answer) is left alone — that is the Network's outage, not this site's configuration.
+                name: 'sso_client', required: true,
+                check: async () => {
+                    if (!sso || typeof sso.checkClient !== 'function') return { skipped: 'no SSO client' };
+                    const client = await sso.checkClient();
+                    if (client === 'invalid') return 'the Network refuses this site\'s OAuth client: check OV_OAUTH_CLIENT_ID / OV_OAUTH_CLIENT_SECRET';
+                    return true;
+                },
+            },
         ],
     });
 }
