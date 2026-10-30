@@ -8,10 +8,12 @@
 const assert = require('assert');
 const http = require('http');
 const { boot, check, done } = require('./helpers/boot');
-const { createNetworkSender } = require('openvibe-sdk/account-data');
+const { createNetworkSender, uncovered } = require('openvibe-sdk/account-data');
 const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const taskStore = require('../server/tasks/store');
 const personal = require('../server/agents/personal');
+const { TABLES } = require('../server/identity/account-data');
+const { testDb } = require('./helpers/db');
 
 const A = 'usr_01JZ0000000000000000000AAA';
 const B = 'usr_01JZ0000000000000000000BBB';
@@ -58,6 +60,17 @@ async function makeTask(t, subject, title) {
 }
 
 (async () => {
+    await check('every table that names a person is covered or exempted with a reason', async () => {
+        const d = await testDb();
+        try {
+            const missing = await uncovered(d.db, {
+                tables: TABLES,
+                exempt: {account_data_events: 'the ledger of requests itself: which export and deletion Actor applied'},
+            });
+            assert.deepStrictEqual(missing, [], `a table with a person column is neither covered nor exempted: ${missing.join(', ')}`);
+        } finally { await d.close(); }
+    });
+
     await check('an export part carries only the person\'s tasks and daily spend, and no secret', async () => {
         const stub = await startNetworkStub();
         const sender = createNetworkSender({ networkInternalUrl: stub.url, clientId: 'actor', clientSecret: 'actor-secret' });
