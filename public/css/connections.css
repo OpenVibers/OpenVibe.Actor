@@ -10,8 +10,8 @@
 .cnx-form { display: grid; gap: 8px; max-width: 520px; }
 .cnx-form label { display: grid; gap: 4px; font-size: 13px; }
 .cnx-form input, .cnx-form select { padding: 8px; font-size: 15px; }
-.cnx-chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 8px 0 0; padding: 0; }
-.cnx-chips form { margin: 0; }
+.ovk-chips, .cnx-chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 8px 0 0; padding: 0; }
+.ovk-chips form, .cnx-chips form { margin: 0; }
 .ovk-chip-btn { border: 1px solid var(--ov-line, #d7d9de); border-radius: 999px; padding: 3px 10px; font-size: 12px; background: transparent; color: inherit; }
 .ovk-chip--on .ovk-chip-btn { background: var(--ov-accent, #1a56db); border-color: transparent; color: #fff; }
 .cnx-builtin, .cnx-own { margin: 18px 0; }

@@ -381,9 +381,10 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 }
                 continue;
             }
-            const item = state.ledger.add({ tool: p.name, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
-            state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: p.name, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
-            await ctx.emit({ step: 'tool_result', tool: p.name, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
+            const shown = displayName(p.name, ctx);
+            const item = state.ledger.add({ tool: shown, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
+            state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: shown, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
+            await ctx.emit({ step: 'tool_result', tool: shown, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
             if (out.isError) { errorResults += 1; lastTool = p.name; } else okResults += 1;
             if (state.brain) {
                 state.brain.toolRuns = (state.brain.toolRuns || 0) + 1;
@@ -656,6 +657,12 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     }
 
     /** Does this tool change something outside the model's own reasoning? The module says `acts: true`. */
+    /** The name a person reads: a connector tool shows its module name (mcp:<connection>:<tool>), not its alias. */
+    function displayName(name, ctx = null) {
+        const dynamic = ctx && ctx.dynamicTools ? ctx.dynamicTools.get(name) : null;
+        return dynamic ? dynamic.name : name;
+    }
+
     function isActing(name, ctx = null) {
         // A connector tool (stage V2-11) is not in the registry: it is built for this run, and the run's own map
         // says whether it acts.
@@ -717,15 +724,16 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             state.brain.steps.push({ step_kind: 'work', tier: state.tier, tool: name || null, ok });
         };
         const record = async (name, args, out, id, startedAt) => {
-            const item = state.ledger.add({ tool: name, input: args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
-            state.messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ evidence: item.id, tool: name, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
-            await ctx.emit({ step: 'tool_result', tool: name, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
+            const shown = displayName(name, ctx);
+            const item = state.ledger.add({ tool: shown, input: args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
+            state.messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ evidence: item.id, tool: shown, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
+            await ctx.emit({ step: 'tool_result', tool: shown, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
             await spanCall(ctx.trace, { kind: 'tool', name, startedAt, ms: now() - startedAt, ok: !(out && out.isError), errorCode: out && out.isError ? 'actor.tool.failed' : null, step: state.calls });
             note(name, !(out && out.isError));
         };
         const recordError = async (name, args, id, text) => {
             const clean = redactText(clip(text, 300));
-            const item = state.ledger.add({ tool: name, input: args, text: clean, data: null });
+            const item = state.ledger.add({ tool: displayName(name, ctx), input: args, text: clean, data: null });
             state.messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ error: clean, tool: name, evidence: item.id }) });
             await ctx.emit({ step: 'tool_result', tool: name, text: clean, is_error: true });
             note(name, false);

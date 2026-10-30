@@ -83,9 +83,9 @@ async function toolsOf(s, owner) {
 }
 
 /** What the server offers now: the tools it lists replace the ones we knew. Every tool starts off. */
-async function replaceTools(s, connectionId, tools = []) {
+async function replaceTools(s, connectionId, offered = []) {
     await s.db.exec("DELETE FROM actor_connection_tools WHERE connection_id = $1", [connectionId]);
-    for (const t of tools) {
+    for (const t of offered) {
         await s.db.query(
             "INSERT INTO actor_connection_tools (connection_id, name, description, input_schema, annotations, enabled, created_at) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, false, $6)" +
             " ON CONFLICT (connection_id, name) DO UPDATE SET description = EXCLUDED.description, input_schema = EXCLUDED.input_schema, annotations = EXCLUDED.annotations",

@@ -13,6 +13,7 @@
  * span, a checkpoint or a log.
  */
 const egress = require("openvibe-shared/egress");
+const { checkUrl } = require("../net/guarded-request");
 const store = require("./store");
 const mcp = require("./mcp");
 const a2a = require("./a2a");
@@ -95,7 +96,12 @@ function createConnectors({ store: s, config = {}, log = console, guard = {} } =
         const clean = String(url || "").trim();
         if (!/^https:\/\//i.test(clean)) return { error: "the address must start with https://" };
         try {
-            await egress.assertPublicUrl(clean, { lookup: guard.lookup, protocols: ["https:"] });
+            checkUrl(clean, { ports: guard.ports });
+            // The same check the request makes: the name must answer with a public address (a test injects its own
+            // lookup and allowance, exactly as the request does).
+            const look = egress.createSafeLookup({ lookup: guard.lookup, isAllowed: guard.isAllowed });
+            const host = new URL(clean).hostname;
+            await new Promise((resolve, reject) => look(host, { all: true }, (err) => (err ? reject(err) : resolve())));
         } catch (err) {
             return { error: "that address is not one Actor may reach: " + String((err && err.message) || err).slice(0, 200) };
         }

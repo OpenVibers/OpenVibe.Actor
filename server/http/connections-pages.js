@@ -61,6 +61,7 @@ function createConnectionsPages(ctx) {
 <span class="ovk-row-top"><span class="cnx-name">${conn.name}</span></span>
 <span class="ovk-row-sub"><span class="ovk-muted">${KIND_LABEL[conn.kind] || conn.kind} · ${state}</span></span>
 <span class="ovk-row-sub"><span class="ovk-muted cnx-url">${conn.url}</span></span>
+${chips}
 </span>
 <span class="cnx-actions">
 <form method="post" action="/connections/${conn.id}/check"><button type="submit" class="ovk-btn">Check</button></form>

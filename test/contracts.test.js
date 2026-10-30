@@ -13,7 +13,7 @@ const contracts = require('openvibe-contracts');
 const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
-const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide'];
+const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task'];
 const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 // Routes added after the pinned contracts release but covered by an existing grant (or public on purpose). The trace is
 // the task's own read, so actor.task.read decides it exactly as it decides GET /api/v1/tasks/:id. The live-stats reads
@@ -25,16 +25,18 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/stats/models', null],
 ]);
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
+// The A2A surface (stage V2-11): POST /a2a/v1/tasks and GET /a2a/v1/tasks/:id, guarded by actor.a2a.task.
+const A2A_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'a2a-pages.js'), 'utf8');
 const INDEX_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-index.js'), 'utf8');
 const CONTROL_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-control.js'), 'utf8');
 
 /** `METHOD /api/v1/path` for every API and resource index route, with its capability guard (null: public). */
 function codeRoutes() {
     const out = new Map();
-    for (const [source, prefix] of [[API_SRC, '/api/v1'], [INDEX_SRC, '/api/v1/resources'], [CONTROL_SRC, '/api/v1/resources']]) {
+    for (const [source, prefix] of [[API_SRC, '/api/v1'], [INDEX_SRC, '/api/v1/resources'], [CONTROL_SRC, '/api/v1/resources'], [A2A_SRC, '']]) {
         for (const m of source.matchAll(/^\s*r\.(get|post|patch|delete)\('([^']+)'(.*)$/gm)) {
-            const guard = m[3].match(/requireCapability\('([a-z.]+)'\)/);
-            const read = m[3].match(/limits\.reads\('([a-z.]+)'\)/);
+            const guard = m[3].match(/requireCapability\('([a-z0-9.]+)'\)/);
+            const read = m[3].match(/limits\.reads\('([a-z0-9.]+)'\)/);
             out.set(`${m[1].toUpperCase()} ${prefix}${m[2] === '/' ? '' : m[2]}`, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });
         }
     }
@@ -85,7 +87,7 @@ function codeRoutes() {
             assert.strictEqual(c.owner, 'actor', id);
         }
         const principalSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'principal.js'), 'utf8');
-        const listed = principalSrc.match(/const CAPABILITIES = \[([^\]]+)\]/)[1].match(/'([a-z.]+)'/g).map((s) => s.slice(1, -1));
+        const listed = principalSrc.match(/const CAPABILITIES = \[([^\]]+)\]/)[1].match(/'([a-z0-9.]+)'/g).map((s) => s.slice(1, -1));
         assert.deepStrictEqual([...listed].sort(), [...CAPS].sort(), 'principal.js accepts exactly Actor\'s capabilities');
         const appSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'app.js'), 'utf8');
         assert.match(appSrc, /app\.use\('\/api\/v1\/resources', resourceIndex\.router\(ctx\)\)/);
