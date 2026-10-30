@@ -50,13 +50,27 @@ function taskLedger({ task = '', understanding = {}, plan = { steps: [] } } = {}
 function createProgress({ nextGoal = null } = {}) {
     const state = {
         done: false, looping: false, progressing: true, stalls: 0, replans: 0, updates: 0,
-        nextGoal: nextGoal ? clip(nextGoal, 160) : null, replannedAt: null,
+        nextGoal: nextGoal ? clip(nextGoal, 160) : null, replannedAt: null, stopped: null,
     };
     function snapshot() {
         return {
             done: state.done, looping: state.looping, progressing: state.progressing, stalls: state.stalls,
-            replans: state.replans, next: state.nextGoal, updates: state.updates, replanned_at: state.replannedAt,
+            stuck: state.done ? false : (state.stalls >= 3 || state.progressing === false),
+            replans: state.replans, next: state.done ? null : state.nextGoal, stopped: state.stopped || null,
+            updates: state.updates, replanned_at: state.replannedAt,
         };
+    }
+    /**
+     * The last update, written when the task ends (stage V2-8 review): a done run says done with no next sub-goal;
+     * a failed or stopped one keeps no next and names why it stopped. The page shows this last ledger.
+     */
+    function finish({ done = true, stopped = null } = {}) {
+        state.done = Boolean(done);
+        state.nextGoal = null;
+        state.stopped = stopped ? clip(stopped, 200) : null;
+        if (state.done) { state.progressing = true; state.stalls = 0; }
+        state.updates += 1;
+        return snapshot();
     }
     /**
      * One step's update. `answered` means the run delivered an answer; `okResults` is how many tool calls succeeded;
@@ -76,7 +90,7 @@ function createProgress({ nextGoal = null } = {}) {
         const stuck = !state.done && state.stalls >= 3;
         return { ...snapshot(), replan, stuck, errors: errorResults };
     }
-    return { state, update, snapshot };
+    return { state, update, snapshot, finish };
 }
 
 /** Restate the plan's step in hand as a different route after no progress. Mutates the plan (the loop owns it). */
@@ -97,10 +111,11 @@ function ledgerText(ledger, progress) {
     const given = (ledger.given || []).join('; ') || 'none';
     const lookup = (ledger.lookup || []).join('; ') || 'none';
     const derive = (ledger.derive || []).join('; ') || 'none';
-    const next = p.next ? clip(p.next, 120) : ((ledger.plan || []).find((s) => s.state === 'active') || {}).goal || 'answer';
+    const next = p.next ? clip(p.next, 120) : 'none';
+    const stuck = p.stuck != null ? Boolean(p.stuck) : (!p.done && p.progressing === false);
     return [
         `Task ledger: given ${clip(given, 260)} · find ${clip(lookup, 260)} · derive ${clip(derive, 200)}`,
-        `Progress: ${p.done ? 'done' : 'not done'}; ${p.looping ? 'looping' : 'not looping'}; ${p.progressing === false ? 'no progress' : 'moving'}; next ${clip(next, 140)}`,
+        `Progress: ${p.done ? 'done' : 'not done'}; ${p.looping ? 'looping' : 'not looping'}; ${p.progressing === false ? 'no progress' : 'moving'}; stuck ${stuck ? 'yes' : 'no'}; ${p.stopped ? `stopped ${clip(p.stopped, 140)}` : `next ${next}`}`,
     ].join('\n');
 }
 

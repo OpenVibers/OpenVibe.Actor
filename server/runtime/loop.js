@@ -699,7 +699,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 await learn.recordSteps({ store, kind: state.brain.kind, steps: state.brain.steps, log, now }).catch(() => {});
             }
             state.plan.steps.forEach((s) => { s.state = 'done'; });
-            if (state.brain.progressLedger) state.brain.progress = state.brain.progressLedger.update({ answered: true });
+            // The last progress ledger (stage V2-8 review): done, no next sub-goal. A failed check writes its own
+            // stopped ledger from the engine, after the verifier has spoken.
+            if (state.brain.progressLedger) state.brain.progress = state.brain.progressLedger.finish({ done: true });
             await emitPlan(state, ctx);
             return resultOf(state);
         } catch (err) {

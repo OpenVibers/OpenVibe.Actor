@@ -295,6 +295,15 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     await meter(verdict.cost_usd);
                     const showCheck = (v) => emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${v.ok ? 'Checked' : 'Check failed'}${v.by ? ` by ${v.by}${v.cross ? '' : ' (same family)'}` : ''}: ${v.reason || ''}`.slice(0, 2000), is_error: !v.ok });
                     await showCheck(verdict);
+                    // The last progress ledger for a task that will not deliver (stage V2-8 review): done no, no next,
+                    // and the reason it stopped. A delivered task keeps the loop's final "done" ledger.
+                    const finalPlan = async (stopped) => {
+                        const brain = out && out.state && out.state.brain;
+                        if (!brain || !brain.progressLedger || !out.plan) return;
+                        const progress = brain.progressLedger.finish({ done: false, stopped });
+                        brain.progress = progress;
+                        await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: loop.planText(out.plan, { ledger: brain.ledger, progress }) });
+                    };
                     // A live claim with no evidence never reaches the person: the loop gets one turn to fetch it or
                     // drop it, then the check runs again (at most config.loop.checkReflections passes by another family).
                     const maxRounds = config.loop && config.loop.checkReflections != null ? config.loop.checkReflections : 2;
@@ -395,10 +404,12 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         return await setState(id, 'succeeded', { result, finished_at: iso() });
                     }
                     if (verdict.unavailable) {
+                        await finalPlan('the answer could not be checked');
                         return await setState(id, 'failed', { error_code: 'actor.check.unavailable', error_detail: `The answer could not be checked (${verdict.reason}), so it was not delivered.`, finished_at: iso() });
                     }
                     // The refused answer, kept on the task page folded away, never delivered as the answer.
                     await learn.recordCheck({ store: s, kind: (out.brain && out.brain.kind) || 'answer', tiers: (out.brain && out.brain.tiers) || [], tools: (out.brain && out.brain.tools) || [], ok: false, log, now: () => now() }).catch(() => {});
+                    await finalPlan('its answer failed the check');
                     await emit(id, { kind: 'output', step: 'text', agent: agentId, text: String(out.text || '').slice(0, 8000), is_error: true });
                     const bad = (verdict.unsupported || []).slice(0, 5).map((c) => c.claim).join('; ');
                     return await setState(id, 'failed', {

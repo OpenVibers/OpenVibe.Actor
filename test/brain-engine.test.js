@@ -9,6 +9,7 @@
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 const store = require('../server/tasks/store');
+const taskEvents = require('../public/js/task-events');
 
 const taskIdOf = (res) => String(res.headers.get('location') || '').split('/').filter(Boolean).pop();
 const SAME = { origin: 'https://openvibe.actor' };
@@ -18,6 +19,7 @@ const SAME = { origin: 'https://openvibe.actor' };
     try {
         const bea = t.network.addUser('bea');
         const s = t.ctx.s;
+        let firstTask = null;
 
         await check('a high-risk ambiguous task asks one question before any tool; the answer resumes the same task', async () => {
             t.providers.state.understand = {
@@ -28,6 +30,7 @@ const SAME = { origin: 'https://openvibe.actor' };
             const created = await t.get('/tasks', { as: bea, form: { task: 'Book a table for two on Friday evening', mode: 'balanced' }, headers: SAME });
             assert.strictEqual(created.status, 303);
             const id = taskIdOf(created);
+            firstTask = id;
             const waiting = await t.waitFor(id, ['needs_you']);
             assert.strictEqual(waiting.state, 'needs_you');
             const page = await t.get(`/tasks/${id}`, { as: bea });
@@ -47,6 +50,21 @@ const SAME = { origin: 'https://openvibe.actor' };
             const expected = ended.result && (typeof ended.result === 'string' ? JSON.parse(ended.result) : ended.result);
             assert.ok(expected && expected.answer, 'the task delivered an answer');
             assert.ok(Number(ended.cost_usd) > 0, 'the question and the work spent the task\'s own budget');
+        });
+
+        await check('a finished task\'s last plan event has the final ledger: done, no next', async () => {
+            const events = await store.eventsAfter(s, firstTask, 0);
+            const lastPlan = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'plan' && taskEvents.plan(e.text));
+            assert.ok(lastPlan, 'a plan event is on the page');
+            const parsed = taskEvents.plan(lastPlan.text);
+            assert.strictEqual(parsed.progress.done, true, 'the last ledger says done');
+            assert.strictEqual(parsed.progress.next, null, 'and has no next sub-goal');
+            assert.strictEqual(parsed.progress.stuck, false);
+            assert.match(lastPlan.text, /Progress: done; /);
+            const page = await t.get(`/tasks/${firstTask}`, { as: bea });
+            for (const label of ['<b>Given:</b>', '<b>To find:</b>', '<b>To work out:</b>', '<b>Done:</b> yes', '<b>Stuck:</b> no', '<b>Next:</b> none']) {
+                assert.ok(page.text.includes(label), `the finished page shows ${label}`);
+            }
         });
 
         await check('an ambiguous task that is cheap to get wrong does not ask; its assumptions are at the top of the plan', async () => {
@@ -114,6 +132,8 @@ const SAME = { origin: 'https://openvibe.actor' };
             assert.match(page.text, /ev-conf is-likely/, 'one search source is likely, not sure');
             assert.match(page.text, /Challenge this claim/);
             assert.match(page.text, new RegExp(`href="/tasks/${id}/challenge\\?ev=E1"`));
+            assert.strictEqual((page.text.match(/Challenge runs a counter-evidence search/g) || []).length, 1, 'the explainer is once, under Evidence');
+            assert.ok(!/a counter-evidence search; the estimate is shown first<\/span>/.test(page.text), 'no repeated explainer on the items');
             const challengePage = await t.get(`/tasks/${id}/challenge?ev=E1`, { as: bea });
             assert.strictEqual(challengePage.status, 200);
             assert.match(challengePage.text, /Estimate:/);
@@ -125,6 +145,25 @@ const SAME = { origin: 'https://openvibe.actor' };
             assert.ok(Number(after.cost_usd || 0) >= before, 'the challenge counts against the task\'s allowance');
             const afterPage = await t.get(`/tasks/${id}`, { as: bea });
             assert.match(afterPage.text, /Challenge: unclear|Challenge: disagrees|Challenge: agrees/);
+        });
+
+        await check('a failed check writes a final ledger with no next and why it stopped', async () => {
+            t.providers.state.understand = null;
+            t.providers.state.smart = 'answer';
+            t.providers.state.checkOk = false;
+            t.providers.state.checkClaims = () => [{ claim: 'a live fact with no evidence', kind: 'live', evidence: [], supported: false }];
+            const created = await t.get('/tasks', { as: bea, form: { task: 'Tell me a live fact from memory', mode: 'balanced' }, headers: SAME });
+            const id = taskIdOf(created);
+            const ended = await t.waitFor(id);
+            assert.strictEqual(ended.state, 'failed');
+            const events = await store.eventsAfter(s, id, 0);
+            const lastPlan = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'plan' && taskEvents.plan(e.text));
+            const parsed = taskEvents.plan(lastPlan.text);
+            assert.strictEqual(parsed.progress.done, false);
+            assert.strictEqual(parsed.progress.next, null);
+            assert.ok(parsed.progress.stopped, 'the last ledger says why it stopped');
+            t.providers.state.checkOk = true;
+            t.providers.state.checkClaims = null;
         });
 
         await check('a finished task writes its outcomes to actor_brain_outcomes', async () => {

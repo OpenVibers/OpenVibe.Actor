@@ -92,13 +92,21 @@
                 });
                 out.ledger = ledger;
             } else if (/^Progress: /.test(line)) {
-                var bits = line.slice(10).split('; ');
-                out.progress = {
-                    done: bits[0] === 'done',
-                    looping: bits[1] === 'looping',
-                    progressing: bits[2] !== 'no progress',
-                    next: (bits[3] || '').replace(/^next /, '') || null,
-                };
+                // "Progress: done; not looping; moving; stuck no; next none" (stage V2-8). Parsed token by token so an
+                // older event with only done/looping/moving/next still reads.
+                var progress = { done: false, looping: false, progressing: true, stuck: false, next: null, stopped: null };
+                line.slice(10).split('; ').forEach(function (bit) {
+                    if (bit === 'done') progress.done = true;
+                    else if (bit === 'not done') progress.done = false;
+                    else if (bit === 'looping') progress.looping = true;
+                    else if (bit === 'not looping') progress.looping = false;
+                    else if (bit === 'moving') progress.progressing = true;
+                    else if (bit === 'no progress') progress.progressing = false;
+                    else if (/^stuck /.test(bit)) progress.stuck = bit.slice(6) === 'yes';
+                    else if (/^next /.test(bit)) progress.next = bit.slice(5) === 'none' ? null : bit.slice(5);
+                    else if (/^stopped /.test(bit)) progress.stopped = bit.slice(8) || null;
+                });
+                out.progress = progress;
             }
         });
         return out.steps.length || out.ledger ? out : null;
@@ -201,5 +209,28 @@
         return out;
     }
 
-    return { lines: lines, firstAt: firstAt, duration: duration, attachments: attachments, plan: plan, planLine: planLine };
+    // "Assuming The price…" reads as a sentence that started after a full stop. The first letter of an assumption
+    // is lowered unless it is an acronym (USD, EU), a camel-cased name (OpenAI, ChatGPT) or a known proper noun
+    // (a day, month, city or product). Several assumptions become one sentence each (stage V2-8 review).
+    var PROPER = /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December|Lisbon|Porto|Madrid|Barcelona|London|Paris|Berlin|Rome|Tokyo|New York|Portugal|Spain|Europe|OpenVibe|Actor|Network|ChatGPT|Google|Microsoft|Apple|Amazon|Netflix)$/;
+    function lowerFirst(text) {
+        var s = String(text == null ? '' : text).trim();
+        var m = /^([A-Za-z][A-Za-z'\u2019.-]*)/.exec(s);
+        if (!m) return s;
+        var word = m[1];
+        if (word === 'I') return s;
+        if (/^[A-Z]{2,}/.test(word)) return s;          // an acronym
+        if (/[a-z][A-Z]/.test(word)) return s;          // OpenAI, ChatGPT
+        if (PROPER.test(word)) return s;                // a known proper noun
+        return word.charAt(0).toLowerCase() + s.slice(1);
+    }
+    function assumingLine(assumptions) {
+        var list = (assumptions || []).map(function (a) { return String(a == null ? '' : a).trim(); }).filter(Boolean);
+        if (!list.length) return '';
+        var out = 'Assuming ' + lowerFirst(list[0]);
+        for (var i = 1; i < list.length; i++) out += '. ' + list[i].replace(/[.?!]+$/, '');
+        return out.replace(/[.?!]*$/, '') + '.';
+    }
+
+    return { lines: lines, firstAt: firstAt, duration: duration, attachments: attachments, plan: plan, planLine: planLine, assumingLine: assumingLine, lowerFirst: lowerFirst };
 });

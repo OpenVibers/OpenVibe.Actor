@@ -819,10 +819,12 @@ ${opts.editable ? html`<form method="post" action="/tasks/${opts.taskId}/assumpt
 <label for="assume-text">Assumptions (one per line; changing them tells the agent how to read the task)</label>
 <textarea id="assume-text" name="assumptions" rows="5" maxlength="2000">${assumptions.join('\n')}</textarea>
 <button class="sc-btn" type="submit">Update assumptions</button>
-</form>` : html`<p class="plan-assume" id="plan-assume"${assumptions.length ? '' : raw(' hidden')}>Assuming ${assumptions.join(' · ')}</p>`}
-<div class="plan-ledger" id="plan-ledger"${ledger ? '' : raw(' hidden')}>
-${ledger ? html`<p><b>Task ledger</b> ${ledger.given.length ? html`<span><span class="muted">given</span> ${ledger.given.join('; ')}</span>` : ''}${ledger.lookup.length ? html` <span><span class="muted">find</span> ${ledger.lookup.join('; ')}</span>` : ''}${ledger.derive.length ? html` <span><span class="muted">derive</span> ${ledger.derive.join('; ')}</span>` : ''}</p>` : ''}
-${progress ? html`<p class="plan-progress"><b>Progress</b> ${progress.done ? 'done' : 'not done'} · ${progress.looping ? 'looping' : 'not looping'} · ${progress.progressing ? 'moving' : 'no progress'}${progress.next ? ` · next: ${progress.next}` : ''}${progress.replans ? ` · replanned ${progress.replans}×` : ''}</p>` : ''}
+</form>` : html`<p class="plan-assume" id="plan-assume"${assumptions.length ? '' : raw(' hidden')}>${taskEvents.assumingLine(assumptions)}</p>`}
+<div class="plan-ledger" id="plan-ledger"${ledger || progress ? '' : raw(' hidden')}>
+${ledger ? html`<p><b>Given:</b> ${ledger.given.length ? ledger.given.join('; ') : 'none'}</p>
+<p><b>To find:</b> ${ledger.lookup.length ? ledger.lookup.join('; ') : 'none'}</p>
+<p><b>To work out:</b> ${ledger.derive.length ? ledger.derive.join('; ') : 'none'}</p>` : ''}
+${progress ? html`<p class="plan-progress"><b>Done:</b> ${progress.done ? 'yes' : 'no'} · <b>Stuck:</b> ${progress.stuck === true || progress.progressing === false ? 'yes' : 'no'} · <b>Next:</b> ${progress.next || 'none'}</p>${progress.stopped ? html`<p class="plan-stopped"><b>Stopped:</b> ${progress.stopped}</p>` : ''}` : ''}
 </div>
 </section>`;
     }
@@ -895,6 +897,7 @@ ${artifacts.length ? html`<div class="files"><h3>Files</h3><ul class="file-grid"
 <span class="fc-meta"><a class="fc-name" href="${a.url}" rel="nofollow noopener">${a.name}</a><span class="muted">${a.kind === 'chart' ? 'Chart' : 'File'} · ${bytes(a.size)}</span></span></li>`)}</ul></div>` : ''}
 ${result.sources && result.sources.length ? html`<div class="sources"><h3>Sources</h3><ul>${result.sources.map((u) => html`<li><a href="${u}" rel="nofollow ugc noopener" target="_blank">${u.replace(/^https?:\/\//, '').slice(0, 90)}</a></li>`)}</ul></div>` : ''}
 ${evidence.length ? html`<details class="evidence" id="evidence"><summary><span>Evidence</span><span class="muted">${evidence.length} item${evidence.length === 1 ? '' : 's'}: what the tools returned${cited.size ? `, ${cited.size} cited` : ''}</span></summary>
+<p class="ev-hint muted small">Challenge runs a counter-evidence search; the estimate is shown first, before it spends anything.</p>
 <ol class="ev-list">${evidence.map((e) => {
             const c = confMap.get(String(e.id)) || (claims ? 'unverified' : null);
             return html`<li class="ev-item${cited.has(String(e.id)) ? ' is-cited' : ''}" id="ev-${e.id}">
@@ -903,7 +906,7 @@ ${e.text ? html`<p class="ev-text">${String(e.text).slice(0, 700)}${String(e.tex
 ${Array.isArray(e.refs) && e.refs.some((r) => r && r.kind === 'memory') ? html`<div class="ev-mem"><p class="ev-mem-title">Why you believe this</p><ul>${e.refs.filter((r) => r && r.kind === 'memory').slice(0, 8).map((r) => html`<li><a href="/memory#${r.id}">${r.text}</a> <span class="muted">${r.source === 'agent' ? 'your agent suggested it' : 'you wrote it'}${r.source_task && TASK_ID.test(String(r.source_task)) ? html` · from <a href="/tasks/${r.source_task}">this task</a>` : ''}</span></li>`)}</ul></div>` : ''}
 ${Array.isArray(e.sources) && e.sources.length ? html`<ul class="ev-src">${e.sources.slice(0, 6).map((src) => html`<li><a href="${src.url}" rel="nofollow ugc noopener" target="_blank">${src.title || String(src.url).replace(/^https?:\/\//, '').slice(0, 80)}</a></li>`)}</ul>` : ''}
 ${e.challenge ? html`<div class="ev-challenge-result"><b>Challenge: ${e.challenge.verdict || 'unclear'}</b>${e.challenge.why ? html` <span>${e.challenge.why}</span>` : ''}${e.challenge.query ? html`<p class="muted small">Looked for: ${e.challenge.query}</p>` : ''}</div>` : ''}
-${canChallenge && !e.challenge ? html`<p class="ev-actions"><a class="ev-challenge" href="/tasks/${t.id}/challenge?ev=${e.id}">Challenge this claim</a> <span class="muted small">a counter-evidence search; the estimate is shown first</span></p>` : ''}</li>`;
+${canChallenge && !e.challenge ? html`<p class="ev-actions"><a class="ev-challenge" href="/tasks/${t.id}/challenge?ev=${e.id}">Challenge this claim</a></p>` : ''}</li>`;
         })}</ol></details>` : ''}
 <p class="answer-foot"><span>${agent ? agent.name : result.agent}${result.model ? html` · ${modelName(result.model)}` : ''}</span><span>${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${Number.isFinite(took) && took > 0 ? html`<span>took ${ago(took)}</span>` : ''}</p>
 </section>`;

@@ -80,6 +80,8 @@ const iso = () => new Date().toISOString();
             { at: iso(), kind: 'output', step: 'check', agent: 'openvibe-runtime', text: 'Check failed by deepseek: a live price has no evidence', is_error: true },
             { at: iso(), kind: 'output', step: 'escalation', agent: 'openvibe-runtime', text: 'Tried a stronger model for this step (fast → smart).' },
             { at: iso(), kind: 'output', step: 'check', agent: 'openvibe-runtime', text: 'Checked by deepseek: all claims grounded' },
+            // The last progress ledger after the task ended (stage V2-8 review): done, no next.
+            { at: iso(), kind: 'output', step: 'plan', agent: 'openvibe-runtime', text: 'Assumptions: The price is the US list price\n✓ 1. Find the current price\n✓ 2. Answer the person\nTask ledger: given the two plans · find the current US price · derive the yearly saving\nProgress: done; not looping; moving; stuck no; next none' },
         ]) await taskStore.appendEvent(s, doneTask, e);
 
         process.stdout.write('seeded\n');

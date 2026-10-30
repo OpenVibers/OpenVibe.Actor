@@ -3,7 +3,7 @@
 // task never answered settles as done instead of spinning forever, identical consecutive calls fold into one line
 // with a count, and the run's time is the task's own (first event → last event).
 const assert = require('assert');
-const { lines, firstAt, duration, plan, planLine } = require('../public/js/task-events');
+const { lines, firstAt, duration, plan, planLine, assumingLine } = require('../public/js/task-events');
 
 const at = (s) => `2026-10-30T10:00:${s}.000Z`;
 const call = (input, s, extra) => ({ kind: 'output', step: 'tool_call', tool: 'web_search', input, at: at(s), agent: 'openai-agent', ...extra });
@@ -95,6 +95,22 @@ const end = (state, s) => ({ kind: 'end', state, at: at(s) });
     assert.deepStrictEqual(out.filter((l) => l.t === 'step').map((l) => l.text), ['Step 1 of 3 \u00b7 Find three offers', 'Step 2 of 3 \u00b7 Read the pages', 'Every step of the plan is done'],
         'one divider per step in hand: the same plan stated twice draws nothing new');
     assert.deepStrictEqual(lines([{ kind: 'output', step: 'plan', text: 'The agent starts with a plan, then works through it.', at: at('01') }]).map((l) => l.text), ['The agent starts with a plan, then works through it.'], 'other plan words stay as they are');
+}
+
+// The brain's ledgers and assumptions (stage V2-8 review): labelled one-sentence assumptions, and a final ledger
+// that can say done with no next, or stopped with why.
+{
+    assert.strictEqual(assumingLine(['The price is the US list price']), 'Assuming the price is the US list price.');
+    assert.strictEqual(assumingLine(['USD is the unit']), 'Assuming USD is the unit.', 'an acronym keeps its case');
+    assert.strictEqual(assumingLine(['The price is high', 'Travel is from Madrid']), 'Assuming the price is high. Travel is from Madrid.', 'one sentence each');
+    const done = plan('\u2713 1. x\nTask ledger: given a \u00b7 find b \u00b7 derive c\nProgress: done; not looping; moving; stuck no; next none');
+    assert.deepStrictEqual(done.ledger, { given: ['a'], lookup: ['b'], derive: ['c'] });
+    assert.strictEqual(done.progress.done, true);
+    assert.strictEqual(done.progress.next, null);
+    assert.strictEqual(done.progress.stuck, false);
+    const stopped = plan('\u2713 1. x\nProgress: not done; not looping; moving; stuck no; stopped its answer failed the check');
+    assert.strictEqual(stopped.progress.done, false);
+    assert.strictEqual(stopped.progress.stopped, 'its answer failed the check');
 }
 
 console.log('task events: all checks passed');
