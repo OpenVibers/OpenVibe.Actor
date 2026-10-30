@@ -56,9 +56,12 @@
 .fold-body { display: none; }
 .fold-toggle:checked ~ .fold-body { display: block; }
 .fold-body > .sc-sec { margin-top: 16px; }
-/* The title row names the part, so a part that keeps its own heading gives way to it on a phone. */
-.fold-bare .fold-body > section > h2, .fold-bare .fold-body > .sc-sec > h2 { display: none; }
-.fold-body .ov-shipped-home h3 { display: none; }
+/* The title row names the part, so a part that keeps its own heading gives way to it on a phone (and keeps it where
+   there is room). */
+@media (max-width: 640px) {
+  .fold-bare .fold-body > section > h2, .fold-bare .fold-body > .sc-sec > h2, .fold-bare .fold-body .ov-shipped-home h3 { display: none; }
+}
+.fold:not(.fold-bare) .fold-body .ov-shipped-home h3 { display: none; }
 @media (min-width: 641px) {
     .fold { margin-top: 56px; }
     .fold-toggle { display: none; }
@@ -67,5 +70,5 @@
     .fold-body { display: block; }
     .fold-bare > .fold-h { display: none; }
     .fold-bare { margin-top: 0; }
-    .fold-body > .sc-sec { margin-top: 0; }
+    .fold:not(.fold-bare) .fold-body > .sc-sec { margin-top: 0; }
 }

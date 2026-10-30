@@ -36,11 +36,13 @@ function foldBlock({ id, head, html, bare = false }) {
  * A pick block. The panes are the page's own blocks; each one keeps its heading on a wide screen, and on a phone the
  * heading gives way to the chip that names it.
  *
- *   pickBlock({ key, label, head, panes })   panes: [{ id, label, html }]
+ *   pickBlock({ key, label, head, panes, checked })   panes: [{ id, label, html }]; checked: the pane the first
+ *                chip picks (the first one by default)
  */
-function pickBlock({ key, label, head = '', panes }) {
+function pickBlock({ key, label, head = '', panes, checked = '' }) {
     if (!panes.length) return '';
-    const chips = panes.map((p, i) => `<input type="radio" name="pick-${esc(key)}" id="pk-${esc(key)}-${esc(p.id)}" value="${esc(p.id)}"${i === 0 ? ' checked' : ''}><label for="pk-${esc(key)}-${esc(p.id)}">${esc(p.label)}</label>`).join('');
+    const first = panes.find((p) => p.id === checked) ? checked : panes[0].id;
+    const chips = panes.map((p) => `<input type="radio" name="pick-${esc(key)}" id="pk-${esc(key)}-${esc(p.id)}" value="${esc(p.id)}"${p.id === first ? ' checked' : ''}><label for="pk-${esc(key)}-${esc(p.id)}">${esc(p.label)}</label>`).join('');
     const body = panes.map((p) => `<div class="pick-pane" id="pp-${esc(key)}-${esc(p.id)}">${str(p.html)}</div>`).join('');
     return `<div class="pick" id="pick-${esc(key)}"><div class="pick-bar"><div class="pick-head"><h2>${esc(head || label)}</h2></div><div class="pick-row" role="radiogroup" aria-label="${esc(label)}">${chips}</div></div><div class="pick-body">${body}</div></div>`;
 }
