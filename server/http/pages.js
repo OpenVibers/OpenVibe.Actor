@@ -27,6 +27,7 @@ const looks = require('../agents/looks');
 const { MODES } = require('../agents/router');
 const seo = require('openvibe-shared/seo');
 const { findArtifact, sendArtifact } = require('../runtime/artifacts');
+const taskEvents = require('../../public/js/task-events');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -84,6 +85,57 @@ const templateHref = (t) => `/?${new URLSearchParams({ task: t.text, ...(t.mode 
 const NEEDS = new Map(TEMPLATES.flatMap((g) => (g.needs ? g.items.map((t) => [t.text, g.needs]) : [])));
 
 const usd = (n) => (n == null ? '—' : n === 0 ? '$0' : n < 0.01 ? `$${Number(n).toFixed(4)}` : `$${Number(n).toFixed(2)}`);
+
+// ── The task page v2 (Actor v2, stage V2-5): the plan, the evidence behind each claim, the files, the check, honestly ──
+// What a tool is called on the page; an unknown one reads as its own name with spaces.
+const TOOL_LABEL = {
+    search_web: 'Web search', read_page: 'Read a page', search_openvibe: 'OpenVibe search', wikipedia: 'Wikipedia',
+    weather_now: 'Weather', market_quote: 'Market price', currency_convert: 'Currency', time_in: 'Local time',
+    convert_time: 'Time zones', geocode: 'Place lookup', place_info: 'Place', sports_scores: 'Sports scores',
+    calculate: 'Calculator', make_file: 'File', make_chart: 'Chart', run_tool: 'OpenVibe tool', find_tools: 'Find a tool',
+    codes_task: 'Coding task', robot_steps: 'Robot', list_my_robots: 'Your robots', list_my_computers: 'Your computers',
+};
+const toolLabel = (name) => TOOL_LABEL[name] || String(name || 'tool').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+// A model id as people say it: "deepseek:deepseek-flash" → "DeepSeek Flash", "openai:gpt-5.1" → "GPT-5.1".
+const BRANDS = { deepseek: 'DeepSeek', gpt: 'GPT', openai: 'OpenAI', minimax: 'MiniMax', claude: 'Claude', gemini: 'Gemini', qwen: 'Qwen', glm: 'GLM', kimi: 'Kimi' };
+function modelName(id) {
+    const m = String(id || '').split(':').pop();
+    if (!m) return 'another model';
+    if (/^gpt-/i.test(m)) return `GPT-${m.slice(4)}`;
+    return m.split('-').map((w) => BRANDS[w.toLowerCase()] || (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ');
+}
+const ago = (ms) => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    return s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+};
+/** What a tool was asked, in a few words: its query, address or need, else its input as JSON. */
+function inputText(input) {
+    if (input == null) return '';
+    if (typeof input !== 'object') return String(input).slice(0, 160);
+    const v = input.query || input.url || input.need || input.place || input.symbol || input.expression || input.name || input.title;
+    if (v != null) return String(v).slice(0, 160);
+    // Otherwise its plain fields, as words: "to USD · from EUR · amount 7.6".
+    const plain = Object.entries(input).filter(([, x]) => x != null && typeof x !== 'object').map(([k, x]) => `${k.replace(/_/g, ' ')} ${x}`);
+    return (plain.length ? plain.join(' · ') : JSON.stringify(input)).slice(0, 160);
+}
+/**
+ * The answer's citations as chips: "[E3]" (or "[E3, E5]") becomes a numbered chip that opens what that tool returned,
+ * for the ids the ledger has; nothing inside code changes, and an id the ledger does not have stays as written.
+ */
+function chipify(htmlText, evidence) {
+    const known = new Map((evidence || []).map((e) => [String(e.id), e]));
+    if (!known.size) return htmlText;
+    const chip = (id) => {
+        const e = known.get(id);
+        const n = id.slice(1);
+        const label = `Evidence ${n}: ${toolLabel(e.tool)}${inputText(e.input) ? `, ${inputText(e.input)}` : ''}`.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+        return `<a class="ev" href="#ev-${id}" data-ev="${id}" aria-label="${label}" title="${label}">${n}</a>`;
+    };
+    return String(htmlText).split(/(<pre[\s\S]*?<\/pre>|<code[\s\S]*?<\/code>)/).map((part, i) => (i % 2 ? part : part.replace(/\[(E\d{1,3}(?:\s*,\s*E\d{1,3})*)\]/g, (all, ids) => {
+        const list = ids.split(/\s*,\s*/);
+        return list.every((id) => known.has(id)) ? `<span class="evs">${list.map(chip).join('')}</span>` : all;
+    }))).join('');
+}
 const perM = (n) => (n === 0 ? 'free' : `$${Number(n).toFixed(2)}`);
 const priceText = (rc) => (rc.input_usd_per_mtok === 0 && rc.output_usd_per_mtok === 0 ? 'Free (OpenVibe hardware)' : `${perM(rc.input_usd_per_mtok)} in · ${perM(rc.output_usd_per_mtok)} out per 1M tokens${rc.per_call_usd ? ` · ${usd(rc.per_call_usd)} a search` : ''}`);
 
@@ -346,6 +398,9 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         const kind = cls ? CLASS_TEXT[cls[1]] || cls[1] : null;
         const desk = open ? store.deskFrom(events) : null;
         const look = looks.get(row.id);
+        const planEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'plan' && taskEvents.plan(e.text));
+        const plan = (t.result && t.result.plan && Array.isArray(t.result.plan.steps) && t.result.plan.steps.length ? t.result.plan : null)
+            || (planEvent ? taskEvents.plan(planEvent.text) : null);
         page(req, res, {
             title: row.task.length > 60 ? `${row.task.slice(0, 59)}…` : row.task,
             crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task' }],
@@ -354,6 +409,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
             scripts: ['js/task-events.js', 'js/task.js'],
             sharedScripts: ['agent-session.js'],
             styles: [showcase.STYLESHEET],
+            css: ['css/task.css'],
             noReferrer: true,
             body: html`${open ? raw('<noscript><meta http-equiv="refresh" content="4"></noscript>') : ''}
 <article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${open ? '1' : ''}" data-bot="${botPages}">
@@ -362,6 +418,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
 <h1 class="task-text">${row.task}</h1>
 </header>
 ${outcome(t, row)}
+${open ? planCard(plan) : ''}
 ${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
 <p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
 <a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
@@ -371,6 +428,7 @@ ${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(
 <figcaption class="muted small">What your agent last saw on the screen${look ? html` · ${time(new Date(look.at).toISOString())}` : ''}</figcaption>
 </figure>` : ''}
 <section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
+${!open && plan ? planCard(plan) : ''}
 <div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div>
 <script type="application/json" id="task-events">${raw(JSON.stringify(events.slice(-3000)).replace(/</g, '\\u003c'))}</script>
 ${open ? html`<p class="muted small live-note" id="live-note"><span class="dot-pulse" aria-hidden="true"></span> Updating as the agent works.</p>` : ''}
@@ -390,6 +448,20 @@ ${table(['State', 'Endpoint', 'Delivery', 'Attempts'], rows.map((d) => [
             html`<code>${d.state}</code>`, html`<code class="small">${d.url}</code>`,
             html`${DELIVERY_TEXT[d.status] || d.status}${d.last_status ? html` <span class="muted small">(${d.last_status})</span>` : ''}`, String(d.attempts),
         ]))}</details>`;
+    }
+
+    /**
+     * The plan the agent works through: each sub-goal done, in hand or next, and what it assumed. A live task's card is
+     * there before the first plan (hidden), so js/task.js can fill it as the plan arrives and changes.
+     */
+    function planCard(plan) {
+        const STATE = { done: 'done', active: 'working on it', todo: 'next' };
+        const steps = plan ? plan.steps : [];
+        return html`<section class="plan-card" id="plan-card" aria-labelledby="h-plan"${steps.length ? '' : raw(' hidden')}>
+<h2 id="h-plan">The plan</h2>
+<ol class="plan" id="plan-steps">${steps.map((st) => html`<li class="ps is-${STATE[st.state] ? st.state : 'todo'}"><span class="ps-mark" aria-hidden="true"></span><span class="ps-goal">${st.goal}</span><span class="sr-only"> (${STATE[st.state] || 'next'})</span></li>`)}</ol>
+<p class="plan-assume" id="plan-assume"${plan && plan.assumptions.length ? '' : raw(' hidden')}>Assuming ${plan ? plan.assumptions.join(' · ') : ''}</p>
+</section>`;
     }
 
     /** The outcome card: the first thing under the task. */
@@ -420,11 +492,26 @@ ${table(['State', 'Endpoint', 'Delivery', 'Attempts'], rows.map((d) => [
         const checked = result.checked || {};
         const bytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${Number(n) || 0} B`);
         const artifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
+        const evidence = Array.isArray(result.evidence) ? result.evidence.filter((e) => e && /^E\d{1,3}$/.test(String(e.id))) : [];
+        const cited = new Set(Array.isArray(result.citations) ? result.citations.map(String) : []);
+        const took = t.finished_at && t.created_at ? Date.parse(t.finished_at) - Date.parse(t.created_at) : NaN;
+        const claims = Number(checked.claims) || 0;
+        const grounded = Math.min(claims, Number(checked.grounded) || 0);
+        const by = `${modelName(checked.by)}${checked.cross_family ? ', another model family' : ', the same family'}`;
+        const ext = (a) => (String(a.name || '').split('.').pop() || a.kind || 'file').slice(0, 5).toUpperCase();
         return html`<section class="outcome outcome-ok answer" aria-labelledby="h-answer"><h2 id="h-answer" class="sr-only">Answer</h2>
-<div class="prose">${raw(markdown(result.answer, { headingOffset: 2 }))}</div>
-${artifacts.length ? html`<div class="sources artifacts"><h3>Files</h3><ul>${artifacts.map((a) => html`<li><a href="${a.url}" rel="nofollow noopener">${a.name}</a> <span class="muted">${a.kind} · ${bytes(a.size)}</span>${a.mime === 'image/svg+xml' ? html`<div><img src="${a.url}" alt="${a.name}" loading="lazy" style="max-width:100%;height:auto;margin-top:8px"></div>` : ''}</li>`)}</ul></div>` : ''}
+<div class="prose">${raw(chipify(markdown(result.answer, { headingOffset: 2 }), evidence))}</div>
+<p class="checked-line"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span>${claims ? `Checked: ${claims} claim${claims === 1 ? '' : 's'}, ${grounded} grounded` : 'Checked'} · by ${by}</span></p>
+${artifacts.length ? html`<div class="files"><h3>Files</h3><ul class="file-grid">${artifacts.map((a) => html`<li class="file-card">
+<a class="fc-preview" href="${a.url}" rel="nofollow noopener" tabindex="-1" aria-hidden="true">${/^image\/(svg\+xml|png|jpe?g|gif|webp)$/.test(a.mime) ? html`<img src="${a.url}" alt="" loading="lazy">` : html`<span class="fc-ext">${ext(a)}</span>`}</a>
+<span class="fc-meta"><a class="fc-name" href="${a.url}" rel="nofollow noopener">${a.name}</a><span class="muted">${a.kind === 'chart' ? 'Chart' : 'File'} · ${bytes(a.size)}</span></span></li>`)}</ul></div>` : ''}
 ${result.sources && result.sources.length ? html`<div class="sources"><h3>Sources</h3><ul>${result.sources.map((u) => html`<li><a href="${u}" rel="nofollow ugc noopener" target="_blank">${u.replace(/^https?:\/\//, '').slice(0, 90)}</a></li>`)}</ul></div>` : ''}
-<p class="answer-foot"><span>${agent ? agent.name : result.agent}${result.model ? html` · <code>${result.model}</code>` : ''}</span><span>✓ checked by ${checked.by}${checked.cross_family ? ' (another model family)' : ' (same family)'}</span><span>${t.cost ? usd(t.cost.usd) : '$0'}</span></p>
+${evidence.length ? html`<details class="evidence" id="evidence"><summary><span>Evidence</span><span class="muted">${evidence.length} item${evidence.length === 1 ? '' : 's'}: what the tools returned${cited.size ? `, ${cited.size} cited` : ''}</span></summary>
+<ol class="ev-list">${evidence.map((e) => html`<li class="ev-item${cited.has(String(e.id)) ? ' is-cited' : ''}" id="ev-${e.id}">
+<p class="ev-head"><b class="ev-n">${String(e.id).slice(1)}</b><span class="ev-tool">${toolLabel(e.tool)}</span>${inputText(e.input) ? html`<span class="ev-input">${inputText(e.input)}</span>` : ''}${e.at ? html`<time class="ev-at" datetime="${e.at}">${String(e.at).slice(11, 16)} UTC</time>` : ''}</p>
+${e.text ? html`<p class="ev-text">${String(e.text).slice(0, 700)}${String(e.text).length > 700 ? '…' : ''}</p>` : ''}
+${Array.isArray(e.sources) && e.sources.length ? html`<ul class="ev-src">${e.sources.slice(0, 6).map((src) => html`<li><a href="${src.url}" rel="nofollow ugc noopener" target="_blank">${src.title || String(src.url).replace(/^https?:\/\//, '').slice(0, 80)}</a></li>`)}</ul>` : ''}</li>`)}</ol></details>` : ''}
+<p class="answer-foot"><span>${agent ? agent.name : result.agent}${result.model ? html` · ${modelName(result.model)}` : ''}</span><span>${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${Number.isFinite(took) && took > 0 ? html`<span>took ${ago(took)}</span>` : ''}</p>
 </section>`;
     }
 
@@ -439,7 +526,7 @@ ${result.sources && result.sources.length ? html`<div class="sources"><h3>Source
         let lastCheckFailed = false;
         for (const e of events) {
             if (e.kind !== 'output') continue;
-            if ((e.step === 'plan' || e.step === 'handoff') && e.agent) {
+            if ((e.step === 'plan' || e.step === 'handoff') && e.agent && !(e.step === 'plan' && taskEvents.plan(e.text))) {
                 cur = { agent: e.agent, why: e.text, steps: [], refused: null, check: null, stopped: null };
                 out.push(cur);
                 lastCheckFailed = false;
@@ -484,6 +571,7 @@ ${a.refused ? html`<details class="refused"><summary>See the answer that didn't 
     }
 
     function stepItem(e) {
+        if (e.step === 'plan') { const p = taskEvents.plan(e.text); return html`<li class="tl-item tl-plan"><span class="tl-k">Plan</span><span class="tl-v">${p ? taskEvents.planLine(p) : e.text}</span></li>`; }
         if (e.step === 'tool_call') return html`<li class="tl-item tl-tool"><span class="tl-k">Used</span><span class="tl-v"><code>${e.tool}</code> ${e.input || ''}</span></li>`;
         if (e.step === 'tool_result') return html`<li class="tl-item tl-result${e.is_error ? ' tl-err' : ''}"><span class="tl-k">Got</span><span class="tl-v"><span class="muted">${(e.text || '').slice(0, 220)}</span></span></li>`;
         if (/^Needs you: /.test(e.text || '')) return html`<li class="tl-item tl-needs"><span class="tl-k">Needs you</span><span class="tl-v">${withDeskLinks(String(e.text).replace(/^Needs you: /, ''))}</span></li>`;

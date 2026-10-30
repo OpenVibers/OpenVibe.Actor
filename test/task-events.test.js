@@ -3,7 +3,7 @@
 // task never answered settles as done instead of spinning forever, identical consecutive calls fold into one line
 // with a count, and the run's time is the task's own (first event → last event).
 const assert = require('assert');
-const { lines, firstAt, duration } = require('../public/js/task-events');
+const { lines, firstAt, duration, plan, planLine } = require('../public/js/task-events');
 
 const at = (s) => `2026-10-30T10:00:${s}.000Z`;
 const call = (input, s, extra) => ({ kind: 'output', step: 'tool_call', tool: 'web_search', input, at: at(s), agent: 'openai-agent', ...extra });
@@ -80,6 +80,21 @@ const end = (state, s) => ({ kind: 'end', state, at: at(s) });
     assert.strictEqual(duration([{ at: at('01') }, { at: at('11') }]), 10000);
     assert.strictEqual(duration([{ at: at('01') }]), 0);
     assert.strictEqual(duration([], { durationMs: 2500 }), 2500);
+}
+
+// The plan the loop states (Actor v2, stage V2-5): read back exactly, a divider per step in hand, never a repeat.
+{
+    const stated = (k) => ['Assumptions: under $10; Europe', ...['Find three offers', 'Read the pages', 'Compare them'].map((g, i) => `${i < k ? '\u2713' : i === k ? '\u2192' : '\u00b7'} ${i + 1}. ${g}`)].join('\n');
+    assert.deepStrictEqual(plan(stated(1)), { assumptions: ['under $10', 'Europe'], steps: [
+        { goal: 'Find three offers', state: 'done' }, { goal: 'Read the pages', state: 'active' }, { goal: 'Compare them', state: 'todo' }] });
+    assert.strictEqual(plan('This is a "research" task.'), null, 'the engine\'s own words are not a plan');
+    assert.strictEqual(planLine(plan(stated(1))), 'Step 2 of 3 \u00b7 Read the pages');
+    assert.strictEqual(planLine(plan(stated(3))), 'Every step of the plan is done');
+    const ev = (t, sec) => ({ kind: 'output', step: 'plan', text: t, at: at(sec), agent: 'openvibe-runtime' });
+    const out = lines([ev(stated(0), '01'), call('offers', '02'), ev(stated(0), '03'), ev(stated(1), '04'), call('pages', '05'), ev(stated(3), '06')], { final: false });
+    assert.deepStrictEqual(out.filter((l) => l.t === 'step').map((l) => l.text), ['Step 1 of 3 \u00b7 Find three offers', 'Step 2 of 3 \u00b7 Read the pages', 'Every step of the plan is done'],
+        'one divider per step in hand: the same plan stated twice draws nothing new');
+    assert.deepStrictEqual(lines([{ kind: 'output', step: 'plan', text: 'The agent starts with a plan, then works through it.', at: at('01') }]).map((l) => l.text), ['The agent starts with a plan, then works through it.'], 'other plan words stay as they are');
 }
 
 console.log('task events: all checks passed');
