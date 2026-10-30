@@ -38,7 +38,9 @@ const TABLES = [
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',
         columns: ['id', 'requester', 'project_id', 'task', 'mode', 'agent', 'budget_task', 'budget_day', 'state', 'result', 'error_code', 'error_detail',
-            'cost_usd', 'free_usd', 'explanation', 'cancel_at', 'cancel_by', 'last_seq', 'idem_key', 'idem_hash', 'created_at', 'finished_at', 'timeout_ms', 'via', 'webhooks', 'parent_id'],
+            'cost_usd', 'free_usd', 'explanation', 'cancel_at', 'cancel_by', 'last_seq', 'idem_key', 'idem_hash', 'created_at', 'finished_at', 'timeout_ms', 'via', 'webhooks', 'parent_id',
+            // A fork's parent step and the one change it was made with (stage V2-9), and how often it resumed.
+            'fork_of_step', 'fork_change', 'resumes'],
     },
     // The person's own per-UTC-day spend accounting. Deleted: nothing in Actor keeps a person's spend record for a
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is
@@ -97,9 +99,25 @@ async function exportSpans(db, subject) {
     return rows.length ? [{ name: 'spans.json', content: rows }] : [];
 }
 
-/** The parts a table map cannot say: the bytes of the person's files, and the trace of their tasks. */
+/**
+ * The checkpoints of the person's tasks (stage V2-9): when each step was saved. The sealed state is not exported: it
+ * can only be opened with Actor's checkpoint key, and the step and time are what the person's record needs. A
+ * checkpoint has no person column; it is exported by joining the task's requester and goes with the task on deletion
+ * (ON DELETE CASCADE).
+ */
+async function exportCheckpoints(db, subject) {
+    const rows = await db.many(
+        `SELECT c.task_id, c.step, c.created_at
+           FROM actor_checkpoints c JOIN tasks t ON t.id = c.task_id
+          WHERE t.requester = ANY($1::text[]) ORDER BY c.created_at DESC LIMIT 5000`,
+        [[`user:${subject}`]],
+    );
+    return rows.length ? [{ name: 'checkpoints.json', content: rows }] : [];
+}
+
+/** The parts a table map cannot say: the bytes of the person's files, the trace of their tasks, their saved steps. */
 async function exportExtra(db, subject) {
-    return [...(await exportFiles(db, subject)), ...(await exportSpans(db, subject))];
+    return [...(await exportFiles(db, subject)), ...(await exportSpans(db, subject)), ...(await exportCheckpoints(db, subject))];
 }
 
 /** The account-data handle for Actor's store (server/db.js createStore). */
@@ -107,4 +125,4 @@ function create({ db, note = 'A task row holds the task the person asked for, in
     return createAccountData({ db, service: 'actor', tables: TABLES, note, log, extraExport: exportExtra });
 }
 
-module.exports = { create, TABLES, TOPICS, exportFiles, exportSpans, exportExtra };
+module.exports = { create, TABLES, TOPICS, exportFiles, exportSpans, exportCheckpoints, exportExtra };

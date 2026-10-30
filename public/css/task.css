@@ -173,10 +173,87 @@
 .challenge-card { margin: 1rem 0; padding: 16px 18px; border-radius: 16px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); }
 .challenge-claim { margin: 0 0 .6rem; font-size: 1.05rem; line-height: 1.45; overflow-wrap: anywhere; }
 .challenge-card form { display: flex; flex-wrap: wrap; gap: 8px; margin: .6rem 0 0; }
+
+/* Durable runs (stage V2-9): the saved steps, the fork dialog, and the two-run compare. */
+.saved, .related-runs { margin: 1.2rem 0; padding: 14px 18px; border-radius: 16px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); }
+.saved h2, .related-runs h2 { margin: 0 0 .35rem; font-size: .95rem; }
+.saved-list { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: 6px; }
+.saved-step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border, #1f2d47); background: var(--bg-secondary, #101828); min-width: 0; }
+.saved-n { font-weight: 800; font-size: .82rem; color: var(--accent-light, #60a5fa); white-space: nowrap; }
+.saved-what { font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
+.saved-at { margin-left: auto; }
+.saved-fork { min-height: 36px; }
+.related-list { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: 8px; }
+.related-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.cmp-link { min-height: 34px; }
+
+.fork-card { max-width: 46rem; margin: 1rem 0; padding: 18px 20px; border-radius: 16px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); }
+.fork-card h2 { margin: 0 0 .5rem; }
+.fork-card > p { margin: 0 0 1rem; color: var(--text-secondary, #96a7c2); }
+.fork-changes { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; }
+.fork-changes legend { font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted, #7386a3); margin-bottom: 4px; }
+.fork-change { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border, #1f2d47); background: var(--bg-secondary, #101828); cursor: pointer; }
+.fork-change input { margin-top: 4px; flex: none; }
+.fork-change span { display: grid; gap: 2px; min-width: 0; }
+.fork-change small { color: var(--text-muted, #7386a3); }
+.fork-form textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border-light, #2c3d5c); background: var(--bg-secondary, #101828); color: var(--text-primary, #e6edf7); font: inherit; line-height: 1.45; resize: vertical; }
+.fork-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-left: 30px; }
+.fork-row label { font-weight: 650; }
+.fork-row select { min-height: 38px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--border-light, #2c3d5c); background: var(--bg-secondary, #101828); color: var(--text-primary, #e6edf7); font: inherit; }
+.fork-estimate { margin: 1rem 0 .6rem; padding: .65rem .8rem; border-radius: 10px; border-left: 2px solid var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 7%, transparent); }
+.fork-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fork-actions .sc-btn { min-height: 42px; }
+
+.compare { max-width: 72rem; }
+.cmp-head h1 { margin: 0 0 .25rem; }
+.cmp-pick { display: none; }
+.cmp-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; margin: 1rem 0; }
+.cmp-run { min-width: 0; padding: 14px 16px; border-radius: 16px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); }
+.cmp-run h2 { margin: 0 0 .25rem; font-size: 1rem; }
+.cmp-run header p { margin: 0 0 .7rem; }
+.cmp-run .prose { overflow-wrap: anywhere; }
+.cmp-diff { margin-top: 1rem; padding-top: .8rem; border-top: 1px solid var(--border, #1f2d47); }
+.cmp-diff h3 { margin: 0 0 .4rem; font-size: .92rem; }
+.cmp-side h4 { margin: .6rem 0 .25rem; font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted, #7386a3); }
+.cmp-side ul { margin: 0; padding-left: 1.1rem; display: grid; gap: 4px; }
+.cmp-claim { overflow-wrap: anywhere; }
+.cmp-same { margin-top: .6rem; }
+.cmp-cost { width: 100%; border-collapse: collapse; }
+.cmp-cost th, .cmp-cost td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border, #1f2d47); vertical-align: top; }
+.cmp-cost th { width: 34%; color: var(--text-muted, #7386a3); font-size: .82rem; }
+.cmp-foot { margin-top: 1rem; }
+.cmp-answer .prose { font-size: .95rem; }
+
 @media (max-width: 640px) {
+  .saved, .related-runs, .fork-card { padding: 12px 13px; }
+  .saved-at { margin-left: 0; width: 100%; }
+  .saved-fork { width: 100%; }
+  .fork-row { padding-left: 0; }
+  .fork-row select { width: 100%; }
+  .cmp-grid { grid-template-columns: minmax(0, 1fr); }
   .plan-ledger, .assume-form { margin-left: 0; }
   .q-options .q-option { flex-basis: 100%; }
   .assume-form .sc-btn { width: 100%; }
   .plan-ledger b { display: block; }
   .ev-challenge { min-height: 44px; padding: 0 14px; }
+}
+
+/* The compare page on a phone: one part at a time, picked with chips (radio inputs and :has(), no script; the
+   OpenVibe.Tools #151 pattern). A wider screen, or a browser without :has(), shows all three parts and no chips. */
+@supports selector(:has(*)) {
+  @media (max-width: 640px) {
+    .cmp-pick { display: flex; gap: 8px; overflow-x: auto; margin: .9rem -16px .2rem; padding: 2px 16px 4px; scrollbar-width: none; overscroll-behavior-x: contain; }
+    .cmp-pick::-webkit-scrollbar { display: none; }
+    .cmp-pick input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+    .cmp-pick label { display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 15px; border-radius: 999px; border: 1px solid var(--border, rgba(255,255,255,.1)); color: var(--text-secondary, #a8b3c4); font-size: 13.5px; font-weight: 650; white-space: nowrap; cursor: pointer; }
+    .cmp-pick input:checked + label { color: var(--text-primary, #e6edf7); border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); }
+    .cmp-pick input:focus-visible + label { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
+    .cmp-panel { display: none; }
+    .compare:has(#cmp-answer:checked) .cmp-panel-answer,
+    .compare:has(#cmp-steps:checked) .cmp-panel-steps,
+    .compare:has(#cmp-cost:checked) .cmp-panel-cost { display: block; }
+    .cmp-panel:target { display: block; }
+    .cmp-grid { margin-top: .4rem; }
+    .cmp-foot { margin-top: 1.2rem; }
+  }
 }

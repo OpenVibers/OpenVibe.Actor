@@ -19,7 +19,7 @@ const DEFAULT_CLIP = 6000;
 function createLedger({ now = () => Date.now(), clip = DEFAULT_CLIP } = {}) {
     const items = [];
 
-    function add({ tool, input = null, text = '', data = null, sources = [], artifacts = [], refs = [], at = null } = {}) {
+    function add({ tool, input = null, text = '', data = null, sources = [], artifacts = [], refs = [], secret = false, at = null } = {}) {
         const id = `E${items.length + 1}`;
         const item = {
             id,
@@ -31,6 +31,8 @@ function createLedger({ now = () => Date.now(), clip = DEFAULT_CLIP } = {}) {
             artifacts: Array.isArray(artifacts) ? artifacts.slice(0, 20) : [],
             // Rows the task page can open (a memory a cited answer leaned on): the index, never the store.
             refs: Array.isArray(refs) ? refs.slice(0, 20) : [],
+            // A tool may mark its result secret (stage V2-9): the run uses it, a checkpoint never stores it.
+            ...(secret === true ? { secret: true } : {}),
             at: at || new Date(now()).toISOString(),
         };
         items.push(item);

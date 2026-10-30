@@ -22,8 +22,9 @@ const http = require('http');
 
 async function startProviders() {
     const requests = [];
-    const state = { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', smart: 'tool', script: null, checkClaims: null, loopTool: null, judge: null, understand: null, adjudicate: null };
+    const state = { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', smart: 'tool', script: null, checkClaims: null, loopTool: null, judge: null, understand: null, adjudicate: null, hangAfterCalls: null };
     const hanging = new Set();
+    let loopCalls = 0;
 
     const usage = (inp, out) => ({ prompt_tokens: inp, completion_tokens: out, prompt_cache_hit_tokens: 0 });
     const chatReply = (res, message, u = usage(1000, 100)) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ model: 'stand-in', choices: [{ message: { role: 'assistant', ...message }, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }], usage: u })); };
@@ -41,6 +42,9 @@ async function startProviders() {
 
     /** The one loop (runtime/loop.js) on the stand-in: script it, or one tool call then an answer. */
     function loopReply(res, body) {
+        loopCalls += 1;
+        // A test can make the worker hang after N loop turns (stage V2-9: interrupt it, then resume from a checkpoint).
+        if (state.hangAfterCalls != null && loopCalls > state.hangAfterCalls) { hanging.add(res); return undefined; }
         if (state.runtime === 'hang') { hanging.add(res); return undefined; }
         if (Array.isArray(state.script) && state.script.length) {
             const next = state.script.shift();
@@ -169,7 +173,8 @@ async function startProviders() {
     };
     return {
         url, env, state, requests,
-        reset() { Object.assign(state, { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', checkerDown: null, smart: 'tool', script: null, checkClaims: null, loopTool: null, judge: null, understand: null, adjudicate: null }); requests.length = 0; },
+        loopCalls: () => loopCalls,
+        reset() { loopCalls = 0; Object.assign(state, { cls: 'answer', checkOk: true, runtime: 'tool', openai: 'ok', local: 'ok', checkerDown: null, smart: 'tool', script: null, checkClaims: null, loopTool: null, judge: null, understand: null, adjudicate: null, hangAfterCalls: null }); requests.length = 0; },
         close: () => new Promise((r) => { for (const res of hanging) { try { res.destroy(); } catch { /* gone */ } } server.close(r); }),
     };
 }

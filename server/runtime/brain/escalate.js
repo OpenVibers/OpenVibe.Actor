@@ -41,9 +41,9 @@ function nextTool({ current = null, toolNames = [], tried = [] } = {}) {
     return null;
 }
 
-function createEscalations({ maxPerTask = MAX_PER_TASK, maxPerStep = MAX_PER_STEP } = {}) {
-    let total = 0;
-    const byStep = new Map();
+function createEscalations({ maxPerTask = MAX_PER_TASK, maxPerStep = MAX_PER_STEP, total: restoredTotal = 0, byStep: restoredByStep = [] } = {}) {
+    let total = Math.max(0, Number(restoredTotal) || 0);
+    const byStep = new Map(Array.isArray(restoredByStep) ? restoredByStep.map(([k, n]) => [String(k), Math.max(0, Number(n) || 0)]) : []);
     const made = [];
 
     /**
@@ -91,6 +91,7 @@ function createEscalations({ maxPerTask = MAX_PER_TASK, maxPerStep = MAX_PER_STE
         count: () => total,
         steps: () => new Map(byStep),
         made: () => made.slice(),
+        snapshot: () => ({ total, byStep: [...byStep.entries()] }),
         caps: { maxPerTask, maxPerStep },
     };
 }

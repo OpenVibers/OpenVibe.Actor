@@ -162,7 +162,7 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
 
 /** A tool result as the loop, the ledger and the check use it. */
 function normalize(out) {
-    const empty = { text: '', data: null, sources: [], artifacts: [], refs: [], isError: false };
+    const empty = { text: '', data: null, sources: [], artifacts: [], refs: [], isError: false, secret: false };
     if (out == null) return empty;
     if (typeof out === 'string') return { ...empty, text: out };
     if (typeof out !== 'object') return { ...empty, text: String(out) };
@@ -179,7 +179,7 @@ function normalize(out) {
             source: r.source == null ? null : String(r.source).slice(0, 32), source_task: r.source_task == null ? null : String(r.source_task).slice(0, 64),
             agent_id: r.agent_id == null ? null : String(r.agent_id).slice(0, 64),
         })) : [];
-    return { text, data, sources, artifacts, refs, isError: out.isError === true };
+    return { text, data, sources, artifacts, refs, isError: out.isError === true, secret: out.secret === true };
 }
 
 module.exports = { createRegistry, validateTool, allowedBy, normalize, SCOPES, MAX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS };

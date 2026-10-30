@@ -35,6 +35,7 @@ const { understand } = require('./brain/understand');
 const { taskLedger, createProgress, replan, ledgerText } = require('./brain/ledger');
 const { allowedTiers, loadPrior, chooseTier, orderTools, STEP_KINDS } = require('./brain/choose');
 const { createEscalations } = require('./brain/escalate');
+const { snapshot: snapshotState, restore: restoreState } = require('./checkpoint-state');
 const learn = require('./brain/learn');
 
 const MAX_ANSWER_TOKENS = 5000;
@@ -174,7 +175,7 @@ async function spanCall(trace, { kind, name, tier = null, family = null, started
     });
 }
 
-function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null }) {
+function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null }) {
     const loopCfg = config.loop || {};
     const resultChars = loopCfg.toolResultChars || 6000;
     const maxCalls = loopCfg.maxToolCallsPerTurn || 8;
@@ -357,8 +358,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 }
                 continue;
             }
-            const item = state.ledger.add({ tool: p.name, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs });
-            state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: p.name, result: clip(out.text, resultChars) }) });
+            const item = state.ledger.add({ tool: p.name, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
+            state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: p.name, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
             await ctx.emit({ step: 'tool_result', tool: p.name, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
             if (out.isError) { errorResults += 1; lastTool = p.name; } else okResults += 1;
             if (state.brain) {
@@ -435,6 +436,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
 
     /** The tier for the next turn: the bandit's pick when stats and outcomes can speak, else the run's tier. */
     async function tierFor(state, ctx) {
+        // A fork that picked a tier runs at that tier: the person's one change is not a suggestion to the bandit.
+        if (state.fixedTier && state.tier) return state.tier;
         if (!stats || !state.brain || state.depth > 0) return state.tier;
         const pick = await chooseTier({
             mode: state.mode, kind: state.brain.kind, stepKind: 'work',
@@ -483,21 +486,29 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
      */
     async function drive(state, ctx, { reflections = 0, maxModelCalls = Infinity } = {}) {
         const signal = state.signal;
+        // Every break in this loop is a final answer: mark it before the checkpoint so a restart delivers it without
+        // another model call (stage V2-9), and save the step.
+        const answered = async (why) => {
+            state.lastText = await forceAnswer(state, ctx, why);
+            state.answered = true;
+            await saveCheckpoint(state, ctx);
+            return state.lastText;
+        };
         for (;;) {
             if (signal && signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'actor.task.cancelled' });
             if (ctx.budgetLeft && ctx.budgetLeft() <= 0) {
-                state.lastText = await forceAnswer(state, ctx, 'the task reached its budget');
+                await answered('the task reached its budget');
                 break;
             }
             if (state.calls >= maxModelCalls) {
-                state.lastText = await forceAnswer(state, ctx, 'the sub-agent used its steps');
+                await answered('the sub-agent used its steps');
                 break;
             }
             const tier = await tierFor(state, ctx);
-            if (tier === null) { state.lastText = await forceAnswer(state, ctx, 'the budget cannot pay for another model call'); break; }
+            if (tier === null) { await answered('the budget cannot pay for another model call'); break; }
             state.tier = tier;
             const r = await callModel(state, ctx, { tools: state.tools, stepKind: 'work' });
-            if (!r) { state.lastText = await forceAnswer(state, ctx, 'the task reached its budget'); break; }
+            if (!r) { await answered('the task reached its budget'); break; }
             state.messages.push(r.message);
             if (r.text && r.text.trim()) { state.lastText = r.text.trim(); if (state.brain) state.brain.lastLine = clip(r.text.trim(), 160); }
             if (!r.toolCalls || !r.toolCalls.length) {
@@ -506,12 +517,15 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                     state.selfReflections += 1;
                     if (state.lastText) await ctx.emit({ step: 'text', text: clip(state.lastText, 2000) });
                     state.messages.push({ role: 'user', content: `Reflect before this is delivered. Check the draft claim by claim: which claims have no evidence? A live fact (a price, score, weather reading, count, current status, release, date) must cite an [E#] from this run. If one has no evidence and a tool can fetch it, call that tool now. If it cannot be verified, remove it or say plainly that it is unverified. Then give the final answer, keeping the citations.` });
+                    await saveCheckpoint(state, ctx);
                     continue;
                 }
                 if (state.brain && state.brain.progressLedger) {
                     state.brain.progress = state.brain.progressLedger.update({ answered: true, nextGoal: state.brain.progressLedger.state.nextGoal });
                     if (state.depth === 0) await emitPlan(state, ctx);
                 }
+                state.answered = true;
+                await saveCheckpoint(state, ctx);
                 break;
             }
             if (r.text && r.text.trim()) await ctx.emit({ step: 'text', text: clip(r.text.trim(), 2000) });
@@ -536,13 +550,14 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                         }
                     }
                     if (upd.stuck) {
-                        state.lastText = await forceAnswer(state, ctx, 'stuck: two routes made no progress, so this is what the evidence supports');
+                        await answered('stuck: two routes made no progress, so this is what the evidence supports');
                         break;
                     }
                 }
             }
+            await saveCheckpoint(state, ctx);
             if (actOut.looping) {
-                state.lastText = await forceAnswer(state, ctx, 'the same tool and input were called three times');
+                await answered('the same tool and input were called three times');
                 break;
             }
         }
@@ -585,14 +600,163 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // Its evidence joins the parent's ledger, renumbered; its answer's citations follow the new ids.
         const ids = new Map();
         for (const item of child.ledger.items) {
-            const next = parent.ledger.add({ tool: item.tool, input: item.input, text: item.text, data: item.data, sources: item.sources, artifacts: item.artifacts, refs: item.refs, at: item.at });
+            const next = parent.ledger.add({ tool: item.tool, input: item.input, text: item.text, data: item.data, sources: item.sources, artifacts: item.artifacts, refs: item.refs, secret: item.secret, at: item.at });
             ids.set(item.id, next.id);
         }
         const answer = clip(withoutMeta(child.lastText).replace(/\[E(\d{1,3})\]/g, (all, n) => (ids.has(`E${n}`) ? `[${ids.get(`E${n}`)}]` : '')), 3000);
         return { delegate: true, goal, answer, evidence: [...ids.values()], calls: child.calls, spent, stopped: child.stopped || 'answer' };
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null }) {
+    /**
+     * Write the run's state after a step (stage V2-9). It never fails the task: a missing table, a bad key or a disk
+     * problem is logged once by checkpoints.js and the run goes on. A sub-agent has no checkpoint of its own — its work
+     * is part of the parent's next step, and the parent's own checkpoint holds the joined evidence.
+     */
+    async function saveCheckpoint(state, ctx) {
+        if (!checkpoints || !checkpoints.enabled || !state || state.depth > 0 || !state.taskId) return null;
+        try {
+            return await checkpoints.save({
+                taskId: state.taskId,
+                step: state.calls,
+                state: snapshotState(state, { spent: ctx.spent ? ctx.spent() : 0, now }),
+            });
+        } catch (err) {
+            if (log && log.warn) log.warn('[Actor] checkpoint not written (the task goes on):', (err && err.message) || err);
+            return null;
+        }
+    }
+
+    function forkText(fork) {
+        const change = (fork && fork.change) || {};
+        const what = change.kind === 'tier' ? `a different tier (${change.tier})`
+            : change.kind === 'tool' ? `one tool off the allowed list (${change.tool})`
+                : 'an edited instruction for this step';
+        return `Forked from step ${fork.step} with ${what}.`;
+    }
+
+    /**
+     * A run that continues from a checkpoint: a resume after a restart (stage V2-9) or a fork of a finished one. It
+     * restores the messages, both ledgers, the evidence, the allow-list and the tier; rebuilds the tools from the live
+     * registry, never wider than the checkpoint's allow-list; applies the fork's one change; says so on the page and in
+     * a span; and drives on from the step it stopped at. A checkpoint whose last step already answered is delivered
+     * without another model call.
+     */
+    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null }) {
+        const source = resume && resume.state ? resume.state : (fork && fork.checkpoint && fork.checkpoint.state);
+        const restored = restoreState(source);
+        if (!restored) throw Object.assign(new Error('the saved step could not be read'), { code: 'actor.checkpoint.invalid' });
+        const forced = fork && fork.change && fork.change.kind === 'tier' ? String(fork.change.tier) : null;
+        const baseTier = forced && models.resolve(forced).available ? forced
+            : (restored.baseTier && models.resolve(restored.baseTier).available ? restored.baseTier : (mode === 'best' && models.resolve('best').available ? 'best' : 'smart'));
+        if (!models.resolve(baseTier).available) throw Object.assign(new Error(models.resolve(baseTier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
+        const artifacts = createArtifactStore({ store, config, taskId, requester, log, now });
+        const state = restored;
+        state.task = String(task);
+        state.requester = requester;
+        state.taskId = taskId;
+        state.mode = mode;
+        state.signal = signal;
+        state.agentId = agentId;
+        state.depth = 0;
+        // A fork always makes at least one new turn: the change the person picked is the reason it exists. A resume
+        // delivers a saved final answer without calling the model again.
+        if (fork) state.answered = false;
+        const ctx = {
+            config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, artifacts,
+            store, now, agentId, personText: personText == null ? String(task) : String(personText),
+            trace: createTracer({ store, taskId, log, now }),
+            readOutside: () => state.readOutside === true, notifyTask,
+            emit: async (e) => emit(e),
+            // The budget already spent by the run before the restart; the engine adds the new calls to it.
+            spent: typeof spent === 'function' ? spent : () => Number(resume && resume.state ? resume.state.spent : 0) || 0,
+            state: { desks: requester ? deskRun(taskId) : null },
+        };
+        state.ctx = ctx;
+        ctx.checkpoint = async () => saveCheckpoint(state, ctx);
+
+        // The live tool list, at most the checkpoint's allow-list. A tool the registry no longer offers is dropped; the
+        // delegate is kept only for a "best" run that already had it (never added by a fork).
+        const offered = registry.definitions({ requester, mode, config, models, signal, artifacts, store, agentId, taskId, now });
+        const byName = new Map(offered.map((d) => [d.function.name, d]));
+        const allowedNames = state.allow instanceof Set ? state.allow : new Set(Array.isArray(state.allow) ? state.allow : []);
+        const savedNames = Array.isArray(state.tools) && state.tools.length ? state.tools : [...allowedNames];
+        let names = savedNames.filter((name) => byName.has(name) && (allowedNames.size ? allowedNames.has(name) : true));
+        if (mode !== 'best') names = names.filter((name) => name !== DELEGATE.function.name);
+        if (fork && fork.change && fork.change.kind === 'tool') names = names.filter((name) => name !== fork.change.tool);
+        state.tools = names.map((name) => byName.get(name));
+        const delegate = savedNames.includes(DELEGATE.function.name) && mode === 'best' && !(config.loop && config.loop.subAgents === false);
+        if (delegate) state.tools.push(DELEGATE);
+        state.allow = new Set(state.tools.map((t) => t.function.name));
+        if (!state.brain) state.brain = {};
+        if (!state.brain.escalations) state.brain.escalations = createEscalations();
+        if (!state.plan || !Array.isArray(state.plan.steps)) state.plan = { assumptions: [], steps: [] };
+        if (forced) { state.tier = forced; state.baseTier = forced; state.fixedTier = true; }
+        else if (!models.resolve(state.tier).available) state.tier = baseTier;
+
+        if (fork) {
+            const change = fork.change || {};
+            if (change.kind === 'tool' && change.tool) {
+                state.messages.push({ role: 'user', content: `The person took ${change.tool} off the tools you may use from this step on. Continue without it, and do not ask for it.` });
+            } else if (change.kind === 'instruction') {
+                state.messages.push({ role: 'user', content: `The person edited step ${fork.step}'s instruction for this run: ${clip(change.instruction, 2000)}\nContinue from here with that change.` });
+            }
+            await ctx.emit({ step: 'fork', text: forkText(fork) });
+            await spanCall(ctx.trace, { kind: 'tool', name: 'fork', startedAt: now(), ms: 0, ok: true, step: fork.step });
+        }
+        if (resume) {
+            await ctx.emit({ step: 'resume', text: `Picked up after a restart at step ${resume.step}.` });
+            await spanCall(ctx.trace, { kind: 'tool', name: 'resume', startedAt: now(), ms: 0, ok: true, step: resume.step });
+        }
+
+        // The live assumptions form, on a resumed run too.
+        if (control && typeof control === 'object') {
+            const applyAssumptions = async (text) => {
+                const list = String(text == null ? '' : text).split(/[\n;]+/).map((a) => clip(a, 200)).filter(Boolean).slice(0, 5);
+                if (!list.length) return { ok: false, reason: 'no assumptions were given' };
+                state.plan.assumptions = list;
+                state.messages.push({ role: 'user', content: `The person edited the plan's assumptions: ${list.join('; ')}. Use these from now on; do not restate them in the answer.` });
+                await emitPlan(state, ctx);
+                return { ok: true, assumptions: state.plan.assumptions };
+            };
+            control.pending = [];
+            control.assume = applyAssumptions;
+            control.plan = () => state.plan;
+            for (const text of control.pending.splice(0)) await applyAssumptions(text);
+        }
+
+        try {
+            // The checkpoint after the final answer turn: deliver it, then the engine's check runs as usual. Nothing is
+            // fetched twice.
+            if (state.answered && state.lastText) {
+                state.plan.steps.forEach((s) => { s.state = 'done'; });
+                if (state.brain.progressLedger) state.brain.progress = state.brain.progressLedger.finish({ done: true });
+                await emitPlan(state, ctx);
+                return resultOf(state);
+            }
+            await emitPlan(state, ctx);
+            const maxSelf = config.loop && config.loop.selfReflections != null ? config.loop.selfReflections : selfReflections;
+            try {
+                await drive(state, ctx, { reflections: maxSelf });
+            } finally {
+                const from = Number(state.brain.stepsFrom) || 0;
+                await learn.recordSteps({ store, kind: state.brain.kind, steps: state.brain.steps.slice(from), log, now }).catch(() => {});
+            }
+            state.answered = true;
+            state.plan.steps.forEach((s) => { s.state = 'done'; });
+            if (state.brain.progressLedger) state.brain.progress = state.brain.progressLedger.finish({ done: true });
+            await emitPlan(state, ctx);
+            await ctx.checkpoint();
+            return resultOf(state);
+        } catch (err) {
+            await close(state).catch(() => {});
+            throw err;
+        }
+    }
+
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null }) {
+        if (resume || fork) {
+            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent });
+        }
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
         // Files and charts made in this run are stored privately for the person the task is for, in Actor's own
@@ -602,7 +766,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const state = {
             task: String(task), requester, taskId, mode, tier, signal, messages: [], lastText: '', model: null, family: null, provider: null,
             calls: 0, ledger: createLedger({ now }), plan: { assumptions: [], steps: [] }, counts: new Map(), stopped: null, selfReflections: 0,
-            readOutside: false, agentId, baseTier: tier,
+            readOutside: false, agentId, baseTier: tier, answered: false,
             ctx: null, context: Array.isArray(context) ? context.filter((c) => c && c.task && c.answer).slice(-3) : [],
             depth: 0, tools: [], allow: null,
             // The brain (stage V2-8): what understand found, the two ledgers, the learned prior and the cascade.
@@ -619,9 +783,12 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),
+            // What the task has spent so far, for the checkpoint (the loop waits on budgetLeft, not the total).
+            spent: typeof spent === 'function' ? spent : () => 0,
             state: { desks: requester ? deskRun(taskId) : null },
         };
         state.ctx = ctx;
+        ctx.checkpoint = async () => saveCheckpoint(state, ctx);
         // An assumption edit can arrive while the understand and plan calls are still running (the page already shows
         // the plan of a previous turn). Hold it here and apply it as soon as the run's own handler exists.
         if (control && typeof control === 'object') {
@@ -698,11 +865,14 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 // Every finished run teaches the router, once per distinct step outcome (stage V2-8). Best-effort.
                 await learn.recordSteps({ store, kind: state.brain.kind, steps: state.brain.steps, log, now }).catch(() => {});
             }
+            state.answered = true;
             state.plan.steps.forEach((s) => { s.state = 'done'; });
             // The last progress ledger (stage V2-8 review): done, no next sub-goal. A failed check writes its own
             // stopped ledger from the engine, after the verifier has spoken.
             if (state.brain.progressLedger) state.brain.progress = state.brain.progressLedger.finish({ done: true });
             await emitPlan(state, ctx);
+            // The answer turn is a step too: a restart after it delivers the saved answer, never a second call.
+            await ctx.checkpoint();
             return resultOf(state);
         } catch (err) {
             await close(state).catch(() => {});
@@ -747,6 +917,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             } else if (r.text && r.text.trim()) state.lastText = r.text.trim();
         }
         state.stopped = 'revised';
+        state.answered = true;
+        // The revised answer is the run's last step too: fork from it, or resume it, without another call.
+        await saveCheckpoint(state, ctx);
         return {
             ...prev, text: withoutMeta(state.lastText), sources: state.ledger.sourceUrls(), evidence: state.ledger.forResult(),
             citations: state.ledger.citations(state.lastText), artifacts: artifactsOf(state.ledger.items), stopped: 'revised',

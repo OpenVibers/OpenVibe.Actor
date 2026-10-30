@@ -123,6 +123,16 @@ function load(env = process.env) {
             maxTaskBytes: Math.max(1024, int(env.ACTOR_ARTIFACT_MAX_TASK_BYTES, 2 * 1024 * 1024)),
         },
 
+        // Durable runs (Actor v2, stage V2-9): a checkpoint after every step, sealed with AES-256-GCM under
+        // ACTOR_CHECKPOINT_KEY (64 hex characters). Without a valid key, checkpoints are off and a task behaves as
+        // before (a restart marks it interrupted). The last `keep` checkpoints per task are kept; a task is resumed at
+        // most `maxResumes` times, then the next interruption fails it.
+        checkpoints: {
+            key: String(env.ACTOR_CHECKPOINT_KEY || ''),
+            keep: Math.max(1, int(env.ACTOR_CHECKPOINT_KEEP, 50)),
+            maxResumes: Math.max(0, int(env.ACTOR_CHECKPOINT_MAX_RESUMES, 2)),
+        },
+
         // What one person may spend without paying (plan T17: "free tier from the bounded allowance"), and the
         // operator's ceiling over everyone in one UTC day. A request above the person's tier is refused, never lowered.
         allowance: {

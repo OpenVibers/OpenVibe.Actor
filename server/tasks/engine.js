@@ -37,7 +37,7 @@ const LOOP_AGENT = 'openvibe-runtime';
 // What a task asked in a public chat may be (chat/asks.js): nothing that uses the person's own computers, robots or code.
 const PUBLIC_CLASSES = ['answer', 'lookup', 'research', 'web'];
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null }) {
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
     // A question the loop asked before any tool ran (stage V2-8): the task waits in needs_you, the page shows the
@@ -158,11 +158,47 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         }
     }
 
+    /**
+     * The checkpoint a queued task continues from (stage V2-9), or null. A fork starts from its parent's checkpoint at
+     * fork_of_step until it has one of its own; a task the boot resumed uses its own newest one. A task that was only
+     * ever queued has neither and starts fresh.
+     */
+    function parseJson(value) {
+        if (value == null) return null;
+        return typeof value === 'string' ? JSON.parse(value) : value;
+    }
+    async function loadStart(row, { boot = false } = {}) {
+        if (!checkpoints || !checkpoints.enabled || !row) return null;
+        const last = async (id) => {
+            try { return await checkpoints.last(id); } catch (err) { log.warn && log.warn('[Actor] checkpoint could not be opened (the task is not re-run blind):', row.id, (err && err.message) || err); return null; }
+        };
+        if (row.fork_of_step != null) {
+            const own = await last(row.id);
+            if (own) return { kind: 'resume', checkpoint: own };
+            let start = null;
+            try { start = await checkpoints.at(row.parent_id, Number(row.fork_of_step)); } catch (err) { log.warn && log.warn('[Actor] fork checkpoint could not be opened:', row.id, (err && err.message) || err); }
+            if (start) return { kind: 'fork', checkpoint: start, step: Number(row.fork_of_step), change: parseJson(row.fork_change) };
+            return null;
+        }
+        // At boot, any open task may have a checkpoint (the row's `resumes` counts resumes already made, and a task
+        // that was interrupted for the first time has none yet). While executing, only a task the boot requeued does.
+        if (boot || Number(row.resumes) > 0) {
+            const own = await last(row.id);
+            if (own) return { kind: 'resume', checkpoint: own };
+        }
+        return null;
+    }
+
     async function execute(id, signal) {
         const row = await store.getTask(s, id);
         if (!row || row.state !== 'queued') return;
+        const start = await loadStart(row);
+        const resume = start && start.kind === 'resume' ? { step: start.checkpoint.step, state: start.checkpoint.state } : null;
+        const fork = start && start.kind === 'fork' ? { step: start.step, checkpoint: start.checkpoint, change: start.change } : null;
+        // A resumed task keeps what it already spent; a fork has its own budget from zero (the parent's spend is not its).
         const budget = Number(row.budget_task);
-        let spent = 0;
+        let spent = resume && resume.state ? Math.max(Number(row.cost_usd) || 0, Number(resume.state.spent) || 0) : (Number(row.cost_usd) || 0);
+        const unrecoverable = (Number(row.resumes) > 0 && !resume) || (row.fork_of_step != null && !resume && !fork);
         const meter = async (usd) => {
             const v = Number(usd) || 0;
             if (!v) return;
@@ -222,21 +258,33 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         let floor = null;
         const raise = (agent) => { if (agent && agent.quality === 'high') floor = 'high'; else if (agent && agent.quality === 'standard' && floor !== 'high') floor = 'standard'; };
         try {
-            await setState(id, 'running', { cost_usd: 0, free_usd: 0 });
-            // A task with no budget spends nothing: not even a classification call.
-            if (budget <= 0) {
+            // A resume keeps what the run already spent; a fresh task starts its counter at zero.
+            await setState(id, 'running', resume ? {} : { cost_usd: 0, free_usd: 0 });
+            if (unrecoverable) {
+                const why = row.fork_of_step != null
+                    ? 'The step this fork starts from is no longer saved, so it was not started. Fork it again.'
+                    : 'The saved step of this task could not be read, so it was not re-run from the beginning. Ask again.';
+                return await setState(id, 'failed', { error_code: 'actor.task.interrupted', error_detail: why, finished_at: iso() });
+            }
+            // A task with no budget spends nothing: not even a classification call. A resumed task whose saved step is
+            // already an answer is still delivered (it owes nothing more).
+            if (budget <= 0 && !(resume && resume.state && resume.state.answered)) {
                 return await setState(id, 'failed', { error_code: 'actor.budget.exceeded', error_detail: 'This task has a $0 budget, so nothing ran. Give it a budget above $0.', finished_at: iso() });
             }
-            // What kind of task this is. Private mode never sends the text anywhere to find out.
+            // What kind of task this is. Private mode never sends the text anywhere to find out. A resumed run already
+            // chose its route, so it does not pay to classify again.
             let cls;
-            if (row.mode === 'private' || !adapters.checkers.deepseek) {
+            if (resume || fork) {
+                cls = 'answer';
+                await emit(id, { kind: 'output', step: 'plan', text: resume ? `Continuing from step ${resume.step}.` : `Starting from step ${fork.step} of the original run.` });
+            } else if (row.mode === 'private' || !adapters.checkers.deepseek) {
                 cls = heuristic(row.task);
             } else {
                 const c = await classify(row.task, { chat: adapters.checkers.deepseek, signal });
                 await meter(c.cost_usd);
                 cls = c.class;
             }
-            await emit(id, { kind: 'output', step: 'plan', text: `This is a "${cls}" task.` });
+            if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', text: `This is a "${cls}" task.` });
             // Asked in a public chat (chat/asks.js): the answer is posted where everyone reads it, so only what needs
             // nothing of the person's own — never their computers, robots or code on their machine.
             const fromChat = row.via === 'chat';
@@ -255,9 +303,12 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 const personText = ownAgent ? require('../agents/personal').personText(row.task)
                     : (row.via == null || row.via === 'chat' ? row.task : '');
                 const notifyTask = (kind, detail) => tellPerson(row, kind, detail || {});
-                explanation.push({ selected: agentId, objective: row.mode === 'best' ? 'correctness' : 'balanced', reasons: [`the one agent loop (${row.mode === 'best' ? 'best' : 'smart'} tier)`], candidates: [], decided_at: iso() });
+                const why = resume ? `the one agent loop resumed after a restart (step ${resume.step})`
+                    : fork ? `the one agent loop forked from step ${fork.step}`
+                        : `the one agent loop (${row.mode === 'best' ? 'best' : 'smart'} tier)`;
+                explanation.push({ selected: agentId, objective: row.mode === 'best' ? 'correctness' : 'balanced', reasons: [why], candidates: [], decided_at: iso() });
                 await store.updateTask(s, id, { explanation });
-                await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: 'The agent starts with a plan, then works through it.' });
+                if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: 'The agent starts with a plan, then works through it.' });
                 // A personal agent's run that would start coding work on its owner's machine asks first (approvals.js).
                 const requestApproval = /^agent:agt_/.test(String(row.via || '')) ? async ({ kind, summary, payload }) => {
                     const ask = await approvals.request(s, { owner: row.requester, agentId: row.via.slice(6), taskId: id, kind, summary, payload });
@@ -272,17 +323,21 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 try {
                     out = await loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
-                        context: row.parent_id ? await store.followContext(s, row) : [],
+                        // A fork carries its parent's state in the checkpoint, not as a follow-up conversation.
+                        context: row.parent_id && row.fork_of_step == null && !resume ? await store.followContext(s, row) : [],
                         emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
                         meter, budgetLeft, waitForPerson, requestApproval,
                         personText, agentId: ownAgent, notifyTask,
-                        askPerson, control,
+                        askPerson, control, resume, fork, spent: () => spent,
                     });
                 } catch (err) {
                     if (signal && signal.aborted) throw err;
-                    const why = (err && err.message) || String(err);
-                    const code = err && err.code === 'actor.model.unavailable' ? 'actor.model.unavailable' : err && err.code === 'actor.budget.exceeded' ? 'actor.budget.exceeded' : 'actor.agent.failed';
-                    return await setState(id, 'failed', { error_code: code, error_detail: why.slice(0, 2000), finished_at: iso() });
+                    const detail = (err && err.message) || String(err);
+                    const code = err && err.code === 'actor.model.unavailable' ? 'actor.model.unavailable'
+                        : err && err.code === 'actor.budget.exceeded' ? 'actor.budget.exceeded'
+                            : err && err.code === 'actor.checkpoint.invalid' ? 'actor.checkpoint.invalid'
+                                : 'actor.agent.failed';
+                    return await setState(id, 'failed', { error_code: code, error_detail: detail.slice(0, 2000), finished_at: iso() });
                 }
                 try {
                     await setState(id, 'verifying', { agentForEvent: agentId });
@@ -517,17 +572,72 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         return store.getTask(s, id);
     }
 
-    /** Shutdown: running tasks are stopped and recorded as interrupted; queued ones too. */
+    /**
+     * Boot (stage V2-9): what a stopped process left open. A queued task that never ran is started again; a task that
+     * was running resumes from its newest checkpoint; a task with no checkpoint (or past the resume cap) is failed as
+     * before, with its webhooks told. Without ACTOR_CHECKPOINT_KEY this is exactly the old failInterrupted.
+     *
+     * Returns { resumed, failed, requeued } for the boot log.
+     */
+    async function resumeInterrupted() {
+        const rows = await store.openTasks(s);
+        if (!checkpoints || !checkpoints.enabled) {
+            const failed = await store.failInterrupted(s);
+            for (const id of failed) await enqueueFailed(id);
+            return { resumed: [], failed, requeued: [] };
+        }
+        const max = config.checkpoints && config.checkpoints.maxResumes != null ? config.checkpoints.maxResumes : 2;
+        const resumed = [];
+        const requeued = [];
+        const capped = [];
+        const failed = [];
+        for (const row of rows) {
+            const start = await loadStart(row, { boot: true });
+            if (!start) {
+                if (row.state === 'queued' && !Number(row.resumes)) {
+                    requeued.push(row.id);
+                    submit(row.id);
+                } else {
+                    failed.push(row.id);
+                }
+                continue;
+            }
+            const resumes = Number(row.resumes) || 0;
+            if (resumes >= max) {
+                capped.push(row.id);
+                continue;
+            }
+            await store.updateTask(s, row.id, { state: 'queued', resumes: resumes + 1, finished_at: null });
+            await emit(row.id, { kind: 'state', state: 'queued' });
+            resumed.push(row.id);
+            submit(row.id);
+        }
+        const cappedDetail = 'Actor was interrupted twice while this task ran, so it was not resumed a third time (interrupted twice). Ask again.';
+        const gone = capped.length ? await store.failInterrupted(s, { ids: capped, detail: cappedDetail }) : [];
+        const lost = failed.length ? await store.failInterrupted(s, { ids: failed }) : [];
+        for (const id of [...gone, ...lost]) await enqueueFailed(id);
+        return { resumed, failed: [...gone, ...lost], requeued };
+    }
+
+    async function enqueueFailed(id) {
+        if (!webhooks) return;
+        try { await webhooks.enqueue(id, 'failed'); } catch (err) { log.warn && log.warn('[Actor] webhook enqueue failed:', id, (err && err.message) || err); }
+    }
+
+    /**
+     * Shutdown: running tasks are aborted and left open (their rows stay running/verifying, so the next boot can resume
+     * from the last checkpoint); queued tasks wait for that boot too. Without a checkpoint key they are failed at the
+     * next boot by resumeInterrupted, as before.
+     */
     async function stop() {
         stopped = true;
         for (const ac of running.values()) ac.abort('shutdown');
         waiting.length = 0;
-        await store.failInterrupted(s).catch(() => {});
     }
 
     const status = () => ({ running: running.size, waiting: waiting.length });
 
-    return { submit, cancel, stop, status, answer, assume, MAX_ATTEMPTS };
+    return { submit, cancel, stop, status, answer, assume, resumeInterrupted, MAX_ATTEMPTS };
 }
 
 module.exports = { createEngine, MAX_ATTEMPTS };
