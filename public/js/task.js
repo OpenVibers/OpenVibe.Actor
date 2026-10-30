@@ -90,8 +90,22 @@
     if (at && document.getElementById('evidence')) { document.getElementById('evidence').open = true; at.classList.add('is-open'); }
   }
 
+  // The follow-up box grows with what is typed (up to 40% of the screen), and Ctrl/Cmd+Enter sends it.
+  function followBox() {
+    var box = document.getElementById('follow-text');
+    if (!box || box.dataset.bound) return;
+    box.dataset.bound = '1';
+    var fit = function () { box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, Math.round(window.innerHeight * 0.4)) + 'px'; };
+    box.addEventListener('input', fit);
+    box.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && box.value.trim() && box.form) { e.preventDefault(); if (box.form.requestSubmit) box.form.requestSubmit(); else box.form.submit(); }
+    });
+    if (location.hash === '#follow-up') { try { box.focus({ preventScroll: true }); } catch (err) { box.focus(); } }
+  }
+
   function start() {
     evidence();
+    followBox();
     var art0 = document.querySelector('article.task');
     var view = art0 ? session(art0) : null;
     var art = document.querySelector('article.task[data-open="1"]');

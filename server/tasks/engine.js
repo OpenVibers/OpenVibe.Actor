@@ -156,6 +156,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 try {
                     out = await loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
+                        context: row.parent_id ? await store.followContext(s, row) : [],
                         emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
                         meter, budgetLeft, waitForPerson, requestApproval,
                     });

@@ -66,4 +66,20 @@
 .answer .prose table { display: block; max-width: 100%; overflow-x: auto; }
 .answer .prose th, .answer .prose td { overflow-wrap: normal; word-break: normal; white-space: nowrap; }
 
+/* Follow-ups (stage V2-5b): the thread above, one composer under the answer. */
+.follows-on { margin: 0 0 .3rem; font-size: .9rem; color: var(--text-muted, #7386a3); overflow-wrap: anywhere; }
+.follows-on a { font-weight: 650; }
+.follow { margin: -0.6rem 0 1.6rem; }
+.follow > h2 { margin: 0 0 .5rem; font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted, #7386a3); }
+.follow-list { list-style: none; margin: 0 0 .7rem; padding: 0; display: grid; gap: 6px; }
+.follow-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); }
+.follow-list a { min-width: 0; flex: 1 1 14rem; font-weight: 650; overflow-wrap: anywhere; text-decoration: none; }
+.follow-list a:hover { text-decoration: underline; }
+.follow-form { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 14px; border-radius: 16px; border: 1px solid var(--border-light, #2c3d5c); background: var(--bg-secondary, #101828); transition: border-color .15s, box-shadow .15s; }
+.follow-form:focus-within { border-color: var(--accent, #3b82f6); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #3b82f6) 22%, transparent); }
+.follow-form textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 40vh; padding: 9px 0; resize: none; border: 0; outline: none; background: transparent; color: var(--text-primary, #e6edf7); font: inherit; line-height: 1.45; }
+.follow-form textarea::placeholder { color: var(--text-muted, #7386a3); }
+.follow-form .sc-btn { flex: none; min-height: 40px; padding: 0 18px; border-radius: 12px; }
+.follow-hint { margin: .45rem 0 0 4px; font-size: .82rem; color: var(--text-muted, #7386a3); }
+
 @media (prefers-reduced-motion: reduce) { .ps, .ps.is-active .ps-mark { animation: none; } .ev, .ev-item { transition: none; } }
