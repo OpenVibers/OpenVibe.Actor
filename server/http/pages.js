@@ -33,7 +33,6 @@ const benchOffers = require('../tasks/bench-offers');
 const compareRuns = require('../tasks/compare');
 const confidence = require('../runtime/brain/confidence');
 const taskEvents = require('../../public/js/task-events');
-const { noLooks, hasLooks } = require('openvibe-sdk/no-looks');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const LOOP_AGENT = 'openvibe-runtime';
@@ -925,7 +924,6 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
     // The button on a finished task opens this preview: exactly the task text and the final answer, never the evidence,
     // files, memory or trace. Only its owner sees it, and only a POST from that page (checked same-origin) offers it.
     const BENCH_ERROR = {
-        'actor.bench.looks': 'That answer describes how someone looks, so it cannot be shared as a public case. The task stays yours and nothing was offered.',
         'actor.bench.no_answer': 'This task has no answer to offer.',
     };
     async function benchPage(req, res, { error = null } = {}) {
@@ -936,8 +934,8 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         const result = row.result ? (typeof row.result === 'string' ? JSON.parse(row.result) : row.result) : null;
         if (row.state !== 'succeeded' || !result || !result.answer) return res.redirect(303, `/tasks/${row.id}`);
         const existing = await benchOffers.get(s, row.id, requesterOf(req));
-        const clean = noLooks(String(result.answer));
-        const blocked = hasLooks(clean);
+        const clean = String(result.answer);
+        const blocked = false;
         const why = error ? (BENCH_ERROR[error] || 'The offer could not be made. Try again in a moment.') : (blocked ? BENCH_ERROR['actor.bench.looks'] : null);
         return page(req, res, {
             title: 'Offer as a Bench case',

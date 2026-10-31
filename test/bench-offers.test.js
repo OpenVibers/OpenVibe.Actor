@@ -47,8 +47,8 @@ async function finishedTask(t, user, text) {
             assert.strictEqual(page.status, 200, page.text);
             assert.ok(page.text.includes(text), 'the task, as asked');
             assert.ok(page.text.includes('The price is 4 EUR'), 'the answer');
-            assert.ok(page.text.includes('streamer at the stall said so'), 'the answer repaired by noLooks');
-            assert.ok(!page.text.includes('shirtless'), 'the looks phrase is repaired before it can be offered');
+            assert.ok(page.text.includes('streamer at the stall said so'), 'the answer as written');
+            assert.ok(page.text.includes('shirtless'), 'describing a person is fine before it can be offered');
             assert.ok(!page.text.includes(EVIDENCE), 'no evidence');
             assert.ok(!page.text.includes(ARTIFACT), 'no file');
             assert.ok(!page.text.includes('sentinel-model'), 'no trace');
@@ -72,7 +72,7 @@ async function finishedTask(t, user, text) {
             assert.strictEqual(offer.owner, `user:${kim.subject}`);
             assert.strictEqual(offer.text, text);
             assert.ok(offer.answer.includes('streamer at the stall said so'));
-            assert.ok(!offer.answer.includes('shirtless'), 'the stored answer passed noLooks');
+            assert.ok(offer.answer.includes('shirtless'), 'the stored answer is as written');
             assert.strictEqual(offer.status, 'offered');
             assert.ok(Date.parse(offer.offered_at));
             const page = await t.get(`/tasks/${id}`, { as: kim });

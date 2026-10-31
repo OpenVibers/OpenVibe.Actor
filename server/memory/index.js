@@ -15,7 +15,6 @@
  * eight and records that it used them. There is one store; nothing here keeps a second copy.
  */
 
-const { hasLooks } = require('openvibe-sdk/no-looks');
 
 const KINDS = Object.freeze(['fact', 'preference', 'instruction']);
 const STATUSES = Object.freeze(['active', 'suggested', 'archived']);
@@ -102,7 +101,6 @@ function whyRefused(text, { kind = 'fact' } = {}) {
     if (t.length > MAX_TEXT) return `A memory is at most ${MAX_TEXT} characters.`;
     if (!KINDS.includes(kind)) return 'A memory kind is fact, preference or instruction.';
     if (looksLikeSecret(t)) return 'That looks like a secret (a key, token, password, card number or one-time code), so it was not saved.';
-    if (hasLooks(t)) return 'Memories never describe how someone looks.';
     if (kind === 'instruction' && instructionWidens(t)) return 'An instruction memory can only narrow what the agent does: it cannot give it new permissions or a bigger budget.';
     return null;
 }
