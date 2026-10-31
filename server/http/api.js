@@ -61,7 +61,13 @@ function createApi(ctx) {
             WHERE t.requester = $1 AND (t.state = ANY($2) OR COALESCE(t.finished_at, t.created_at) >= $3)
             ORDER BY COALESCE(t.finished_at, le.at, t.created_at) DESC
             LIMIT 50`, [requester, store.OPEN, cutoff]);
-        const tasks = rows.map((row) => items.taskItem(row, { lastEvent: store.parseJson(row.last_event), steps: Number(row.tool_steps) }));
+        // The waits (plan A2): a task that waits shows the quiet line the person reads.
+        const openWaits = ctx.waits ? await ctx.waits.listOpen() : [];
+        const waitFor = new Map(openWaits.map((w) => [w.task_id, w]));
+        const tasks = rows.map((row) => items.taskItem(row, {
+            lastEvent: store.parseJson(row.last_event), steps: Number(row.tool_steps),
+            wait: waitFor.get(row.id) || null, now: s.now,
+        }));
         const asks = (await approvals.list(s, requester))
             .filter((a) => a.state === 'pending')
             .map(items.approvalItem);
@@ -199,10 +205,15 @@ function createApi(ctx) {
     // ── Tasks ────────────────────────────────────────────────
     // A delegated caller (a service acting for the person) owns only the person's tasks it started itself.
     const owns = (p, row) => row && ((row.requester === p.requester && (!p.via || row.via === p.via)) || (p.project && row.project_id === p.project));
-    async function load(req, res) {
+    async function load(req, res, { delegated = false } = {}) {
         if (!TASK_ID.test(req.params.id)) { problem(req, res, 404, 'actor.task.not_found', 'No such task.'); return null; }
         const row = await store.getTask(s, req.params.id);
-        if (!owns(req.principal, row)) { problem(req, res, 404, 'actor.task.not_found', 'No such task.'); return null; }
+        // A service acting for the person (the Action Center's Cancel, plan A2) may reach that person's task:
+        // the token carries the capability and the request names the person in X-OV-Subject.
+        const mine = delegated
+            ? row && req.principal && row.requester === req.principal.requester
+            : owns(req.principal, row);
+        if (!mine) { problem(req, res, 404, 'actor.task.not_found', 'No such task.'); return null; }
         return row;
     }
     const wire = (row) => store.toWire(row, { baseUrl: config.baseUrl });
@@ -271,7 +282,12 @@ function createApi(ctx) {
     });
 
     r.post('/tasks/:id/cancel', principal.requireCapability('actor.task.create'), async (req, res) => {
-        const row = await load(req, res);
+        // The Action Center's Cancel comes from OpenVibe.Network acting for the person: the delegated case. Only
+        // Network: any other first-party service acting for a person still cancels only the tasks it started itself
+        // (owns(): the via check), so one service can never stop what another one asked for.
+        const p = req.principal;
+        const delegated = Boolean(p && p.kind === 'app' && p.via === 'service:network' && p.claims && String(p.requester || '').startsWith('user:'));
+        const row = await load(req, res, { delegated });
         if (!row) return;
         const after = await engine.cancel(row.id, req.principal.requester);
         res.status(store.OPEN.includes(after.state) ? 202 : 200).json(wire(after));

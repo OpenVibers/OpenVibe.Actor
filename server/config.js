@@ -54,6 +54,19 @@ function load(env = process.env) {
         },
         valkey: { url: env.VALKEY_URL || '', prefix: env.VALKEY_PREFIX || 'ov:actor:' },
 
+        // A drill (ACTOR_DRILL=1) keeps every background loop off, the network's convention: the wait deadlines
+        // and the sweep do not run in a drill.
+        drill: env.ACTOR_DRILL === '1' || env.ACTOR_DRILL === 'true',
+        // Waits (plan A2): how many a person may hold open, how many one task may hold, how long a deadline may
+        // be, how big a matcher may be. The hard caps live in the code (server/waits/limits.js).
+        waits: {
+            perPerson: int(env.ACTOR_WAIT_PER_PERSON, 5),
+            perTask: int(env.ACTOR_WAIT_PER_TASK, 1),
+            perTaskLifetime: int(env.ACTOR_WAIT_PER_TASK_LIFETIME, 5),
+            deadlineMs: int(env.ACTOR_WAIT_DEADLINE_MS, 6 * 60 * 60_000),
+            filterClauses: int(env.ACTOR_WAIT_FILTER_CLAUSES, 4),
+        },
+
         // OpenVibe.Network: SSO (OAuth2 authorization server with PKCE) and its JWKS.
         networkUrl,
         networkInternalUrl: trim(env.OV_NETWORK_INTERNAL_URL || 'http://127.0.0.1:4000'),

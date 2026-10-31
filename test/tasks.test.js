@@ -344,7 +344,11 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         const listed = await t.get('/api/v1/tasks', { bearer: watch, headers: { 'X-OV-Subject': owner.subject } });
         assert.deepStrictEqual(listed.json().tasks.map((x) => x.id), [ok.json().id]);
         assert.strictEqual((await t.get(`/api/v1/tasks/${own.json().id}`, { bearer: watch, headers: { 'X-OV-Subject': owner.subject } })).status, 404);
-        assert.strictEqual((await t.get(`/api/v1/tasks/${own.json().id}/cancel`, { bearer: watch, headers: { 'X-OV-Subject': owner.subject }, method: 'POST' })).status, 404, 'nor cancel it');
+        // The Action Center's Cancel is the one exception (plan A2): OpenVibe.Network acting for the person may cancel
+        // that person's task, so the Dock's button reaches it. Any other service still cancels only what it started.
+        assert.strictEqual((await t.get(`/api/v1/tasks/${own.json().id}/cancel`, { bearer: watch, headers: { 'X-OV-Subject': owner.subject }, method: 'POST' })).status, 404, 'another service cannot stop a task it did not start');
+        const network = mint('svc:network', 'service', ['actor.task.create']);
+        assert.strictEqual((await t.get(`/api/v1/tasks/${own.json().id}/cancel`, { bearer: network, headers: { 'X-OV-Subject': owner.subject }, method: 'POST' })).status, 200, 'but the Action Center (Network) reaches it');
 
         // Only a first-party service may name a person, and only a person.
         const app = mint('app:app_01JAB2C3D4E5F6G7H8J9K0MNPT', 'app', ['actor.task.create'], { project_id: 'prj_01JAB2C3D4E5F6G7H8J9K0MNPR', env: 'production', ns: ['prj_01JAB2C3D4E5F6G7H8J9K0MNPR'] });

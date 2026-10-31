@@ -34,6 +34,10 @@ const TABLES = [
     // A finished task they offered as an OpenVibe.Bench case (stage V2-10): the task text and the answer, nothing else.
     // Before tasks, so its rows are counted before the task's cascade would take them.
     { table: 'actor_bench_offers', subject: 'owner', value: (usr) => `user:${usr}`, file: 'bench-offers.json' },
+    // The waits of their tasks (plan A2): what a task of theirs is waiting for, until when, and the line it
+    // shows. Before the tasks, so the rows are counted before the task's cascade would take them.
+    { table: 'actor_waits', subject: 'requester', value: (usr) => `user:${usr}`, file: 'waits.json',
+        columns: ['id', 'task_id', 'requester', 'step', 'kind', 'until', 'filter', 'deadline_at', 'on_timeout', 'line', 'status', 'created_at', 'updated_at', 'finished_at'] },
     // Every column but webhook_secret (a task's signing secret is a credential, not the person's data).
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',
