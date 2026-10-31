@@ -13,11 +13,12 @@
 .ps.is-done .ps-mark { border-color: var(--success, #22c55e); background: var(--success, #22c55e); }
 .ps.is-done .ps-mark::after { content: ""; position: absolute; left: 5px; top: 2px; width: 5px; height: 9px; border: solid var(--bg-card, #131c2e); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg); }
 .ps.is-active { color: var(--text-primary, #e6edf7); font-weight: 650; }
-.ps.is-active .ps-mark { border-color: color-mix(in srgb, var(--accent, #3b82f6) 30%, transparent); border-top-color: var(--accent, #3b82f6); animation: ps-spin .9s linear infinite; }
+.ps.is-active .ps-mark { border-color: var(--accent, #3b82f6); animation: ps-pulse 1.4s ease-out infinite; }   /* the step on now: a ring that pulses out, never a spinner */
 .state-succeeded .ps.is-active .ps-mark, .state-failed .ps.is-active .ps-mark, .state-cancelled .ps.is-active .ps-mark { animation: none; border-color: var(--accent, #3b82f6); }
 .plan-assume { margin: .4rem 0 0 32px; font-size: .85rem; color: var(--text-muted, #7386a3); }
 .plan-assume[hidden] { display: none; }
-@keyframes ps-spin { to { transform: rotate(360deg); } }
+@keyframes ps-pulse { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #3b82f6) 50%, transparent); } to { box-shadow: 0 0 0 7px transparent; } }
+@media (prefers-reduced-motion: reduce) { .ps.is-active .ps-mark { animation: none; } }
 .tl-plan .tl-k { color: var(--accent-light, #60a5fa); }
 
 /* An answer's citations: a numbered chip per piece of evidence, opening what that tool returned. */
