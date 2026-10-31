@@ -74,7 +74,12 @@ const waitFor = async (fn, ms = 10_000) => {
         const after = await store.getTask(t.ctx.s, id);
         assert.strictEqual(Number(after.cost_usd || 0), spent, 'the budget clock stops: nothing is spent');
         assert.ok(closed.length >= 1, 'the run was closed, so the desk is released');
-        assert.ok(Number(wait.remaining_ms) > 0, 'the task keeps the wall clock it had left');
+        // The engine stamps the clock it had left onto the wait when it parks: wait for that stamp.
+        const stamped = await waitFor(async () => {
+            const row = await t.ctx.waits.get(wait.id);
+            return row && row.remaining_ms != null ? row : null;
+        });
+        assert.ok(Number(stamped.remaining_ms) > 0, 'the task keeps the wall clock it had left');
 
         // The event wakes it. The payload is a stranger's text: it may resume the task, nothing else.
         await t.ctx.waits.onEvent({
