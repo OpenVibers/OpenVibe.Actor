@@ -282,9 +282,11 @@ function createApi(ctx) {
     });
 
     r.post('/tasks/:id/cancel', principal.requireCapability('actor.task.create'), async (req, res) => {
-        // The Action Center's Cancel comes from OpenVibe.Network acting for the person: the delegated case.
+        // The Action Center's Cancel comes from OpenVibe.Network acting for the person: the delegated case. Only
+        // Network: any other first-party service acting for a person still cancels only the tasks it started itself
+        // (owns(): the via check), so one service can never stop what another one asked for.
         const p = req.principal;
-        const delegated = Boolean(p && p.kind === 'app' && p.claims && String(p.requester || '').startsWith('user:'));
+        const delegated = Boolean(p && p.kind === 'app' && p.via === 'service:network' && p.claims && String(p.requester || '').startsWith('user:'));
         const row = await load(req, res, { delegated });
         if (!row) return;
         const after = await engine.cancel(row.id, req.principal.requester);
