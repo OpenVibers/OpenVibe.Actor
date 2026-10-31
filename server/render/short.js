@@ -2,9 +2,9 @@
 /**
  * The home on a phone (the owner's short-pages rule, 2026-10-30): one or two screens, app-like.
  *
- *   foldBlock()  a part a reader rarely needs: closed on a phone, where the title row opens it, and open where there
- *                is room, where it looks like the section it replaces. A checkbox and a label, no script: the part
- *                stays in the page for the crawlers, and a browser without CSS shows it as it was.
+ *   foldBlock()  a part a reader rarely needs, in a fold that starts open on every screen (the owner's rule,
+ *                2026-10-31, so no content is hidden on a phone). A checkbox and a label, no script: the part stays in
+ *                the page for the crawlers, and a reader may still close it.
  *   pickBlock()  several blocks of the same kind, one at a time on a phone, picked with a row of chips. Radio inputs
  *                and :has(), no script: every block stays in the page, and a wider screen (or a browser without
  *                :has()) shows them all and no chips.
@@ -27,7 +27,7 @@ const str = (v) => (v && typeof v === 'object' && typeof v.s === 'string') ? v.s
 function foldBlock({ id, head, html, bare = false }) {
     const key = `fold-${esc(id)}`;
     return `<div class="fold${bare ? ' fold-bare' : ''}" id="${key}">`
-        + `<input class="fold-toggle" type="checkbox" id="${key}-open">`
+        + `<input class="fold-toggle" type="checkbox" id="${key}-open" checked>`
         + `<label class="fold-h" for="${key}-open">${str(head)}<span class="fold-mark" aria-hidden="true"></span></label>`
         + `<div class="fold-body">${str(html)}</div></div>`;
 }
