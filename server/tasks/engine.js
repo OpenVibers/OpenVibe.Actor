@@ -37,12 +37,16 @@ const LOOP_AGENT = 'openvibe-runtime';
 // What a task asked in a public chat may be (chat/asks.js): nothing that uses the person's own computers, robots or code.
 const PUBLIC_CLASSES = ['answer', 'lookup', 'research', 'web'];
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null }) {
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
     // A question the loop asked before any tool ran (stage V2-8): the task waits in needs_you, the page shows the
     // question, and POST /tasks/:id/answer resumes this same run with the person's words.
     const asking = new Map();       // task id → resolve(answer)
+    // The waits (plan A2): the notice and the event of a wait that ended, waiting for the run it
+    // resumes. One per task: the task is queued again and the payload is taken when it starts.
+    const wakes = new Map();
+    let waits = waitsArg;
     const controls = new Map();     // task id → the run's control object (live assumptions)
     let stopped = false;
 
@@ -210,7 +214,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         const budgetLeft = () => budget - spent;
         const abortAtEnd = () => { if (running.has(id)) running.get(id).abort('timeout'); };
         // The task's own clock (Actor v2): set at creation (10 minutes by default, up to an hour for mode best).
-        const timeoutMs = Math.max(10_000, Number(row.timeout_ms) || config.taskTimeoutMs);
+        // A task that waited (plan A2) keeps the wall clock it had left when it parked: the wait was not its
+        // time to spend. Its budget clock stops while it waits, because no model runs.
+        let timeoutMs = Math.max(10_000, Number(row.timeout_ms) || config.taskTimeoutMs);
+        const parked = waits ? await waits.remaining(id) : null;
+        if (parked) timeoutMs = Math.max(10_000, Math.min(timeoutMs, parked));
         let ends = Date.now() + timeoutMs;
         let timer = setTimeout(abortAtEnd, timeoutMs);
         timer.unref();
@@ -322,6 +330,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     await tellPerson(row, 'needs_you', { what: `approve: ${summary}`, url });
                     return { pending: true, id: ask.id, url };
                 } : null;
+                // The wait that ended (plan A2), if this run was woken by one: the notice, and the event as data.
+                const wakePayload = wakes.get(id) || null;
+                if (wakePayload) wakes.delete(id);
                 let out = null;
                 const control = {};
                 controls.set(id, control);
@@ -334,7 +345,20 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         meter, budgetLeft, waitForPerson, requestApproval,
                         personText, agentId: ownAgent, notifyTask,
                         askPerson, control, resume, fork, spent: () => spent,
+                        waits, waitEvent: wakePayload,
                     });
+                    // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
+                    // ('running' is the closest state there is today), its wall clock waits with it, and its
+                    // budget clock stops because no model runs while it waits. The desk is closed with the run.
+                    if (out && out.parked) {
+                        const wait = waits ? await waits.get(out.parked.wait_id) : null;
+                        const left = Math.max(0, ends - Date.now());
+                        if (wait) await waits.setRemaining(wait.id, left);
+                        // The desk goes with the run: while the task waits, nothing holds it.
+                        await loop.close(out && out.state).catch(() => {});
+                        await emit(id, { kind: 'output', step: 'text', agent: agentId, text: 'Waiting: ' + (wait ? wait.line : 'for something') + '. Nothing runs until it arrives or the deadline passes.' });
+                        return undefined;
+                    }
                 } catch (err) {
                     if (signal && signal.aborted) throw err;
                     // The person chose "Stop the task" on an interrupted action (stage V2-9): end it cancelled, not failed.
@@ -600,6 +624,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         const capped = [];
         const failed = [];
         for (const row of rows) {
+            // A task that is waiting (plan A2) is not interrupted: it waits for its event or its deadline.
+            if (waits && await waits.hasOpenWait(row.id)) continue;
             const start = await loadStart(row, { boot: true });
             if (!start) {
                 if (row.state === 'queued' && !Number(row.resumes)) {
@@ -643,9 +669,45 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         waiting.length = 0;
     }
 
+    /**
+     * A wait ended and the task goes back to the queue (plan A2). The run starts again from its checkpoint; the
+     * notice (and the event, as untrusted data) reaches the model through the loop. The task's budget, its
+     * allow-list and its permissions are exactly what they were: a wait never widens anything.
+     */
+    async function resumeWithEvent(taskId, payload) {
+        const row = await store.getTask(s, taskId);
+        if (!row || !store.OPEN.includes(row.state)) return null;
+        const resumes = Number(row.resumes) || 0;
+        await store.updateTask(s, taskId, { state: 'queued', resumes: resumes + 1, finished_at: null });
+        wakes.set(taskId, payload || {});
+        await emit(taskId, { kind: 'state', state: 'queued' });
+        submit(taskId);
+        return row;
+    }
+
+    /** The same, with only a notice (a cancelled wait, a deadline that passed). */
+    const resumeWithNotice = (taskId, notice) => resumeWithEvent(taskId, { event: null, notice });
+
+    /** A wait that timed out with on_timeout 'fail' ends the task. */
+    async function failTask(taskId, code, detail) {
+        const row = await store.getTask(s, taskId);
+        if (!row || !store.OPEN.includes(row.state)) return null;
+        return setState(taskId, 'failed', { error_code: code, error_detail: String(detail || '').slice(0, 2000), finished_at: iso() });
+    }
+
+    /** The person is told that a wait timed out. */
+    async function notifyWaitTimeout(wait) {
+        const row = await store.getTask(s, wait.task_id);
+        if (!row) return null;
+        return tellPerson(row, 'needs_you', { what: 'the wait for "' + wait.line + '" timed out', url: config.baseUrl + '/tasks/' + wait.task_id });
+    }
+
+    /** The waits module is created after the engine (it resumes tasks), so it is set here. */
+    function setWaits(module) { waits = module; return module; }
+
     const status = () => ({ running: running.size, waiting: waiting.length });
 
-    return { submit, cancel, stop, status, answer, assume, resumeInterrupted, MAX_ATTEMPTS };
+    return { submit, cancel, stop, status, answer, assume, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, MAX_ATTEMPTS };
 }
 
 module.exports = { createEngine, MAX_ATTEMPTS };

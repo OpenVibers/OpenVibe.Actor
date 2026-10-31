@@ -119,6 +119,13 @@ async function createApp(opts = {}) {
     // Network notifications ("tell me when it's done"): off without a client secret, never able to fail a task.
     const notifier = opts.notifier || createNotifier({ config, fetchImpl, log });
     const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier, registry, checkpoints });
+    // Waits (plan A2): a wait is a record, not a running loop. The module owns the rows, the matcher, the loop
+    // guard and the deadline; the engine parks a run and resumes it when the wait ends.
+    const waits = opts.waits || require('./waits').createWaits({
+        s, config, log, now: s.now, engine,
+        events: opts.eventsClient || require('./waits/events').createEventClient({ config, port: config.port, secret: (config.events.secrets || [])[0] || '', log }),
+    });
+    engine.setWaits(waits);
     const principal = createPrincipal({ config, keys });
     const projects = opts.projects || require('./identity/projects').createProjects({ config });
     // Ask Actor from chat (chat/asks.js): chat.message.created through the events consumer below, replies through Chat.
@@ -127,7 +134,7 @@ async function createApp(opts = {}) {
         createTask: (args) => createTask({ s, config, engine, webhooks, ...args }) });
     // Each personal agent's run that passed its check also goes to its owner's Vibe chat (agents/vibe-deliver.js).
     const vibeDelivery = require('./agents/vibe-deliver').createVibeDelivery({ s, config, chat: chatClient, log });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors };
+    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;
@@ -204,7 +211,8 @@ async function createApp(opts = {}) {
     // 404 for /internal/ so this is reachable only on 127.0.0.1.
     // chat.message.created goes to chat/asks.js (ask Actor from chat); anything else is acknowledged and ignored.
     app.use('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, log,
-        onEvent: (ev) => (ev.event_type === 'chat.message.created' ? chatAsks.onEvent(ev) : 'ignored:type') }));
+        // A chat message asks Actor a question; anything else may wake a wait (plan A2).
+        onEvent: (ev) => (ev.event_type === 'chat.message.created' ? chatAsks.onEvent(ev) : waits.onEvent(ev)) }));
 
     // ── Static assets (content-hashed ?v= → immutable) ──────
     app.use('/shared', require('openvibe-shared/serve').handler());

@@ -344,7 +344,9 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         const listed = await t.get('/api/v1/tasks', { bearer: watch, headers: { 'X-OV-Subject': owner.subject } });
         assert.deepStrictEqual(listed.json().tasks.map((x) => x.id), [ok.json().id]);
         assert.strictEqual((await t.get(`/api/v1/tasks/${own.json().id}`, { bearer: watch, headers: { 'X-OV-Subject': owner.subject } })).status, 404);
-        assert.strictEqual((await t.get(`/api/v1/tasks/${own.json().id}/cancel`, { bearer: watch, headers: { 'X-OV-Subject': owner.subject }, method: 'POST' })).status, 404, 'nor cancel it');
+        // The Action Center's Cancel is the one exception (plan A2): a service acting for the person with the
+        // capability may cancel that person's task, so the Dock's button reaches it. The reads still do not.
+        assert.strictEqual((await t.get(`/api/v1/tasks/${own.json().id}/cancel`, { bearer: watch, headers: { 'X-OV-Subject': owner.subject }, method: 'POST' })).status, 200, 'but the delegated cancel reaches the task');
 
         // Only a first-party service may name a person, and only a person.
         const app = mint('app:app_01JAB2C3D4E5F6G7H8J9K0MNPT', 'app', ['actor.task.create'], { project_id: 'prj_01JAB2C3D4E5F6G7H8J9K0MNPR', env: 'production', ns: ['prj_01JAB2C3D4E5F6G7H8J9K0MNPR'] });

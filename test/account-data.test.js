@@ -94,6 +94,17 @@ async function makeOffer(t, subject, taskId, text = 'A bench case') {
     );
 }
 
+/** One wait of the task (plan A2): what a task of theirs is waiting for. */
+async function makeWait(t, subject, taskId, line = 'waiting for your Codes task on owner/repo to finish') {
+    const s = t.ctx.s;
+    const id = s.newId('wai');
+    await s.db.query(
+        "INSERT INTO actor_waits (id, task_id, requester, kind, until, filter, deadline_at, on_timeout, line, status, created_at, updated_at) VALUES ($1, $2, $3, 'event', $4::jsonb, $5::jsonb, $6, 'ask', $7, 'waiting', $8, $8)",
+        [id, taskId, `user:${subject}`, JSON.stringify({ topic: 'codes.task.*' }), JSON.stringify({ 'payload.repo': 'owner/repo' }), s.iso(Date.now() + 3600000), line, s.iso()],
+    );
+    return id;
+}
+
 (async () => {
     await check('every table that names a person is covered or exempted with a reason', async () => {
         const d = await testDb();
@@ -123,6 +134,7 @@ async function makeOffer(t, subject, taskId, text = 'A bench case') {
             await makeArtifact(t, B, bTask, 'other.md', 'B private notes');
             await makeSpan(t, aTask, 'search_web');
             await makeSpan(t, bTask, 'read_page');
+            await makeWait(t, A, aTask, 'waiting for your Codes task on owner/repo to finish');
             await makeOffer(t, A, aTask, 'A bench case');
             await makeOffer(t, B, bTask, 'B bench case');
             const ownAgent = (await personal.create(t.ctx.s, t.config, `user:${A}`, { name: 'A helper', instructions: 'Help A.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
@@ -138,7 +150,12 @@ async function makeOffer(t, subject, taskId, text = 'A bench case') {
             assert.ok(part, 'the part was pushed to Network');
             assert.strictEqual(part.auth, 'Bearer tok_actor', 'with this service\'s own token');
             assert.strictEqual(part.body.subject, A);
-            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['agent-memory.json', 'agents.json', 'artifacts-content.json', 'artifacts.json', 'bench-offers.json', 'spans.json', 'spend.json', 'tasks.json']);
+            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['agent-memory.json', 'agents.json', 'artifacts-content.json', 'artifacts.json', 'bench-offers.json', 'spans.json', 'spend.json', 'tasks.json', 'waits.json']);
+            const waits = part.body.files.find((f) => f.name === 'waits.json').content;
+            assert.strictEqual(waits.length, 1, 'only the wait of A');
+            assert.strictEqual(waits[0].requester, `user:${A}`);
+            assert.strictEqual(waits[0].line, 'waiting for your Codes task on owner/repo to finish');
+            assert.strictEqual(waits[0].task_id, aTask);
             const artifacts = part.body.files.find((f) => f.name === 'artifacts.json').content;
             assert.strictEqual(artifacts.length, 1, 'only A\'s artifact row');
             assert.strictEqual(artifacts[0].name, 'notes.md');
@@ -189,6 +206,7 @@ async function makeOffer(t, subject, taskId, text = 'A bench case') {
             await makeSpan(t, bTask);
             await makeOffer(t, A, aTask);
             await makeOffer(t, B, bTask, 'B bench case');
+            await makeWait(t, A, aTask);
             const agent = (await personal.create(t.ctx.s, t.config, `user:${A}`, { name: 'Erase me', instructions: 'Help A.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
             await personal.addMemory(t.ctx.s, `user:${A}`, agent.id, 'Erase this.');
             const db = t.ctx.s.db;
@@ -214,7 +232,7 @@ async function makeOffer(t, subject, taskId, text = 'A bench case') {
 
             const confirmation = stub.calls.find((c) => c.url === `/internal/account-deletions/${DEL}/confirmations`);
             assert.ok(confirmation, 'the confirmation was sent');
-            assert.deepStrictEqual(confirmation.body.erased, { actor_bench_offers: 1, actor_artifacts: 1, tasks: 1, spend_daily: 1, actor_agent_memory: 1, actor_agents: 1 });
+            assert.deepStrictEqual(confirmation.body.erased, { actor_bench_offers: 1, actor_artifacts: 1, tasks: 1, spend_daily: 1, actor_agent_memory: 1, actor_agents: 1, actor_waits: 1 });
             assert.deepStrictEqual(confirmation.body.retained, {});
             assert.ok(!Number.isNaN(Date.parse(confirmation.body.completed_at)));
 
