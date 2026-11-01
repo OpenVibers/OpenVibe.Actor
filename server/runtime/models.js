@@ -29,6 +29,8 @@
  * }
  */
 
+const { AsyncLocalStorage } = require('node:async_hooks');
+const { serviceAuth } = require('openvibe-contracts');
 const { chatClient, priceUsage, ProviderError } = require('../agents/providers');
 
 class ModelError extends Error {
@@ -57,6 +59,10 @@ const SMALL = { test: (m) => !FULL.has(String(m)) && SMALL_RE.test(String(m)) };
 
 const TIERS = ['fast', 'smart', 'best', 'check', 'vision'];
 const PROVIDERS = ['openai', 'deepseek', 'runtime', 'compatible', 'local'];
+// OpenVibe.AI (plan L55 C3): the gateway, NOT one of the operator's providers. It is never resolved as a tier (a
+// person who did not choose it keeps today's behaviour), and it holds no key of its own: the call goes to AI, and AI
+// answers with the person's own key (sealed in AI's vault) or with OpenVibe's.
+const AI_PROVIDER = 'openvibe-ai';
 
 /** Parse a pinned tier value: "openai:gpt-5.1", or a bare model on the first configured provider. */
 function parsePin(value) {
@@ -73,6 +79,7 @@ const clip = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n - 1
 function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = console, now = () => Date.now() } = {}) {
     const cfg = config.models || { tiers: {}, providerOrder: [], listTimeoutMs: 5000 };
     const p = config.providers || {};
+    const ai = config.ai || {};
     const order = (cfg.providerOrder && cfg.providerOrder.length ? cfg.providerOrder : PROVIDERS).filter((k) => PROVIDERS.includes(k));
     for (const k of PROVIDERS) if (!order.includes(k)) order.push(k);
 
@@ -83,6 +90,8 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         runtime: { baseUrl: trimSlash(p.runtime && p.runtime.url), apiKey: (p.runtime && p.runtime.apiKey) || '', model: (p.runtime && p.runtime.model) || '', family: 'runtime' },
         compatible: { baseUrl: trimSlash(p.compatible && p.compatible.baseUrl), apiKey: (p.compatible && p.compatible.apiKey) || '', model: (p.compatible && p.compatible.model) || '', family: 'compatible' },
         local: { baseUrl: trimSlash(p.local && p.local.url), apiKey: '', model: (p.local && p.local.model) || '', family: 'local' },
+        // OpenVibe.AI: no api key (Actor holds none), no model of its own (AI routes), one family of its own.
+        'openvibe-ai': { baseUrl: trimSlash(ai.url), apiKey: '', model: '', family: 'openvibe-ai' },
     };
     const listed = {};       // provider → the provider's model ids (as read at boot)
     const listErrors = {};   // provider → why its list could not be read
@@ -107,6 +116,11 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         if (!e.baseUrl) return { available: false, reason: `no ${key} endpoint is configured on this server` };
         if ((key === 'openai' || key === 'deepseek') && !e.apiKey) return { available: false, reason: `no ${key} key is configured on this server` };
         if ((key === 'runtime' || key === 'local') && !e.model) return { available: false, reason: `no model is configured for the ${key} endpoint` };
+        if (key === AI_PROVIDER) {
+            if (!e.baseUrl) return { available: false, reason: 'no OpenVibe.AI endpoint is configured on this server' };
+            if (!ai.clientSecret) return { available: false, reason: 'Actor has no Network client secret for OpenVibe.AI' };
+            return { available: true };
+        }
         return { available: true };
     }
 
@@ -231,8 +245,116 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         return resolveNow(tier, opts);
     }
 
+    // ── OpenVibe.AI (plan L55 C3): the person's own key ────────────────────────────────────────────
+    // The model choice of the run in flight. The store is per async context, so every model call of that run —
+    // the loop's own, the plan's, the check's — reads it, and no other run's does.
+    const choiceStore = new AsyncLocalStorage();
+    let aiTokens = null;
+
+    /** Actor's service token for OpenVibe.AI (audience openvibe.ai). Never a provider key. */
+    function aiTokenClient() {
+        if (aiTokens) return aiTokens;
+        if (!ai.clientSecret) return null;
+        aiTokens = serviceAuth.createTokenClient({
+            tokenUrl: (config.networkInternalUrl || config.networkUrl) + '/oauth/token',
+            clientId: ai.clientId, clientSecret: ai.clientSecret,
+            audience: ai.audience, scope: ai.scope, fetchImpl,
+        });
+        return aiTokens;
+    }
+
+    /** Run the rest of the work with this person's model choice in force. */
+    function withChoice(choice, fn) {
+        return choiceStore.run(choice || null, fn);
+    }
+
+    /** The choice of the run in flight, or null (today's behaviour). */
+    function currentChoice() {
+        return choiceStore.getStore() || null;
+    }
+
+    /**
+     * One call through OpenVibe.AI, on the person's own key (plan L55 C3).
+     *
+     * Actor sends no key: AI holds it, sealed, and the request names the provider and the person
+     * (x-openvibe-credential: <provider>:<subject>, the bare usr_… id AI expects — never "user:usr_…"). AI answers
+     * with that key, or refuses: the person has no key for that provider yet, and the message says where to add it.
+     */
+    async function chatViaAi({ choice, messages, tools, json, maxTokens, signal }) {
+        const tokens = aiTokenClient();
+        if (!tokens) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
+        const base = trimSlash(ai.url);
+        let host = base;
+        try { host = new URL(base).host; } catch { /* a plain host is fine */ }
+        const provider = choice.provider;
+        const body = {
+            model: choice.model || 'openvibe',
+            messages,
+            ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {}),
+            ...(json ? { response_format: { type: 'json_object' } } : {}),
+            max_tokens: Math.max(1, Math.min(Number(maxTokens) || 1500, 16000)),
+            temperature: 0.2,
+            // L37: a wish, not a pin. The provider is the one the person's own key is for, so the wish holds.
+            prefer: { provider, ...(choice.model ? { model: choice.model } : {}) },
+        };
+        const timeout = AbortSignal.timeout(ai.timeoutMs || 180_000);
+        const sig = signal ? AbortSignal.any([signal, timeout]) : timeout;
+        let res;
+        try {
+            res = await fetchImpl(base + '/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    accept: 'application/json',
+                    ...(await tokens.authHeaders()),
+                    // The person's own key for this provider, and who the person is (the bare usr_… id).
+                    'x-openvibe-credential': provider + ':' + choice.subject,
+                },
+                body: JSON.stringify(body),
+                signal: sig,
+            });
+        } catch (err) {
+            if (signal && signal.aborted) throw new ProviderError('cancelled', { code: 'actor.task.cancelled' });
+            throw new ProviderError(err && err.name === 'TimeoutError' ? 'OpenVibe.AI did not answer in time' : 'OpenVibe.AI could not be reached', { code: 'actor.provider.unreachable' });
+        }
+        const raw = await res.text();
+        let answer = null;
+        try { answer = JSON.parse(raw); } catch { /* not JSON */ }
+        if (!res.ok) {
+            const err = (answer && answer.error) || {};
+            const code = String(err.code || '');
+            const msg = String(err.message || clip(raw, 200) || ('HTTP ' + res.status));
+            // No key for that provider yet: the person adds it at AI's own site, where it is sealed.
+            if (res.status === 404 && code === 'credential.not_found') {
+                throw new ModelError('Add your ' + provider + ' key at ' + host + ' first', { code: 'actor.model.no_own_key' });
+            }
+            throw new ProviderError('HTTP ' + res.status + ': ' + clip(msg, 300), { status: res.status, code: res.status === 429 ? 'actor.provider.rate_limited' : 'actor.provider.error' });
+        }
+        if (!answer) throw new ProviderError('OpenVibe.AI answered with something that is not JSON');
+        const first = (answer.choices && answer.choices[0]) || {};
+        const message = first.message || { role: 'assistant', content: '' };
+        const u = answer.usage || {};
+        const usage = { input: u.prompt_tokens || 0, cached: 0, output: u.completion_tokens || 0 };
+        const x = answer.x_openvibe || {};
+        return {
+            message,
+            text: typeof message.content === 'string' ? message.content : '',
+            toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [],
+            finish: first.finish_reason || null,
+            model: answer.model || choice.model || 'openvibe',
+            usage,
+            // AI prices the call (it knows the provider, and whether the person's own key paid for it).
+            cost_usd: Number(x.cost_usd) || 0,
+        };
+    }
     /** One model call. The caller checks the budget first and meters cost_usd after; this layer only prices it. */
-    async function chat({ tier = 'smart', messages, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null } = {}) {
+    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null } = {}) {
+        // The person's own key (plan L55 C3): every model call of this run goes to OpenVibe.AI with it.
+        const choice = currentChoice();
+        if (choice && choice.provider) {
+            const r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal });
+            return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
+        }
         await warm();
         if (provider && !PROVIDERS.includes(provider)) throw new ModelError(`unknown model provider "${provider}"`, { code: 'actor.model.provider' });
         const d = provider && model ? descriptor(tier, provider, model) : resolve(tier, { avoidFamily });
@@ -277,11 +399,11 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     return {
-        warm, chat, resolve, tierList, modelList, resolveAll,
+        warm, chat, resolve, tierList, modelList, resolveAll, withChoice, currentChoice,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },
         listErrors: () => ({ ...listErrors }),
     };
 }
 
-module.exports = { createModels, ModelError, parsePin, PREFERRED, PREFERRED_CHECKED, TIERS, PROVIDERS };
+module.exports = { createModels, ModelError, parsePin, PREFERRED, PREFERRED_CHECKED, TIERS, PROVIDERS, AI_PROVIDER };

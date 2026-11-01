@@ -30,6 +30,7 @@ const personal = require('../agents/personal');
 const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
 const items = require('../actions/items');
+const modelPrefs = require('../runtime/model-prefs');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_ID = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -191,6 +192,34 @@ function createApi(ctx) {
         res.status(204).end();
     });
 
+    // ── The person's model choice (plan L55 C3) ─────────────────────────────────
+    // Which model their tasks run on: 'auto' (Actor decides, as today), 'openvibe' (OpenVibe's own keys, through
+    // OpenVibe.AI) or 'own:<provider>' (their OWN key for that provider, sealed in OpenVibe.AI's vault — a key never
+    // reaches Actor, and Actor never stores one).
+    //
+    // The person's own session or token, never a service: what a person spends their own key on is theirs to choose.
+    // (A service token may read it — it must know which provider to ask for — but not change it.)
+    const personOnly = (req, res, next) => {
+        const p = req.principal;
+        if (!p || p.kind !== 'user' || !p.requester || !p.requester.startsWith('user:')) {
+            return problem(req, res, 404, 'actor.model.not_found', 'No such setting.');
+        }
+        return next();
+    };
+
+    r.get('/me/model', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), async (req, res) => {
+        const row = await modelPrefs.get(s, req.principal.requester);
+        // No `keys` list: OpenVibe.AI keeps the person's keys sealed and has no route a service may ask to see which
+        // providers they hold (its own /me/credentials refuses a service token, even one acting for them). The list
+        // belongs in the AI console, where the person adds the key.
+        res.json({ ...modelPrefs.wire(row), keys: null });
+    });
+
+    r.put('/me/model', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), async (req, res) => {
+        const out = await modelPrefs.put(s, req.principal.requester, req.body || {});
+        if (out.error) return problem(req, res, 422, 'actor.model.invalid', out.error);
+        res.json({ ...modelPrefs.wire(out.row), keys: null });
+    });
     r.post('/route', limits.budget('actor.route'), (req, res) => {
         const b = req.body || {};
         if (typeof b.task !== 'string' || !b.task.trim() || b.task.length > 20000) return problem(req, res, 422, 'actor.task.invalid', 'task: the instruction in plain words (1 to 20000 characters)');
