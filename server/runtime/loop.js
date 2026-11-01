@@ -536,6 +536,15 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
      * a loop or (for a sub-agent) its cap on model calls. After every step the progress ledger decides whether to
      * replan (two stalls) or stop (three) — in code, never as the model's mood.
      */
+    /** What the person says to a running task (the chat's composer while it works): queued, said at the next turn. */
+    const steerOf = (state, ctx) => async (text) => {
+        const said = clip(String(text == null ? '' : text).trim(), 1000);
+        if (!said) return { ok: false, reason: 'nothing was said' };
+        (state.steers = state.steers || []).push(said);
+        await ctx.emit({ step: 'text', text: `You: ${clip(said, 300)}` });
+        return { ok: true };
+    };
+
     async function drive(state, ctx, { reflections = 0, maxModelCalls = Infinity } = {}) {
         const signal = state.signal;
         // Every break in this loop is a final answer: mark it before the checkpoint so a restart delivers it without
@@ -548,6 +557,10 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         };
         for (;;) {
             if (signal && signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'actor.task.cancelled' });
+            if (state.steers && state.steers.length) {
+                const said = state.steers.splice(0);
+                state.messages.push({ role: 'user', content: `While you work, the person says: ${said.join(' / ')}\nTake this into account from your next step. If it changes what they want, change course and say so in one short line.` });
+            }
             if (ctx.budgetLeft && ctx.budgetLeft() <= 0) {
                 await answered('the task reached its budget');
                 break;
@@ -937,6 +950,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 };
                 control.pending = [];
                 control.assume = applyAssumptions;
+                control.steer = steerOf(state, ctx);
                 control.plan = () => state.plan;
                 for (const text of control.pending.splice(0)) await applyAssumptions(text);
             }
@@ -1027,6 +1041,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (control && typeof control === 'object') {
             control.pending = [];
             control.assume = async (text) => { control.pending.push(String(text == null ? '' : text)); return { ok: true, queued: true }; };
+            control.steer = steerOf(state, ctx);
         }
         try {
             // Understand first (stage V2-8): one cheap call, before any tool, that sets the deliverable, the risk and

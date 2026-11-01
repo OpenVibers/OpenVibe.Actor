@@ -28,6 +28,8 @@ const { MODES } = require('../agents/router');
 const catalog = require('../agents/catalog');
 const taskEvents = require('../../public/js/task-events');
 const { sameOrigin } = require('./principal');
+const looks = require('../agents/looks');
+const glyphs = require('openvibe-shared/glyphs');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const OPEN = ['queued', 'running', 'verifying'];
@@ -128,7 +130,25 @@ function createChatPages(ctx) {
         copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></svg>',
         more: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>',
         file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7Z"/><path d="M14 3v5h5"/></svg>',
+        you: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14v10H10l-5 4Z"/></svg>',
+        open: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M10 6H6a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-4"/></svg>',
     };
+
+    /**
+     * The screen (the owner, 2026-11-01: "it has a display… you should be able to watch it and just chill while you do
+     * stuff, and steer it"): while a turn works on a desk or reads a screen, what the agent sees now, refreshed by
+     * js/chat.js, and Bot's own page to watch it live and take it over. A finished turn keeps the last picture (for an
+     * hour, in memory: agents/looks.js).
+     */
+    function screenBlock(row, events, open) {
+        const desk = open ? store.deskFrom(events) : null;
+        const look = looks.get(row.id);
+        if (!desk && !look) return open ? html`<figure class="ct-screen" data-screen hidden></figure>` : '';
+        return html`<figure class="ct-screen${open ? ' is-live' : ''}" data-screen${desk ? html` data-desk="${desk.url}"` : ''}>
+<div class="ct-screen-frame">${look ? html`<img data-look src="/tasks/${row.id}/look?at=${look.at}" alt="What Actor ${open ? 'sees now' : 'last saw'}"${look.width && look.height ? html` width="${look.width}" height="${look.height}"` : ''}>` : html`<span class="ct-screen-wait">The screen shows here as soon as Actor looks at it.</span>`}${open ? html`<span class="ct-live">Live</span>` : ''}</div>
+<figcaption><span>${open ? `What Actor sees${desk && desk.kind === 'browser' ? ' in its browser' : ''}` : 'What Actor last saw'}</span>${desk ? html`<a class="ct-watch" href="${desk.url}" target="_blank" rel="noopener">${raw(ICON.open)}Watch live and take over</a>` : ''}</figcaption>
+</figure>`;
+    }
 
     /** The work fold's rows, in order: a plan step, a note the agent wrote, or a tool call with what it returned. */
     function workRows(lines) {
@@ -137,6 +157,7 @@ function createChatPages(ctx) {
         const rows = [];
         for (const l of lines) {
             if (l.t === 'step') rows.push(html`<li class="cw-step">${raw(ICON.step)}<span>${l.text}</span></li>`);
+            else if (l.t === 'text' && /^You: /.test(l.text)) rows.push(html`<li class="cw-you">${raw(ICON.you)}<p>${clip(l.text.slice(5), 300)}</p></li>`);
             else if (l.t === 'text') rows.push(html`<li class="cw-note">${raw(ICON.note)}<p>${clip(l.text, 700)}</p></li>`);
             else if (l.t === 'note') rows.push(html`<li class="cw-note is-${l.level || 'info'}">${raw(ICON.note)}<p>${clip(l.text, 400)}</p></li>`);
             else if (l.t === 'handoff') rows.push(html`<li class="cw-step">${raw(ICON.step)}<span>Handed to ${l.to || 'another agent'}${l.reason ? `: ${clip(l.reason, 160)}` : ''}</span></li>`);
@@ -210,11 +231,11 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
         const evs = events || await store.eventsAfter(s, row.id, 0);
         const open = OPEN.includes(row.state);
         let reply;
-        if (row.state === 'succeeded') reply = html`${workBlock(row, evs, false)}${answerBlock(row, t)}`;
+        if (row.state === 'succeeded') reply = html`${workBlock(row, evs, false)}${screenBlock(row, evs, false)}${answerBlock(row, t)}`;
         else if (row.state === 'needs_you') reply = html`${workBlock(row, evs, false)}${questionBlock(row, evs)}`;
         else if (row.state === 'failed') reply = html`${workBlock(row, evs, false)}${failedBlock(row, t)}`;
         else if (row.state === 'cancelled') reply = html`${workBlock(row, evs, false)}<p class="ct-stopped">Stopped. What it spent before stopping stays spent.</p>`;
-        else reply = workBlock(row, evs, true);
+        else reply = html`${workBlock(row, evs, true)}${screenBlock(row, evs, true)}`;
         return html`<li class="ct-turn state-${row.state}" id="t-${row.id}" data-task="${row.id}" data-state="${row.state}" data-last="${row.last_seq}"${open ? raw(' data-open') : ''}>
 <div class="ct-you"><p class="ct-bubble">${row.task}</p></div>
 <div class="ct-bot"><span class="ct-avatar" aria-hidden="true"></span><div class="ct-reply">${reply}</div></div>
@@ -241,27 +262,36 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 </aside>`;
     }
 
-    function composer({ parent = null, mode = 'balanced', busy = false, problem = null, text = '' } = {}) {
-        return html`<form class="cc" method="post" action="/chat" data-composer${busy ? raw(' data-busy') : ''}>
+    function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '' } = {}) {
+        return html`<form class="cc" method="post" action="${working ? `/chat/${working}/steer` : '/chat'}" data-composer${busy ? raw(' data-busy') : ''}>
 ${problem ? html`<p class="cc-problem" role="alert">${problem}</p>` : ''}
 ${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}
 <div class="cc-box">
 <label class="sr-only" for="cc-text">Message Actor</label>
-<textarea id="cc-text" name="task" rows="1" maxlength="20000" required placeholder="${parent ? 'Reply to Actor' : 'Ask Actor to do something'}" data-cc-text>${text}</textarea>
+<textarea id="cc-text" name="task" rows="1" maxlength="20000" required placeholder="${working ? 'Tell Actor something while it works' : parent ? 'Reply to Actor' : 'Ask Actor to do something'}" data-cc-text>${text}</textarea>
 <div class="cc-row">
 <label class="cc-mode" title="How Actor picks the agent"><span class="sr-only">Mode</span><select name="mode" data-cc-mode>${MODES.map((m) => html`<option value="${m}" title="${MODE_HINT[m] || ''}"${m === mode ? raw(' selected') : ''}>${MODE_LABEL[m] || m}</option>`)}</select></label>
 <span class="cc-note" data-cc-note></span>
+${working ? html`<button class="cc-stop" type="submit" formaction="/tasks/${working}/cancel" formnovalidate aria-label="Stop" data-cc-stop>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>')}</button>` : html`<button class="cc-stop" type="button" aria-label="Stop" data-cc-stop hidden>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>')}</button>`}
 <button class="cc-send" type="submit" aria-label="Send" data-cc-send>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>')}</button>
 </div></div>
 <p class="cc-fine">Actor checks each answer with a second model. ${config.allowance ? `Free: ${config.allowance.tasksPerDay} tasks a day.` : ''}</p>
 </form>`;
     }
 
+    // What people really hand agents like this (the owner, 2026-11-01: "I hate the current examples… search what
+    // people use Grok-style agents for"; research the same day: OpenAI's agent launch, Manus reviews and Perplexity's
+    // Comet usage study put travel, shopping and deals, fact-checks and research, watching for something, and lists
+    // first). Each one only fills the box: nothing runs until the person sends it.
     const STARTERS = [
-        ['Check a domain', 'Who handles the mail for openvibe.network, and is DMARC set up?'],
-        ['Read a page', 'Read https://openvibe.live and tell me in three lines what it is.'],
-        ['Work something out', 'What is 18% of 2,450, and what is that per month over a year?'],
-        ['Plan', 'Plan a 20-minute stream: an opening, three segments and a close.'],
+        ['airplane', 'Find a flight', 'Find the cheapest round trip from New York to Tokyo in March. Show me the best three and stop before paying.'],
+        ['check-circle', 'Is this true?', 'Fact-check this with real sources, and tell me what is true, what is false and what is unclear: '],
+        ['cart', 'Best deal', 'Compare the five best standing desks under $500: price, reviews, and where each is cheapest today.'],
+        ['eye', 'Watch for it', 'Watch eBay for a used RTX 4090 under $900 and tell me the moment one is listed.'],
+        ['map', 'Plan a trip', 'Plan a weekend in Lisbon for two: a hotel under $150 a night, where to eat, and a plan for each day.'],
+        ['table', 'Make a list', 'Make a table of 20 small gaming streamers (under 10k followers) with their channel links and when they stream.'],
+        ['news', 'What\'s the buzz', 'What are people saying about the newest iPhone today on Reddit, X and the news? Give me the short version.'],
+        ['globe', 'Use a website', 'Open openvibe.live, find a channel that is live right now, and tell me what is happening on it.'],
     ];
 
     async function render(req, res, { row = null, problem = null, text = '', status = 200 } = {}) {
@@ -283,10 +313,10 @@ ${sidebar(chats, first ? first.id : null)}
 <header class="ct-head"><button type="button" class="ct-menu" data-cs-open aria-controls="chats" aria-expanded="false">${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>')}<span class="sr-only">Your chats</span></button>
 <h1 class="ct-title">${title}</h1>${first ? html`<a class="ct-new" href="/chat" aria-label="New chat">${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>')}</a>` : ''}</header>
 <div class="ct-scroll" data-scroll>
-${turns.length ? html`<ol class="ct-thread" data-thread>${turnHtmls}</ol>` : html`<div class="ct-hello"><span class="ct-hello-mark" aria-hidden="true"></span><h2>What should Actor do?</h2><p>Ask in plain words. Actor picks the agent and the tools, checks the answer, and shows what it cost.</p>
-<ul class="ct-starters">${STARTERS.map(([k, v]) => html`<li><button type="button" data-starter="${v}"><b>${k}</b><span>${v}</span></button></li>`)}</ul></div>`}
+${turns.length ? html`<ol class="ct-thread" data-thread>${turnHtmls}</ol>` : html`<div class="ct-hello"><span class="ct-hello-mark" aria-hidden="true"></span><h2>What should Actor do?</h2><p>It browses, clicks and types for you. Watch it work, steer it, or go do something else.</p>
+<ul class="ct-starters">${STARTERS.map(([icon, k, v]) => html`<li><button type="button" data-starter="${v}">${raw(glyphs.svg(icon, { size: 20 }))}<b>${k}</b><span>${v}</span></button></li>`)}</ul></div>`}
 </div>
-${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, problem, text })}
+${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text })}
 </section>
 </div>`,
         });
@@ -315,6 +345,20 @@ ${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mo
         const row = TASK_ID.test(req.params.id) ? await store.getTask(s, req.params.id) : null;
         if (!row || row.requester !== requesterOf(req)) return render(req, res, { status: 404, problem: 'That chat is not here: it may have expired (tasks are kept 30 days) or belong to someone else.' });
         return render(req, res, { row });
+    });
+
+    // Words for the turn that is working (the composer while Actor works): the run hears them at its next step.
+    r.post('/chat/:id/steer', express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        const wantsJson = String(req.get('accept') || '').includes('application/json');
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return wantsJson ? res.status(401).json({ error: 'Sign in first.' }) : res.redirect(303, '/auth/login?next=%2Fchat');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('A message must be sent from openvibe.actor itself.');
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req)) return wantsJson ? res.status(404).json({ error: 'That chat is not here.' }) : res.redirect(303, '/chat');
+        const text = String((req.body && req.body.task) || '').trim().slice(0, 1000);
+        const out = text && OPEN.includes(row.state) ? await engine.steer(row.id, text) : { ok: false, reason: text ? 'it has finished' : 'nothing was said' };
+        if (wantsJson) return res.status(out.ok ? 202 : 409).json(out.ok ? { ok: true } : { error: out.reason === 'it has finished' ? 'Actor already finished that one. Send it as a new message.' : 'Actor could not take that just now.' });
+        return res.redirect(303, `/chat/${row.id}#t-${row.id}`);
     });
 
     const PROBLEM = {

@@ -51,31 +51,38 @@ const MODE_TEXT = {
 };
 const MODE_LABEL = { cheapest: 'Cheapest', balanced: 'Balanced', best: 'Best', fastest: 'Fastest', private: 'Private' };
 const STATE_KIND = { queued: '', running: 'info', verifying: 'info', succeeded: 'ok', failed: 'bad', cancelled: '' };
+// What people really hand agents like this (the owner, 2026-11-01: "I hate all the current examples… people aren't
+// gonna use it for that… search what people use Grok-style agents for"; research the same day: OpenAI's agent launch,
+// Manus reviews and Perplexity's Comet usage study put travel and bookings, shopping and deals, fact-checks and
+// research, watching for something, and lists and tables first). The chat's starters are the same set.
 const EXAMPLES = [
-    'Who handles the mail for openvibe.network, and are its SPF and DMARC records set up properly?',
-    'What changed in the latest Node.js LTS release? Give me the three changes that matter most, with sources.',
-    'Explain the difference between a mutex and a semaphore with a short example.',
-    'Is the TLS certificate of example.com valid, and when does it expire?',
+    'Find the cheapest round trip from New York to Tokyo in March. Show me the best three and stop before paying.',
+    'Compare the five best standing desks under $500: price, reviews, and where each is cheapest today.',
+    'Fact-check this with real sources, and tell me what is true, what is false and what is unclear: ',
+    'Watch eBay for a used RTX 4090 under $900 and tell me the moment one is listed.',
 ];
 
-// Tasks to start from, by what they need. Each one works today. On the home they are a rail of cards (kit.card): a short
-// title, the kind as the badge and the card type's icon; the card's link puts the whole task in the task box, ready to run
-// or change. What a robot, computer, desk or private task needs is said in the box once that task is chosen (NEEDS).
+// Tasks to start from, by what they need. On the home they are a rail of cards (kit.card): a short title, the kind as
+// the badge and the card type's icon; the card's link puts the whole task in the task box, ready to run or change. What a
+// robot, computer, desk or private task needs is said in the box once that task is chosen (NEEDS).
 const TEMPLATES = [
-    { group: 'Look it up', badge: 'Lookup', type: 'domain', items: [
-        { title: 'Check a domain\'s mail setup', text: EXAMPLES[0] },
-        { title: 'Is a site\'s certificate valid?', text: EXAMPLES[3] },
+    { group: 'Book and buy', badge: 'Errand', type: 'site', items: [
+        { title: 'The cheapest flight to Tokyo in March', text: EXAMPLES[0] },
+        { title: 'The best standing desk under $500', text: EXAMPLES[1] },
     ] },
-    { group: 'Research with sources', badge: 'Research', type: 'report', items: [
-        { title: 'What changed in the latest Node.js LTS', text: EXAMPLES[1] },
-        { title: 'Which licences let you sell hosted copies', text: 'Which open-source licences let me sell hosted copies of the software? Compare MIT, Apache-2.0, GPL-3.0 and AGPL-3.0, with sources.' },
+    { group: 'Check and research', badge: 'Research', type: 'report', items: [
+        { title: 'Is this true? Check it with sources', text: EXAMPLES[2] },
+        { title: 'What people say about the new iPhone today', text: 'What are people saying about the newest iPhone today on Reddit, X and the news? Give me the short version.' },
     ] },
-    { group: 'Write and explain', badge: 'Write', type: 'post', items: [
-        { title: 'A mutex and a semaphore, explained', text: EXAMPLES[2] },
-        { title: 'A note telling viewers the stream moves', text: 'Write a short, friendly note telling my viewers the stream starts an hour later on Friday.', mode: 'cheapest' },
+    { group: 'Watch for it', badge: 'Watch', type: 'cam', items: [
+        { title: 'A used RTX 4090 under $900 on eBay', text: EXAMPLES[3] },
+    ] },
+    { group: 'Plan and list', badge: 'Plan', type: 'post', items: [
+        { title: 'A weekend in Lisbon for two', text: 'Plan a weekend in Lisbon for two: a hotel under $150 a night, where to eat, and a plan for each day.' },
+        { title: '20 small gaming streamers, in a table', text: 'Make a table of 20 small gaming streamers (under 10k followers) with their channel links and when they stream.' },
     ] },
     { group: 'Across OpenVibe', badge: 'OpenVibe', type: 'stream', items: [
-        { title: 'The best posts and clips on Pi robots', text: 'Find recent posts and clips on OpenVibe about Raspberry Pi robots, and link the best three.' },
+        { title: 'Who is live on OpenVibe, and about what', text: 'Open openvibe.live, find the channels that are live right now, and tell me what is happening on each.' },
     ] },
     { group: 'Your robot', badge: 'Robot', type: 'toy', needs: 'Turn on Your agent on the robot\'s panel first.', items: [
         { title: 'Drive your rover and say hello', text: 'Drive my rover forward for two seconds, turn on its headlights, then say hello.' },
@@ -84,7 +91,6 @@ const TEMPLATES = [
         { title: 'The ten largest files in your Downloads', text: 'On my computer, list the ten largest files in my Downloads folder.' },
     ] },
     { group: 'On a desk of its own', badge: 'Desk', type: 'cam', needs: 'Needs a computer or desk host with the OpenVibe Node\'s computer plugin. Watch the desk and take it over from the task.', items: [
-        { title: 'Who is live on OpenVibe, and about what', text: 'On my computer, open openvibe.live in your own browser on a desk of your own, and tell me who is live right now and what each stream is about.' },
         { title: 'Sign in on its desk, then read your account', text: 'On my computer, open the sign-in page of <a site I use> on your desk and hand it to me to sign in; then tell me what my account page shows.' },
     ] },
     { group: 'Private', badge: 'Private', type: 'person', needs: 'Answered on OpenVibe\'s own model; nothing leaves OpenVibe.', items: [
@@ -571,8 +577,8 @@ ${raw(foldBlock({
     function routerCard(agents) {
         const shown = agents.filter((a) => a.id !== 'codes');
         return html`<figure class="router-card" aria-label="How Actor picked an agent for a sample task">
-<figcaption><span class="muted small">Sample task · Balanced</span><b>“Who handles the mail for openvibe.network, and is DMARC set up?”</b></figcaption>
-<ol>${shown.map((a, i) => html`<li class="${i === 0 ? 'pick' : ''}"><span class="rc-name">${a.name}</span><span class="rc-cost">~${usd(catalog.typicalCost(a.id, config))}</span><span class="rc-why">${i === 0 ? 'can run the DNS tools; cheapest that can' : a.can.includes('task:lookup') ? 'can do it, costs more' : 'cannot run lookups'}</span></li>`)}</ol>
+<figcaption><span class="muted small">Sample task · Balanced</span><b>“Find the best standing desk under $500, and where it is cheapest today.”</b></figcaption>
+<ol>${shown.map((a, i) => html`<li class="${i === 0 ? 'pick' : ''}"><span class="rc-name">${a.name}</span><span class="rc-cost">~${usd(catalog.typicalCost(a.id, config))}</span><span class="rc-why">${i === 0 ? 'searches and reads the shops; cheapest that can' : a.can.includes('task:lookup') ? 'can do it, costs more' : 'cannot run lookups'}</span></li>`)}</ol>
 <p class="rc-foot">Checked by a second model before you see it.</p></figure>`;
     }
 

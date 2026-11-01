@@ -146,6 +146,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         return await control.assume(text);
     }
 
+    /** Words for a running task (the chat's composer while it works): the run hears them at its next turn. */
+    async function steer(id, text) {
+        const control = controls.get(id);
+        if (!control || typeof control.steer !== 'function') return { ok: false, reason: 'this task is not running' };
+        return await control.steer(text);
+    }
+
     function submit(id) {
         if (stopped) return;
         waiting.push(id);
@@ -707,7 +714,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
 
     const status = () => ({ running: running.size, waiting: waiting.length });
 
-    return { submit, cancel, stop, status, answer, assume, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, MAX_ATTEMPTS };
+    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, MAX_ATTEMPTS };
 }
 
 module.exports = { createEngine, MAX_ATTEMPTS };

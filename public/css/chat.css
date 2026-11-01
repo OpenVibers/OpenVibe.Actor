@@ -150,7 +150,6 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 .ct-starters button:hover { border-color: var(--accent, #f97316); }
 .ct-starters b { font-size: 14px; }
 .ct-starters span { font-size: 13.5px; line-height: 1.45; color: var(--text-secondary, #a8b3c4); }
-@media (max-width: 560px) { .ct-starters { grid-template-columns: minmax(0, 1fr); } }
 
 /* The composer: at the bottom of the screen, above the app bar. */
 .cc { position: sticky; bottom: var(--ovnav-appbar-h, 0px); z-index: 15; padding: 10px max(12px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
@@ -172,7 +171,10 @@ html.ov-has-appbar .cc { padding-bottom: 8px; }
 .cc-send svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .cc-send:active { transform: scale(.92); }
 .cc-send:disabled { opacity: .45; cursor: default; }
-.cc-send.is-stop { background: var(--text-primary, #e6edf7); color: var(--bg-primary, #0a0f1c); }
+.cc-stop { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg-secondary, #0f1729); color: var(--text-primary, #e6edf7); }
+.cc-stop[hidden] { display: none; }
+.cc-stop svg { width: 16px; height: 16px; fill: currentColor; }
+.cc-stop:hover { border-color: var(--error, #ef4444); color: var(--error-text, var(--error, #ef4444)); }
 .cc-problem { max-width: 780px; margin: 0 auto 8px; padding: 8px 12px; border-radius: 12px; background: color-mix(in srgb, var(--warning, #f59e0b) 14%, var(--bg-card, #131c2e)); font-size: 14px; }
 .cc-fine { max-width: 780px; margin: 6px auto 0; text-align: center; font-size: 12px; color: var(--text-muted, #7386a3); }
 @media (max-width: 560px) { .cc-fine { display: none; } }
@@ -187,3 +189,28 @@ html.ov-has-appbar .cc { padding-bottom: 8px; }
     .cw-live, .cw-tool.is-run b { color: var(--text-primary, #e6edf7); background: none; }
 }
 html[data-ov-motion=reduced] .ct-answer.is-reveal > * { animation: none !important; }
+
+/* What the person said while it worked, in its list. */
+.cw-you p { margin: 0; padding: 4px 10px; border-radius: 12px; background: color-mix(in srgb, var(--accent, #f97316) 14%, var(--bg-card, #131c2e)); color: var(--text-primary, #e6edf7); overflow-wrap: anywhere; justify-self: start; }
+.cw-you { color: var(--accent, #f97316); }
+.cw-you.is-sending p { opacity: .6; }
+
+/* The screen: what Actor sees while it works, with Bot's live view one tap away. */
+.ct-screen { margin: 0; display: grid; gap: 6px; }
+.ct-screen[hidden] { display: none; }
+.ct-screen-frame { position: relative; overflow: hidden; border-radius: 14px; border: 1px solid var(--line); background: #05070d; aspect-ratio: 16 / 10; display: grid; place-items: center; }
+.ct-screen-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.ct-screen-wait { padding: 16px; font-size: 14px; text-align: center; color: var(--text-muted, #7386a3); }
+.ct-live { position: absolute; top: 8px; left: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, .6); color: #fff; font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.ct-live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #ef4444; animation: ct-breathe 1.4s ease-in-out infinite; }
+.ct-screen figcaption { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-size: 13px; color: var(--text-muted, #7386a3); }
+.ct-watch { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent, #f97316) 55%, var(--line)); color: var(--text-primary, #e6edf7); font-weight: 600; text-decoration: none; }
+.ct-watch:hover { background: color-mix(in srgb, var(--accent, #f97316) 14%, transparent); }
+.ct-watch svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ct-screen:not(.is-live) .ct-screen-frame { max-width: 420px; }
+
+/* The starters carry the set's own glyphs. */
+.ct-starters button { grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; align-items: start; }
+.ct-starters button svg { grid-row: span 2; margin-top: 1px; color: var(--accent, #f97316); }
+.ct-starters span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 560px) { .ct-starters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .ct-starters button { padding: 10px 11px; grid-template-columns: minmax(0, 1fr); } .ct-starters button svg { grid-row: auto; } .ct-starters span { font-size: 12.5px; } }
