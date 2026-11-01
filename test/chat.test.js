@@ -150,6 +150,8 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.match(js, /\(hover: hover\) and \(pointer: fine\)/, 'Enter sends only with a keyboard and mouse; a phone\'s Enter is a new line');
             assert.match(js, /prefers-reduced-motion: reduce/);
             assert.match(js, /function streamIn\(ans\)/, 'the checked answer streams in word by word');
+            assert.match(js, /copy\(ans \? plainText\(ans\) : '', b\)/, 'Copy takes the answer as text…');
+            assert.match(js, /c\.querySelectorAll\('\.evs, \.ct-copy-code'\)/, '…without the citation chips\' numbers or the code blocks\' Copy buttons');
             assert.match(js, /if \(ans && !reduce && !document\.documentElement\.hasAttribute\('data-ov-motion'\)\) streamIn\(ans\)/, 'not under reduced motion');
             const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'css', 'chat.css'), 'utf8');
             assert.match(css, /\.ct-answer\.is-streaming \.sw \{ opacity: 0;/, 'only opacity: a screen reader reads it all at once');
