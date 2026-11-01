@@ -428,7 +428,11 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
         const signed = viewer.kind === 'user' && viewer.subject;
         // A template link (/?task=…&mode=…#task) fills the task box; the page itself stays the canonical /.
         if (!form.text && typeof query.task === 'string') form = { text: query.task.slice(0, 2000), mode: MODES.includes(query.mode) ? query.mode : 'balanced' };
-        const working = agents.filter((a) => a.available).length;
+        // Real numbers (the owner, 2026-11-01: "are you sure this number is correct?"): the agents Actor can pick from
+        // right now, and the tasks running this minute (zero is left out of the strip, so an idle Actor claims nothing).
+        const ready = agents.filter((a) => a.available).length;
+        const st = engine && typeof engine.status === 'function' ? engine.status() : null;
+        const running = st ? (Number(st.running) || 0) + (Number(st.waiting) || 0) : 0;
         const faq = faqItems(agents);
         const hero = showcase.hero({
             eyebrow: 'OpenVibe.Actor · your agent for everything · alpha',
@@ -440,7 +444,8 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
         });
         // One strip of numbers (it scrolls sideways on a phone instead of stacking four tiles); zero is left out.
         const stats = kit.stats([
-            [working, working === 1 ? 'agent working now' : 'agents working now', '#agents'],
+            [running, running === 1 ? 'task running now' : 'tasks running now', '/tasks'],
+            [ready, ready === 1 ? 'agent to choose from' : 'agents to choose from', '#agents'],
             [tools.length, 'tools it can run', '#tools'],
             [MODES.length, 'ways to choose', '/agents#modes'],
             [tier.tasksPerDay, 'free tasks a day', '#faq'],
@@ -554,7 +559,7 @@ ${raw(foldBlock({
         return [
             ['What does OpenVibe.Actor do?', 'You describe a task in plain words. Actor sorts it, picks the agent that can do it best within your budget and mode, runs it while you watch its steps, has a second model check the answer, and shows you the answer with its sources, what it cost and why that agent.'],
             ['What does it cost?', `The free tier gives ${tier.tasksPerDay} tasks a day, up to ${usd(tier.perTaskUsd)} each, with no card. Every task shows its real cost to a fraction of a cent.`],
-            list ? ['Which agents does it use?', `${list} are working now. The agents page lists each one with its price per million tokens and what it can do.`] : null,
+            list ? ['Which agents does it use?', `${list} are ready to pick from. The agents page lists each one with its price per million tokens and what it can do.`] : null,
             ['Is the answer checked?', 'Yes. A second model reads every answer before you see it, from another model family where one is available. An answer that fails its check goes to the next agent that can do the task.'],
             ['What is private mode?', 'Private mode uses only an open model on OpenVibe\'s own server, so the task never leaves OpenVibe. It is for short answers; tasks that need search or tools go to the other agents in the other modes.'],
             ['Can it use my computer or my robot?', 'Only if you turn it on. On openvibe.bot you let your agent use a computer or drive a robot, one at a time. On a computer at the ask level, each program or write waits for your approval on that computer.'],

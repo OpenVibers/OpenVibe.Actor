@@ -5,7 +5,7 @@
  * tool and input three times) or the answer. No 10-turn cap.
  */
 const assert = require('assert');
-const { createLoop, SYSTEM, withoutMeta } = require('../server/runtime/loop');
+const { createLoop, SYSTEM, withoutMeta, splitCheck } = require('../server/runtime/loop');
 const configLib = require('../server/config');
 
 const results = [];
@@ -199,6 +199,21 @@ const runArgs = (m, extra = {}) => ({
         assert.match(prompt, /state the facts the evidence supports, with their \[E#\], and leave the rest out/);
         // Nothing in the prompt asks the model to narrate what it could not ground.
         assert.ok(!/tell the person what you could not verify/i.test(prompt));
+    });
+
+    await ok('a reflection written out before a "Final answer" heading is the check, not the answer (2026-11-01)', async () => {
+        const leaked = 'None of the claims in the existing draft are live facts, so no evidence is required, no tools need to be called.\n\n'
+            + '**Claim-by-claim reflection**\n\nYour rule applies to:\n\n- Prices\n- Scores or standings\n\nThe draft I gave earlier only contains:\n\n- Descriptions of my capabilities\n\n'
+            + 'Therefore:\n\n- There are **no claims that need tool-backed evidence or [E#] citations**.\n\n'
+            + '**Final answer (unchanged in substance, now with your constraints in mind)**\n\n'
+            + 'I can help you think, create, fix, and decide.\n\nIf you tell me what you are working on, I can start.';
+        assert.strictEqual(withoutMeta(leaked), 'I can help you think, create, fix, and decide.\n\nIf you tell me what you are working on, I can start.');
+        assert.match(splitCheck(leaked).check, /^None of the claims/);
+        assert.match(splitCheck(leaked).check, /no claims that need tool-backed evidence/);
+        // A heading named "Final answer" in an answer that has no check before it stays as it is.
+        const plain = 'Here are the scores.\n\n## Final answer\nArsenal won 2–1 [E1].';
+        assert.strictEqual(splitCheck(plain).text, plain);
+        assert.strictEqual(splitCheck('Final answer: 42 [E1].').text, 'Final answer: 42 [E1].');
     });
 
     await ok('a grounding preamble or postamble is dropped, a cited fact paragraph is not', async () => {
