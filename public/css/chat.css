@@ -106,7 +106,8 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 .ct-answer .ev { display: inline-grid; place-items: center; min-width: 1.4em; height: 1.4em; padding: 0 .3em; margin: 0 .08em; border-radius: 6px; font-size: .72em; font-weight: 700; vertical-align: .18em;
     background: color-mix(in srgb, var(--accent, #f97316) 16%, transparent); color: var(--text-secondary, #b4c0d4); text-decoration: none; }
 .ct-answer .ev:hover { background: color-mix(in srgb, var(--accent, #f97316) 32%, transparent); color: var(--text-primary, #e6edf7); }
-.ct-answer.is-reveal > * { animation: ct-reveal .5s cubic-bezier(.2, .8, .2, 1) both; }
+.ct-answer.is-streaming .sw { opacity: 0; transition: opacity .28s ease-out; }
+.ct-answer.is-streaming .sw.on { opacity: 1; }
 .ct-copy-code { position: absolute; top: 6px; right: 6px; padding: 3px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-card, #131c2e); color: var(--text-secondary, #96a7c2); font-size: 12px; opacity: .85; }
 .ct-copy-code:hover { opacity: 1; color: var(--text-primary, #e6edf7); }
 
@@ -185,10 +186,11 @@ html.ov-has-appbar .cc { padding-bottom: 8px; }
 @keyframes ct-reveal { from { opacity: 0; transform: translateY(4px); filter: blur(3px); } to { opacity: 1; transform: none; filter: none; } }
 @media (prefers-reduced-motion: reduce) {
     .cs, .cw-chev, .cc-box, .cc-send { transition: none; }
-    .cs-dot, .ct-avatar, .cw-live, .cw-tool.is-run b, .ct-hello-mark, .ct-turn.is-new .ct-bubble, .cw-list > li, .ct-answer.is-reveal > * { animation: none !important; }
+    .cs-dot, .ct-avatar, .cw-live, .cw-tool.is-run b, .ct-hello-mark, .ct-turn.is-new .ct-bubble, .cw-list > li { animation: none !important; }
+    .ct-answer.is-streaming .sw { opacity: 1 !important; transition: none !important; }
     .cw-live, .cw-tool.is-run b { color: var(--text-primary, #e6edf7); background: none; }
 }
-html[data-ov-motion=reduced] .ct-answer.is-reveal > * { animation: none !important; }
+html[data-ov-motion=reduced] .ct-answer.is-streaming .sw { opacity: 1 !important; transition: none !important; }
 
 /* What the person said while it worked, in its list. */
 .cw-you p { margin: 0; padding: 4px 10px; border-radius: 12px; background: color-mix(in srgb, var(--accent, #f97316) 14%, var(--bg-card, #131c2e)); color: var(--text-primary, #e6edf7); overflow-wrap: anywhere; justify-self: start; }

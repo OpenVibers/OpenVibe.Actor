@@ -220,7 +220,7 @@
                         stopScreen(turn);
                         turn.replaceWith(next);
                         var ans = next.querySelector('[data-answer]');
-                        if (ans && !reduce) { ans.classList.add('is-reveal'); Array.prototype.forEach.call(ans.children, function (c, i) { c.style.animationDelay = Math.min(i, 14) * 55 + 'ms'; }); }
+                        if (ans && !reduce && !document.documentElement.hasAttribute('data-ov-motion')) streamIn(ans);
                         decorate(next);
                         var dot = chat.querySelector('.cs-list a[aria-current] .cs-dot'); if (dot) dot.remove();
                         if (note) note.textContent = '';
@@ -288,6 +288,38 @@
             src.onerror = function () { if (src.readyState === 2) setTimeout(function () { refresh(turn); }, 3000); };
         }
         chat.querySelectorAll('.ct-turn[data-open]').forEach(function (t) { follow(t); });
+
+        // ── The answer streams in (the owner, 2026-11-01: "text streams in, with nice effects"). Actor shows an answer
+        // only once a second model has checked it, so the words arrive together; they are revealed word by word, fast
+        // (about a second for a long answer), the way a chat app types. Code blocks and tables come in whole. Nothing
+        // is hidden from a screen reader: only opacity changes.
+        function streamIn(ans) {
+            var words = [];
+            var walker = document.createTreeWalker(ans, NodeFilter.SHOW_TEXT, { acceptNode: function (n) { return n.parentNode.closest('pre, table, .evs') ? NodeFilter.FILTER_REJECT : (/\S/.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT); } });
+            var nodes = [];
+            while (walker.nextNode()) nodes.push(walker.currentNode);
+            nodes.forEach(function (n) {
+                var frag = document.createDocumentFragment();
+                n.nodeValue.split(/(\s+)/).forEach(function (part) {
+                    if (!part) return;
+                    if (/^\s+$/.test(part)) { frag.appendChild(document.createTextNode(part)); return; }
+                    var w = document.createElement('span'); w.className = 'sw'; w.textContent = part; frag.appendChild(w); words.push(w);
+                });
+                n.parentNode.replaceChild(frag, n);
+            });
+            var blocks = Array.prototype.slice.call(ans.querySelectorAll('pre, table, .evs, img'));
+            blocks.forEach(function (b) { b.classList.add('sw'); });
+            var all = words.concat(blocks);
+            if (!all.length) return;
+            ans.classList.add('is-streaming');
+            var per = Math.max(2, Math.ceil(words.length / 45)), i = 0;   // about 45 frames, whatever the length
+            (function step() {
+                for (var k = 0; k < per && i < words.length; k++, i++) words[i].classList.add('on');
+                blocks.forEach(function (b) { if (!b.classList.contains('on') && (b.compareDocumentPosition(words[Math.max(0, i - 1)]) & Node.DOCUMENT_POSITION_FOLLOWING)) b.classList.add('on'); });
+                if (i < words.length) requestAnimationFrame(step);
+                else { all.forEach(function (w) { w.classList.add('on'); }); setTimeout(function () { ans.classList.remove('is-streaming'); }, 300); }
+            })();
+        }
 
         // ── Copy: an answer, and each code block in it.
         function decorate(rootEl) {
