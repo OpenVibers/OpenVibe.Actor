@@ -150,3 +150,21 @@ button.sc-btn.sc-primary { border: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .tl-item, .dot-pulse { animation: none; } .mode span { transition: none; } }
 
+
+/* /agents: who does the work, as plain cards (plan L55; the owner, 2026-11-01: "so confusing"). */
+.ag-lede { max-width: 68ch; color: var(--text-secondary, #96a7c2); }
+.ag-cards { list-style: none; margin: 16px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+.ag-card { display: grid; gap: 8px; align-content: start; padding: 14px 16px; border-radius: 16px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); scroll-margin-top: 80px; }
+.ag-card:target { border-color: var(--accent, #f97316); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #f97316) 22%, transparent); }
+.ag-card.is-off { opacity: .7; }
+.ag-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 1.05rem; }
+.ag-card .agent-blurb { margin: 0; font-size: .95rem; color: var(--text-secondary, #b4c0d4); }
+.ag-facts { display: grid; gap: 6px; margin: 0; font-size: .92rem; }
+.ag-facts > div { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 8px; }
+.ag-facts dt { color: var(--text-muted, #7386a3); }
+.ag-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ag-chip { display: inline-block; margin: 0 4px 4px 0; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent, #f97316) 14%, transparent); font-size: .85rem; }
+.ag-id { margin: 0; }
+.ag-soon { padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--accent, #f97316) 10%, var(--bg-card, #131c2e)); }
+.ag-fold { margin: 10px 0; padding: 4px 14px; border-radius: 12px; border: 1px solid var(--border, #1f2d47); }
+.ag-fold > summary { cursor: pointer; padding: 8px 0; font-weight: 650; }
