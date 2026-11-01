@@ -26,7 +26,7 @@ const KEY = crypto.randomBytes(32).toString('hex');
 const SAME = { 'sec-fetch-site': 'same-origin' };
 const SELF = 'user:usr_01JZ0000000000000000000AAA';
 const quiet = { log() {}, info() {}, warn() {}, error() {} };
-const taskIdOf = (res) => String(res.headers.get('location') || '').split('/').filter(Boolean).pop();
+const taskIdOf = (res) => String(res.headers.get('location') || '').split('#')[0].split('/').filter(Boolean).pop();   // /tasks/<id> or the chat's /chat/<id>#t-<id>
 const waitFor = async (fn, ms = 10_000) => {
     const until = Date.now() + ms;
     for (;;) {

@@ -119,7 +119,7 @@ const msText = (n) => {
 // A model id as people say it: "deepseek:deepseek-flash" → "DeepSeek Flash", "openai:gpt-5.1" → "GPT-5.1".
 const BRANDS = { deepseek: 'DeepSeek', gpt: 'GPT', openai: 'OpenAI', minimax: 'MiniMax', claude: 'Claude', gemini: 'Gemini', qwen: 'Qwen', glm: 'GLM', kimi: 'Kimi' };
 function modelName(id) {
-    const m = String(id || '').split(':').pop();
+    const m = String(id || '').split(':').pop().replace(/-\d{4}-\d{2}-\d{2}$/, '');
     if (!m) return 'another model';
     if (/^gpt-/i.test(m)) return `GPT-${m.slice(4)}`;
     return m.split('-').map((w) => BRANDS[w.toLowerCase()] || (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ');
@@ -587,7 +587,7 @@ ${raw(foldBlock({
         const mode = MODES.includes(req.body && req.body.mode) ? req.body.mode : 'balanced';
         const out = await createTask({ s, config, engine, principal: { requester: requesterOf(req), project: null }, body: { task: text, mode } });
         if (out.code) return home(req, res, { status: out.status === 503 || out.status === 429 ? out.status : 422, form: { text, mode, problem: out.detail } });
-        return res.redirect(303, `/tasks/${out.task.id}`);
+        return res.redirect(303, `/chat/${out.task.id}`);
     });
 
     // A follow-up (Actor v2, stage V2-5b): a new task of the same person's that continues an answered one, with its
@@ -609,7 +609,7 @@ ${raw(foldBlock({
         if (!text) return res.redirect(303, `/tasks/${parent.id}#follow-up`);
         const out = await createTask({ s, config, engine, principal: { requester: requesterOf(req), project: null }, body: { task: text, mode: parent.mode }, parentId: parent.id });
         if (out.code) return res.redirect(303, `/tasks/${parent.id}?follow=${encodeURIComponent(out.code)}#follow-up`);
-        return res.redirect(303, `/tasks/${out.task.id}`);
+        return res.redirect(303, `/chat/${out.task.id}#t-${out.task.id}`);
     });
 
     // ── Durable runs (stage V2-9): fork from a saved step, and compare two runs ──────
@@ -995,6 +995,9 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
     });
 
     r.get('/tasks/:id', async (req, res) => {
+        if (req.get('sec-fetch-mode') === 'navigate' && req.query.view !== 'details' && TASK_ID.test(req.params.id) && signedIn(req)) {
+            return res.redirect(303, `/chat/${req.params.id}#t-${req.params.id}`);
+        }
         const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
         if (!row || row.requester !== requesterOf(req)) {
             return page(req, res, { title: 'Task not found', body: html`<h1>Task not found</h1><p>${signedIn(req) ? 'There is no task here that belongs to you.' : html`<a href="/auth/login?next=${encodeURIComponent(req.originalUrl)}">Sign in</a> to see your task.`}</p>` }, 404);
@@ -1454,4 +1457,4 @@ ${table(['Code', 'Meaning'], [
     return r;
 }
 
-module.exports = { createPageRoutes, MODE_TEXT };
+module.exports = { createPageRoutes, MODE_TEXT, chipify, toolLabel, inputText, modelName, msText, usd };

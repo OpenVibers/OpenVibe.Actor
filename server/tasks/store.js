@@ -38,7 +38,7 @@ const getTask = (s, id) => s.db.maybe('SELECT * FROM tasks WHERE id = $1', [id])
  * question and its answer, only the same person's, only answered ones. An answer's [E#] citations belonged to its own
  * run, so they are taken out: the new run cites only what it fetches itself. Each answer is clipped to `clip` chars.
  */
-async function followContext(s, row, { depth = 3, clip = 3000 } = {}) {
+async function followContext(s, row, { depth = 6, clip = 2500 } = {}) {
     const out = [];
     let at = row && row.parent_id;
     for (let i = 0; at && i < depth; i++) {

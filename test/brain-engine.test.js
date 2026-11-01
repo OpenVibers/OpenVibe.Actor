@@ -11,7 +11,7 @@ const { boot, check, done } = require('./helpers/boot');
 const store = require('../server/tasks/store');
 const taskEvents = require('../public/js/task-events');
 
-const taskIdOf = (res) => String(res.headers.get('location') || '').split('/').filter(Boolean).pop();
+const taskIdOf = (res) => String(res.headers.get('location') || '').split('#')[0].split('/').filter(Boolean).pop();   // /tasks/<id> or the chat's /chat/<id>#t-<id>
 const SAME = { origin: 'https://openvibe.actor' };
 
 (async () => {

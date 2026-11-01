@@ -25,6 +25,7 @@ const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
 // The product's own places: the main ones carry an icon (phones get them as the bottom tab bar), the rest fold into
 // the navbar's More (Shared 4.22). Search is the navbar's magnifier and What shipped is the footer's.
 const NAV = [
+    { label: 'Chat', href: '/chat', icon: 'fa-comments' },
     { label: 'Console', href: '/console', icon: 'fa-gauge-high' },
     { label: 'Your tasks', href: '/tasks', icon: 'fa-list-check' },
     { label: 'Agents', href: '/agents', icon: 'fa-robot' },
@@ -60,7 +61,7 @@ function renderPage(o) {
         service: 'actor',
         apiBase: NETWORK_URL,
         links: NAV.map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) })),
-        appBar: [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Console', href: '/console', icon: 'fa-gauge-high' }, { label: 'Tasks', href: '/tasks', icon: 'fa-list-check' }, { label: 'Agents', href: '/agents', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20)
+        appBar: [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Console', href: '/console', icon: 'fa-gauge-high' }, { label: 'Chat', href: '/chat', icon: 'fa-comments' }, { label: 'Agents', href: '/agents', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20)
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
@@ -70,7 +71,7 @@ function renderPage(o) {
     };
     // This site's own account links live in the shared navbar's account menu (the page's account
     // bar below is only for visitors without JavaScript).
-    if (signedIn) nav.menu = { before: [{ label: 'Console', href: '/console', icon: 'fa-gauge' }, { label: 'Your tasks', href: '/tasks', icon: 'fa-list-check' }, { label: 'Your agents', href: '/me/agents', icon: 'fa-robot' }, { label: 'Memory', href: '/memory', icon: 'fa-brain' }] };
+    if (signedIn) nav.menu = { before: [{ label: 'Chat', href: '/chat', icon: 'fa-comments' }, { label: 'Console', href: '/console', icon: 'fa-gauge' }, { label: 'Your tasks', href: '/tasks', icon: 'fa-list-check' }, { label: 'Your agents', href: '/me/agents', icon: 'fa-robot' }, { label: 'Memory', href: '/memory', icon: 'fa-brain' }] };
     const footer = { service: 'actor', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' };
     const account = signedIn
         ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`
@@ -109,8 +110,8 @@ ${render(scripts)}
         body: `<a class="skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
 <noscript><div class="account-bar" role="navigation" aria-label="Account">${render(account)}</div></noscript>
-<main id="main" class="page">
-${render(crumbs)}
+<main id="main" class="page${o.app ? ' page-app' : ''}">
+${o.app ? '' : render(crumbs)}
 ${render(o.body)}
 ${o.path === '/' ? foldBlock({
         id: 'shipped',
