@@ -30,6 +30,14 @@ const taskEvents = require('../../public/js/task-events');
 const { sameOrigin } = require('./principal');
 const looks = require('../agents/looks');
 const inputs = require('../tasks/inputs');
+const modelPrefs = require('../runtime/model-prefs');
+
+// The model a person's tasks run on (plan L55 C3; the owner, 11-01: "use your own API keys, or OpenVibe's"). Auto is
+// OpenVibe's own; "own:<provider>" is the person's key, sealed in OpenVibe.AI, which Actor never sees.
+const PROVIDER_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', deepseek: 'DeepSeek', google: 'Google Gemini', openrouter: 'OpenRouter', mistral: 'Mistral' };
+const AI_SITE = 'https://ai.openvibe.services';
+const allowUrl = (provider) => `${AI_SITE}/you?allow=actor&provider=${encodeURIComponent(provider)}`;
+const modelLabel = (m) => (m && m.provider ? `Your ${PROVIDER_NAMES[m.provider] || m.provider} key` : 'Auto');
 const glyphs = require('openvibe-shared/glyphs');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -272,7 +280,24 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 </aside>`;
     }
 
-    function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '' } = {}) {
+    /**
+     * The model chip: what this person's tasks run on, and a menu to change it. The buttons save with one request
+     * (js/chat.js, PUT /api/v1/me/model); without the script the menu's link opens /chat/model, a plain form.
+     */
+    function modelChip(model) {
+        const current = model && model.provider ? `own:${model.provider}` : 'auto';
+        const item = (choice, title, sub) => html`<button type="button" class="ccm-item${choice === current ? ' is-on' : ''}" data-ccm-choice="${choice}" aria-pressed="${choice === current ? 'true' : 'false'}"><b>${title}</b><small>${sub}</small></button>`;
+        return html`<details class="cc-model" data-cc-model>
+<summary class="cc-model-chip" title="The model your tasks run on">${raw(glyphs.svg('chip', { size: 16 }))}<span data-ccm-label>${modelLabel(model)}</span></summary>
+<div class="ccm-panel" role="group" aria-label="The model your tasks run on">
+<ul class="ccm-list"><li>${item('auto', 'Auto, OpenVibe\'s', 'Actor picks a model for each step, on OpenVibe\'s keys.')}</li></ul>
+<p class="ccm-head">Your own key</p>
+<ul class="ccm-list">${modelPrefs.OWN_PROVIDERS.map((p) => html`<li class="ccm-own" data-ccm-provider="${p}">${item(`own:${p}`, PROVIDER_NAMES[p] || p, 'Your key, kept in OpenVibe.AI')}<a class="ccm-setup" href="${allowUrl(p)}" target="_blank" rel="noopener" data-ccm-setup>Set up</a></li>`)}</ul>
+<p class="ccm-fine" data-ccm-fine>A key you add stays sealed in OpenVibe.AI: Actor never sees it, and only uses it once you allow Actor there. <a href="/chat/model">All settings</a></p>
+</div></details>`;
+    }
+
+    function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '', model = null } = {}) {
         return html`<form class="cc" method="post" action="${working ? `/chat/${working}/steer` : '/chat'}" data-composer${busy ? raw(' data-busy') : ''}>
 ${problem ? html`<p class="cc-problem" role="alert">${problem}</p>` : ''}
 ${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}
@@ -282,6 +307,7 @@ ${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}
 <textarea id="cc-text" name="task" rows="1" maxlength="20000" required placeholder="${working ? 'Tell Actor something while it works' : parent ? 'Reply to Actor' : 'Ask Actor to do something'}" data-cc-text>${text}</textarea>
 <div class="cc-row">
 <button type="button" class="cc-attach" data-cc-attach aria-label="Attach files" title="Attach text, code, CSV, JSON or images" hidden>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>')}</button><input type="file" multiple hidden data-cc-files accept=".txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,image/png,image/jpeg,image/webp,image/gif">
+${modelChip(model)}
 <label class="cc-mode" title="How Actor picks the agent"><span class="sr-only">Mode</span><select name="mode" data-cc-mode>${MODES.map((m) => html`<option value="${m}" title="${MODE_HINT[m] || ''}"${m === mode ? raw(' selected') : ''}>${MODE_LABEL[m] || m}</option>`)}</select></label>
 <span class="cc-note" data-cc-note></span>
 ${working ? html`<button class="cc-stop" type="submit" formaction="/tasks/${working}/cancel" formnovalidate aria-label="Stop" data-cc-stop>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>')}</button>` : html`<button class="cc-stop" type="button" aria-label="Stop" data-cc-stop hidden>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>')}</button>`}
@@ -313,6 +339,7 @@ ${working ? html`<button class="cc-stop" type="submit" formaction="/tasks/${work
         const lastTurn = turns[turns.length - 1] || null;
         const busy = Boolean(lastTurn && (OPEN.includes(lastTurn.state) || lastTurn.state === 'needs_you'));
         const fileMap = await inputs.list(s, turns.map((t) => t.id));
+        const model = modelPrefs.wire(await modelPrefs.get(s, requester).catch(() => null));
         const turnHtmls = await Promise.all(turns.map((t) => turnHtml(t, { files: fileMap.get(t.id) || [] })));
         const title = first ? clip(first.task, 60) : 'New chat';
         return send(res, status, {
@@ -329,13 +356,48 @@ ${sidebar(chats, first ? first.id : null)}
 ${turns.length ? html`<ol class="ct-thread" data-thread>${turnHtmls}</ol>` : html`<div class="ct-hello"><span class="ct-hello-mark" aria-hidden="true"></span><h2>What should Actor do?</h2><p>It browses, clicks and types for you. Watch it work, steer it, or go do something else.</p>
 <ul class="ct-starters">${STARTERS.map(([icon, k, v]) => html`<li><button type="button" data-starter="${v}">${raw(glyphs.svg(icon, { size: 20 }))}<b>${k}</b><span>${v}</span></button></li>`)}</ul></div>`}
 </div>
-${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text })}
+${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model })}
 </section>
 </div>`,
         });
     }
 
     const loginTo = (req) => `/auth/login?next=${encodeURIComponent(req.originalUrl)}`;
+
+    r.get('/chat/model', async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req)) return res.redirect(303, loginTo(req));
+        const model = modelPrefs.wire(await modelPrefs.get(s, requesterOf(req)).catch(() => null));
+        const current = model.provider ? `own:${model.provider}` : 'auto';
+        const saved = req.query.saved === '1';
+        const error = typeof req.query.error === 'string' ? req.query.error.slice(0, 200) : '';
+        const radio = (choice, title, sub, extra = '') => html`<label class="cm-opt"><input type="radio" name="choice" value="${choice}"${choice === current ? raw(' checked') : ''}><span><b>${title}</b><small>${sub}</small></span>${raw(extra)}</label>`;
+        return send(res, 200, {
+            viewer: req.viewer, config, path: req.originalUrl, title: 'Your model', app: true, noReferrer: true,
+            css: ['css/chat.css'], scripts: [],
+            body: html`<main class="cm"><a class="cm-back" href="/chat">${raw(glyphs.svg('back', { size: 18 }))} Chat</a>
+<h1>The model your tasks run on</h1>
+<p class="cm-lede">Actor can run on OpenVibe's keys, or on your own key for a provider you use. Your key stays sealed in OpenVibe.AI: Actor never sees it, and only uses it after you allow Actor there.</p>
+${saved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on ${modelLabel(model)}.</p>` : ''}${error ? html`<p class="cm-err" role="alert">${error}</p>` : ''}
+<form class="cm-form" method="post" action="/chat/model">
+${radio('auto', 'Auto, OpenVibe\'s', 'Actor picks a model for each step, on OpenVibe\'s keys. Free within the daily allowance.')}
+<p class="cm-head">Your own key</p>
+${modelPrefs.OWN_PROVIDERS.map((p) => radio(`own:${p}`, PROVIDER_NAMES[p] || p, 'Billed by the provider to you, not counted against Actor\'s allowance.', `<a class="cm-setup" href="${allowUrl(p).replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add or allow the key</a>`))}
+<label class="cm-modelid"><span>A model id, if you want one <small>(leave empty and OpenVibe.AI picks the provider's best fit)</small></span><input name="model" value="${model.model || ''}" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9._:/\-]{0,119}" placeholder="for example gpt-5.1, claude-sonnet-4-5, deepseek-chat" spellcheck="false" autocomplete="off"></label>
+<button class="cm-save" type="submit">Save</button>
+</form></main>`,
+        });
+    });
+
+    r.post('/chat/model', express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req)) return res.redirect(303, loginTo(req));
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('Change this on openvibe.actor itself.');
+        const body = req.body || {};
+        const out = await modelPrefs.put(s, requesterOf(req), { choice: body.choice, model: body.model ? String(body.model) : null });
+        if (out.error) return res.redirect(303, `/chat/model?error=${encodeURIComponent('That did not save: ' + out.error)}`);
+        return res.redirect(303, '/chat/model?saved=1');
+    });
 
     r.get('/chat', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));

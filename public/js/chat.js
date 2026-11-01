@@ -414,6 +414,66 @@
             if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(str).then(ok, function () {});
         }
         decorate(chat);
+        modelChip();
+    }
+
+    // ── The model chip (plan L55 C3): what this person's tasks run on. Opening it asks which of their own keys Actor
+    // may use (names only, from OpenVibe.AI); a choice saves at once. Escape or a click elsewhere closes it.
+    function modelChip() {
+        var box = document.querySelector('[data-cc-model]');
+        if (!box || box.dataset.wired) return;
+        box.dataset.wired = '1';
+        var label = box.querySelector('[data-ccm-label]');
+        var fine = box.querySelector('[data-ccm-fine]');
+        var ready = null;
+        function mark() {
+            box.querySelectorAll('[data-ccm-provider]').forEach(function (li) {
+                var ok = !!(ready && ready.indexOf(li.getAttribute('data-ccm-provider')) !== -1);
+                li.classList.toggle('is-ready', ok);
+                var setup = li.querySelector('[data-ccm-setup]');
+                if (setup) setup.hidden = ok;
+            });
+        }
+        box.addEventListener('toggle', function () {
+            if (!box.open) return;
+            fetch('/api/v1/me/model', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (j) { if (j) { ready = Array.isArray(j.keys) ? j.keys : []; mark(); } })
+                .catch(function () {});
+        });
+        box.addEventListener('click', function (e) {
+            var b = e.target.closest('[data-ccm-choice]');
+            if (!b) return;
+            var choice = b.getAttribute('data-ccm-choice');
+            b.disabled = true;
+            fetch('/api/v1/me/model', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ choice: choice }) })
+                .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error((j && j.detail) || 'not saved'); }, function () { throw new Error('not saved'); }); })
+                .then(function (j) {
+                    box.querySelectorAll('[data-ccm-choice]').forEach(function (x) {
+                        var on = x.getAttribute('data-ccm-choice') === choice;
+                        x.classList.toggle('is-on', on);
+                        x.setAttribute('aria-pressed', on ? 'true' : 'false');
+                    });
+                    var p = j && j.provider;
+                    var name = p ? (b.querySelector('b') || {}).textContent : '';
+                    if (label) label.textContent = p ? 'Your ' + name + ' key' : 'Auto';
+                    // Chosen but not allowed yet: say what is left to do instead of letting the next task fail.
+                    if (p && ready && ready.indexOf(p) === -1 && fine) {
+                        fine.textContent = '';
+                        fine.append('Your next task runs on your ' + name + ' key once you allow Actor to use it: ');
+                        var a = document.createElement('a');
+                        a.href = 'https://ai.openvibe.services/you?allow=actor&provider=' + encodeURIComponent(p);
+                        a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'allow it at OpenVibe.AI';
+                        fine.append(a, '.');
+                    } else {
+                        box.open = false;
+                    }
+                })
+                .catch(function (err) { if (fine) fine.textContent = 'That did not save: ' + err.message; })
+                .then(function () { b.disabled = false; });
+        });
+        document.addEventListener('click', function (e) { if (box.open && !box.contains(e.target)) box.open = false; });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && box.open) { box.open = false; box.querySelector('summary').focus(); } });
     }
 
     function stop() { streams.forEach(function (s) { try { s.close(); } catch (e) { /* */ } }); streams = []; }
