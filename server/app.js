@@ -51,6 +51,7 @@ const { createPrincipal } = require('./http/principal');
 const { createApi } = require('./http/api');
 const resourceIndex = require('./registry/resource-index');
 const { createPageRoutes } = require('./http/pages');
+const { createChatPages } = require('./http/chat-pages');
 const { createAgentPages } = require('./http/agent-pages');
 const { createConsolePages } = require('./http/console-pages');
 const { createMemoryPages } = require('./http/memory-pages');
@@ -241,6 +242,7 @@ async function createApp(opts = {}) {
     app.use(createMemoryPages(ctx));
     app.use(createConnectionsPages(ctx));
     app.use(createConsolePages(ctx, opts.bot || {}));
+    app.use(createChatPages(ctx));
     const pageRoutes = createPageRoutes(ctx);
     // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public
     // pages. The pages themselves keep their own routes — a signed-in visitor's account bar and task box are
