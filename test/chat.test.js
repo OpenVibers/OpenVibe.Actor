@@ -72,7 +72,7 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
                 const page = await t.get(`/chat/${at}`, { as: kim });
                 const a = page.text.indexOf(`id="t-${first}"`), b = page.text.indexOf(`id="t-${second}"`);
                 assert.ok(a > 0 && b > a, `the chat through ${at} shows both turns, oldest first`);
-                assert.strictEqual((page.text.match(/<a href="\/chat\//g) || []).length, 1, 'one chat in the list');
+                assert.strictEqual((page.text.match(/<a href="\/chat\/tsk_/g) || []).length, 1, 'one chat in the list');
                 assert.match(page.text, new RegExp(`<a href="/chat/${first}" aria-current="page"`), 'the list names a chat by its first turn');
             }
         });

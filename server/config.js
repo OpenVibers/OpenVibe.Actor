@@ -82,6 +82,18 @@ function load(env = process.env) {
         },
         cookies: { secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction },
 
+        // OpenVibe.AI (plan L55 C3): the model gateway a person's own keys live in. Actor holds NO provider key of
+        // its own for this: it asks AI to run the call, and AI answers with the key the person chose (their own,
+        // sealed in AI's vault) or with OpenVibe's own keys. The token is Actor's service token for audience
+        // openvibe.ai (the grant: ai.run.create, namespace ai.complete); the person is named in the request.
+        ai: {
+            url: trim(env.OV_AI_URL || 'https://ai.openvibe.services'),
+            audience: 'openvibe.ai',
+            scope: 'ai.run.create',
+            clientId: env.OV_OAUTH_CLIENT_ID || 'actor',
+            clientSecret: env.OV_OAUTH_CLIENT_SECRET || '',
+            timeoutMs: Math.max(5000, int(env.ACTOR_AI_TIMEOUT_MS, 180_000)),
+        },
         // The model providers behind the agent systems (server/agents/catalog.js). A provider without its key is
         // listed as unavailable, with the reason; nothing is invented. Keys are the operator's.
         providers: {
