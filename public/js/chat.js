@@ -379,15 +379,33 @@
                 if (b.dataset.wired) return; b.dataset.wired = '1'; b.hidden = false;
                 b.addEventListener('click', function () {
                     var ans = b.closest('.ct-reply').querySelector('[data-answer]');
-                    copy(ans ? ans.innerText : '', b);
+                    copy(ans ? plainText(ans) : '', b);
                 });
             });
             (rootEl || chat).querySelectorAll('.ct-answer pre').forEach(function (pre) {
                 if (pre.querySelector('.ct-copy-code')) return;
                 var b = document.createElement('button'); b.type = 'button'; b.className = 'ct-copy-code'; b.textContent = 'Copy';
-                b.addEventListener('click', function () { var code = pre.querySelector('code') || pre; copy(code.innerText, b); });
+                b.addEventListener('click', function () { copy(plainText(pre.querySelector('code') || pre), b); });
                 pre.appendChild(b);
             });
+        }
+        // What a person means by the answer's text: without the citation chips' numbers ("visits 12" was "visits 1 2")
+        // and without the code blocks' own Copy buttons. innerText keeps the line breaks only for laid-out nodes, so the
+        // trimmed copy is read while it sits, invisible, in the page.
+        function plainText(el) {
+            var c = el.cloneNode(true);
+            c.querySelectorAll('.evs, .ct-copy-code').forEach(function (x) {
+                // "one host [1 2], and" → "one host, and": the space before a chip goes when punctuation follows it.
+                var before = x.previousSibling, after = x.nextSibling;
+                if (before && before.nodeType === 3 && (!after || (after.nodeType === 3 && /^[\s,.;:!?)]/.test(after.nodeValue)))) before.nodeValue = before.nodeValue.replace(/\s+$/, '');
+                x.remove();
+            });
+            c.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + (el.clientWidth || 600) + 'px;opacity:0;pointer-events:none';
+            c.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(c);
+            var t = c.innerText.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+            c.remove();
+            return t;
         }
         function copy(str, btn) {
             var label = btn.querySelector('span') || btn;
