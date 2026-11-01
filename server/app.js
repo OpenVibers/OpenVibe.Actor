@@ -177,7 +177,8 @@ async function createApp(opts = {}) {
                 fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com'],
                 imgSrc: ["'self'", 'data:', 'https://openvibe.network', 'https://openvibe.media'],
                 connectSrc: ["'self'", 'https://openvibe.network', 'https://cloudflareinsights.com', 'https://openvibe.events'],
-                frameSrc: ["'self'", 'https://openvibe.network'],
+                // Bot's watch links: a chat turn frames the desk the agent works on, live (plan L55 C1b).
+                frameSrc: ["'self'", 'https://openvibe.network', ...(() => { try { return [new URL(config.services.botPublicUrl).origin]; } catch { return []; } })()],
                 frameAncestors: ["'none'"],
                 objectSrc: ["'none'"],
                 baseUri: ["'self'"],
@@ -242,7 +243,7 @@ async function createApp(opts = {}) {
     app.use(createMemoryPages(ctx));
     app.use(createConnectionsPages(ctx));
     app.use(createConsolePages(ctx, opts.bot || {}));
-    app.use(createChatPages(ctx));
+    app.use(createChatPages(ctx, opts.bot || {}));
     const pageRoutes = createPageRoutes(ctx);
     // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public
     // pages. The pages themselves keep their own routes — a signed-in visitor's account bar and task box are

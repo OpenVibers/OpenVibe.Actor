@@ -372,7 +372,39 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
     /** The person's page to watch a desk live and take it over (Bot's own screen page). */
     const watchUrl = (machine, desk) => `${pages}/machines/${machine}/screen${desk && desk !== 'main' ? `?desk=${encodeURIComponent(desk)}` : ''}`;
 
-    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, openSession, endSession, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
+    // A watch link (plan L55 C1b, contracts 0.268.0 bot.machine.watch_link): a short-lived page that shows the desk the
+    // agent works on, live, and lets the person take it over, framable in the chat (no sign-in: the token is the
+    // credential). Its own token client: a Network that has not granted the capability yet refuses only this, never
+    // the computer control above.
+    const linkTokens = !enabled ? null : tokensOverride || serviceAuth.createTokenClient({
+        tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.bot', scope: 'bot.machine.watch_link', fetchImpl,
+    });
+    async function watchLink(subject, machine, desk, { control = true, minutes = 60, signal } = {}) {
+        if (!enabled) return { error: 'computers are off here' };
+        const bad = guard(subject, machine);
+        if (bad) return bad;
+        if (SESSION_MACHINE.test(String(machine))) return { error: 'a desk host session has no watch link' };
+        // The agent's own desks only: Bot refuses the owner's screen (main) to an agent anyway.
+        if (desk !== 'private' && !DESK_NAME.test(String(desk || ''))) return { error: 'only an agent desk (private or desk-<name>) has a watch link' };
+        const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000);
+        let res;
+        try {
+            res = await fetchImpl(`${base}/api/v1/machines/${encodeURIComponent(machine)}/watch-links`, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-OV-Subject': subject, ...(await linkTokens.authHeaders()) },
+                body: JSON.stringify({ desk, control: !!control, minutes, label: 'the chat on openvibe.actor' }), signal: sig,
+            });
+        } catch {
+            return { error: 'Bot did not answer for the watch link' };
+        }
+        const data = await res.json().catch(() => null);
+        if (!res.ok) return problem({ status: res.status, data }, 'the watch link');
+        if (!data || !/^https:\/\/[^\s"<>]{1,300}$/.test(String(data.url || ''))) return { error: 'Bot answered without a link' };
+        return { url: data.url, expires_at: data.expires_at || null, control: !!data.control, desk: data.desk || desk };
+    }
+
+    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, openSession, endSession, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
 }
 
 module.exports = { createComputers };

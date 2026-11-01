@@ -286,9 +286,44 @@
         }
         // What Actor sees: the last picture, fetched every two seconds while the turn works (only when it changed).
         var screens = {};
+        // The live desk (plan L55 C1b): when the turn works on one of the person's own desks, the server asks Bot for a
+        // short-lived page that shows it moving and takes the mouse, and the turn frames it in place of the picture.
+        // If Bot cannot, the picture keeps refreshing as before.
+        function live(turn) {
+            var fig = turn.querySelector('[data-screen][data-watch]');
+            if (!fig || fig.hasAttribute('data-framed') || !turn.hasAttribute('data-open')) return;
+            fig.setAttribute('data-framed', 'asking');
+            fetch(fig.getAttribute('data-watch'), { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; })
+                .then(function (j) {
+                    if (!j || !/^https:\/\//.test(j.url || '') || !fig.isConnected) { fig.setAttribute('data-framed', 'no'); return; }
+                    var frame = fig.querySelector('.ct-screen-frame');
+                    if (!frame) { frame = document.createElement('div'); frame.className = 'ct-screen-frame'; fig.insertBefore(frame, fig.firstChild); }
+                    var f = document.createElement('iframe');
+                    f.src = j.url;
+                    f.title = 'Actor\'s desk, live. Click into it to take over.';
+                    f.setAttribute('allow', 'fullscreen; clipboard-write');
+                    f.setAttribute('referrerpolicy', 'no-referrer');
+                    f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-pointer-lock');
+                    f.className = 'ct-desk';
+                    frame.appendChild(f);
+                    fig.classList.add('is-framed');
+                    fig.hidden = false;
+                    fig.setAttribute('data-framed', 'yes');
+                    stopScreen(turn);   // the frame moves by itself: no more pictures to fetch
+                    var a = fig.querySelector('.ct-watch');
+                    if (a) { a.href = j.url; a.lastChild.textContent = 'Open it big'; }
+                    var cap = fig.querySelector('figcaption > span');
+                    if (cap) cap.textContent = j.control ? 'Actor\'s desk, live: click into it to take over' : 'Actor\'s desk, live';
+                });
+        }
         function screen(turn) {
             var id = turn.getAttribute('data-task');
+            live(turn);
             if (screens[id] || !turn.hasAttribute('data-open')) return;
+            var framed = turn.querySelector('[data-screen][data-framed="yes"]');
+            if (framed) return;
             var fig = turn.querySelector('[data-screen]');
             if (!fig) return;
             var busyLoad = false;
