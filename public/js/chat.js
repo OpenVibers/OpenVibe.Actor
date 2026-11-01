@@ -78,6 +78,51 @@
         chat.querySelectorAll('[data-starter]').forEach(function (b) {
             b.addEventListener('click', function () { text.value = b.getAttribute('data-starter'); grow(); syncSend(); text.focus(); });
         });
+        // ── Files: the paperclip opens the picker; each file is a chip until it is sent (at most 4, 6 MB each).
+        var attachBtn = chat.querySelector('[data-cc-attach]');
+        var fileInput = chat.querySelector('[data-cc-files]');
+        var chips = chat.querySelector('[data-cc-chips]');
+        var picked = [];
+        function drawChips() {
+            if (!chips) return;
+            chips.textContent = '';
+            chips.hidden = !picked.length;
+            picked.forEach(function (f, i) {
+                var li = document.createElement('li');
+                if (/^image\//.test(f.type)) {   // a data: URL: the page's CSP allows data: images, not blob:
+                    var im = document.createElement('img'); im.alt = ''; li.appendChild(im);
+                    var rd = new FileReader(); rd.onload = function () { im.src = String(rd.result); }; rd.readAsDataURL(f);
+                }
+                var name = document.createElement('span'); name.textContent = f.name; li.appendChild(name);
+                var x = document.createElement('button'); x.type = 'button'; x.setAttribute('aria-label', 'Remove ' + f.name); x.textContent = '\u00d7';
+                x.addEventListener('click', function () { picked.splice(i, 1); drawChips(); syncSend(); });
+                li.appendChild(x); chips.appendChild(li);
+            });
+        }
+        if (attachBtn && fileInput && window.FileReader) {
+            attachBtn.hidden = false;
+            attachBtn.addEventListener('click', function () { fileInput.click(); });
+            fileInput.addEventListener('change', function () {
+                Array.prototype.forEach.call(fileInput.files || [], function (f) {
+                    if (picked.length >= 4) { problem('Attach at most 4 files to one message.'); return; }
+                    if (f.size > 6 * 1048576) { problem(f.name + ' is over 6 MB.'); return; }
+                    picked.push(f);
+                });
+                fileInput.value = '';
+                drawChips(); syncSend();
+            });
+        }
+        function readAll(files) {
+            return Promise.all(files.map(function (f) {
+                return new Promise(function (ok, no) {
+                    var rd = new FileReader();
+                    rd.onload = function () { ok({ name: f.name, type: f.type || '', data: String(rd.result).split(',')[1] || '' }); };
+                    rd.onerror = function () { no(new Error('read')); };
+                    rd.readAsDataURL(f);
+                });
+            }));
+        }
+
         function openTurn() { var t = chat.querySelectorAll('.ct-turn'); var last = t[t.length - 1]; return last && (last.hasAttribute('data-open') || last.getAttribute('data-state') === 'needs_you') ? last : null; }
         var stopBtn = chat.querySelector('[data-cc-stop]');
         function working() { var t = openTurn(); return t && t.hasAttribute('data-open') ? t : null; }
@@ -88,6 +133,7 @@
             form.setAttribute('action', w ? '/chat/' + w.getAttribute('data-task') + '/steer' : '/chat');
             if (text) text.placeholder = w ? 'Tell Actor something while it works' : (form.querySelector('input[name=parent]') ? 'Reply to Actor' : 'Ask Actor to do something');
             send.disabled = !(text && text.value.trim());
+            if (attachBtn) attachBtn.disabled = !!w;
         }
         syncSend();
 
@@ -138,8 +184,13 @@
             e.preventDefault();
             problem(null);
             send.disabled = true;
-            var body = new URLSearchParams(new FormData(form));
-            fetch('/chat', { method: 'POST', credentials: 'same-origin', headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, body: body.toString() })
+            var fields = {};
+            new FormData(form).forEach(function (v, k) { if (typeof v === 'string') fields[k] = v; });
+            (picked.length ? readAll(picked) : Promise.resolve([]))
+                .then(function (files) {
+                    if (files.length) fields.files = files;
+                    return fetch('/chat', { method: 'POST', credentials: 'same-origin', headers: { accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify(fields) });
+                })
                 .then(function (r) { return r.json().catch(function () { return { error: 'That could not be sent. Try again.' }; }).then(function (j) { return { ok: r.ok, j: j }; }); })
                 .then(function (res) {
                     if (!res.ok || !res.j.turn) { problem(res.j.error || 'That could not be sent. Try again.'); syncSend(); return; }
@@ -157,6 +208,7 @@
                     turn.classList.add('is-new');
                     thread.appendChild(turn);
                     text.value = ''; grow();
+                    picked = []; drawChips();
                     setParent(res.j.id);
                     follow(turn);
                     syncSend();

@@ -29,6 +29,7 @@ const catalog = require('../agents/catalog');
 const taskEvents = require('../../public/js/task-events');
 const { sameOrigin } = require('./principal');
 const looks = require('../agents/looks');
+const inputs = require('../tasks/inputs');
 const glyphs = require('openvibe-shared/glyphs');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -226,7 +227,16 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 <form method="post" action="/chat" class="ct-retry"><input type="hidden" name="task" value="${row.task}"><input type="hidden" name="mode" value="best">${isFollow(row) ? html`<input type="hidden" name="parent" value="${row.parent_id}">` : ''}<button class="ct-opt" type="submit">Try again in Best mode</button><a class="ct-act" href="/tasks/${row.id}?view=details">Details</a></form></div>`;
     }
 
-    async function turnHtml(row, { events = null } = {}) {
+    const bytesText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
+    function filesBlock(row, files) {
+        if (!files || !files.length) return '';
+        return html`<ul class="ct-attached">${files.map((f) => html`<li>${inputs.IMAGE.test(f.mime)
+            ? html`<a href="/chat/file/${row.id}/${f.id}" target="_blank" rel="noopener"><img src="/chat/file/${row.id}/${f.id}" alt="${f.name}" loading="lazy"></a>`
+            : html`<a class="ct-file" href="/chat/file/${row.id}/${f.id}" target="_blank" rel="noopener">${raw(ICON.file)}<span><b>${f.name}</b><small>${bytesText(f.size)}</small></span></a>`}</li>`)}</ul>`;
+    }
+
+    async function turnHtml(row, { events = null, files = null } = {}) {
+        const attached = files || (await inputs.list(s, [row.id])).get(row.id) || [];
         const t = store.toWire(row, { baseUrl: config.baseUrl });
         const evs = events || await store.eventsAfter(s, row.id, 0);
         const open = OPEN.includes(row.state);
@@ -237,7 +247,7 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
         else if (row.state === 'cancelled') reply = html`${workBlock(row, evs, false)}<p class="ct-stopped">Stopped. What it spent before stopping stays spent.</p>`;
         else reply = html`${workBlock(row, evs, true)}${screenBlock(row, evs, true)}`;
         return html`<li class="ct-turn state-${row.state}" id="t-${row.id}" data-task="${row.id}" data-state="${row.state}" data-last="${row.last_seq}"${open ? raw(' data-open') : ''}>
-<div class="ct-you"><p class="ct-bubble">${row.task}</p></div>
+<div class="ct-you">${filesBlock(row, attached)}<p class="ct-bubble">${row.task}</p></div>
 <div class="ct-bot"><span class="ct-avatar" aria-hidden="true"></span><div class="ct-reply">${reply}</div></div>
 </li>`;
     }
@@ -267,9 +277,11 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 ${problem ? html`<p class="cc-problem" role="alert">${problem}</p>` : ''}
 ${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}
 <div class="cc-box">
+<ul class="cc-files" data-cc-chips hidden></ul>
 <label class="sr-only" for="cc-text">Message Actor</label>
 <textarea id="cc-text" name="task" rows="1" maxlength="20000" required placeholder="${working ? 'Tell Actor something while it works' : parent ? 'Reply to Actor' : 'Ask Actor to do something'}" data-cc-text>${text}</textarea>
 <div class="cc-row">
+<button type="button" class="cc-attach" data-cc-attach aria-label="Attach files" title="Attach text, code, CSV, JSON or images" hidden>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>')}</button><input type="file" multiple hidden data-cc-files accept=".txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,image/png,image/jpeg,image/webp,image/gif">
 <label class="cc-mode" title="How Actor picks the agent"><span class="sr-only">Mode</span><select name="mode" data-cc-mode>${MODES.map((m) => html`<option value="${m}" title="${MODE_HINT[m] || ''}"${m === mode ? raw(' selected') : ''}>${MODE_LABEL[m] || m}</option>`)}</select></label>
 <span class="cc-note" data-cc-note></span>
 ${working ? html`<button class="cc-stop" type="submit" formaction="/tasks/${working}/cancel" formnovalidate aria-label="Stop" data-cc-stop>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>')}</button>` : html`<button class="cc-stop" type="button" aria-label="Stop" data-cc-stop hidden>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>')}</button>`}
@@ -300,7 +312,8 @@ ${working ? html`<button class="cc-stop" type="submit" formaction="/tasks/${work
         const first = turns[0] || null;
         const lastTurn = turns[turns.length - 1] || null;
         const busy = Boolean(lastTurn && (OPEN.includes(lastTurn.state) || lastTurn.state === 'needs_you'));
-        const turnHtmls = await Promise.all(turns.map((t) => turnHtml(t)));
+        const fileMap = await inputs.list(s, turns.map((t) => t.id));
+        const turnHtmls = await Promise.all(turns.map((t) => turnHtml(t, { files: fileMap.get(t.id) || [] })));
         const title = first ? clip(first.task, 60) : 'New chat';
         return send(res, status, {
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
@@ -339,6 +352,23 @@ ${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mo
         res.type('html').send(require('../render/html').render(await turnHtml(row)));
     });
 
+    // An attached file, to its own person only: an image shown in place; anything else downloaded as plain text, in a
+    // sandbox, never sniffed.
+    r.get('/chat/file/:taskId/:id', async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req) || !TASK_ID.test(req.params.taskId) || !/^inp_[A-Za-z0-9_-]{6,20}$/.test(req.params.id)) return res.status(404).end();
+        const row = await store.getTask(s, req.params.taskId);
+        if (!row || row.requester !== requesterOf(req)) return res.status(404).end();
+        const f = await inputs.get(s, row.id, req.params.id);
+        if (!f) return res.status(404).end();
+        const bytes = Buffer.isBuffer(f.bytes) ? f.bytes : Buffer.from(f.bytes || []);
+        res.set('X-Content-Type-Options', 'nosniff');
+        res.set('Content-Security-Policy', "default-src 'none'; sandbox");
+        if (inputs.IMAGE.test(f.mime) && f.mime !== 'image/svg+xml') return res.type(f.mime).send(bytes);
+        res.set('Content-Disposition', `attachment; filename="${String(f.name).replace(/[^A-Za-z0-9._-]/g, '_')}"`);
+        return res.type('text/plain; charset=utf-8').send(bytes);
+    });
+
     r.get('/chat/:id', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         if (!signedIn(req)) return res.redirect(303, loginTo(req));
@@ -366,7 +396,7 @@ ${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mo
         'actor.budget.day_spent': 'Today\'s budget is spent. It resets at midnight UTC.',
         'actor.capacity.spent': 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.',
     };
-    r.post('/chat', express.urlencoded({ extended: false, limit: '64kb' }), async (req, res) => {
+    r.post('/chat', express.urlencoded({ extended: false, limit: '64kb' }), express.json({ limit: '18mb' }), async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         const wantsJson = String(req.get('accept') || '').includes('application/json');
         const fail = (status, detail, row = null, text = '') => (wantsJson ? res.status(status).json({ error: detail }) : render(req, res, { row, problem: detail, text, status }));
@@ -379,7 +409,10 @@ ${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mo
         if (parentId && (!parent || parent.requester !== requesterOf(req))) return fail(404, 'That chat is not here any more. Start a new one.');
         if (!text) return fail(422, 'Write a message first.', parent);
         if (parent && (OPEN.includes(parent.state) || parent.state === 'needs_you')) return fail(409, 'Actor is still working on the last message. Wait for it, or stop it.', parent, text);
-        const out = await createTask({ s, config, engine, principal: { requester: requesterOf(req), project: null }, body: { task: text, mode }, parentId: parent ? parent.id : null });
+        const checked = inputs.check(req.body && req.body.files);
+        if (checked.problem) return fail(422, checked.problem, parent, text);
+        const out = await createTask({ s, config, engine, principal: { requester: requesterOf(req), project: null }, body: { task: text, mode }, parentId: parent ? parent.id : null,
+            afterInsert: checked.files.length ? (made) => inputs.save(s, made.id, requesterOf(req), checked.files) : null });
         if (out.code) return fail(out.status === 503 || out.status === 429 ? out.status : 422, PROBLEM[out.code] || out.detail || 'That could not start. Try again in a moment.', parent, text);
         const row = await store.getTask(s, out.task.id);
         if (wantsJson) return res.status(201).json({ id: row.id, chat: parent ? undefined : row.id, url: `/chat/${row.id}`, turn: require('../render/html').render(await turnHtml(row, { events: [] })) });
