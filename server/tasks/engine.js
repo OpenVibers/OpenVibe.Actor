@@ -1,6 +1,7 @@
 'use strict';
 
 // The most a task's clock waits for its person, in all (Desks plan D4: hand_to_person).
+const inputs = require('./inputs');
 const PERSON_WAIT_MAX_MS = 15 * 60_000;
 
 /**
@@ -343,6 +344,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 let out = null;
                 const control = {};
                 controls.set(id, control);
+                // The files attached to this message in the chat (plan L55 C2): text as data; images described first.
+                const attachments = await inputs.forRun(s, id, { models, meter, signal, log }).catch((err) => { log.warn('[Actor] attachments:', err && err.message); return []; });
                 try {
                     out = await loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
@@ -352,7 +355,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         meter, budgetLeft, waitForPerson, requestApproval,
                         personText, agentId: ownAgent, notifyTask,
                         askPerson, control, resume, fork, spent: () => spent,
-                        waits, waitEvent: wakePayload,
+                        waits, waitEvent: wakePayload, attachments,
                     });
                     // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
                     // ('running' is the closest state there is today), its wall clock waits with it, and its

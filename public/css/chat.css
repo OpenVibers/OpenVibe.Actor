@@ -216,3 +216,25 @@ html[data-ov-motion=reduced] .ct-answer.is-streaming .sw { opacity: 1 !important
 .ct-starters button svg { grid-row: span 2; margin-top: 1px; color: var(--accent, #f97316); }
 .ct-starters span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 @media (max-width: 560px) { .ct-starters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .ct-starters button { padding: 10px 11px; grid-template-columns: minmax(0, 1fr); } .ct-starters button svg { grid-row: auto; } .ct-starters span { font-size: 12.5px; } }
+
+/* Attached files: chips in the composer before sending, and above the bubble after. */
+.cc-attach { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: none; color: var(--text-secondary, #b4c0d4); }
+.cc-attach:hover { color: var(--text-primary, #e6edf7); border-color: var(--accent, #f97316); }
+.cc-attach[hidden] { display: none; }
+.cc-attach:disabled { opacity: .4; }
+.cc-attach svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cc-files { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; padding: 0; }
+.cc-files[hidden] { display: none; }
+.cc-files li { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; padding: 3px 4px 3px 6px; border-radius: 10px; background: var(--bg-secondary, #0f1729); border: 1px solid var(--line); font-size: 13px; }
+.cc-files img { width: 28px; height: 28px; object-fit: cover; border-radius: 6px; }
+.cc-files span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-files button { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 0; background: none; color: var(--text-muted, #7386a3); font-size: 16px; line-height: 1; }
+.cc-files button:hover { background: var(--bg-hover, rgba(255, 255, 255, .08)); color: var(--text-primary, #e6edf7); }
+.ct-you { flex-direction: column; align-items: flex-end; gap: 6px; }
+.ct-attached { list-style: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin: 0; padding: 0; max-width: min(85%, 620px); }
+.ct-attached img { display: block; max-width: 220px; max-height: 180px; border-radius: 14px; border: 1px solid var(--line); }
+.ct-file { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg-card, #131c2e); color: var(--text-primary, #e6edf7); text-decoration: none; }
+.ct-file svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.ct-file span { display: grid; line-height: 1.25; }
+.ct-file b { font-size: 13.5px; font-weight: 600; }
+.ct-file small { font-size: 12px; color: var(--text-muted, #7386a3); }

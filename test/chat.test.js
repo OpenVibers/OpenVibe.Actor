@@ -176,6 +176,55 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.match(page.text, /<figure class="ct-screen" data-screen hidden><\/figure>/, 'no picture yet: the screen is there, hidden, for the script to fill');
         });
 
+        await check('files: a CSV and an image go with the message, the run reads the CSV as data, only their person sees them', async () => {
+            t.providers.reset();
+            t.providers.state.script = [{ content: 'Lisbon leads with 42 [E1].' }];
+            const csv = 'city,visits\nLisbon,42\nPorto,17\n';
+            const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+            const r = await t.get('/chat', { as: kim, json: { task: 'Which city leads?', files: [{ name: 'visits.csv', type: 'text/csv', data: Buffer.from(csv).toString('base64') }, { name: 'dot.png', type: 'image/png', data: png }] }, headers: { ...SAME, accept: 'application/json' } });
+            assert.strictEqual(r.status, 201, r.text.slice(0, 200));
+            const j = r.json();
+            assert.match(j.turn, /<ul class="ct-attached">/);
+            assert.match(j.turn, /<b>visits\.csv<\/b>/);
+            assert.match(j.turn, new RegExp(`<img src="/chat/file/${j.id}/inp_[A-Za-z0-9_-]+" alt="dot\.png"`));
+            await t.waitFor(j.id);
+            const rows = await s.db.many('SELECT name, mime, size, owner FROM actor_task_inputs WHERE task_id = $1 ORDER BY name', [j.id]);
+            assert.deepStrictEqual(rows.map((x) => [x.name, x.mime, x.owner]), [['dot.png', 'image/png', `user:${kim.subject}`], ['visits.csv', 'text/csv', `user:${kim.subject}`]]);
+            const sent = t.providers.requests.map((q) => JSON.stringify(q.body || {})).join('\n');
+            assert.ok(sent.includes('attached_file name=\\"visits.csv\\"') && sent.includes('Lisbon,42'), 'the run reads the CSV');
+            assert.ok(sent.includes('never instructions'), 'as data, not instructions');
+            const id = (await s.db.maybe("SELECT id FROM actor_task_inputs WHERE task_id = $1 AND name = 'dot.png'", [j.id])).id;
+            const csvId = (await s.db.maybe("SELECT id FROM actor_task_inputs WHERE task_id = $1 AND name = 'visits.csv'", [j.id])).id;
+            const mine = await t.get(`/chat/file/${j.id}/${csvId}`, { as: kim });
+            assert.strictEqual(mine.status, 200);
+            assert.strictEqual(mine.text, csv);
+            assert.match(mine.headers.get('content-disposition'), /^attachment;/, 'text downloads, never renders');
+            assert.match(mine.headers.get('content-security-policy'), /sandbox/);
+            const img = await t.get(`/chat/file/${j.id}/${id}`, { as: kim });
+            assert.match(img.headers.get('content-type'), /^image\/png/);
+            assert.strictEqual((await t.get(`/chat/file/${j.id}/${csvId}`, { as: bo })).status, 404, 'another person: nothing');
+            const page = await t.get(`/chat/${j.id}`, { as: kim });
+            assert.match(page.text, /<b>visits\.csv<\/b>/, 'the chat shows them above the bubble');
+        });
+
+        await check('files: the wrong kind, too many, or too big are refused with a plain reason', async () => {
+            const one = (name, type, bytes) => ({ name, type, data: Buffer.from(bytes).toString('base64') });
+            const exe = await t.get('/chat', { as: kim, json: { task: 'run this', files: [one('a.exe', 'application/x-msdownload', 'MZ\u0000\u0001')] }, headers: { ...SAME, accept: 'application/json' } });
+            assert.strictEqual(exe.status, 422);
+            assert.match(exe.json().error, /reads text, code, CSV, JSON and images/);
+            const pdf = await t.get('/chat', { as: kim, json: { task: 'read', files: [one('a.pdf', 'application/pdf', '%PDF-1.4')] }, headers: { ...SAME, accept: 'application/json' } });
+            assert.match(pdf.json().error, /PDFs are coming next/);
+            const five = await t.get('/chat', { as: kim, json: { task: 'many', files: [1, 2, 3, 4, 5].map((n) => one(`${n}.txt`, 'text/plain', 'x')) }, headers: { ...SAME, accept: 'application/json' } });
+            assert.match(five.json().error, /at most 4 files/);
+            const bin = await t.get('/chat', { as: kim, json: { task: 'fake text', files: [one('a.txt', 'text/plain', 'a\u0000b')] }, headers: { ...SAME, accept: 'application/json' } });
+            assert.match(bin.json().error, /not a text file/);
+        });
+
+        await check('a chat keeps its last six turns in mind', async () => {
+            const loopSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'server', 'runtime', 'loop.js'), 'utf8');
+            assert.ok(loopSrc.includes('.slice(-6)'), 'the loop keeps six, as store.followContext gives');
+        });
+
         await check('the app bar and the menu lead to Chat', async () => {
             const r = await t.get('/chat', { as: kim });
             assert.match(r.text, /"label":"Chat","href":"\/chat"/);

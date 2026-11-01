@@ -31,6 +31,10 @@ const TABLES = [
     // cascade).
     { table: 'actor_artifacts', subject: 'owner', value: (usr) => `user:${usr}`, file: 'artifacts.json', erase: 'delete',
         columns: ['id', 'task_id', 'owner', 'name', 'mime', 'size', 'created_at'] },
+    // The files they attached to their messages in the chat (plan L55 C2): the rows here (with what the run read of
+    // each), the bytes with the artifacts' in the extra part. Before tasks, for the same reason.
+    { table: 'actor_task_inputs', subject: 'owner', value: (usr) => `user:${usr}`, file: 'attachments.json', erase: 'delete',
+        columns: ['id', 'task_id', 'owner', 'name', 'mime', 'size', 'text', 'created_at'] },
     // A finished task they offered as an OpenVibe.Bench case (stage V2-10): the task text and the answer, nothing else.
     // Before tasks, so its rows are counted before the task's cascade would take them.
     { table: 'actor_bench_offers', subject: 'owner', value: (usr) => `user:${usr}`, file: 'bench-offers.json' },
@@ -77,7 +81,8 @@ const CONTENT_BUDGET = 4 * 1024 * 1024;
  */
 async function exportFiles(db, subject) {
     const rows = await db.many(
-        'SELECT id, name, mime, size, bytes FROM actor_artifacts WHERE owner = ANY($1::text[]) ORDER BY created_at DESC',
+        `SELECT id, name, mime, size, bytes, created_at FROM actor_artifacts WHERE owner = ANY($1::text[])
+         UNION ALL SELECT id, name, mime, size, bytes, created_at FROM actor_task_inputs WHERE owner = ANY($1::text[]) ORDER BY created_at DESC`,
         [[`user:${subject}`]],
     );
     const out = [];

@@ -27,6 +27,7 @@
  * createLoop({ config, models, registry, log, store, now }) → { run(args), revise(state, claims) }
  */
 
+const { block: inputBlock } = require('../tasks/inputs');
 const { createLedger } = require('./evidence');
 const { createTracer, codeOf } = require('./trace');
 const { createArtifactStore } = require('./artifacts');
@@ -995,7 +996,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         }
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [] }) {
         if (resume || fork) {
             return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent });
         }
@@ -1009,7 +1010,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             task: String(task), requester, taskId, mode, tier, signal, messages: [], lastText: '', model: null, family: null, provider: null,
             calls: 0, ledger: createLedger({ now }), plan: { assumptions: [], steps: [] }, counts: new Map(), stopped: null, selfReflections: 0,
             readOutside: false, agentId, baseTier: tier, answered: false, acting: [],
-            ctx: null, context: Array.isArray(context) ? context.filter((c) => c && c.task && c.answer).slice(-3) : [],
+            ctx: null, context: Array.isArray(context) ? context.filter((c) => c && c.task && c.answer).slice(-6) : [],
+            attachments: Array.isArray(attachments) ? attachments : [],
             depth: 0, tools: [], allow: null,
             // The brain (stage V2-8): what understand found, the two ledgers, the learned prior and the cascade.
             brain: {
@@ -1047,7 +1049,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // Understand first (stage V2-8): one cheap call, before any tool, that sets the deliverable, the risk and
             // the one question a high-risk ambiguous task may ask. It spends against the task's budget like any call.
             if (!ctx.budgetLeft || ctx.budgetLeft() > 0) {
-                const u = await understand({ task: state.task, mode, context: state.context, models, trace: ctx.trace, signal, now });
+                const u = await understand({ task: state.attachments.length ? `${state.task}\n(with ${state.attachments.length} attached file${state.attachments.length === 1 ? '' : 's'}: ${state.attachments.map((a) => a.name).join(', ')})` : state.task, mode, context: state.context, models, trace: ctx.trace, signal, now });
                 state.brain.understanding = u;
                 state.brain.kind = u.kind;
                 if (u.cost_usd) await ctx.meter(u.cost_usd);
@@ -1092,7 +1094,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             });
             // A follow-up (stage V2-5b): the conversation it continues, as it went, then the new question.
             for (const c of state.context) state.messages.push({ role: 'user', content: c.task }, { role: 'assistant', content: c.answer });
-            state.messages.push({ role: 'user', content: state.context.length ? `${FOLLOW_NOTE}\n\n${state.task}` : state.task });
+            const withFiles = state.attachments.length ? `${state.task}\n\n${inputBlock(state.attachments)}` : state.task;
+            state.messages.push({ role: 'user', content: state.context.length ? `${FOLLOW_NOTE}\n\n${withFiles}` : withFiles });
             if (state.brain.personAnswer) state.messages.push({ role: 'user', content: `I answered your question: ${state.brain.personAnswer}` });
             state.brain.prior = await loadPrior({ store, kind: state.brain.kind, tiers: allowedTiers(mode), stepKinds: STEP_KINDS, log });
             // An assumption edit on the live page is a follow-up turn in this same run: the person's words reach the
