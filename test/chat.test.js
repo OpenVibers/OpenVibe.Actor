@@ -30,11 +30,13 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.match(r.headers.get('location'), /^\/auth\/login\?next=%2Fchat/);
         });
 
-        await check('a new chat: one question, four starters, the composer, and an empty list of chats', async () => {
+        await check('a new chat: one question, eight starters from what people use agents for, the composer, an empty list', async () => {
             const r = await t.get('/chat', { as: kim });
             assert.strictEqual(r.status, 200);
             assert.match(r.text, /<h2>What should Actor do\?<\/h2>/);
-            assert.strictEqual((r.text.match(/data-starter="/g) || []).length, 4);
+            assert.strictEqual((r.text.match(/data-starter="/g) || []).length, 8);
+            ['Find a flight', 'Is this true?', 'Best deal', 'Watch for it', 'Plan a trip', 'Make a list'].forEach((k) => assert.ok(r.text.includes(`<b>${k}</b>`), k));
+            assert.ok(!/Who handles the mail/.test(r.text), 'not the old DNS example (the owner: "people aren\'t gonna use it for that")');
             assert.match(r.text, /<form class="cc" method="post" action="\/chat" data-composer>/);
             assert.match(r.text, /Your chats show here\./);
             assert.match(r.text, /<main id="main" class="page page-app">/, 'the app layout: the whole width, no crumbs');
@@ -142,10 +144,32 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             const js = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'js', 'chat.js'), 'utf8');
             assert.match(js, /new EventSource\('\/api\/v1\/tasks\/' \+ encodeURIComponent\(id\) \+ '\/events\?after='/, 'follows the task\'s own event stream');
             assert.match(js, /fetch\('\/chat\/turn\/' \+ encodeURIComponent\(id\)/, 'the server draws each turn; the page swaps it in');
-            assert.match(js, /'\/tasks\/' \+ encodeURIComponent\(busy\.getAttribute\('data-task'\)\) \+ '\/cancel'/, 'Stop cancels the working turn');
+            assert.match(js, /'\/tasks\/' \+ encodeURIComponent\(w\.getAttribute\('data-task'\)\) \+ '\/cancel'/, 'Stop cancels the working turn');
+            assert.match(js, /'\/chat\/' \+ encodeURIComponent\(w\.getAttribute\('data-task'\)\) \+ '\/steer'/, 'what you write while it works steers it');
+            assert.match(js, /'\/tasks\/' \+ encodeURIComponent\(id\) \+ '\/look\?at='/, 'the screen refreshes from the last picture');
             assert.match(js, /\(hover: hover\) and \(pointer: fine\)/, 'Enter sends only with a keyboard and mouse; a phone\'s Enter is a new line');
             assert.match(js, /prefers-reduced-motion: reduce/);
             assert.ok(!/innerHTML = [^;]*(text\.value|e\.text|title)/.test(js), 'what a person typed is never set as HTML');
+        });
+
+        await check('steering: words for a working turn go to it; a finished turn, another person, another site: no', async () => {
+            const done = await t.get(`/chat/${first}/steer`, { as: kim, form: { task: 'only Hetzner' }, headers: { ...SAME, accept: 'application/json' } });
+            assert.strictEqual(done.status, 409);
+            assert.match(done.json().error, /already finished/);
+            assert.strictEqual((await t.get(`/chat/${first}/steer`, { as: bo, form: { task: 'x' }, headers: { ...SAME, accept: 'application/json' } })).status, 404);
+            assert.strictEqual((await t.get(`/chat/${first}/steer`, { as: kim, form: { task: 'x' }, headers: { 'sec-fetch-site': 'cross-site' } })).status, 403);
+            assert.deepStrictEqual(await t.ctx.engine.steer('tsk_00000000000000000000000000', 'hi'), { ok: false, reason: 'this task is not running' });
+        });
+
+        await check('a working turn: the composer steers it and Stop is its own button; the screen waits for a picture', async () => {
+            const last = (await s.db.maybe('SELECT id FROM tasks WHERE requester = $1 ORDER BY id DESC LIMIT 1', [`user:${kim.subject}`])).id;
+            await s.db.query("UPDATE tasks SET state = 'running' WHERE id = $1", [last]);
+            const page = await t.get(`/chat/${last}`, { as: kim });
+            await s.db.query("UPDATE tasks SET state = 'succeeded' WHERE id = $1", [last]);
+            assert.match(page.text, new RegExp(`<form class="cc" method="post" action="/chat/${last}/steer" data-composer data-busy>`));
+            assert.match(page.text, /placeholder="Tell Actor something while it works"/);
+            assert.match(page.text, new RegExp(`<button class="cc-stop" type="submit" formaction="/tasks/${last}/cancel" formnovalidate aria-label="Stop" data-cc-stop>`));
+            assert.match(page.text, /<figure class="ct-screen" data-screen hidden><\/figure>/, 'no picture yet: the screen is there, hidden, for the script to fill');
         });
 
         await check('the app bar and the menu lead to Chat', async () => {

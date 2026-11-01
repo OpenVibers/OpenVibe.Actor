@@ -2,7 +2,9 @@
  *   - a message sends without a reload, its turn appears at once, and the thread stays at the bottom;
  *   - a turn that is working follows its event stream: the live line says what it is doing now, the work list fills in
  *     (the server renders it: GET /chat/turn/:id), and the answer fades in when it is done;
- *   - Send turns into Stop while Actor works; Enter sends on a keyboard, Shift+Enter is a new line;
+ *   - while Actor works, what you write steers that turn (it hears it at its next step) and Stop is its own button;
+ *     Enter sends on a keyboard, Shift+Enter is a new line;
+ *   - a turn working on a screen shows what Actor sees, refreshed every two seconds, with Bot's live view one tap away;
  *   - the chats open as a drawer on phones, and the search box filters them;
  *   - Copy on each answer and on each code block.
  * Booted on load and after an in-place page swap (openvibe-shared/boost's ov:boost:load).
@@ -77,15 +79,15 @@
             b.addEventListener('click', function () { text.value = b.getAttribute('data-starter'); grow(); syncSend(); text.focus(); });
         });
         function openTurn() { var t = chat.querySelectorAll('.ct-turn'); var last = t[t.length - 1]; return last && (last.hasAttribute('data-open') || last.getAttribute('data-state') === 'needs_you') ? last : null; }
-        var STOP = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';
-        var SEND = send ? send.innerHTML : '';
+        var stopBtn = chat.querySelector('[data-cc-stop]');
+        function working() { var t = openTurn(); return t && t.hasAttribute('data-open') ? t : null; }
         function syncSend() {
             if (!send) return;
-            var busy = openTurn();
-            send.classList.toggle('is-stop', !!busy && busy.hasAttribute('data-open'));
-            send.innerHTML = busy && busy.hasAttribute('data-open') ? STOP : SEND;
-            send.setAttribute('aria-label', busy && busy.hasAttribute('data-open') ? 'Stop' : 'Send');
-            send.disabled = !(busy && busy.hasAttribute('data-open')) && !(text && text.value.trim());
+            var w = working();
+            if (stopBtn) { stopBtn.hidden = !w; stopBtn.type = 'button'; stopBtn.removeAttribute('formaction'); }
+            form.setAttribute('action', w ? '/chat/' + w.getAttribute('data-task') + '/steer' : '/chat');
+            if (text) text.placeholder = w ? 'Tell Actor something while it works' : (form.querySelector('input[name=parent]') ? 'Reply to Actor' : 'Ask Actor to do something');
+            send.disabled = !(text && text.value.trim());
         }
         syncSend();
 
@@ -102,16 +104,37 @@
             if (text) text.placeholder = 'Reply to Actor';
         }
 
+        if (stopBtn) stopBtn.addEventListener('click', function () {
+            var w = working();
+            if (!w) return;
+            stopBtn.disabled = true;
+            if (note) note.textContent = 'Stopping…';
+            fetch('/tasks/' + encodeURIComponent(w.getAttribute('data-task')) + '/cancel', { method: 'POST', credentials: 'same-origin', redirect: 'manual' })
+                .catch(function () {}).then(function () { stopBtn.disabled = false; });
+        });
+        // Steering: the words join the working turn's list at once, and the run hears them at its next step.
+        function steer(w) {
+            var said = text.value.trim();
+            var row = document.createElement('li'); row.className = 'cw-you is-sending';
+            row.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14v10H10l-5 4Z"/></svg><p></p>';
+            row.querySelector('p').textContent = said;
+            var list = w.querySelector('[data-work]');
+            if (list) { var fold = list.closest('details'); if (fold) fold.open = true; list.appendChild(row); }
+            text.value = ''; grow(); syncSend();
+            var body = new URLSearchParams({ task: said });
+            fetch('/chat/' + encodeURIComponent(w.getAttribute('data-task')) + '/steer', { method: 'POST', credentials: 'same-origin', headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, body: body.toString() })
+                .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+                .then(function (res) {
+                    row.classList.remove('is-sending');
+                    if (!res.ok) { row.remove(); text.value = said; grow(); syncSend(); problem(res.j.error || 'Actor could not take that just now.'); }
+                })
+                .catch(function () { row.remove(); text.value = said; grow(); syncSend(); problem('No connection. Your message is still in the box.'); });
+        }
+
         if (form) form.addEventListener('submit', function (e) {
-            var busy = openTurn();
-            if (busy && busy.hasAttribute('data-open')) {      // Stop
-                e.preventDefault();
-                send.disabled = true;
-                if (note) note.textContent = 'Stopping…';
-                fetch('/tasks/' + encodeURIComponent(busy.getAttribute('data-task')) + '/cancel', { method: 'POST', credentials: 'same-origin', redirect: 'manual' }).catch(function () {});
-                return;
-            }
             if (!window.fetch || !text || !text.value.trim()) return;
+            var w = working();
+            if (w) { e.preventDefault(); problem(null); steer(w); return; }
             e.preventDefault();
             problem(null);
             send.disabled = true;
@@ -183,10 +206,18 @@
                     if (!finished) {
                         // Only the work list changes while it works: the fold keeps its open or closed state.
                         var list = turn.querySelector('[data-work]'), fresh = next.querySelector('[data-work]');
-                        if (list && fresh) list.innerHTML = fresh.innerHTML;
-                        else if (fresh) turn.querySelector('.ct-reply').innerHTML = next.querySelector('.ct-reply').innerHTML;
+                        if (list && fresh) {
+                            // Keep a line the person just sent until the server's list has it too.
+                            var sending = Array.prototype.slice.call(list.querySelectorAll('.cw-you.is-sending'));
+                            list.innerHTML = fresh.innerHTML;
+                            sending.forEach(function (r) { list.appendChild(r); });
+                        } else if (fresh) turn.querySelector('.ct-reply').innerHTML = next.querySelector('.ct-reply').innerHTML;
+                        // The screen appears (or its live link changes) when the run opens a desk.
+                        var scr = turn.querySelector('[data-screen]'), scr2 = next.querySelector('[data-screen]');
+                        if (scr && scr2 && (scr.hidden !== scr2.hidden || scr.getAttribute('data-desk') !== scr2.getAttribute('data-desk'))) { scr.replaceWith(scr2); screen(turn); }
                         liveLine(turn);
                     } else {
+                        stopScreen(turn);
                         turn.replaceWith(next);
                         var ans = next.querySelector('[data-answer]');
                         if (ans && !reduce) { ans.classList.add('is-reveal'); Array.prototype.forEach.call(ans.children, function (c, i) { c.style.animationDelay = Math.min(i, 14) * 55 + 'ms'; }); }
@@ -201,9 +232,43 @@
                 })
                 .catch(function () {});
         }
+        // What Actor sees: the last picture, fetched every two seconds while the turn works (only when it changed).
+        var screens = {};
+        function screen(turn) {
+            var id = turn.getAttribute('data-task');
+            if (screens[id] || !turn.hasAttribute('data-open')) return;
+            var fig = turn.querySelector('[data-screen]');
+            if (!fig) return;
+            var busyLoad = false;
+            screens[id] = setInterval(function () {
+                if (busyLoad || document.hidden) return;
+                busyLoad = true;
+                var img = new Image();
+                img.onload = function () {
+                    busyLoad = false;
+                    var f = turn.querySelector('[data-screen]');
+                    if (!f) return;
+                    var shown = f.querySelector('img[data-look]');
+                    if (!shown) {
+                        var frame = f.querySelector('.ct-screen-frame');
+                        if (!frame) { frame = document.createElement('div'); frame.className = 'ct-screen-frame'; f.insertBefore(frame, f.firstChild); }
+                        var wait = frame.querySelector('.ct-screen-wait'); if (wait) wait.remove();
+                        shown = document.createElement('img'); shown.setAttribute('data-look', ''); shown.alt = 'What Actor sees now';
+                        frame.insertBefore(shown, frame.firstChild);
+                    }
+                    shown.src = img.src;
+                    f.hidden = false;
+                };
+                img.onerror = function () { busyLoad = false; };
+                img.src = '/tasks/' + encodeURIComponent(id) + '/look?at=' + Date.now();
+            }, 2000);
+        }
+        function stopScreen(turn) { var id = turn.getAttribute('data-task'); if (screens[id]) { clearInterval(screens[id]); delete screens[id]; } }
+
         function follow(turn) {
             if (!window.EventSource || !turn || !turn.hasAttribute('data-open') || turn.dataset.following) return;
             turn.dataset.following = '1';
+            screen(turn);
             liveLine(turn);
             var id = turn.getAttribute('data-task');
             var src = new EventSource('/api/v1/tasks/' + encodeURIComponent(id) + '/events?after=' + encodeURIComponent(turn.getAttribute('data-last') || '0'));
