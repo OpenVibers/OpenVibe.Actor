@@ -136,6 +136,15 @@ function deskFrom(events) {
     return desk;
 }
 
+/**
+ * Where a desk is, from Bot's screen page address (agents/computers.js watchUrl): { machine, desk }, the desk 'main'
+ * when the address names none; null for any other address. What a watch link needs (plan L55 C1b).
+ */
+function deskPlace(url) {
+    const at = /\/machines\/(dev_[A-Za-z0-9_-]{1,64})\/screen(?:\?desk=([a-z0-9-]{1,40}))?$/.exec(String(url || ''));
+    return at ? { machine: at[1], desk: at[2] || 'main' } : null;
+}
+
 async function taskDesk(s, row) {
     if (!row || !OPEN.includes(row.state)) return null;
     const rows = await s.db.many('SELECT body FROM task_events WHERE task_id = $1 ORDER BY seq DESC LIMIT 200', [row.id]);
@@ -250,4 +259,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, deskPlace, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };

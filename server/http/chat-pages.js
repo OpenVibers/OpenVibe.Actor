@@ -79,9 +79,15 @@ function tookOf(row) {
     return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}`;
 }
 
-function createChatPages(ctx) {
+function createChatPages(ctx, { computers = null } = {}) {
     const { config, s, engine } = ctx;
     const r = asyncRouter();
+    // Bot's computers, for the live desk in a turn (plan L55 C1b): made when first asked for.
+    let pcsMade = computers;
+    const pcs = () => (pcsMade = pcsMade || require('../agents/computers').createComputers({ config }));
+    // Watch links are credentials (whoever holds one watches, and may take over): kept in memory for the task's own
+    // requester, never written to the task's events or the database, and reused until a few minutes before they end.
+    const links = new Map();
     // Helpers from the task page, read when first used (pages.js is the bigger module; no load-order coupling).
     const pageKit = () => require('./pages');
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
@@ -145,7 +151,9 @@ function createChatPages(ctx) {
         const desk = open ? store.deskFrom(events) : null;
         const look = looks.get(row.id);
         if (!desk && !look) return open ? html`<figure class="ct-screen" data-screen hidden></figure>` : '';
-        return html`<figure class="ct-screen${open ? ' is-live' : ''}" data-screen${desk ? html` data-desk="${desk.url}"` : ''}>
+        const place = desk && store.deskPlace(desk.url);
+        const framable = !!(place && place.desk !== 'main');
+        return html`<figure class="ct-screen${open ? ' is-live' : ''}" data-screen${desk ? html` data-desk="${desk.url}"` : ''}${framable ? html` data-watch="/chat/${row.id}/watch"` : ''}>
 <div class="ct-screen-frame">${look ? html`<img data-look src="/tasks/${row.id}/look?at=${look.at}" alt="What Actor ${open ? 'sees now' : 'last saw'}"${look.width && look.height ? html` width="${look.width}" height="${look.height}"` : ''}>` : html`<span class="ct-screen-wait">The screen shows here as soon as Actor looks at it.</span>`}${open ? html`<span class="ct-live">Live</span>` : ''}</div>
 <figcaption><span>${open ? `What Actor sees${desk && desk.kind === 'browser' ? ' in its browser' : ''}` : 'What Actor last saw'}</span>${desk ? html`<a class="ct-watch" href="${desk.url}" target="_blank" rel="noopener">${raw(ICON.open)}Watch live and take over</a>` : ''}</figcaption>
 </figure>`;
@@ -389,6 +397,30 @@ ${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mo
         const out = text && OPEN.includes(row.state) ? await engine.steer(row.id, text) : { ok: false, reason: text ? 'it has finished' : 'nothing was said' };
         if (wantsJson) return res.status(out.ok ? 202 : 409).json(out.ok ? { ok: true } : { error: out.reason === 'it has finished' ? 'Actor already finished that one. Send it as a new message.' : 'Actor could not take that just now.' });
         return res.redirect(303, `/chat/${row.id}#t-${row.id}`);
+    });
+
+    // The live desk in a working turn (plan L55 C1b; the owner, 11-01: "show you the display… watch it… and steer it").
+    // The page asks once the turn is on a desk; the answer is a short-lived Bot page it frames, where the person can
+    // take the mouse. Only the task's requester, only same-origin, only while the turn works.
+    r.post('/chat/:id/watch', async (req, res) => {
+        res.set('Cache-Control', 'private, no-store');
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.status(401).json({ error: 'Sign in first.' });
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).json({ error: 'Ask from openvibe.actor itself.' });
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req)) return res.status(404).json({ error: 'That chat is not here.' });
+        if (!OPEN.includes(row.state)) return res.status(409).json({ error: 'Actor has finished that one.' });
+        const on = await store.taskDesk(s, row);
+        const desk = on && store.deskPlace(on.url);
+        if (!desk) return res.status(409).json({ error: 'Actor is not on a desk just now.' });
+        const key = `${row.id}|${desk.machine}|${desk.desk}`;
+        const kept = links.get(key);
+        if (kept && kept.until > now()) return res.json({ url: kept.url, expires_at: kept.expires_at, control: kept.control });
+        const out = await pcs().watchLink(req.viewer.subject, desk.machine, desk.desk, { control: true, minutes: 60 });
+        if (out.error) return res.status(502).json({ error: 'The live desk is not available here; the picture still updates.', reason: out.code || null });
+        const ends = Date.parse(out.expires_at || '') || now() + 60 * 60000;
+        links.set(key, { url: out.url, expires_at: out.expires_at, control: out.control, until: ends - 3 * 60000 });
+        if (links.size > 500) links.delete(links.keys().next().value);
+        return res.json({ url: out.url, expires_at: out.expires_at, control: out.control });
     });
 
     const PROBLEM = {
