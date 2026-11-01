@@ -207,15 +207,16 @@ function createApi(ctx) {
         return next();
     };
 
-    r.get('/me/model', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), async (req, res) => {
+    r.get('/me/model', principal.requireCapability('actor.model.manage'), personOnly, limits.reads('actor.model.manage'), async (req, res) => {
         const row = await modelPrefs.get(s, req.principal.requester);
-        // No `keys` list: OpenVibe.AI keeps the person's keys sealed and has no route a service may ask to see which
-        // providers they hold (its own /me/credentials refuses a service token, even one acting for them). The list
-        // belongs in the AI console, where the person adds the key.
-        res.json({ ...modelPrefs.wire(row), keys: null });
+        // The providers the person allowed THIS service to use their own key for, and that they hold a key for:
+        // names only, never key material. Null when OpenVibe.AI does not say (the person allowed us nothing yet).
+        const subject = String(req.principal.requester || '').replace(/^user:/, '');
+        const keys = ctx.models && typeof ctx.models.allowedKeys === 'function' ? await ctx.models.allowedKeys(subject) : null;
+        res.json({ ...modelPrefs.wire(row), keys });
     });
 
-    r.put('/me/model', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), async (req, res) => {
+    r.put('/me/model', principal.requireCapability('actor.model.manage'), personOnly, limits.budget('actor.model.manage'), async (req, res) => {
         const out = await modelPrefs.put(s, req.principal.requester, req.body || {});
         if (out.error) return problem(req, res, 422, 'actor.model.invalid', out.error);
         res.json({ ...modelPrefs.wire(out.row), keys: null });

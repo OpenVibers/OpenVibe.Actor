@@ -263,6 +263,23 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         return aiTokens;
     }
 
+    /**
+     * The providers the person allowed THIS service to use their own key for, and that they hold a key for: names
+     * only, never key material. Null when AI does not say (or does not know) — the person may not have allowed us.
+     */
+    async function allowedKeys(subject) {
+        const tokens = aiTokenClient();
+        if (!tokens || !subject) return null;
+        try {
+            const res = await fetchImpl(trimSlash(ai.url) + '/api/v1/allowed-keys/' + encodeURIComponent(subject), {
+                headers: { accept: 'application/json', ...(await tokens.authHeaders()) },
+            });
+            if (!res.ok) return null;
+            const j = await res.json();
+            return Array.isArray(j.providers) ? j.providers : null;
+        } catch { return null; }
+    }
+
     /** Run the rest of the work with this person's model choice in force. */
     function withChoice(choice, fn) {
         return choiceStore.run(choice || null, fn);
@@ -327,6 +344,12 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             // No key for that provider yet: the person adds it at AI's own site, where it is sealed.
             if (res.status === 404 && code === 'credential.not_found') {
                 throw new ModelError('Add your ' + provider + ' key at ' + host + ' first', { code: 'actor.model.no_own_key' });
+            }
+            // The person holds the key but has not allowed this service to use it (AI, plan L55 C3): AI's own detail
+            // names the page where they allow it, so the person can act on it.
+            if (res.status === 403 && code === 'ai.credential_not_allowed') {
+                const said = String(msg || '').trim();
+                throw new ModelError(said ? said.charAt(0).toUpperCase() + said.slice(1) : 'This service may not use your key yet', { code: 'actor.model.not_allowed' });
             }
             throw new ProviderError('HTTP ' + res.status + ': ' + clip(msg, 300), { status: res.status, code: res.status === 429 ? 'actor.provider.rate_limited' : 'actor.provider.error' });
         }
@@ -399,7 +422,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     return {
-        warm, chat, resolve, tierList, modelList, resolveAll, withChoice, currentChoice,
+        warm, chat, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },
         listErrors: () => ({ ...listErrors }),
