@@ -102,7 +102,8 @@ function renderPage(o) {
         head: `<meta name="referrer" content="${o.noReferrer ? 'no-referrer' : 'strict-origin-when-cross-origin'}">
 ${appIcon.headTags({ site: 'actor' })}
 <link rel="stylesheet" href="${asset('css/actor.css')}">
-${(o.styles || []).map((name) => `<link rel="stylesheet" href="${esc(ovServe.url(name))}">`).join('\n')}
+<!-- The shared showcase stylesheet on every page, not only the home: inner pages use its buttons (sc-btn), and without it a sign-in button drew as a bare link (phone sweep, 2026-11-01). It is scoped to its own sc- classes. -->
+${[...new Set(['showcase.css', ...(o.styles || [])])].map((name) => `<link rel="stylesheet" href="${esc(ovServe.url(name))}">`).join('\n')}
 ${(o.css || []).map((rel) => `<link rel="stylesheet" href="${asset(rel)}">`).join('\n')}
 ${render(scripts)}
 <meta name="ov-boost" content="actor@${esc(RELEASE)}">
