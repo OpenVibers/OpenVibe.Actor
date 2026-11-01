@@ -251,7 +251,7 @@
     .cmp-pick { display: flex; gap: 8px; overflow-x: auto; margin: .9rem -16px .2rem; padding: 2px 16px 4px; scrollbar-width: none; overscroll-behavior-x: contain; }
     .cmp-pick::-webkit-scrollbar { display: none; }
     .cmp-pick input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
-    .cmp-pick label { display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 15px; border-radius: 999px; border: 1px solid var(--border, rgba(255,255,255,.1)); color: var(--text-secondary, #a8b3c4); font-size: 13.5px; font-weight: 650; white-space: nowrap; cursor: pointer; }
+    .cmp-pick label { display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 15px; border-radius: 999px; border: 1px solid var(--border, color-mix(in srgb, var(--text-primary, #fff) 10%, transparent)); color: var(--text-secondary, #a8b3c4); font-size: 13.5px; font-weight: 650; white-space: nowrap; cursor: pointer; }
     .cmp-pick input:checked + label { color: var(--text-primary, #e6edf7); border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); }
     .cmp-pick input:focus-visible + label { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
     .cmp-panel { display: none; }

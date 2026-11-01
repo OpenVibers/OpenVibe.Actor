@@ -27,14 +27,14 @@
 .cn-more { margin: auto 0 0; padding-top: .35rem; font-size: 14px; }
 
 .cn-tasks, .cn-list, .cn-links { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: .1rem; }
-.cn-task { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "pill text" ". meta"; column-gap: .6rem; align-items: baseline; padding: .5rem 0; border-top: 1px solid var(--border-color, rgba(255,255,255,.08)); }
+.cn-task { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "pill text" ". meta"; column-gap: .6rem; align-items: baseline; padding: .5rem 0; border-top: 1px solid var(--border-color, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); }
 .cn-task:first-child { border-top: 0; }
 .cn-task .pill { grid-area: pill; white-space: nowrap; }
 .cn-task a { grid-area: text; color: var(--text-primary, #e6edf7); text-decoration: none; overflow-wrap: anywhere; }
 .cn-task a:hover, .cn-task a:focus-visible { color: var(--accent-light, #60a5fa); text-decoration: underline; }
 .cn-task .cn-meta { grid-area: meta; }
 .cn-meta { color: var(--text-secondary, #96a7c2); font-size: 13px; }
-.cn-list li, .cn-links li { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .55rem; padding: .45rem 0; border-top: 1px solid var(--border-color, rgba(255,255,255,.08)); }
+.cn-list li, .cn-links li { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .55rem; padding: .45rem 0; border-top: 1px solid var(--border-color, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); }
 .cn-list li:first-child, .cn-links li:first-child { border-top: 0; }
 /* A row with a status dot: the dot keeps its own column, so a long name wraps beside it, never under it. */
 .cn-list li:has(> .cn-dot) { display: grid; grid-template-columns: 8px minmax(0, 1fr); column-gap: .55rem; row-gap: .15rem; align-items: center; }
@@ -61,7 +61,7 @@
 .cn-month .cn-bar small { display: block; height: 1.3em; line-height: 1.3em; }
 /* The events feed: a coloured dot for how each ended, the text, then who, cost and when. */
 .cn-events { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
-.cn-event { display: grid; grid-template-columns: 8px minmax(0, 1fr); column-gap: .6rem; row-gap: .1rem; align-items: center; padding: .45rem 0; border-top: 1px solid var(--border-color, rgba(255,255,255,.08)); }
+.cn-event { display: grid; grid-template-columns: 8px minmax(0, 1fr); column-gap: .6rem; row-gap: .1rem; align-items: center; padding: .45rem 0; border-top: 1px solid var(--border-color, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); }
 .cn-event:first-child { border-top: 0; }
 .cn-event > a, .cn-event > .cn-meta { grid-column: 2; overflow-wrap: anywhere; }
 .cn-event > a { color: var(--text-primary, #e6edf7); }
@@ -76,7 +76,7 @@
   .cn-grid { grid-template-columns: minmax(0, 1fr); }
   .cn-wide { grid-column: auto; }
   .cn-full .cn-links { grid-template-columns: minmax(0, 1fr); }
-  .cn-full .cn-links li { border-top: 1px solid var(--border-color, rgba(255,255,255,.08)); }
+  .cn-full .cn-links li { border-top: 1px solid var(--border-color, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); }
   .cn-full .cn-links li:first-child { border-top: 0; }
   .cn-command-row { justify-content: space-between; }
   .cn-command textarea { min-height: 5.4rem; }

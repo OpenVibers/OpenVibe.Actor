@@ -32,7 +32,7 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 .cs-group { margin: 12px 8px 4px; font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted, #7386a3); }
 .cs-list a { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 10px; border-radius: 10px; color: var(--text-secondary, #b4c0d4); text-decoration: none; font-size: 14.5px; }
 .cs-list a span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cs-list a:hover { background: var(--bg-hover, rgba(255, 255, 255, .05)); color: var(--text-primary, #e6edf7); }
+.cs-list a:hover { background: var(--bg-hover, color-mix(in srgb, var(--text-primary, #fff) 5%, transparent)); color: var(--text-primary, #e6edf7); }
 .cs-list a[aria-current=page] { background: color-mix(in srgb, var(--accent, #f97316) 16%, transparent); color: var(--text-primary, #e6edf7); font-weight: 600; }
 .cs-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent, #f97316); animation: ct-breathe 1.6s ease-in-out infinite; }
 .cs-empty { margin: 14px 10px; font-size: 14px; color: var(--text-muted, #7386a3); }
@@ -47,7 +47,7 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 .ct-head.is-stuck { border-bottom-color: var(--line); }
 .ct-title { flex: 1; min-width: 0; margin: 0; font-size: 16px; font-weight: 650; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ct-menu, .ct-new { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; border: 0; background: none; color: var(--text-secondary, #b4c0d4); }
-.ct-menu:hover, .ct-new:hover { background: var(--bg-hover, rgba(255, 255, 255, .06)); color: var(--text-primary, #e6edf7); }
+.ct-menu:hover, .ct-new:hover { background: var(--bg-hover, color-mix(in srgb, var(--text-primary, #fff) 6%, transparent)); color: var(--text-primary, #e6edf7); }
 .ct-menu svg, .ct-new svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 @media (min-width: 900px) { .ct-menu { display: none; } }
 .ct-scroll { flex: 1; padding: 8px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px)); }
@@ -126,7 +126,7 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 .ct-checked svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .ct-acts { display: inline-flex; gap: 2px; margin-left: auto; }
 .ct-act { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 9px; border-radius: 9px; border: 0; background: none; color: var(--text-secondary, #96a7c2); font-size: 13px; text-decoration: none; }
-.ct-act:hover { background: var(--bg-hover, rgba(255, 255, 255, .06)); color: var(--text-primary, #e6edf7); }
+.ct-act:hover { background: var(--bg-hover, color-mix(in srgb, var(--text-primary, #fff) 6%, transparent)); color: var(--text-primary, #e6edf7); }
 .ct-act svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .ct-act.is-done { color: var(--success-text, var(--success, #22c55e)); }
 
@@ -233,7 +233,7 @@ html[data-ov-motion=reduced] .ct-answer.is-streaming .sw { opacity: 1 !important
 .cc-files img { width: 28px; height: 28px; object-fit: cover; border-radius: 6px; }
 .cc-files span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-files button { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 0; background: none; color: var(--text-muted, #7386a3); font-size: 16px; line-height: 1; }
-.cc-files button:hover { background: var(--bg-hover, rgba(255, 255, 255, .08)); color: var(--text-primary, #e6edf7); }
+.cc-files button:hover { background: var(--bg-hover, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); color: var(--text-primary, #e6edf7); }
 .ct-you { flex-direction: column; align-items: flex-end; gap: 6px; }
 .ct-attached { list-style: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin: 0; padding: 0; max-width: min(85%, 620px); }
 .ct-attached img { display: block; max-width: 220px; max-height: 180px; border-radius: 14px; border: 1px solid var(--line); }
@@ -263,7 +263,7 @@ html[data-ov-motion=reduced] .ct-answer.is-streaming .sw { opacity: 1 !important
 .ccm-item::before { content: ''; position: absolute; left: 11px; top: 12px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); box-sizing: border-box; }
 .ccm-item.is-on::before { border-color: var(--accent, #4f7cff); background: radial-gradient(circle, var(--accent, #4f7cff) 0 3px, transparent 3.5px); }
 .ccm-item:hover, .ccm-item:focus-visible { background: color-mix(in srgb, var(--text-primary, #eef2f8) 6%, transparent); outline: none; }
-.ccm-own.is-ready .ccm-item small::after { content: ' · ready'; color: #22c55e; font-weight: 650; }
+.ccm-own.is-ready .ccm-item small::after { content: ' · ready'; color: var(--success-text, #22c55e); font-weight: 650; }
 .ccm-setup { flex: none; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: var(--accent, #4f7cff); text-decoration: none; border: 1px solid color-mix(in srgb, var(--accent, #4f7cff) 40%, transparent); }
 .ccm-setup:hover { background: color-mix(in srgb, var(--accent, #4f7cff) 12%, transparent); }
 .ccm-fine { margin: 8px 8px 4px; color: var(--text-muted, #7386a3); font-size: 12px; line-height: 1.45; }
