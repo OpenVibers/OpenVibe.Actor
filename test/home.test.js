@@ -25,7 +25,7 @@ const { boot, check, done } = require('./helpers/boot');
         assert.match(r.text, /<dt><a href="#tools">tools it can run<\/a><\/dt>/, 'the tools number opens the tools fold');
         assert.match(r.text, stat('ways to choose', '5'));
         assert.match(r.text, stat('free tasks a day'));
-        assert.match(r.text, stat('agents? working now'));
+        assert.match(r.text, stat('agents? to choose from'));
         const tools = foldOf(r.text, 'tools');
         assert.match(tools, />MX Lookup</);
         assert.ok(!tools.includes('Video download'), 'a job tool is not offered');

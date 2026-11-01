@@ -117,10 +117,33 @@ const META = [
     /\bI(?:'m| am) not adding those numbers\b/i,
     /\bI can(?:'|no)t verify\b/i,
     /\bevidence[- ]linked\b/i,
+    /\bclaim[- ]by[- ]claim\b/i,
+    /\b(?:existing|earlier|previous) draft\b/i,
+    /\bno (?:tool[- ]backed )?evidence (?:is )?(?:required|needed)\b/i,
 ];
 
+// The owner, 2026-11-01 (a "What can you do" answer opened with "None of the claims in the existing draft are live
+// facts… Claim-by-claim reflection… Final answer (unchanged in substance…)"): a model that writes out its reflection
+// before the answer, and then heads the answer "Final answer", has handed us both. The answer is what follows that
+// heading; what came before it is the check, which goes to the steps (a 'text' step), never to the person. Only when the
+// part before the heading reads as a check, so an answer that merely contains the words "final answer" is untouched.
+const FINAL_HEAD = /^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?(?:my |the )?final (?:answer|reply|response|version)\b[^\n]*$/im;
+const CHECK_TALK = [
+    /\bclaim[- ]by[- ]claim\b/i, /\b(?:existing|earlier|previous|first|my|the|this) draft\b/i, /\breflect(?:ion|ing)?\b/i,
+    /\bno (?:tool[- ]backed )?evidence (?:is )?(?:required|needed)\b/i, /\[E#\]/, /\bunverif(?:ied|iable)\b/i, /\blive facts?\b/i,
+];
+function splitCheck(text) {
+    const s = String(text || '');
+    const m = FINAL_HEAD.exec(s);
+    if (!m || m.index === 0) return { text: s, check: '' };
+    const before = s.slice(0, m.index).trim();
+    const after = s.slice(m.index + m[0].length).replace(/^\s+/, '');
+    if (!after || !CHECK_TALK.some((re) => re.test(before))) return { text: s, check: '' };
+    return { text: after, check: before };
+}
+
 function withoutMeta(text) {
-    const parts = String(text || '').split(/\n{2,}/);
+    const parts = splitCheck(text).text.split(/\n{2,}/);
     const meta = (p) => p.length < 600 && !/\[E\d+\]/.test(p) && META.some((re) => re.test(p));
     while (parts.length > 1 && meta(parts[0])) parts.shift();
     while (parts.length > 1 && meta(parts[parts.length - 1])) parts.pop();
@@ -545,7 +568,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 if (state.selfReflections < reflections && (!ctx.budgetLeft || ctx.budgetLeft() > 0)) {
                     state.selfReflections += 1;
                     if (state.lastText) await ctx.emit({ step: 'text', text: clip(state.lastText, 2000) });
-                    state.messages.push({ role: 'user', content: `Reflect before this is delivered. Check the draft claim by claim: which claims have no evidence? A live fact (a price, score, weather reading, count, current status, release, date) must cite an [E#] from this run. If one has no evidence and a tool can fetch it, call that tool now. If it cannot be verified, remove it or say plainly that it is unverified. Then give the final answer, keeping the citations.` });
+                    state.messages.push({ role: 'user', content: `Reflect before this is delivered. Check the draft claim by claim: which claims have no evidence? A live fact (a price, score, weather reading, count, current status, release, date) must cite an [E#] from this run. If one has no evidence and a tool can fetch it, call that tool now. If it cannot be verified, remove it or say plainly that it is unverified. Do this check in your head: your next reply goes to the person exactly as written, so it is only the final answer, keeping the citations, with no notes about the check or the draft and no heading such as "Final answer".` });
                     await saveCheckpoint(state, ctx);
                     continue;
                 }
@@ -553,6 +576,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                     state.brain.progress = state.brain.progressLedger.update({ answered: true, nextGoal: state.brain.progressLedger.state.nextGoal });
                     if (state.depth === 0) await emitPlan(state, ctx);
                 }
+                const split = splitCheck(state.lastText);
+                if (split.check) await ctx.emit({ step: 'text', text: clip(split.check, 2000) });
                 state.answered = true;
                 await saveCheckpoint(state, ctx);
                 break;
@@ -1174,4 +1199,4 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     return { run, revise, escalate, close, planText, SYSTEM };
 }
 
-module.exports = { createLoop, planText, SYSTEM, withoutMeta, DELEGATE, MAX_SUB_AGENTS };
+module.exports = { createLoop, planText, SYSTEM, withoutMeta, splitCheck, DELEGATE, MAX_SUB_AGENTS };
