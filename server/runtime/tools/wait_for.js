@@ -16,17 +16,20 @@
  */
 const { personOf } = require('./_openvibe');
 
-const SOURCES = ['codes', 'run', 'time'];
+const SOURCES = ['codes', 'run', 'watch', 'live', 'release', 'time'];
 
 module.exports = {
     name: 'wait_for',
-    description: 'Wait for something to happen without spending anything while you wait. Use it when the answer depends on something that is still running (a coding task on the person\'s own machine, a job in the cloud) or when you should simply look again later. The task keeps its place, its budget and its plan; no model runs until the event arrives or the deadline passes. Say the source, what to wait for, how long at most, and the short line the person should read.',
+    description: 'Wait for something to happen without spending anything while you wait. Use it when the answer depends on something that is still running (a coding task on the person\'s own machine, a job in the cloud), on something that has not happened yet (one of the person\'s own Watch alerts firing, a channel going live, a new release of an OpenVibe service) or when you should simply look again later. The task keeps its place, its budget and its plan; no model runs until the event arrives or the deadline passes. Say the source, what to wait for, how long at most, and the short line the person should read.',
     input: {
         type: 'object',
         properties: {
-            source: { type: 'string', enum: SOURCES, description: 'codes: a coding task on a repository; run: a job in the cloud; time: just some time' },
+            source: { type: 'string', enum: SOURCES, description: 'codes: a coding task on a repository; run: a job in the cloud; watch: one of the person\'s OpenVibe.Watch alerts fires; live: a channel goes live on OpenVibe.Live; release: an OpenVibe service ships a new release; time: just some time' },
             repo: { type: 'string', description: 'owner/name of the repository, for source "codes"' },
             job_id: { type: 'string', description: 'the job id (job_…), for source "run"' },
+            watch_id: { type: 'string', description: 'for source "watch": one watch\'s id; leave it out to wait for any of the person\'s watches' },
+            channel: { type: 'string', description: 'for source "live": the channel\'s username on OpenVibe.Live' },
+            service: { type: 'string', description: 'for source "release": the service id, e.g. live, chat, media' },
             seconds: { type: 'number', description: 'how long to wait at most, in seconds (the deadline)' },
             on_timeout: { type: 'string', enum: ['ask', 'retry', 'fail'], description: 'what to do when nothing happened: ask the person, try that step again once, or fail the task' },
             line: { type: 'string', description: 'the short line the person reads, e.g. "waiting for your Codes task on owner/repo to finish"' },
@@ -47,7 +50,9 @@ module.exports = {
         if (!SOURCES.includes(source)) {
             return { text: JSON.stringify({ error: `source must be one of ${SOURCES.join(', ')}` }), isError: true };
         }
-        const target = source === 'codes' ? String(input.repo || '') : source === 'run' ? String(input.job_id || '') : null;
+        const target = source === 'codes' ? String(input.repo || '') : source === 'run' ? String(input.job_id || '')
+            : source === 'watch' ? String(input.watch_id || '') : source === 'live' ? String(input.channel || '')
+                : source === 'release' ? String(input.service || '') : null;
         const seconds = Number(input.seconds);
         if (!Number.isFinite(seconds) || seconds <= 0) {
             return { text: JSON.stringify({ error: 'seconds must be how long to wait (a positive number of seconds)' }), isError: true };

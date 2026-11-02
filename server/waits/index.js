@@ -21,15 +21,28 @@ const { guard } = require('./guard');
 const { topicMatches, personId, isValidPattern } = require('./match');
 const { limits } = require('./limits');
 
-/** The sources a wait may name in A2a: a Codes task, a Run job, or just time. */
+/**
+ * The sources a wait may name. A2a: a Codes task, a Run job, or just time. A2b (11-02):
+ *   watch    one of the person's own OpenVibe.Watch alerts firing (watch.watch.triggered; only their own: the
+ *            recipient is the person, and a watch id narrows it to one)
+ *   live     a channel going live on OpenVibe.Live (live.stream.started, public: any channel by its name)
+ *   release  a new release of an OpenVibe service (host.release.published, public: the service id, as live or chat)
+ * A Chat source waits for Chat's payload contract and a room id a person can name (its rooms are stream-keyed objects).
+ */
 const SOURCES = {
     codes: { topic: 'codes.task.*', states: ['succeeded', 'failed', 'cancelled'] },
     run: { topic: 'run.job.*', states: ['succeeded', 'failed', 'cancelled', 'expired'] },
+    watch: { topic: 'watch.watch.triggered', states: null },
+    live: { topic: 'live.stream.started', states: null },
+    release: { topic: 'host.release.published', states: null },
     time: { topic: null, states: [] },
 };
 
 const REPO_RE = /^[^/\s]+\/[^/\s]+$/;
 const JOB_RE = /^job_[0-9A-HJKMNP-TV-Z]{26}$/;
+const WATCH_RE = /^[A-Za-z0-9_-]{4,64}$/;
+const CHANNEL_RE = /^[A-Za-z0-9_-]{2,40}$/;
+const SERVICE_RE = /^[a-z][a-z0-9-]{1,40}$/;
 
 function createWaits({ s, config, log = console, now = () => Date.now(), events = null, engine = null }) {
     const L = limits(config);
@@ -78,7 +91,7 @@ function createWaits({ s, config, log = console, now = () => Date.now(), events 
         if (src.topic) {
             until.topic = src.topic;
             until.from = iso(now());
-            filter['payload.state'] = src.states;
+            if (src.states) filter['payload.state'] = src.states;
         } else {
             until.at = deadlineAt;
         }
@@ -92,6 +105,23 @@ function createWaits({ s, config, log = console, now = () => Date.now(), events 
             if (!JOB_RE.test(job)) throw Object.assign(new Error('a Run wait names the job id'), { code: 'actor.wait.target' });
             filter['payload.job_id'] = job;
             filter['payload.requester.id'] = me;
+        } else if (source === 'watch') {
+            // Only the person's own alerts: the event names who is notified. A watch id narrows it to one of them.
+            filter['payload.recipient'] = me;
+            const id = String(target || '').trim();
+            if (id) {
+                if (!WATCH_RE.test(id)) throw Object.assign(new Error('a Watch wait names the watch by its id'), { code: 'actor.wait.target' });
+                filter['payload.watch_id'] = id;
+            }
+        } else if (source === 'live') {
+            const name = String(target || '').trim().replace(/^@/, '');
+            if (!CHANNEL_RE.test(name)) throw Object.assign(new Error('a Live wait names the channel by its username'), { code: 'actor.wait.target' });
+            // Live's usernames are matched as Live writes them; the two common spellings are both accepted.
+            filter['payload.channel.username'] = [...new Set([name, name.toLowerCase()])];
+        } else if (source === 'release') {
+            const service = String(target || '').trim().toLowerCase();
+            if (!SERVICE_RE.test(service)) throw Object.assign(new Error('a release wait names the service, for example live or chat'), { code: 'actor.wait.target' });
+            filter['payload.service'] = service;
         }
         // The bounds: a person may not keep a hundred subscriptions, and a task may not wait on a hundred things.
         const openForPerson = await store.countOpen(s, requester);
@@ -116,6 +146,9 @@ function createWaits({ s, config, log = console, now = () => Date.now(), events 
     function defaultLine(source, target) {
         if (source === 'codes') return `waiting for your Codes task on ${target} to finish`;
         if (source === 'run') return `waiting for your run ${target} to finish`;
+        if (source === 'watch') return target ? `waiting for your watch ${target} to fire` : 'waiting for one of your watches to fire';
+        if (source === 'live') return `waiting for ${String(target || '').replace(/^@/, '')} to go live`;
+        if (source === 'release') return `waiting for a new release of OpenVibe ${target}`;
         return 'waiting for a while';
     }
 
