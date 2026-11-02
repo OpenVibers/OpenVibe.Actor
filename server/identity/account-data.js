@@ -66,7 +66,7 @@ const TABLES = [
     // they picked. Never a key: the key itself is sealed in OpenVibe.AI's vault, and this row only names the
     // provider. It goes with the person.
     { table: 'actor_model_prefs', subject: 'requester', value: (usr) => `user:${usr}`, file: 'model-prefs.json',
-        columns: ['requester', 'choice', 'model', 'updated_at'] },
+        columns: ['requester', 'choice', 'model', 'runs_on', 'updated_at'] },
     // What they asked Actor in chat (chat/asks.js): the message it answered, the room, the task it became.
     { table: 'actor_chat_asks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'chat-asks.json' },
     // The connections they added (stage V2-11): the servers and agents, and which of their tools are on. The token

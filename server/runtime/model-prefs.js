@@ -18,6 +18,9 @@
  * (server/identity/account-data.js).
  */
 const CHOICES = ['auto', 'openvibe'];
+// Where the tasks run (plan L55 C3, migration 0027): OpenVibe's cloud, or the person's own paired machine through
+// OpenVibe.Codes (the codes agent), for every turn but robot and computer-control tasks.
+const RUNS_ON = ['openvibe', 'computer'];
 const KEY_PROVIDERS = ['openai', 'anthropic', 'deepseek', 'google', 'openrouter', 'mistral'];
 // Plus their own computer (plan L55 C3): node is OpenVibe.AI's name for it.
 const OWN_PROVIDERS = [...KEY_PROVIDERS, 'node'];
@@ -45,7 +48,7 @@ function parse(body) {
 /** The row for a person, or null (no row: the default is 'auto'). */
 async function get(s, requester) {
     if (!requester) return null;
-    const row = await s.db.maybe('SELECT requester, choice, model, updated_at FROM actor_model_prefs WHERE requester = $1', [requester]);
+    const row = await s.db.maybe('SELECT requester, choice, model, runs_on, updated_at FROM actor_model_prefs WHERE requester = $1', [requester]);
     return row || null;
 }
 
@@ -75,15 +78,41 @@ async function choiceFor(s, requester) {
     return { subject, provider: row.choice.slice(4), model: row.model || null };
 }
 
+/** Where the person's tasks run: 'openvibe' (no row, or the default) or 'computer'. */
+async function runsOnFor(s, requester) {
+    const row = await get(s, requester);
+    return row && RUNS_ON.includes(row.runs_on) ? row.runs_on : 'openvibe';
+}
+
+/** The model choice "Runs on: my computer" means: the person's own computer, through OpenVibe.AI's node credential. */
+function computerChoice(requester) {
+    const subject = String(requester || '').startsWith('user:') ? requester.slice(5) : null;
+    return subject ? { subject, provider: 'node', model: null } : null;
+}
+
+/** Set where the person's tasks run. Returns { runs_on } or { error }; the model choice is left as it is. */
+async function setRunsOn(s, requester, value, now = () => new Date().toISOString()) {
+    const v = String(value == null ? '' : value).trim();
+    if (!RUNS_ON.includes(v)) return { error: 'runs_on: one of ' + RUNS_ON.join(', ') };
+    if (!requester) return { error: 'no person' };
+    await s.db.query(
+        "INSERT INTO actor_model_prefs (requester, choice, model, runs_on, updated_at) VALUES ($1, 'auto', NULL, $2, $3)"
+        + ' ON CONFLICT (requester) DO UPDATE SET runs_on = excluded.runs_on, updated_at = excluded.updated_at',
+        [requester, v, now()],
+    );
+    return { runs_on: v };
+}
+
 /** The choice as the API answers it. */
 function wire(row) {
-    if (!row) return { choice: 'auto', provider: null, model: null, updated_at: null };
+    if (!row) return { choice: 'auto', provider: null, model: null, runs_on: 'openvibe', updated_at: null };
     return {
         choice: row.choice,
         provider: String(row.choice || '').startsWith('own:') ? row.choice.slice(4) : null,
         model: row.model || null,
+        runs_on: RUNS_ON.includes(row.runs_on) ? row.runs_on : 'openvibe',
         updated_at: row.updated_at || null,
     };
 }
 
-module.exports = { CHOICES, OWN_PROVIDERS, KEY_PROVIDERS, parse, get, put, choiceFor, wire };
+module.exports = { CHOICES, RUNS_ON, OWN_PROVIDERS, KEY_PROVIDERS, parse, get, put, choiceFor, runsOnFor, setRunsOn, computerChoice, wire };
