@@ -8,6 +8,25 @@ const { boot, check, done } = require('./helpers/boot');
 const { chatsOf, groupOf } = require('../server/http/chat-pages');
 
 const SAME = { 'sec-fetch-site': 'same-origin' };
+
+/** A one-page PDF with one line of text (Helvetica), its cross-reference table at the right byte offsets. */
+function tinyPdf(line) {
+    const esc = String(line).replace(/[\\()]/g, (c) => `\\${c}`);
+    const content = line ? `BT /F1 18 Tf 72 720 Td (${esc}) Tj ET` : '';
+    const objects = [
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+        `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ];
+    let out = '%PDF-1.4\n';
+    const offsets = objects.map((o, i) => { const at = out.length; out += `${i + 1} 0 obj\n${o}\nendobj\n`; return at; });
+    const xref = out.length;
+    out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+    out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    return Buffer.from(out, 'latin1');
+}
 const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
 
 (async () => {
@@ -220,13 +239,37 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.match(page.text, /<b>visits\.csv<\/b>/, 'the chat shows them above the bubble');
         });
 
+        await check('files: a PDF goes with the message, the run reads its text as data, and it downloads as a PDF', async () => {
+            const has = require('child_process').spawnSync(process.env.ACTOR_PDFTOTEXT || 'pdftotext', ['-v']);
+            if (has.error) { console.log('  (pdftotext is not installed here: the PDF text check is skipped)'); return; }
+            t.providers.reset();
+            t.providers.state.script = [{ content: 'Revenue was 42 [E1].' }];
+            const r = await t.get('/chat', { as: kim, json: { task: 'What was the revenue?', files: [{ name: 'report.pdf', type: 'application/pdf', data: tinyPdf('Quarterly revenue 42 thousand').toString('base64') }] }, headers: { ...SAME, accept: 'application/json' } });
+            assert.strictEqual(r.status, 201, r.text.slice(0, 200));
+            const j = r.json();
+            await t.waitFor(j.id);
+            const sent = t.providers.requests.map((q) => JSON.stringify(q.body || {})).join('\n');
+            assert.ok(sent.includes('attached_file name=\\"report.pdf\\" type=\\"application/pdf\\"'), 'the PDF goes to the run as a file');
+            assert.ok(sent.includes('Quarterly revenue 42 thousand'), 'with its text');
+            const row = await s.db.maybe("SELECT id, text FROM actor_task_inputs WHERE task_id = $1 AND name = 'report.pdf'", [j.id]);
+            assert.match(row.text, /^PDF text:\nQuarterly revenue 42 thousand/, 'the text is kept, so a retry does not read it again');
+            const dl = await t.get(`/chat/file/${j.id}/${row.id}`, { as: kim });
+            assert.match(dl.headers.get('content-type'), /^application\/pdf/);
+            assert.match(dl.headers.get('content-disposition'), /^attachment;/, 'a PDF downloads, never renders here');
+            // A PDF with no text layer (scanned pictures) says so instead of handing the run nothing.
+            const { forRun } = require('../server/tasks/inputs');
+            await s.db.query("UPDATE actor_task_inputs SET text = NULL, bytes = $2 WHERE id = $1", [row.id, tinyPdf('')]);
+            const again = await forRun(s, j.id, {});
+            assert.match(again[0].text, /no text in it/);
+        });
+
         await check('files: the wrong kind, too many, or too big are refused with a plain reason', async () => {
             const one = (name, type, bytes) => ({ name, type, data: Buffer.from(bytes).toString('base64') });
             const exe = await t.get('/chat', { as: kim, json: { task: 'run this', files: [one('a.exe', 'application/x-msdownload', 'MZ\u0000\u0001')] }, headers: { ...SAME, accept: 'application/json' } });
             assert.strictEqual(exe.status, 422);
-            assert.match(exe.json().error, /reads text, code, CSV, JSON and images/);
-            const pdf = await t.get('/chat', { as: kim, json: { task: 'read', files: [one('a.pdf', 'application/pdf', '%PDF-1.4')] }, headers: { ...SAME, accept: 'application/json' } });
-            assert.match(pdf.json().error, /PDFs are coming next/);
+            assert.match(exe.json().error, /reads text, code, CSV, JSON, PDFs and images/);
+            const pdf = await t.get('/chat', { as: kim, json: { task: 'read', files: [one('a.pdf', 'application/pdf', 'MZ not a pdf')] }, headers: { ...SAME, accept: 'application/json' } });
+            assert.match(pdf.json().error, /a\.pdf is not a PDF/);
             const five = await t.get('/chat', { as: kim, json: { task: 'many', files: [1, 2, 3, 4, 5].map((n) => one(`${n}.txt`, 'text/plain', 'x')) }, headers: { ...SAME, accept: 'application/json' } });
             assert.match(five.json().error, /at most 4 files/);
             const bin = await t.get('/chat', { as: kim, json: { task: 'fake text', files: [one('a.txt', 'text/plain', 'a\u0000b')] }, headers: { ...SAME, accept: 'application/json' } });
