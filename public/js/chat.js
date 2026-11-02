@@ -1,12 +1,13 @@
-/* Actor's chat in the browser (plan L55 C1). The page works without this file; with it:
- *   - a message sends without a reload, its turn appears at once, and the thread stays at the bottom;
- *   - a turn that is working follows its event stream: the live line says what it is doing now, the work list fills in
- *     (the server renders it: GET /chat/turn/:id), and the answer fades in when it is done;
+/* Actor's chat in the browser (plan L55 C1), on the network's conversation UI (openvibe-shared/thread, ov-thread.js,
+ * L55 C4). The page works without this file. ov-thread.js does what every chat does: the drawer and Find a chat, the
+ * growing composer and Enter to send, starters, Copy, staying at the bottom, and the answer typing in. This file adds
+ * Actor's own parts:
+ *   - a message sends without a reload (files ride along), and its turn appears at once;
+ *   - a turn that is working follows its event stream: the live line says what it is doing now, the work list fills
+ *     in (the server renders it: GET /chat/turn/:id), and the finished turn is swapped in;
  *   - while Actor works, what you write steers that turn (it hears it at its next step) and Stop is its own button;
- *     Enter sends on a keyboard, Shift+Enter is a new line;
  *   - a turn working on a screen shows what Actor sees, refreshed every two seconds, with Bot's live view one tap away;
- *   - the chats open as a drawer on phones, and the search box filters them;
- *   - Copy on each answer and on each code block.
+ *   - the model chip.
  * Booted on load and after an in-place page swap (openvibe-shared/boost's ov:boost:load).
  */
 (function () {
@@ -17,67 +18,21 @@
         var chat = document.querySelector('.chat');
         if (!chat || chat.dataset.ready) return;
         chat.dataset.ready = '1';
-        var form = chat.querySelector('[data-composer]');
-        var text = chat.querySelector('[data-cc-text]');
-        var send = chat.querySelector('[data-cc-send]');
+        var form = chat.querySelector('[data-ovt-composer]');
+        var text = chat.querySelector('[data-ovt-text]');
+        var send = chat.querySelector('[data-ovt-send]');
         var note = chat.querySelector('[data-cc-note]');
-        var head = chat.querySelector('.ct-head');
         var fine = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
         var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-        // ── Where the navbar ends: the sticky header and the chats column sit under it, and follow it when it steps away.
-        var nav = document.querySelector('.openvibe-navbar') || document.getElementById('navbar-mount');
-        var topWas = -1, ticking = false;
-        function measure() {
-            ticking = false;
-            var b = nav ? Math.max(0, Math.round(nav.getBoundingClientRect().bottom)) : 0;
-            if (b !== topWas) { topWas = b; chat.style.setProperty('--chat-top', b + 'px'); }
-            if (head) head.classList.toggle('is-stuck', window.scrollY > 8);
-        }
-        function onScroll() { if (!ticking) { ticking = true; requestAnimationFrame(measure); } }
-        measure();
-        window.addEventListener('scroll', onScroll, { passive: true });
-        window.addEventListener('resize', onScroll);
-        setTimeout(measure, 400);
 
         // ── The thread stays at the bottom while you are there.
         function nearBottom() { return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 220; }
         function toBottom(smooth) { window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth && !reduce ? 'smooth' : 'auto' }); }
-        if (!location.hash && chat.querySelector('[data-thread]')) toBottom(false);
 
-        // ── The chats: a drawer on phones, filtered by the search box.
-        var opener = chat.querySelector('[data-cs-open]');
-        var scrim = chat.querySelector('.cs-scrim');
-        var closeBtn = chat.querySelector('.cs-close');
-        function drawer(on) {
-            chat.classList.toggle('is-drawer', on);
-            if (scrim) scrim.hidden = !on;
-            if (closeBtn) closeBtn.hidden = !on;
-            if (opener) opener.setAttribute('aria-expanded', on ? 'true' : 'false');
-            if (on) { var f = chat.querySelector('[data-cs-find]'); if (f && fine) f.focus(); }
-        }
-        if (opener) opener.addEventListener('click', function () { drawer(true); });
-        chat.querySelectorAll('[data-cs-close]').forEach(function (el) { el.addEventListener('click', function () { drawer(false); }); });
-        document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && chat.classList.contains('is-drawer')) drawer(false); });
-        var find = chat.querySelector('[data-cs-find]');
-        if (find) find.addEventListener('input', function () {
-            var q = find.value.trim().toLowerCase();
-            chat.querySelectorAll('.cs-list li').forEach(function (li) { var a = li.querySelector('a'); li.hidden = !!q && (!a || (a.getAttribute('data-title') || '').indexOf(q) === -1); });
-            chat.querySelectorAll('.cs-group').forEach(function (g) { var ul = g.nextElementSibling; g.hidden = !!ul && !ul.querySelector('li:not([hidden])'); });
-        });
-
-        // ── The composer.
-        function grow() { if (!text) return; text.style.height = 'auto'; text.style.height = Math.min(text.scrollHeight, window.innerHeight * 0.4) + 'px'; }
-        if (text) {
-            text.addEventListener('input', function () { grow(); syncSend(); });
-            text.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && fine) { e.preventDefault(); if (form.requestSubmit) form.requestSubmit(); else form.submit(); }
-            });
-            grow();
-        }
-        chat.querySelectorAll('[data-starter]').forEach(function (b) {
-            b.addEventListener('click', function () { text.value = b.getAttribute('data-starter'); grow(); syncSend(); text.focus(); });
-        });
+        // ── The composer: ov-thread.js grows it, sends on Enter and fills starters. An input event lets it re-measure after
+        // this file changes the words.
+        function grow() { if (text) text.dispatchEvent(new Event('input')); }
+        if (text) text.addEventListener('input', function () { syncSend(); });
         // ── Files: the paperclip opens the picker; each file is a chip until it is sent (at most 4, 6 MB each).
         var attachBtn = chat.querySelector('[data-cc-attach]');
         var fileInput = chat.querySelector('[data-cc-files]');
@@ -123,8 +78,8 @@
             }));
         }
 
-        function openTurn() { var t = chat.querySelectorAll('.ct-turn'); var last = t[t.length - 1]; return last && (last.hasAttribute('data-open') || last.getAttribute('data-state') === 'needs_you') ? last : null; }
-        var stopBtn = chat.querySelector('[data-cc-stop]');
+        function openTurn() { var t = chat.querySelectorAll('.ovt-turn'); var last = t[t.length - 1]; return last && (last.hasAttribute('data-open') || last.getAttribute('data-state') === 'needs_you') ? last : null; }
+        var stopBtn = chat.querySelector('[data-ovt-stop]');
         function working() { var t = openTurn(); return t && t.hasAttribute('data-open') ? t : null; }
         function syncSend() {
             if (!send) return;
@@ -161,10 +116,10 @@
         // Steering: the words join the working turn's list at once, and the run hears them at its next step.
         function steer(w) {
             var said = text.value.trim();
-            var row = document.createElement('li'); row.className = 'cw-you is-sending';
-            row.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14v10H10l-5 4Z"/></svg><p></p>';
+            var row = document.createElement('li'); row.className = 'ovt-w-you is-sending';
+            row.innerHTML = '<svg class="ovt-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20a8 8 0 0 1 16 0"/></svg><p></p>';
             row.querySelector('p').textContent = said;
-            var list = w.querySelector('[data-work]');
+            var list = w.querySelector('[data-ovt-work]');
             if (list) { var fold = list.closest('details'); if (fold) fold.open = true; list.appendChild(row); }
             text.value = ''; grow(); syncSend();
             var body = new URLSearchParams({ task: said });
@@ -194,52 +149,45 @@
                 .then(function (r) { return r.json().catch(function () { return { error: 'That could not be sent. Try again.' }; }).then(function (j) { return { ok: r.ok, j: j }; }); })
                 .then(function (res) {
                     if (!res.ok || !res.j.turn) { problem(res.j.error || 'That could not be sent. Try again.'); syncSend(); return; }
-                    var thread = chat.querySelector('[data-thread]');
-                    if (!thread) {
-                        var hello = chat.querySelector('.ct-hello');
-                        thread = document.createElement('ol'); thread.className = 'ct-thread'; thread.setAttribute('data-thread', '');
-                        if (hello) hello.replaceWith(thread); else chat.querySelector('[data-scroll]').appendChild(thread);
-                        var title = chat.querySelector('.ct-title'); if (title) title.textContent = text.value.trim().slice(0, 60);
+                    var thread = chat.querySelector('[data-ovt-thread]');
+                    if (thread && !thread.querySelector(':scope > li')) {
+                        var title = chat.querySelector('.ovt-title'); if (title) title.textContent = text.value.trim().slice(0, 60);
                         try { history.pushState({}, '', res.j.url); } catch (err) { /* */ }
                         addChat(res.j.id, text.value.trim());
                     }
-                    var box = document.createElement('div'); box.innerHTML = res.j.turn;
-                    var turn = box.firstElementChild;
-                    turn.classList.add('is-new');
-                    thread.appendChild(turn);
+                    var turn = window.OVThread ? window.OVThread.add(res.j.turn) : null;
                     text.value = ''; grow();
                     picked = []; drawChips();
                     setParent(res.j.id);
-                    follow(turn);
+                    if (turn) follow(turn);
                     syncSend();
-                    toBottom(true);
                 })
                 .catch(function () { problem('No connection. Your message is still in the box.'); syncSend(); });
         });
 
         // A new chat joins the top of the list.
         function addChat(id, title) {
-            var list = chat.querySelector('.cs-list');
+            var list = chat.querySelector('.ovt-list');
             if (!list) return;
-            var empty = list.querySelector('.cs-empty'); if (empty) empty.remove();
-            chat.querySelectorAll('.cs-list a[aria-current]').forEach(function (a) { a.removeAttribute('aria-current'); });
+            var empty = list.querySelector('.ovt-empty'); if (empty) empty.remove();
+            chat.querySelectorAll('.ovt-list a[aria-current]').forEach(function (a) { a.removeAttribute('aria-current'); });
             var ul = list.querySelector('ul');
-            if (!ul || !list.querySelector('.cs-group') || list.querySelector('.cs-group').textContent !== 'Today') {
-                var g = document.createElement('p'); g.className = 'cs-group'; g.textContent = 'Today';
+            if (!ul || !list.querySelector('.ovt-group') || list.querySelector('.ovt-group').textContent !== 'Today') {
+                var g = document.createElement('p'); g.className = 'ovt-group'; g.textContent = 'Today';
                 ul = document.createElement('ul'); list.insertBefore(ul, list.firstChild); list.insertBefore(g, ul);
             }
-            var li = document.createElement('li'), a = document.createElement('a'), dot = document.createElement('i'), span = document.createElement('span');
+            var li = document.createElement('li'), a = document.createElement('a'), dot = document.createElement('span'), span = document.createElement('span');
             a.href = '/chat/' + id; a.setAttribute('aria-current', 'page'); a.setAttribute('data-title', title.toLowerCase());
-            dot.className = 'cs-dot'; span.textContent = title.slice(0, 80);
+            dot.className = 'ovt-dot'; dot.setAttribute('aria-hidden', 'true'); span.textContent = title.slice(0, 80);
             a.appendChild(dot); a.appendChild(span); li.appendChild(a); ul.insertBefore(li, ul.firstChild);
         }
 
         // ── A turn at work: its stream, its live line, and the answer when it lands.
         function liveLine(turn) {
-            var line = turn.querySelector('[data-live-line]');
+            var line = turn.querySelector('[data-ovt-live]');
             if (!line) return;
-            var run = turn.querySelectorAll('.cw-tool.is-run b');
-            var steps = turn.querySelectorAll('.cw-step span, .cw-note p');
+            var run = turn.querySelectorAll('.ovt-w-tool.is-run b');
+            var steps = turn.querySelectorAll('.ovt-w-step span, .ovt-w-note p');
             var txt = run.length ? 'Using ' + run[run.length - 1].textContent + '…'
                 : steps.length ? steps[steps.length - 1].textContent : '';
             if (txt) line.textContent = txt.length > 90 ? txt.slice(0, 89) + '…' : txt;
@@ -257,24 +205,21 @@
                     var finished = !next.hasAttribute('data-open');
                     if (!finished) {
                         // Only the work list changes while it works: the fold keeps its open or closed state.
-                        var list = turn.querySelector('[data-work]'), fresh = next.querySelector('[data-work]');
+                        var list = turn.querySelector('[data-ovt-work]'), fresh = next.querySelector('[data-ovt-work]');
                         if (list && fresh) {
                             // Keep a line the person just sent until the server's list has it too.
-                            var sending = Array.prototype.slice.call(list.querySelectorAll('.cw-you.is-sending'));
+                            var sending = Array.prototype.slice.call(list.querySelectorAll('.ovt-w-you.is-sending'));
                             list.innerHTML = fresh.innerHTML;
                             sending.forEach(function (r) { list.appendChild(r); });
-                        } else if (fresh) turn.querySelector('.ct-reply').innerHTML = next.querySelector('.ct-reply').innerHTML;
+                        } else if (fresh) turn.querySelector('.ovt-reply').innerHTML = next.querySelector('.ovt-reply').innerHTML;
                         // The screen appears (or its live link changes) when the run opens a desk.
                         var scr = turn.querySelector('[data-screen]'), scr2 = next.querySelector('[data-screen]');
                         if (scr && scr2 && (scr.hidden !== scr2.hidden || scr.getAttribute('data-desk') !== scr2.getAttribute('data-desk'))) { scr.replaceWith(scr2); screen(turn); }
                         liveLine(turn);
                     } else {
                         stopScreen(turn);
-                        turn.replaceWith(next);
-                        var ans = next.querySelector('[data-answer]');
-                        if (ans && !reduce && !document.documentElement.hasAttribute('data-ov-motion')) streamIn(ans);
-                        decorate(next);
-                        var dot = chat.querySelector('.cs-list a[aria-current] .cs-dot'); if (dot) dot.remove();
+                        if (window.OVThread) window.OVThread.replace(id, h); else turn.replaceWith(next);
+                        var dot = chat.querySelector('.ovt-list a[aria-current] .ovt-dot'); if (dot) dot.remove();
                         if (note) note.textContent = '';
                         syncSend();
                         if (text && fine) text.focus();
@@ -365,7 +310,7 @@
             src.addEventListener('output', function (m) {
                 try {
                     var e = JSON.parse(m.data);
-                    var line = turn.querySelector('[data-live-line]');
+                    var line = turn.querySelector('[data-ovt-live]');
                     if (line && e.step === 'tool_call' && e.tool) line.textContent = 'Using ' + String(e.tool).replace(/_/g, ' ') + '…';
                 } catch (err) { /* a malformed event is skipped */ }
                 soon();
@@ -374,81 +319,8 @@
             src.addEventListener('end', function () { src.close(); clearTimeout(timer); timer = 0; refresh(turn); });
             src.onerror = function () { if (src.readyState === 2) setTimeout(function () { refresh(turn); }, 3000); };
         }
-        chat.querySelectorAll('.ct-turn[data-open]').forEach(function (t) { follow(t); });
+        chat.querySelectorAll('.ovt-turn[data-open]').forEach(function (t) { follow(t); });
 
-        // ── The answer streams in (the owner, 2026-11-01: "text streams in, with nice effects"). Actor shows an answer
-        // only once a second model has checked it, so the words arrive together; they are revealed word by word, fast
-        // (about a second for a long answer), the way a chat app types. Code blocks and tables come in whole. Nothing
-        // is hidden from a screen reader: only opacity changes.
-        function streamIn(ans) {
-            var words = [];
-            var walker = document.createTreeWalker(ans, NodeFilter.SHOW_TEXT, { acceptNode: function (n) { return n.parentNode.closest('pre, table, .evs') ? NodeFilter.FILTER_REJECT : (/\S/.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT); } });
-            var nodes = [];
-            while (walker.nextNode()) nodes.push(walker.currentNode);
-            nodes.forEach(function (n) {
-                var frag = document.createDocumentFragment();
-                n.nodeValue.split(/(\s+)/).forEach(function (part) {
-                    if (!part) return;
-                    if (/^\s+$/.test(part)) { frag.appendChild(document.createTextNode(part)); return; }
-                    var w = document.createElement('span'); w.className = 'sw'; w.textContent = part; frag.appendChild(w); words.push(w);
-                });
-                n.parentNode.replaceChild(frag, n);
-            });
-            var blocks = Array.prototype.slice.call(ans.querySelectorAll('pre, table, .evs, img'));
-            blocks.forEach(function (b) { b.classList.add('sw'); });
-            var all = words.concat(blocks);
-            if (!all.length) return;
-            ans.classList.add('is-streaming');
-            var per = Math.max(2, Math.ceil(words.length / 45)), i = 0;   // about 45 frames, whatever the length
-            (function step() {
-                for (var k = 0; k < per && i < words.length; k++, i++) words[i].classList.add('on');
-                blocks.forEach(function (b) { if (!b.classList.contains('on') && (b.compareDocumentPosition(words[Math.max(0, i - 1)]) & Node.DOCUMENT_POSITION_FOLLOWING)) b.classList.add('on'); });
-                if (i < words.length) requestAnimationFrame(step);
-                else { all.forEach(function (w) { w.classList.add('on'); }); setTimeout(function () { ans.classList.remove('is-streaming'); }, 300); }
-            })();
-        }
-
-        // ── Copy: an answer, and each code block in it.
-        function decorate(rootEl) {
-            (rootEl || chat).querySelectorAll('[data-copy]').forEach(function (b) {
-                if (b.dataset.wired) return; b.dataset.wired = '1'; b.hidden = false;
-                b.addEventListener('click', function () {
-                    var ans = b.closest('.ct-reply').querySelector('[data-answer]');
-                    copy(ans ? plainText(ans) : '', b);
-                });
-            });
-            (rootEl || chat).querySelectorAll('.ct-answer pre').forEach(function (pre) {
-                if (pre.querySelector('.ct-copy-code')) return;
-                var b = document.createElement('button'); b.type = 'button'; b.className = 'ct-copy-code'; b.textContent = 'Copy';
-                b.addEventListener('click', function () { copy(plainText(pre.querySelector('code') || pre), b); });
-                pre.appendChild(b);
-            });
-        }
-        // What a person means by the answer's text: without the citation chips' numbers ("visits 12" was "visits 1 2")
-        // and without the code blocks' own Copy buttons. innerText keeps the line breaks only for laid-out nodes, so the
-        // trimmed copy is read while it sits, invisible, in the page.
-        function plainText(el) {
-            var c = el.cloneNode(true);
-            c.querySelectorAll('.evs, .ct-copy-code').forEach(function (x) {
-                // "one host [1 2], and" → "one host, and": the space before a chip goes when punctuation follows it.
-                var before = x.previousSibling, after = x.nextSibling;
-                if (before && before.nodeType === 3 && (!after || (after.nodeType === 3 && /^[\s,.;:!?)]/.test(after.nodeValue)))) before.nodeValue = before.nodeValue.replace(/\s+$/, '');
-                x.remove();
-            });
-            c.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + (el.clientWidth || 600) + 'px;opacity:0;pointer-events:none';
-            c.setAttribute('aria-hidden', 'true');
-            document.body.appendChild(c);
-            var t = c.innerText.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-            c.remove();
-            return t;
-        }
-        function copy(str, btn) {
-            var label = btn.querySelector('span') || btn;
-            var was = label.textContent;
-            function ok() { label.textContent = 'Copied'; btn.classList.add('is-done'); setTimeout(function () { label.textContent = was; btn.classList.remove('is-done'); }, 1600); }
-            if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(str).then(ok, function () {});
-        }
-        decorate(chat);
         modelChip();
     }
 
