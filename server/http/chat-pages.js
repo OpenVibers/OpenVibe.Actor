@@ -272,7 +272,9 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
                 name: g.name,
                 items: g.items.map((c) => ({ href: `/chat/${c.id}`, title: c.title, current: c.id === currentId, live: c.open })),
             })),
-            foot: [{ href: '/console', label: 'Console' }, { href: '/me/agents', label: 'Your agents' }, { href: '/memory', label: 'Memory' }],
+            findAction: '/chat',
+            // Actor's places as the network sidebar's rows, as Codes' are (kit.sidebar, plan L35).
+            nav: [{ href: '/console', label: 'Console', icon: 'grid' }, { href: '/me/agents', label: 'Your agents', icon: 'robot' }, { href: '/memory', label: 'Memory', icon: 'book' }],
         }));
     }
 
@@ -343,7 +345,8 @@ ${modelChip(model)}
         const title = first ? clip(first.task, 60) : 'New chat';
         return send(res, status, {
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
-            css: ['css/chat.css'], scripts: ['js/chat.js'], styles: ['thread.css'], sharedScripts: ['ov-thread.js'],
+            // The network's sidebar (kit.css, kit-web.js) and its conversation UI (thread.css, ov-thread.js).
+            css: ['css/chat.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css'], sharedScripts: ['kit-web.js', 'ov-thread.js'],
             body: html`${busy ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
 <div class="chat" data-chat="${first ? first.id : ''}">${raw(thread.page({
                 sidebar: String(sidebar(chats, first ? first.id : null)),
