@@ -7,6 +7,8 @@
  *   auto            Actor decides, as today (the operator's tiers and keys)
  *   openvibe        OpenVibe's own keys, through OpenVibe.AI (the gateway: its routing, quota and cost)
  *   own:<provider>  the person's OWN key for that provider, sealed in OpenVibe.AI's vault
+ *   own:node        a model on the person's own computer (OpenVibe.AI's "Your computer": their OpenVibe Node, through
+ *                   OpenVibe.Bot; no key, nothing billed), used only after they allow Actor there
  *
  * The provider is one of the six OpenVibe.AI knows a person's key for. The model id is optional: without one,
  * OpenVibe.AI routes the call (L37's soft preference), and the person's choice of provider still holds.
@@ -16,7 +18,9 @@
  * (server/identity/account-data.js).
  */
 const CHOICES = ['auto', 'openvibe'];
-const OWN_PROVIDERS = ['openai', 'anthropic', 'deepseek', 'google', 'openrouter', 'mistral'];
+const KEY_PROVIDERS = ['openai', 'anthropic', 'deepseek', 'google', 'openrouter', 'mistral'];
+// Plus their own computer (plan L55 C3): node is OpenVibe.AI's name for it.
+const OWN_PROVIDERS = [...KEY_PROVIDERS, 'node'];
 // A model id: letters, digits and the marks providers use (gpt-5.1, claude-sonnet-4-5, deepseek/flash, org/model).
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/;
 
@@ -82,4 +86,4 @@ function wire(row) {
     };
 }
 
-module.exports = { CHOICES, OWN_PROVIDERS, parse, get, put, choiceFor, wire };
+module.exports = { CHOICES, OWN_PROVIDERS, KEY_PROVIDERS, parse, get, put, choiceFor, wire };
