@@ -359,6 +359,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         // A fork carries its parent's state in the checkpoint, not as a follow-up conversation.
                         context: row.parent_id && row.fork_of_step == null && !resume ? await store.followContext(s, row) : [],
                         emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
+                        // The answer as it is written (plan L55 C2): to the readers that asked, never stored.
+                        // The loop streams a model call only while such a reader is there (wanted).
+                        delta: typeof stream.delta === 'function' ? Object.assign((d) => stream.delta(id, d), { wanted: () => stream.wants(id) }) : null,
                         meter, budgetLeft, waitForPerson, requestApproval,
                         personText, agentId: ownAgent, notifyTask,
                         askPerson, control, resume, fork, spent: () => spent,

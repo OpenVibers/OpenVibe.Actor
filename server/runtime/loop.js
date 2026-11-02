@@ -288,6 +288,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return null;
         const defs = forceNoTools ? null : shortlistTools(tools, state);
         const startedAt = now();
+        // The pieces of this call's text go to the page as they arrive (plan L55 C2), numbered by call so the page can
+        // start a fresh draft when a call that ended in tool calls is followed by the next one.
+        const n = (state.deltaCalls = (state.deltaCalls || 0) + 1);
+        // Only while someone reads the answer as it is written: a task nobody watches calls the model as before.
+        const onDelta = ctx.delta && (typeof ctx.delta.wanted !== 'function' || ctx.delta.wanted()) ? (text) => ctx.delta({ text, n }) : null;
         let r;
         try {
             r = await models.chat({
@@ -296,6 +301,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 tools: defs && defs.length ? defs : null,
                 maxTokens: MAX_ANSWER_TOKENS,
                 signal: state.signal,
+                ...(onDelta ? { onDelta } : {}),
             });
         } catch (err) {
             await spanModel(ctx.trace, { tier: state.tier, family: state.family, startedAt, ms: now() - startedAt, error: err, step: state.calls + 1 });
@@ -840,7 +846,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
      * a span; and drives on from the step it stopped at. A checkpoint whose last step already answered is delivered
      * without another model call.
      */
-    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null }) {
+    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null }) {
         const source = resume && resume.state ? resume.state : (fork && fork.checkpoint && fork.checkpoint.state);
         const restored = restoreState(source);
         if (!restored) throw Object.assign(new Error('the saved step could not be read'), { code: 'actor.checkpoint.invalid' });
@@ -866,6 +872,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),
+            // The answer as the model writes it (plan L55 C2): delta({ text, n }), not stored; null when nobody streams.
+            delta: typeof delta === 'function' ? delta : null,
             // The connector tools of this run (stage V2-11) and the failures that switch a server off.
             dynamicTools: new Map(),
             connectorState: { failures: new Map(), disabled: new Set() },
@@ -996,9 +1004,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         }
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [] }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null }) {
         if (resume || fork) {
-            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent });
+            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta });
         }
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
@@ -1027,6 +1035,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),
+            // The answer as the model writes it (plan L55 C2): delta({ text, n }), not stored; null when nobody streams.
+            delta: typeof delta === 'function' ? delta : null,
             // The connector tools of this run (stage V2-11) and the failures that switch a server off.
             dynamicTools: new Map(),
             connectorState: { failures: new Map(), disabled: new Set() },
