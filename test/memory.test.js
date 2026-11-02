@@ -36,9 +36,9 @@ const ownerA = `user:${A}`;
         assert.ok(!memory.looksLikeSecret('I was born in 1990 and live at 12 Baker Street.'));
     });
 
-    await check('nothing about how a person looks is stored', async () => {
-        assert.match(memory.whyRefused('I have long blonde hair.') || '', /looks/i);
-        assert.match(memory.whyRefused('The user is a tall, handsome man.') || '', /looks/i);
+    await check('a memory may say how a person looks (the owner, 2026-10-31: AI may describe people)', async () => {
+        assert.strictEqual(memory.whyRefused('I have long blonde hair.'), null);
+        assert.strictEqual(memory.whyRefused('The user is a tall, handsome man.'), null);
     });
 
     await check('an instruction memory may narrow, never widen a permission or a budget', async () => {

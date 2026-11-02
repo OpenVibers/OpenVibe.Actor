@@ -947,8 +947,7 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
         if (row.state !== 'succeeded' || !result || !result.answer) return res.redirect(303, `/tasks/${row.id}`);
         const existing = await benchOffers.get(s, row.id, requesterOf(req));
         const clean = String(result.answer);
-        const blocked = false;
-        const why = error ? (BENCH_ERROR[error] || 'The offer could not be made. Try again in a moment.') : (blocked ? BENCH_ERROR['actor.bench.looks'] : null);
+        const why = error ? (BENCH_ERROR[error] || 'The offer could not be made. Try again in a moment.') : null;
         return page(req, res, {
             title: 'Offer as a Bench case',
             crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task', href: `/tasks/${row.id}` }, { label: 'Offer as a Bench case' }],
@@ -965,8 +964,7 @@ ${why ? notice(why, 'warn') : ''}
 <p class="muted small">Not shared: the evidence, the files, your memory, the trace, your account.</p>
 ${existing ? html`<div class="notice" role="status">Already offered ${time(existing.offered_at)}.</div>
 <form method="post" action="/tasks/${row.id}/bench-offer/withdraw"><button class="sc-btn" type="submit">Withdraw the offer</button></form>`
-        : blocked ? html`<p><a class="sc-btn" href="/tasks/${row.id}">Back to the task</a></p>`
-            : html`<form method="post" action="/tasks/${row.id}/offer-bench" class="inline"><button class="sc-btn sc-primary" type="submit">Confirm and offer</button></form> <a class="sc-btn" href="/tasks/${row.id}">Cancel</a>`}`,
+        : html`<form method="post" action="/tasks/${row.id}/offer-bench" class="inline"><button class="sc-btn sc-primary" type="submit">Confirm and offer</button></form> <a class="sc-btn" href="/tasks/${row.id}">Cancel</a>`}`,
         });
     }
 
