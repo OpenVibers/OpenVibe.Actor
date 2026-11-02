@@ -24,11 +24,24 @@ const str = (v) => (v && typeof v === 'object' && typeof v.s === 'string') ? v.s
  *
  *   foldBlock({ id, head, html, bare })
  */
+/**
+ * What a fold holds, counted, for its line ("7 questions", "latest 5", "3 items"): a folded part still says how much
+ * is behind it (the owner's rule, 2026-10-31: folds show their count). The 11-01 pass missed this checkbox fold.
+ */
+function foldMeta(body, cls = '') {
+    const s = typeof body === 'string' ? body : String((body && (body.s || body.html || body.value)) || body || '');
+    const n = (re) => (s.match(re) || []).length;
+    const shipped = /data-ov-shipped="list"[^>]*?data-limit="(\d+)"|data-limit="(\d+)"[^>]*?data-ov-shipped="list"/.exec(s);
+    const q = n(/<details[\s>]/g), li = n(/<li[\s>]/g), a = n(/<a\s/g);
+    const text = shipped ? `latest ${shipped[1] || shipped[2]}` : q > 1 ? `${q} questions` : li > 1 ? `${li} items` : a > 1 ? `${a} links` : '';
+    return text ? `<span${cls ? ` class="${cls}"` : ''}>${text}</span>` : '';
+}
+
 function foldBlock({ id, head, html, bare = false }) {
     const key = `fold-${esc(id)}`;
     return `<div class="fold${bare ? ' fold-bare' : ''}" id="${key}">`
         + `<input class="fold-toggle" type="checkbox" id="${key}-open">`
-        + `<label class="fold-h" for="${key}-open">${str(head)}<span class="fold-mark" aria-hidden="true"></span></label>`
+        + `<label class="fold-h" for="${key}-open">${str(head)}${foldMeta(str(html), 'fold-n')}<span class="fold-mark" aria-hidden="true"></span></label>`
         + `<div class="fold-body">${str(html)}</div></div>`;
 }
 
