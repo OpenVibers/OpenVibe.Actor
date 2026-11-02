@@ -197,6 +197,46 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.deepStrictEqual(await t.ctx.engine.steer('tsk_00000000000000000000000000', 'hi'), { ok: false, reason: 'this task is not running' });
         });
 
+        await check('a parked turn (plan A2): it says what it waits for and until when; Wake now and Stop waiting, for its person only', async () => {
+            const last = (await s.db.maybe('SELECT id FROM tasks WHERE requester = $1 ORDER BY id DESC LIMIT 1', [`user:${kim.subject}`])).id;
+            await s.db.query("UPDATE tasks SET state = 'running' WHERE id = $1", [last]);
+            const woke = [];
+            const engine = t.ctx.engine;
+            const before = { ev: engine.resumeWithEvent, note: engine.resumeWithNotice };
+            engine.resumeWithEvent = async (id, p) => { woke.push(['wake', id, p && p.event]); return { id }; };
+            engine.resumeWithNotice = async (id, n) => { woke.push(['cancel', id, n]); return { id }; };
+            try {
+                const w = await t.ctx.waits.create({ taskId: last, requester: `user:${kim.subject}`, source: 'time', seconds: 7200, line: 'waiting for maticus to go live' });
+                const page = await t.get(`/chat/${last}`, { as: kim });
+                assert.match(page.text, new RegExp(`<form class="ovt-card is-info ct-wait" method="post" action="/chat/${last}/wait" data-ct-wait>`));
+                assert.match(page.text, /<b>Waiting<\/b> for maticus to go live\. Nothing is spent while it waits\./, 'the line, without saying waiting twice');
+                assert.match(page.text, /<time datetime="[^"]+" data-ct-local>in about 2 h<\/time>, then asks you what next\./);
+                assert.match(page.text, /name="do" value="wake">Wake now<\/button>/);
+                // Another person, another site: nothing changes.
+                assert.strictEqual((await t.get(`/chat/${last}/wait`, { as: bo, form: { do: 'wake' }, headers: { ...SAME, accept: 'application/json' } })).status, 404);
+                assert.strictEqual((await t.get(`/chat/${last}/wait`, { as: kim, form: { do: 'wake' }, headers: { 'sec-fetch-site': 'cross-site' } })).status, 403);
+                assert.strictEqual((await t.ctx.waits.get(w.id)).status, 'waiting');
+                const wake = await t.get(`/chat/${last}/wait`, { as: kim, form: { do: 'wake' }, headers: SAME });
+                assert.strictEqual(wake.status, 303);
+                assert.strictEqual(wake.headers.get('location'), `/chat/${last}#t-${last}`);
+                assert.strictEqual((await t.ctx.waits.get(w.id)).status, 'woken');
+                assert.deepStrictEqual(woke.at(-1).slice(0, 3), ['wake', last, null], 'Wake now resumes it with no event');
+                assert.doesNotMatch((await t.get(`/chat/${last}`, { as: kim })).text, /data-ct-wait/, 'no wait, no card');
+                const again = await t.get(`/chat/${last}/wait`, { as: kim, form: { do: 'wake' }, headers: { ...SAME, accept: 'application/json' } });
+                assert.strictEqual(again.status, 409, 'nothing to wake twice');
+                await s.db.query("UPDATE tasks SET state = 'running' WHERE id = $1", [last]);
+                const w2 = await t.ctx.waits.create({ taskId: last, requester: `user:${kim.subject}`, source: 'time', seconds: 900, line: 'waiting a while' });
+                const stop = await t.get(`/chat/${last}/wait`, { as: kim, form: { do: 'cancel' }, headers: { ...SAME, accept: 'application/json' } });
+                assert.strictEqual(stop.status, 202);
+                assert.strictEqual((await t.ctx.waits.get(w2.id)).status, 'cancelled');
+                assert.strictEqual(woke.at(-1)[0], 'cancel', 'Stop waiting: the run carries on without it');
+            } finally {
+                engine.resumeWithEvent = before.ev;
+                engine.resumeWithNotice = before.note;
+                await s.db.query("UPDATE tasks SET state = 'succeeded' WHERE id = $1", [last]);
+            }
+        });
+
         await check('a working turn: the composer steers it and Stop is its own button; the screen waits for a picture', async () => {
             const last = (await s.db.maybe('SELECT id FROM tasks WHERE requester = $1 ORDER BY id DESC LIMIT 1', [`user:${kim.subject}`])).id;
             await s.db.query("UPDATE tasks SET state = 'running' WHERE id = $1", [last]);

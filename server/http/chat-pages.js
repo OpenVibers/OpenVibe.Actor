@@ -244,6 +244,22 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 <form method="post" action="/chat" class="ct-retry"><input type="hidden" name="task" value="${row.task}"><input type="hidden" name="mode" value="best">${isFollow(row) ? html`<input type="hidden" name="parent" value="${row.parent_id}">` : ''}<button class="ct-opt" type="submit">Try again in Best mode</button><a class="ct-act" href="/tasks/${row.id}?view=details">Details</a></form></div>`;
     }
 
+    /**
+     * A parked turn (plan A2, Watch mode): what it waits for, until when, and the person's two moves. Wake now resumes
+     * it with no event (the run checks for itself); Stop waiting ends the wait and the run carries on without it. The
+     * deadline is written as a <time> the page shows in the reader's own zone (js/chat.js), "in about 2 h" without it.
+     */
+    function waitBlock(row, wait) {
+        if (!wait) return '';
+        const left = Math.max(0, Date.parse(wait.deadline_at) - now());
+        const mins = Math.round(left / 60000);
+        const about = mins < 1 ? 'any moment now' : mins < 90 ? `in about ${mins} min` : `in about ${Math.round(mins / 60)} h`;
+        return html`<form class="ovt-card is-info ct-wait" method="post" action="/chat/${row.id}/wait" data-ct-wait>
+<p class="ovt-card-h">${raw(glyphs.svg('clock', { size: 18 }))}<span><b>Waiting</b> ${String(wait.line || 'for something to happen').replace(/^waiting\s+/i, '').replace(/[.\s]+$/, '')}. Nothing is spent while it waits.</span></p>
+<p class="ct-wait-until">It gives up <time datetime="${new Date(wait.deadline_at).toISOString()}" data-ct-local>${about}</time>, then ${wait.on_timeout === 'fail' ? 'stops' : wait.on_timeout === 'retry' ? 'tries that step once more' : 'asks you what next'}.</p>
+<div class="ovt-card-acts"><button type="submit" class="ovt-card-btn" name="do" value="wake">Wake now</button><button type="submit" class="ovt-card-btn is-quiet" name="do" value="cancel">Stop waiting</button></div></form>`;
+    }
+
     /** The files beside the question (thread.files draws them). */
     function filesOf(row, files) {
         return (files || []).map((f) => ({ href: `/chat/file/${row.id}/${f.id}`, name: f.name, size: f.size, image: inputs.IMAGE.test(f.mime) }));
@@ -259,7 +275,11 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
         else if (row.state === 'needs_you') reply = html`${workBlock(row, evs, false)}${questionBlock(row, evs)}`;
         else if (row.state === 'failed') reply = html`${workBlock(row, evs, false)}${failedBlock(row, t)}`;
         else if (row.state === 'cancelled') reply = html`${workBlock(row, evs, false)}<p class="ct-stopped">Stopped. What it spent before stopping stays spent.</p>`;
-        else reply = html`${workBlock(row, evs, true)}${screenBlock(row, evs, true)}`;
+        else {
+            // A turn parked on a wait says what it waits for (plan A2); otherwise it is working.
+            const parked = ctx.waits && typeof ctx.waits.listForTask === 'function' ? (await ctx.waits.listForTask(row.id).catch(() => [])).find((w) => w.status === 'waiting') : null;
+            reply = html`${workBlock(row, evs, true)}${screenBlock(row, evs, true)}${waitBlock(row, parked)}`;
+        }
         // data-task and data-last are Actor's (js/chat.js follows the task's event stream from data-last).
         return raw(thread.turn({ id: row.id, state: row.state, open, you: { text: row.task, files: filesOf(row, attached) }, reply: String(reply), attrs: { 'data-task': row.id, 'data-last': row.last_seq } }));
     }
@@ -453,6 +473,24 @@ ${radio('own:node', 'Your computer', 'A model you run at home (Ollama, LM Studio
         const text = String((req.body && req.body.task) || '').trim().slice(0, 1000);
         const out = text && OPEN.includes(row.state) ? await engine.steer(row.id, text) : { ok: false, reason: text ? 'it has finished' : 'nothing was said' };
         if (wantsJson) return res.status(out.ok ? 202 : 409).json(out.ok ? { ok: true } : { error: out.reason === 'it has finished' ? 'Actor already finished that one. Send it as a new message.' : 'Actor could not take that just now.' });
+        return res.redirect(303, `/chat/${row.id}#t-${row.id}`);
+    });
+
+    // A parked turn's two moves (plan A2): Wake now, or Stop waiting. The task's own person, from openvibe.actor only.
+    r.post('/chat/:id/wait', express.urlencoded({ extended: false, limit: '1kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        const wantsJson = String(req.get('accept') || '').includes('application/json');
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return wantsJson ? res.status(401).json({ error: 'Sign in first.' }) : res.redirect(303, '/auth/login?next=%2Fchat');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('Wake or stop a wait from openvibe.actor itself.');
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req)) return wantsJson ? res.status(404).json({ error: 'That chat is not here.' }) : res.redirect(303, '/chat');
+        const move = String((req.body && req.body.do) || '');
+        const waits = ctx.waits;
+        const open = waits ? (await waits.listForTask(row.id)).find((w) => w.status === 'waiting') : null;
+        let done = null;
+        if (open && move === 'wake') done = await waits.wakeByPerson(open.id, requesterOf(req));
+        else if (open && move === 'cancel') done = await waits.cancel(open.id, requesterOf(req));
+        if (wantsJson) return res.status(done ? 202 : 409).json(done ? { ok: true } : { error: open ? 'Say wake or cancel.' : 'It is not waiting any more.' });
         return res.redirect(303, `/chat/${row.id}#t-${row.id}`);
     });
 

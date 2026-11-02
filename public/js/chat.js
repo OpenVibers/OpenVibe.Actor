@@ -271,6 +271,24 @@
             var said = typeof e.text === 'string' ? e.text.replace(/…$/, '').trim() : '';
             if (e.step === 'tool_call' || (e.step === 'text' && said && d.text.trim().indexOf(said) === 0)) { turn._draft = null; draft(turn); }
         }
+        // A wait's deadline in the reader's own zone ("at 18:40", or with the day when it is not today).
+        function localTimes(root) {
+            (root || document).querySelectorAll('time[data-ct-local]').forEach(function (t) {
+                var d = new Date(t.getAttribute('datetime'));
+                if (isNaN(d)) return;
+                var today = d.toDateString() === new Date().toDateString();
+                t.textContent = 'at ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + (today ? '' : ' on ' + d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }));
+            });
+        }
+        localTimes(chat);
+        // A parked turn's card (plan A2) comes and goes with the wait: it is outside the work list the refresh keeps.
+        function syncWait(turn, next) {
+            var cur = turn.querySelector('[data-ct-wait]'), fresh = next.querySelector('[data-ct-wait]');
+            if (cur && !fresh) cur.remove();
+            else if (fresh && !cur) { var reply = turn.querySelector('.ovt-reply'); if (reply) reply.appendChild(fresh); }
+            else if (fresh && cur && cur.outerHTML !== fresh.outerHTML) cur.replaceWith(fresh);
+            localTimes(turn);
+        }
         function refresh(turn, done) {
             var id = turn.getAttribute('data-task');
             return fetch('/chat/turn/' + encodeURIComponent(id), { credentials: 'same-origin' })
@@ -296,6 +314,7 @@
                         if (scr && scr2 && (scr.hidden !== scr2.hidden || scr.getAttribute('data-desk') !== scr2.getAttribute('data-desk'))) { scr.replaceWith(scr2); screen(turn); }
                         liveLine(turn);
                         draft(turn);
+                        syncWait(turn, next);
                     } else {
                         stopScreen(turn);
                         // An answer the person already watched being written is not typed in again: it only takes its
