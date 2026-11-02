@@ -192,6 +192,85 @@
                 : steps.length ? steps[steps.length - 1].textContent : '';
             if (txt) line.textContent = txt.length > 90 ? txt.slice(0, 89) + '…' : txt;
         }
+        // The answer as it is written (plan L55 C2): the stream's delta events ({ text, n }) build a draft under the work
+        // fold, drawn from the text with a few Markdown marks (paragraphs, lists, headings, bold, code) as DOM nodes,
+        // never as HTML. A new model call (n) starts a new draft; a draft the run then keeps as a note in the work list,
+        // or that ended in tool calls, goes away. The finished turn replaces it with the stored, rendered answer.
+        function drawInline(el, text) {
+            String(text).split(/(\*\*[^*\n]+\*\*|`[^`\n]+`|\[E\d{1,3}\])/).forEach(function (part) {
+                if (!part) return;
+                var node;
+                if (/^\*\*[^*]+\*\*$/.test(part)) { node = document.createElement('b'); node.textContent = part.slice(2, -2); }
+                else if (/^\[E\d{1,3}\]$/.test(part)) { node = document.createElement('span'); node.className = 'ev'; node.textContent = part.slice(2, -1); }
+                else if (/^`[^`]+`$/.test(part)) { node = document.createElement('code'); node.textContent = part.slice(1, -1); }
+                else node = document.createTextNode(part);
+                el.appendChild(node);
+            });
+        }
+        function drawDraft(box, text) {
+            box.textContent = '';
+            var para = null, list = null, fence = null;
+            String(text).split('\n').forEach(function (line) {
+                if (/^\s*```/.test(line)) {
+                    if (fence) { fence = null; return; }
+                    var pre = document.createElement('pre'); fence = document.createElement('code'); pre.appendChild(fence); box.appendChild(pre);
+                    para = list = null;
+                    return;
+                }
+                if (fence) { fence.textContent += (fence.textContent ? '\n' : '') + line; return; }
+                if (!line.trim()) { para = list = null; return; }
+                var item = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(line);
+                if (item) {
+                    var kind = /^\s*\d/.test(line) ? 'OL' : 'UL';
+                    if (!list || list.tagName !== kind) { list = document.createElement(kind.toLowerCase()); box.appendChild(list); }
+                    var li = document.createElement('li'); drawInline(li, item[1]); list.appendChild(li);
+                    para = null;
+                    return;
+                }
+                var head = /^\s*#{1,6}\s+(.*)$/.exec(line);
+                if (head) {
+                    var h = document.createElement('p'); var b = document.createElement('b'); b.textContent = head[1].replace(/\*\*/g, ''); h.appendChild(b); box.appendChild(h);
+                    para = list = null;
+                    return;
+                }
+                list = null;
+                if (!para) { para = document.createElement('p'); box.appendChild(para); } else para.appendChild(document.createTextNode(' '));
+                drawInline(para, line);
+            });
+        }
+        function draft(turn) {
+            var d = turn._draft;
+            var box = turn.querySelector('[data-ovt-draft]');
+            if (!d || !d.text.trim()) { if (box) box.remove(); return; }
+            if (!box) {
+                var reply = turn.querySelector('.ovt-reply');
+                if (!reply) return;
+                box = document.createElement('div');
+                box.className = 'ovt-answer ct-draft';
+                box.setAttribute('data-ovt-draft', '');
+                box.setAttribute('aria-busy', 'true');
+                reply.appendChild(box);
+            }
+            var stay = nearBottom();
+            drawDraft(box, d.text);
+            if (stay) toBottom(false);
+        }
+        function addDelta(turn, e) {
+            if (!e || typeof e.text !== 'string') return;
+            var d = turn._draft;
+            if (!d || d.n !== e.n) d = turn._draft = { n: e.n, text: '' };
+            d.text += e.text;
+            if (turn._drawing) return;
+            turn._drawing = true;
+            (window.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); })(function () { turn._drawing = false; draft(turn); });
+        }
+        // A stored step that holds the draft's own text (the run kept it as a note), or a tool call: the draft is done.
+        function settleDraft(turn, e) {
+            var d = turn._draft;
+            if (!d || !e) return;
+            var said = typeof e.text === 'string' ? e.text.replace(/…$/, '').trim() : '';
+            if (e.step === 'tool_call' || (e.step === 'text' && said && d.text.trim().indexOf(said) === 0)) { turn._draft = null; draft(turn); }
+        }
         function refresh(turn, done) {
             var id = turn.getAttribute('data-task');
             return fetch('/chat/turn/' + encodeURIComponent(id), { credentials: 'same-origin' })
@@ -216,8 +295,13 @@
                         var scr = turn.querySelector('[data-screen]'), scr2 = next.querySelector('[data-screen]');
                         if (scr && scr2 && (scr.hidden !== scr2.hidden || scr.getAttribute('data-desk') !== scr2.getAttribute('data-desk'))) { scr.replaceWith(scr2); screen(turn); }
                         liveLine(turn);
+                        draft(turn);
                     } else {
                         stopScreen(turn);
+                        // An answer the person already watched being written is not typed in again: it only takes its
+                        // finished form (OVThread types in a turn that was open and is not any more).
+                        if (turn.querySelector('[data-ovt-draft]')) turn.removeAttribute('data-open');
+                        turn._draft = null;
                         if (window.OVThread) window.OVThread.replace(id, h); else turn.replaceWith(next);
                         var dot = chat.querySelector('.ovt-list a[aria-current] .ovt-dot'); if (dot) dot.remove();
                         if (note) note.textContent = '';
@@ -303,7 +387,7 @@
             screen(turn);
             liveLine(turn);
             var id = turn.getAttribute('data-task');
-            var src = new EventSource('/api/v1/tasks/' + encodeURIComponent(id) + '/events?after=' + encodeURIComponent(turn.getAttribute('data-last') || '0'));
+            var src = new EventSource('/api/v1/tasks/' + encodeURIComponent(id) + '/events?deltas=1&after=' + encodeURIComponent(turn.getAttribute('data-last') || '0'));
             streams.push(src);
             var timer = 0;
             function soon() { if (timer) return; timer = setTimeout(function () { timer = 0; refresh(turn); }, 450); }
@@ -312,8 +396,12 @@
                     var e = JSON.parse(m.data);
                     var line = turn.querySelector('[data-ovt-live]');
                     if (line && e.step === 'tool_call' && e.tool) line.textContent = 'Using ' + String(e.tool).replace(/_/g, ' ') + '…';
+                    settleDraft(turn, e);
                 } catch (err) { /* a malformed event is skipped */ }
                 soon();
+            });
+            src.addEventListener('delta', function (m) {
+                try { addDelta(turn, JSON.parse(m.data)); } catch (err) { /* a malformed piece is skipped */ }
             });
             src.addEventListener('state', soon);
             src.addEventListener('end', function () { src.close(); clearTimeout(timer); timer = 0; refresh(turn); });
