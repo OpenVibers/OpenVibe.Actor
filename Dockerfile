@@ -3,6 +3,8 @@
 #   docker compose -f docker-compose.selfhost.yml up -d
 FROM node:22-bookworm-slim
 WORKDIR /app
+# pdftotext reads the text of PDFs attached in the chat (server/tasks/inputs.js).
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY server ./server

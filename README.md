@@ -141,6 +141,8 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
   - `ACTOR_CHAT_ASKS=0` turns it off.
 - **The model providers**: DeepSeek (`ACTOR_DEEPSEEK_API_KEY`, `api.deepseek.com`), OpenAI (`ACTOR_OPENAI_API_KEY`, `api.openai.com/v1`) for the web-search agent and the cross-family check, and an OpenAI-compatible local server (`ACTOR_LOCAL_LLM_URL`) for private mode.
 
+**Programs:** poppler-utils' `pdftotext` reads the text of a PDF attached in the chat (`ACTOR_PDFTOTEXT` names another path); without it a PDF is kept but its text is not read, and the run is told so.
+
 **Data:** PostgreSQL (openvibe-sdk/db, `DATABASE_URL` / `DATABASE_DIRECT_URL`) holds tasks, their events and daily spend; Valkey (`VALKEY_URL`) holds the shared per-caller limit counters. A provider or service without its key or URL is listed unavailable, never invented.
 
 **Libraries:** openvibe-contracts (contract validation, problem responses, service-token verification, capability checks); openvibe-sdk (`placement` for routing, `auth`, `db`, `limits`, `account-data`, `valkey`, `service`); openvibe-shared (`serve`, `cache-policy`, `frame`, `shell`, `showcase`, `seo`, `legal`, `release`, `metrics`, `ready`); express, helmet, express-rate-limit, cookie-parser, pg, iovalkey.

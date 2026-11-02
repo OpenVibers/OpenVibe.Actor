@@ -296,9 +296,9 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
     }
 
     const ATTACH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>';
-    const ATTACH_ACCEPT = '.txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,image/png,image/jpeg,image/webp,image/gif';
+    const ATTACH_ACCEPT = '.txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,.pdf,application/pdf,image/png,image/jpeg,image/webp,image/gif';
     function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '', model = null } = {}) {
-        const tools = html`<button type="button" class="cc-attach" data-cc-attach aria-label="Attach files" title="Attach text, code, CSV, JSON or images" hidden>${raw(ATTACH_ICON)}</button><input type="file" multiple hidden data-cc-files accept="${ATTACH_ACCEPT}">
+        const tools = html`<button type="button" class="cc-attach" data-cc-attach aria-label="Attach files" title="Attach text, code, CSV, JSON, PDFs or images" hidden>${raw(ATTACH_ICON)}</button><input type="file" multiple hidden data-cc-files accept="${ATTACH_ACCEPT}">
 ${modelChip(model)}
 <label class="cc-mode" title="How Actor picks the agent"><span class="sr-only">Mode</span><select name="mode" data-cc-mode>${MODES.map((m) => html`<option value="${m}" title="${MODE_HINT[m] || ''}"${m === mode ? raw(' selected') : ''}>${MODE_LABEL[m] || m}</option>`)}</select></label>
 <span class="cc-note" data-cc-note></span>`;
@@ -412,8 +412,8 @@ ${modelPrefs.OWN_PROVIDERS.map((p) => radio(`own:${p}`, PROVIDER_NAMES[p] || p, 
         res.type('html').send(require('../render/html').render(await turnHtml(row)));
     });
 
-    // An attached file, to its own person only: an image shown in place; anything else downloaded as plain text, in a
-    // sandbox, never sniffed.
+    // An attached file, to its own person only: an image shown in place; a PDF downloaded as itself; anything else
+    // downloaded as plain text. In a sandbox, never sniffed.
     r.get('/chat/file/:taskId/:id', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         if (!signedIn(req) || !TASK_ID.test(req.params.taskId) || !/^inp_[A-Za-z0-9_-]{6,20}$/.test(req.params.id)) return res.status(404).end();
@@ -426,6 +426,7 @@ ${modelPrefs.OWN_PROVIDERS.map((p) => radio(`own:${p}`, PROVIDER_NAMES[p] || p, 
         res.set('Content-Security-Policy', "default-src 'none'; sandbox");
         if (inputs.IMAGE.test(f.mime) && f.mime !== 'image/svg+xml') return res.type(f.mime).send(bytes);
         res.set('Content-Disposition', `attachment; filename="${String(f.name).replace(/[^A-Za-z0-9._-]/g, '_')}"`);
+        if (f.mime === inputs.PDF) return res.type(inputs.PDF).send(bytes);
         return res.type('text/plain; charset=utf-8').send(bytes);
     });
 
