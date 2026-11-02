@@ -39,6 +39,8 @@ const AI_SITE = 'https://ai.openvibe.services';
 const allowUrl = (provider) => `${AI_SITE}/you?allow=actor&provider=${encodeURIComponent(provider)}`;
 const modelLabel = (m) => (m && m.provider ? `Your ${PROVIDER_NAMES[m.provider] || m.provider} key` : 'Auto');
 const glyphs = require('openvibe-shared/glyphs');
+// One conversation UI for the network (plan L55 C4): the sidebar, the turns, the work, the answer and the composer.
+const thread = require('openvibe-shared/thread');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const OPEN = ['queued', 'running', 'verifying'];
@@ -167,22 +169,21 @@ function createChatPages(ctx, { computers = null } = {}) {
 </figure>`;
     }
 
-    /** The work fold's rows, in order: a plan step, a note the agent wrote, or a tool call with what it returned. */
+    /** The work fold's rows (thread.work), in order: a plan step, a note the agent wrote, what the person said while it
+     *  worked, or a tool call with what it returned. */
     function workRows(lines) {
-        const { toolLabel, msText } = pageKit();
+        const { toolLabel } = pageKit();
         const results = new Map(lines.filter((l) => l.t === 'tool_result').map((l) => [l.id, l]));
         const rows = [];
         for (const l of lines) {
-            if (l.t === 'step') rows.push(html`<li class="cw-step">${raw(ICON.step)}<span>${l.text}</span></li>`);
-            else if (l.t === 'text' && /^You: /.test(l.text)) rows.push(html`<li class="cw-you">${raw(ICON.you)}<p>${clip(l.text.slice(5), 300)}</p></li>`);
-            else if (l.t === 'text') rows.push(html`<li class="cw-note">${raw(ICON.note)}<p>${clip(l.text, 700)}</p></li>`);
-            else if (l.t === 'note') rows.push(html`<li class="cw-note is-${l.level || 'info'}">${raw(ICON.note)}<p>${clip(l.text, 400)}</p></li>`);
-            else if (l.t === 'handoff') rows.push(html`<li class="cw-step">${raw(ICON.step)}<span>Handed to ${l.to || 'another agent'}${l.reason ? `: ${clip(l.reason, 160)}` : ''}</span></li>`);
+            if (l.t === 'step') rows.push({ kind: 'step', text: l.text });
+            else if (l.t === 'text' && /^You: /.test(l.text)) rows.push({ kind: 'you', text: l.text.slice(5) });
+            else if (l.t === 'text') rows.push({ kind: 'note', text: l.text });
+            else if (l.t === 'note') rows.push({ kind: 'note', text: l.text, level: l.level || 'info' });
+            else if (l.t === 'handoff') rows.push({ kind: 'step', text: `Handed to ${l.to || 'another agent'}${l.reason ? `: ${clip(l.reason, 160)}` : ''}` });
             else if (l.t === 'tool') {
                 const res = results.get(l.id);
-                const state = !res ? 'is-run' : res.ok ? 'is-ok' : 'is-bad';
-                rows.push(html`<li class="cw-tool ${state}"><details><summary>${raw(ICON.tool)}<b>${toolLabel(l.name)}</b>${l.what ? html`<span class="cw-in">${clip(l.what, 90)}</span>` : ''}<span class="cw-st">${res ? raw(res.ok ? ICON.ok : ICON.bad) : ''}${res && res.duration_ms ? msText(res.duration_ms) : ''}</span></summary>
-${res ? html`<pre class="cw-out">${clip(res.output, 1500)}</pre>` : html`<p class="cw-out muted">Running…</p>`}</details></li>`);
+                rows.push({ kind: 'tool', name: toolLabel(l.name), input: l.what || null, output: res ? res.output : null, ok: res ? Boolean(res.ok) : null, running: !res });
             }
         }
         return rows;
@@ -190,15 +191,7 @@ ${res ? html`<pre class="cw-out">${clip(res.output, 1500)}</pre>` : html`<p clas
 
     function workBlock(row, events, open) {
         const lines = taskEvents.lines(events.slice(-EVENTS_MAX), { final: !open, state: row.state });
-        const rows = workRows(lines);
-        const tools = lines.filter((l) => l.t === 'tool').length;
-        const took = tookOf(row);
-        const head = open
-            ? html`<span class="cw-live" data-live-line>${LIVE_TEXT[row.state] || 'Working'}…</span>`
-            : html`<span>${took ? `Worked for ${took}` : 'Worked'}${tools ? ` · ${tools} tool${tools === 1 ? '' : 's'}` : ''}</span>`;
-        if (!open && !rows.length) return '';
-        return html`<details class="cw"${open ? raw(' data-open') : ''}><summary>${head}<svg class="cw-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10l4 4 4-4"/></svg></summary>
-<ol class="cw-list" data-work>${rows}</ol></details>`;
+        return raw(thread.work({ open, live: LIVE_TEXT[row.state] || 'Working', took: tookOf(row) || null, rows: workRows(lines) }));
     }
 
     function answerBlock(row, t) {
@@ -206,27 +199,35 @@ ${res ? html`<pre class="cw-out">${clip(res.output, 1500)}</pre>` : html`<p clas
         const result = t.result || {};
         const evidence = Array.isArray(result.evidence) ? result.evidence.filter((e) => e && /^E\d{1,3}$/.test(String(e.id))) : [];
         // Citations open the evidence on the Details page (the chat keeps one line per answer, not the evidence list).
-        const body = chipify(markdown(result.answer || '', { headingOffset: 2 }), evidence).replace(/href="#ev-/g, `href="/tasks/${row.id}?view=details#ev-`);
+        // A citation chip comes in whole when the answer types in, and its number is never copied with the answer.
+        const body = chipify(markdown(result.answer || '', { headingOffset: 2 }), evidence)
+            .replace(/href="#ev-/g, `href="/tasks/${row.id}?view=details#ev-`)
+            .replace(/<(\w+) class="evs/g, '<$1 data-ovt-whole data-ovt-nocopy class="evs');
         const artifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
         const sources = Array.isArray(result.sources) ? result.sources.slice(0, 8) : [];
-        const checked = result.checked || {};
-        const claims = Number(checked.claims) || 0;
-        const agent = catalog.byId(result.agent);
+        const claims = Number((result.checked || {}).claims) || 0;
         const took = tookOf(row);
-        const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return String(u).slice(0, 40); } };
-        return html`<div class="ct-answer prose" data-answer>${raw(body)}</div>
-${artifacts.length ? html`<ul class="ct-files">${artifacts.map((a) => html`<li><a href="${a.url}" rel="nofollow noopener">${/^image\/(svg\+xml|png|jpe?g|gif|webp)$/.test(a.mime) ? html`<img src="${a.url}" alt="${a.name}" loading="lazy">` : raw(ICON.file)}<span>${a.name}</span></a></li>`)}</ul>` : ''}
-${sources.length ? html`<p class="ct-sources">${sources.map((u) => html`<a href="${u}" rel="nofollow ugc noopener" target="_blank">${host(u)}</a>`)}</p>` : ''}
-<div class="ct-meta"><span title="${agent ? agent.name : result.agent || ''}">${MODE_LABEL[row.mode] || row.mode}${result.model ? ` · ${modelName(result.model)}` : ''}</span>${t.cost ? html`<span>${usd(t.cost.usd)}</span>` : ''}${took ? html`<span>${took}</span>` : ''}${claims ? html`<span class="ct-checked" title="${claims} claim${claims === 1 ? '' : 's'} checked by a second model">${raw(ICON.ok)}Checked</span>` : ''}
-<span class="ct-acts"><button type="button" class="ct-act" data-copy hidden>${raw(ICON.copy)}<span>Copy</span></button><a class="ct-act" href="/tasks/${row.id}?view=details">${raw(ICON.more)}<span>Details</span></a></span></div>`;
+        return raw(thread.answer({
+            html: `<div class="prose">${body}</div>`,
+            files: artifacts.map((a) => ({ href: a.url, name: a.name, image: /^image\/(svg\+xml|png|jpe?g|gif|webp)$/.test(a.mime) })),
+            sources,
+            meta: [
+                `${MODE_LABEL[row.mode] || row.mode}${result.model ? ` · ${modelName(result.model)}` : ''}`,
+                t.cost ? usd(t.cost.usd) : null,
+                took || null,
+                // Said in words, not a tooltip a phone cannot open.
+                claims ? `${claims} claim${claims === 1 ? '' : 's'} checked` : null,
+            ],
+            actions: [{ label: 'Details', href: `/tasks/${row.id}?view=details`, icon: 'more' }],
+        }));
     }
 
     function questionBlock(row, events) {
         const q = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'question');
-        if (!q) return html`<div class="ct-card is-wait"><p><b>Actor is waiting for you.</b></p><p><a href="/tasks/${row.id}?view=details#question">Open the question</a></p></div>`;
+        if (!q) return html`<div class="ovt-card is-wait"><p><b>Actor is waiting for you.</b></p><p><a href="/tasks/${row.id}?view=details#question">Open the question</a></p></div>`;
         const options = Array.isArray(q.options) ? q.options : [];
         const acting = q.question_kind === 'acting';
-        return html`<div class="ct-card is-wait"><p><b>${acting ? 'Actor was stopped mid-action' : 'One question first'}</b></p><p>${String(q.text || '')}</p>
+        return html`<div class="ovt-card is-wait"><p><b>${acting ? 'Actor was stopped mid-action' : 'One question first'}</b></p><p>${String(q.text || '')}</p>
 <form method="post" action="/tasks/${row.id}/answer" class="ct-opts">${options.map((o) => html`<button class="ct-opt" type="submit" name="answer" value="${o}">${o}</button>`)}</form>
 ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class="ct-own"><input name="answer" type="text" maxlength="2000" required placeholder="Or answer in your own words" aria-label="Your answer"><button class="ct-opt" type="submit">Answer</button></form>`}</div>`;
     }
@@ -239,16 +240,13 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
             'actor.task.timeout': 'It ran too long and was stopped.',
             'actor.task.interrupted': 'Actor restarted while this was running. Nothing more was charged.',
         }[err.code] || err.detail || 'It stopped without saying why.';
-        return html`<div class="ct-card is-bad"><p><b>Actor couldn't finish this.</b> ${why}</p>
+        return html`<div class="ovt-card is-bad"><p><b>Actor couldn't finish this.</b> ${why}</p>
 <form method="post" action="/chat" class="ct-retry"><input type="hidden" name="task" value="${row.task}"><input type="hidden" name="mode" value="best">${isFollow(row) ? html`<input type="hidden" name="parent" value="${row.parent_id}">` : ''}<button class="ct-opt" type="submit">Try again in Best mode</button><a class="ct-act" href="/tasks/${row.id}?view=details">Details</a></form></div>`;
     }
 
-    const bytesText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
-    function filesBlock(row, files) {
-        if (!files || !files.length) return '';
-        return html`<ul class="ct-attached">${files.map((f) => html`<li>${inputs.IMAGE.test(f.mime)
-            ? html`<a href="/chat/file/${row.id}/${f.id}" target="_blank" rel="noopener"><img src="/chat/file/${row.id}/${f.id}" alt="${f.name}" loading="lazy"></a>`
-            : html`<a class="ct-file" href="/chat/file/${row.id}/${f.id}" target="_blank" rel="noopener">${raw(ICON.file)}<span><b>${f.name}</b><small>${bytesText(f.size)}</small></span></a>`}</li>`)}</ul>`;
+    /** The files beside the question (thread.files draws them). */
+    function filesOf(row, files) {
+        return (files || []).map((f) => ({ href: `/chat/file/${row.id}/${f.id}`, name: f.name, size: f.size, image: inputs.IMAGE.test(f.mime) }));
     }
 
     async function turnHtml(row, { events = null, files = null } = {}) {
@@ -262,30 +260,20 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
         else if (row.state === 'failed') reply = html`${workBlock(row, evs, false)}${failedBlock(row, t)}`;
         else if (row.state === 'cancelled') reply = html`${workBlock(row, evs, false)}<p class="ct-stopped">Stopped. What it spent before stopping stays spent.</p>`;
         else reply = html`${workBlock(row, evs, true)}${screenBlock(row, evs, true)}`;
-        return html`<li class="ct-turn state-${row.state}" id="t-${row.id}" data-task="${row.id}" data-state="${row.state}" data-last="${row.last_seq}"${open ? raw(' data-open') : ''}>
-<div class="ct-you">${filesBlock(row, attached)}<p class="ct-bubble">${row.task}</p></div>
-<div class="ct-bot"><span class="ct-avatar" aria-hidden="true"></span><div class="ct-reply">${reply}</div></div>
-</li>`;
+        // data-task and data-last are Actor's (js/chat.js follows the task's event stream from data-last).
+        return raw(thread.turn({ id: row.id, state: row.state, open, you: { text: row.task, files: filesOf(row, attached) }, reply: String(reply), attrs: { 'data-task': row.id, 'data-last': row.last_seq } }));
     }
 
     // ── The page ───────────────────────────────────────────────────────────────────────────────────────────────────
     function sidebar(chats, currentId) {
-        const groups = [];
-        let last = null;
-        const t = now();
-        for (const c of chats) {
-            const g = groupOf(c.last, t);
-            if (g !== last) { groups.push({ name: g, items: [] }); last = g; }
-            groups[groups.length - 1].items.push(c);
-        }
-        return html`<aside class="cs" id="chats" aria-label="Your chats">
-<div class="cs-head"><a class="cs-new" href="/chat">${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>')}New chat</a>
-<button type="button" class="cs-close" data-cs-close aria-label="Close the chats" hidden>${raw(ICON.bad)}</button></div>
-<label class="cs-find"><span class="sr-only">Find a chat</span><input type="search" placeholder="Find a chat" data-cs-find autocomplete="off"></label>
-<nav class="cs-list">${groups.length ? groups.map((g) => html`<p class="cs-group">${g.name}</p><ul>${g.items.map((c) => html`<li><a href="/chat/${c.id}"${c.id === currentId ? raw(' aria-current="page"') : ''} data-title="${c.title.toLowerCase()}">${c.open ? html`<i class="cs-dot" title="Working"></i>` : ''}<span>${c.title}</span></a></li>`)}</ul>`)
-        : html`<p class="cs-empty">Your chats show here.</p>`}</nav>
-<p class="cs-foot"><a href="/console">Console</a><a href="/me/agents">Your agents</a><a href="/memory">Memory</a></p>
-</aside>`;
+        return raw(thread.sidebar({
+            newHref: '/chat',
+            groups: thread.group(chats, (c) => c.last, now()).map((g) => ({
+                name: g.name,
+                items: g.items.map((c) => ({ href: `/chat/${c.id}`, title: c.title, current: c.id === currentId, live: c.open })),
+            })),
+            foot: [{ href: '/console', label: 'Console' }, { href: '/me/agents', label: 'Your agents' }, { href: '/memory', label: 'Memory' }],
+        }));
     }
 
     /**
@@ -305,24 +293,27 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 </div></details>`;
     }
 
+    const ATTACH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>';
+    const ATTACH_ACCEPT = '.txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,image/png,image/jpeg,image/webp,image/gif';
     function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '', model = null } = {}) {
-        return html`<form class="cc" method="post" action="${working ? `/chat/${working}/steer` : '/chat'}" data-composer${busy ? raw(' data-busy') : ''}>
-${problem ? html`<p class="cc-problem" role="alert">${problem}</p>` : ''}
-${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}
-<div class="cc-box">
-<ul class="cc-files" data-cc-chips hidden></ul>
-<label class="sr-only" for="cc-text">Message Actor</label>
-<textarea id="cc-text" name="task" rows="1" maxlength="20000" required placeholder="${working ? 'Tell Actor something while it works' : parent ? 'Reply to Actor' : 'Ask Actor to do something'}" data-cc-text>${text}</textarea>
-<div class="cc-row">
-<button type="button" class="cc-attach" data-cc-attach aria-label="Attach files" title="Attach text, code, CSV, JSON or images" hidden>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>')}</button><input type="file" multiple hidden data-cc-files accept=".txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,image/png,image/jpeg,image/webp,image/gif">
+        const tools = html`<button type="button" class="cc-attach" data-cc-attach aria-label="Attach files" title="Attach text, code, CSV, JSON or images" hidden>${raw(ATTACH_ICON)}</button><input type="file" multiple hidden data-cc-files accept="${ATTACH_ACCEPT}">
 ${modelChip(model)}
 <label class="cc-mode" title="How Actor picks the agent"><span class="sr-only">Mode</span><select name="mode" data-cc-mode>${MODES.map((m) => html`<option value="${m}" title="${MODE_HINT[m] || ''}"${m === mode ? raw(' selected') : ''}>${MODE_LABEL[m] || m}</option>`)}</select></label>
-<span class="cc-note" data-cc-note></span>
-${working ? html`<button class="cc-stop" type="submit" formaction="/tasks/${working}/cancel" formnovalidate aria-label="Stop" data-cc-stop>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>')}</button>` : html`<button class="cc-stop" type="button" aria-label="Stop" data-cc-stop hidden>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>')}</button>`}
-<button class="cc-send" type="submit" aria-label="Send" data-cc-send>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>')}</button>
-</div></div>
-<p class="cc-fine">Actor checks each answer with a second model. ${config.allowance ? `Free: ${config.allowance.tasksPerDay} tasks a day.` : ''}</p>
-</form>`;
+<span class="cc-note" data-cc-note></span>`;
+        return raw(thread.composer({
+            action: working ? `/chat/${working}/steer` : '/chat',
+            name: 'task',
+            maxlength: 20000,
+            label: 'Message Actor',
+            placeholder: working ? 'Tell Actor something while it works' : parent ? 'Reply to Actor' : 'Ask Actor to do something',
+            value: text,
+            busy,
+            stopAction: working ? `/tasks/${working}/cancel` : '',
+            hidden: { parent },
+            top: String(html`${problem ? html`<p class="cc-problem" role="alert">${problem}</p>` : ''}<ul class="cc-files" data-cc-chips hidden></ul>`),
+            tools: String(tools),
+            note: `Actor checks each answer with a second model.${config.allowance ? ` Free: ${config.allowance.tasksPerDay} tasks a day.` : ''}`,
+        }));
     }
 
     // What people really hand agents like this (the owner, 2026-11-01: "I hate the current examples… search what
@@ -352,21 +343,17 @@ ${working ? html`<button class="cc-stop" type="submit" formaction="/tasks/${work
         const title = first ? clip(first.task, 60) : 'New chat';
         return send(res, status, {
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
-            css: ['css/chat.css'], scripts: ['js/chat.js'],
+            css: ['css/chat.css'], scripts: ['js/chat.js'], styles: ['thread.css'], sharedScripts: ['ov-thread.js'],
             body: html`${busy ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
-<div class="chat" data-chat="${first ? first.id : ''}">
-${sidebar(chats, first ? first.id : null)}
-<div class="cs-scrim" data-cs-close hidden></div>
-<section class="ct" aria-label="${first ? 'Conversation' : 'New chat'}">
-<header class="ct-head"><button type="button" class="ct-menu" data-cs-open aria-controls="chats" aria-expanded="false">${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>')}<span class="sr-only">Your chats</span></button>
-<h1 class="ct-title">${title}</h1>${first ? html`<a class="ct-new" href="/chat" aria-label="New chat">${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>')}</a>` : ''}</header>
-<div class="ct-scroll" data-scroll>
-${turns.length ? html`<ol class="ct-thread" data-thread>${turnHtmls}</ol>` : html`<div class="ct-hello"><span class="ct-hello-mark" aria-hidden="true"></span><h2>What should Actor do?</h2><p>It browses, clicks and types for you. Watch it work, steer it, or go do something else.</p>
-<ul class="ct-starters">${STARTERS.map(([icon, k, v]) => html`<li><button type="button" data-starter="${v}">${raw(glyphs.svg(icon, { size: 20 }))}<b>${k}</b><span>${v}</span></button></li>`)}</ul></div>`}
-</div>
-${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model })}
-</section>
-</div>`,
+<div class="chat" data-chat="${first ? first.id : ''}">${raw(thread.page({
+                sidebar: String(sidebar(chats, first ? first.id : null)),
+                head: thread.head({ title, newHref: first ? '/chat' : null }),
+                turns: turnHtmls.map(String),
+                empty: first ? '' : String(html`<div class="ct-hello"><span class="ct-hello-mark" aria-hidden="true"></span><h2>What should Actor do?</h2><p>It browses, clicks and types for you. Watch it work, steer it, or go do something else.</p>
+<ul class="ct-starters">${STARTERS.map(([icon, k, v]) => html`<li><button type="button" data-ovt-starter="${v}">${raw(glyphs.svg(icon, { size: 20 }))}<b>${k}</b><span>${v}</span></button></li>`)}</ul></div>`),
+                composer: String(composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model })),
+                label: first ? 'Conversation' : 'New chat',
+            }))}</div>`,
         });
     }
 
