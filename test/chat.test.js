@@ -60,7 +60,8 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.match(page.text, new RegExp(`<a class="ovt-act" href="/tasks/${first}\\?view=details">`), 'Details is the full task page');
             assert.match(page.text, /<div class="ovt-meta"><span>Balanced/);
             assert.match(page.text, new RegExp(`<input type="hidden" name="parent" value="${first}">`), 'the composer replies to the last turn');
-            assert.match(page.text, new RegExp(`<a href="/chat/${first}" aria-current="page"`), 'the chat is in the list, marked as the one open');
+            assert.match(page.text, new RegExp(`<a class="ovk-sidebar-item is-here" href="/chat/${first}" aria-current="page"`), 'the chat is in the list (the network\'s sidebar), marked as the one open');
+            assert.match(page.text, /<nav class="ovk-sidebar-nav"[^>]*>[\s\S]*Console[\s\S]*Your agents[\s\S]*Memory/, 'Actor\'s places as rows, as Codes\' are');
         });
 
         await check('a reply continues the chat: both turns, in order, one chat in the list, with the turn before in mind', async () => {
@@ -74,8 +75,8 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
                 const page = await t.get(`/chat/${at}`, { as: kim });
                 const a = page.text.indexOf(`id="t-${first}"`), b = page.text.indexOf(`id="t-${second}"`);
                 assert.ok(a > 0 && b > a, `the chat through ${at} shows both turns, oldest first`);
-                assert.strictEqual((page.text.match(/<a href="\/chat\/tsk_/g) || []).length, 1, 'one chat in the list');
-                assert.match(page.text, new RegExp(`<a href="/chat/${first}" aria-current="page"`), 'the list names a chat by its first turn');
+                assert.strictEqual((page.text.match(/<a class="ovk-sidebar-item[^"]*" href="\/chat\/tsk_/g) || []).length, 1, 'one chat in the list');
+                assert.match(page.text, new RegExp(`<a class="ovk-sidebar-item is-here" href="/chat/${first}" aria-current="page"`), 'the list names a chat by its first turn');
             }
         });
 
