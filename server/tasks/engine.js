@@ -1,6 +1,7 @@
 'use strict';
 
 // The most a task's clock waits for its person, in all (Desks plan D4: hand_to_person).
+const inputs = require('./inputs');
 const PERSON_WAIT_MAX_MS = 15 * 60_000;
 
 /**
@@ -18,6 +19,10 @@ const PERSON_WAIT_MAX_MS = 15 * 60_000;
  * At most config.maxRunning tasks run at once; the rest wait queued in order.
  */
 const store = require('./store');
+const modelPrefs = require('../runtime/model-prefs');
+// The person's own model choice rides with the models layer (plan L55 C3). A stand-in models object (a test's)
+// does not carry it, and a run then keeps today's behaviour.
+const withChoice = (models, choice, fn) => (models && typeof models.withChoice === 'function' ? models.withChoice(choice, fn) : fn());
 const catalog = require('../agents/catalog');
 const { classify, heuristic } = require('../agents/classify');
 const { route, whyNone } = require('../agents/router');
@@ -37,12 +42,16 @@ const LOOP_AGENT = 'openvibe-runtime';
 // What a task asked in a public chat may be (chat/asks.js): nothing that uses the person's own computers, robots or code.
 const PUBLIC_CLASSES = ['answer', 'lookup', 'research', 'web'];
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null }) {
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
     // A question the loop asked before any tool ran (stage V2-8): the task waits in needs_you, the page shows the
     // question, and POST /tasks/:id/answer resumes this same run with the person's words.
     const asking = new Map();       // task id → resolve(answer)
+    // The waits (plan A2): the notice and the event of a wait that ended, waiting for the run it
+    // resumes. One per task: the task is queued again and the payload is taken when it starts.
+    const wakes = new Map();
+    let waits = waitsArg;
     const controls = new Map();     // task id → the run's control object (live assumptions)
     let stopped = false;
 
@@ -142,6 +151,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         return await control.assume(text);
     }
 
+    /** Words for a running task (the chat's composer while it works): the run hears them at its next turn. */
+    async function steer(id, text) {
+        const control = controls.get(id);
+        if (!control || typeof control.steer !== 'function') return { ok: false, reason: 'this task is not running' };
+        return await control.steer(text);
+    }
+
     function submit(id) {
         if (stopped) return;
         waiting.push(id);
@@ -210,7 +226,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         const budgetLeft = () => budget - spent;
         const abortAtEnd = () => { if (running.has(id)) running.get(id).abort('timeout'); };
         // The task's own clock (Actor v2): set at creation (10 minutes by default, up to an hour for mode best).
-        const timeoutMs = Math.max(10_000, Number(row.timeout_ms) || config.taskTimeoutMs);
+        // A task that waited (plan A2) keeps the wall clock it had left when it parked: the wait was not its
+        // time to spend. Its budget clock stops while it waits, because no model runs.
+        let timeoutMs = Math.max(10_000, Number(row.timeout_ms) || config.taskTimeoutMs);
+        const parked = waits ? await waits.remaining(id) : null;
+        if (parked) timeoutMs = Math.max(10_000, Math.min(timeoutMs, parked));
         let ends = Date.now() + timeoutMs;
         let timer = setTimeout(abortAtEnd, timeoutMs);
         timer.unref();
@@ -322,11 +342,19 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     await tellPerson(row, 'needs_you', { what: `approve: ${summary}`, url });
                     return { pending: true, id: ask.id, url };
                 } : null;
+                // The wait that ended (plan A2), if this run was woken by one: the notice, and the event as data.
+                const wakePayload = wakes.get(id) || null;
+                if (wakePayload) wakes.delete(id);
                 let out = null;
                 const control = {};
                 controls.set(id, control);
+                // The files attached to this message in the chat (plan L55 C2): text as data; images described first.
+                const attachments = await inputs.forRun(s, id, { models, meter, signal, log }).catch((err) => { log.warn('[Actor] attachments:', err && err.message); return []; });
+                // The person's own model choice for this run (plan L55 C3): their own key, through OpenVibe.AI.
+                // Every model call of the run — the loop's, the plan's, the check's — reads it, and no other run's does.
+                const choice = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
                 try {
-                    out = await loop.run({
+                    out = await withChoice(models, choice, async () => loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
                         // A fork carries its parent's state in the checkpoint, not as a follow-up conversation.
                         context: row.parent_id && row.fork_of_step == null && !resume ? await store.followContext(s, row) : [],
@@ -334,7 +362,20 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         meter, budgetLeft, waitForPerson, requestApproval,
                         personText, agentId: ownAgent, notifyTask,
                         askPerson, control, resume, fork, spent: () => spent,
-                    });
+                        waits, waitEvent: wakePayload, attachments,
+                    }));
+                    // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
+                    // ('running' is the closest state there is today), its wall clock waits with it, and its
+                    // budget clock stops because no model runs while it waits. The desk is closed with the run.
+                    if (out && out.parked) {
+                        const wait = waits ? await waits.get(out.parked.wait_id) : null;
+                        const left = Math.max(0, ends - Date.now());
+                        if (wait) await waits.setRemaining(wait.id, left);
+                        // The desk goes with the run: while the task waits, nothing holds it.
+                        await loop.close(out && out.state).catch(() => {});
+                        await emit(id, { kind: 'output', step: 'text', agent: agentId, text: 'Waiting: ' + (wait ? wait.line : 'for something') + '. Nothing runs until it arrives or the deadline passes.' });
+                        return undefined;
+                    }
                 } catch (err) {
                     if (signal && signal.aborted) throw err;
                     // The person chose "Stop the task" on an interrupted action (stage V2-9): end it cancelled, not failed.
@@ -349,11 +390,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 }
                 try {
                     await setState(id, 'verifying', { agentForEvent: agentId });
-                    const verify = async (current) => checkClaims({
+                    const verify = async (current) => withChoice(models, choice, () => checkClaims({
                         task: row.task, answer: current.text, evidence: current.evidence, models,
                         writerFamily: current.family || null, signal, now: () => now(),
                         trace: current.state && current.state.ctx && current.state.ctx.trace,
-                    });
+                    }));
                     let verdict = await verify(out);
                     await meter(verdict.cost_usd);
                     const showCheck = (v) => emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${v.ok ? 'Checked' : 'Check failed'}${v.by ? ` by ${v.by}${v.cross ? '' : ' (same family)'}` : ''}: ${v.reason || ''}`.slice(0, 2000), is_error: !v.ok });
@@ -396,7 +437,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         for (const c of verdict.contested.slice(0, 2)) {
                             if (budgetLeft() <= 0) break;
                             try {
-                                const j = await adjudicate({ claim: c, evidence: out.evidence, task: row.task, models, writerFamily: out.family || null, signal, now: () => now(), trace: out.state && out.state.ctx && out.state.ctx.trace });
+                                const j = await withChoice(models, choice, () => adjudicate({ claim: c, evidence: out.evidence, task: row.task, models, writerFamily: out.family || null, signal, now: () => now(), trace: out.state && out.state.ctx && out.state.ctx.trace }));
                                 if (j) { await meter(j.cost_usd); if (!j.failed) contested.push({ claim: j.claim, sides: j.sides, pick: j.pick, reason: j.reason, by: j.by }); }
                             } catch (err) {
                                 if (signal && signal.aborted) throw err;
@@ -412,14 +453,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         if (Array.isArray(verdict.claims) && verdict.claims.length) {
                             const outward = !!(out.state && out.state.brain && out.state.brain.understanding && out.state.brain.understanding.outward);
                             try {
-                                review = await confidence.review({
+                                review = await withChoice(models, choice, () => confidence.review({
                                     claims: verdict.claims, evidence: out.evidence, task: row.task, mode: row.mode, models,
                                     outward, signal, trace: out.state && out.state.ctx && out.state.ctx.trace,
                                     budgetLeft, writerFamily: out.family || null, now: () => now(),
                                     search: async (query) => (registry
                                         ? registry.run('search_web', { query }, { config, log, signal, requester: row.requester, now })
                                         : { text: 'no search is configured', isError: true }),
-                                });
+                                }));
                                 await meter(review.cost_usd);
                                 if (review.challenged) await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `Challenged ${review.challenged} high-stakes claim${review.challenged === 1 ? '' : 's'} with a counter-evidence search; ${review.unsure} could not be confirmed.`.slice(0, 2000) });
                             } catch (err) {
@@ -600,6 +641,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         const capped = [];
         const failed = [];
         for (const row of rows) {
+            // A task that is waiting (plan A2) is not interrupted: it waits for its event or its deadline.
+            if (waits && await waits.hasOpenWait(row.id)) continue;
             const start = await loadStart(row, { boot: true });
             if (!start) {
                 if (row.state === 'queued' && !Number(row.resumes)) {
@@ -643,9 +686,45 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         waiting.length = 0;
     }
 
+    /**
+     * A wait ended and the task goes back to the queue (plan A2). The run starts again from its checkpoint; the
+     * notice (and the event, as untrusted data) reaches the model through the loop. The task's budget, its
+     * allow-list and its permissions are exactly what they were: a wait never widens anything.
+     */
+    async function resumeWithEvent(taskId, payload) {
+        const row = await store.getTask(s, taskId);
+        if (!row || !store.OPEN.includes(row.state)) return null;
+        const resumes = Number(row.resumes) || 0;
+        await store.updateTask(s, taskId, { state: 'queued', resumes: resumes + 1, finished_at: null });
+        wakes.set(taskId, payload || {});
+        await emit(taskId, { kind: 'state', state: 'queued' });
+        submit(taskId);
+        return row;
+    }
+
+    /** The same, with only a notice (a cancelled wait, a deadline that passed). */
+    const resumeWithNotice = (taskId, notice) => resumeWithEvent(taskId, { event: null, notice });
+
+    /** A wait that timed out with on_timeout 'fail' ends the task. */
+    async function failTask(taskId, code, detail) {
+        const row = await store.getTask(s, taskId);
+        if (!row || !store.OPEN.includes(row.state)) return null;
+        return setState(taskId, 'failed', { error_code: code, error_detail: String(detail || '').slice(0, 2000), finished_at: iso() });
+    }
+
+    /** The person is told that a wait timed out. */
+    async function notifyWaitTimeout(wait) {
+        const row = await store.getTask(s, wait.task_id);
+        if (!row) return null;
+        return tellPerson(row, 'needs_you', { what: 'the wait for "' + wait.line + '" timed out', url: config.baseUrl + '/tasks/' + wait.task_id });
+    }
+
+    /** The waits module is created after the engine (it resumes tasks), so it is set here. */
+    function setWaits(module) { waits = module; return module; }
+
     const status = () => ({ running: running.size, waiting: waiting.length });
 
-    return { submit, cancel, stop, status, answer, assume, resumeInterrupted, MAX_ATTEMPTS };
+    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, MAX_ATTEMPTS };
 }
 
 module.exports = { createEngine, MAX_ATTEMPTS };

@@ -39,6 +39,8 @@ const EXPECTED = {
     computer_run: true,
     computer_write: true,
     hand_to_person: true,
+    // A wait changes nothing in the world: it parks the run until the event or the deadline.
+    wait_for: false,
     make_chart: true,
     make_file: true,
     remember: true,

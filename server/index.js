@@ -69,6 +69,17 @@ async function start() {
     const subscriptions = require('./events-consumer').startSubscriptions({ config, port: config.port, secret: config.events.secrets[0] || '',
         topics: config.chat.asks ? ['chat.message.created'] : [] });
     const extra = [() => { if (subscriptions) subscriptions.stop(); }];
+    // The waits (plan A2): the deadline loop fires the waits whose time is up, and the sweep reads the topics
+    // with open waits from their cursor (the recovery path when a delivery was missed). Both are background
+    // loops, so both are off in a drill (ACTOR_DRILL=1).
+    if (!config.drill && ctx.waits) {
+        const jobs = require('./utils/jobs');
+        ctx.waitJobs = [
+            jobs.every('actor-wait-deadlines', 30_000, () => ctx.waits.runDeadlines(), { initialDelayMs: 15_000, log: console }),
+            jobs.every('actor-wait-sweep', 60_000, () => ctx.waits.sweep(), { initialDelayMs: 30_000, log: console }),
+        ];
+        extra.push(() => { for (const stop of ctx.waitJobs) stop(); });
+    }
     createLifecycle({ server, ctx, timers: [prune, agentTick], extra });
     return { server, ctx };
 }

@@ -49,32 +49,40 @@ const MODE_TEXT = {
     private: 'Only OpenVibe\'s own hardware: nothing leaves OpenVibe.',
 };
 const MODE_LABEL = { cheapest: 'Cheapest', balanced: 'Balanced', best: 'Best', fastest: 'Fastest', private: 'Private' };
+const CLASS_WORD = { answer: 'Answers', lookup: 'Lookups', research: 'Reading pages', web: 'Web search', code: 'Code', robot: 'Your robot', computer: 'Your computer' };
 const STATE_KIND = { queued: '', running: 'info', verifying: 'info', succeeded: 'ok', failed: 'bad', cancelled: '' };
+// What people really hand agents like this (the owner, 2026-11-01: "I hate all the current examples… people aren't
+// gonna use it for that… search what people use Grok-style agents for"; research the same day: OpenAI's agent launch,
+// Manus reviews and Perplexity's Comet usage study put travel and bookings, shopping and deals, fact-checks and
+// research, watching for something, and lists and tables first). The chat's starters are the same set.
 const EXAMPLES = [
-    'Who handles the mail for openvibe.network, and are its SPF and DMARC records set up properly?',
-    'What changed in the latest Node.js LTS release? Give me the three changes that matter most, with sources.',
-    'Explain the difference between a mutex and a semaphore with a short example.',
-    'Is the TLS certificate of example.com valid, and when does it expire?',
+    'Find the cheapest round trip from New York to Tokyo in March. Show me the best three and stop before paying.',
+    'Compare the five best standing desks under $500: price, reviews, and where each is cheapest today.',
+    'Fact-check this with real sources, and tell me what is true, what is false and what is unclear: ',
+    'Watch eBay for a used RTX 4090 under $900 and tell me the moment one is listed.',
 ];
 
-// Tasks to start from, by what they need. Each one works today. On the home they are a rail of cards (kit.card): a short
-// title, the kind as the badge and the card type's icon; the card's link puts the whole task in the task box, ready to run
-// or change. What a robot, computer, desk or private task needs is said in the box once that task is chosen (NEEDS).
+// Tasks to start from, by what they need. On the home they are a rail of cards (kit.card): a short title, the kind as
+// the badge and the card type's icon; the card's link puts the whole task in the task box, ready to run or change. What a
+// robot, computer, desk or private task needs is said in the box once that task is chosen (NEEDS).
 const TEMPLATES = [
-    { group: 'Look it up', badge: 'Lookup', type: 'domain', items: [
-        { title: 'Check a domain\'s mail setup', text: EXAMPLES[0] },
-        { title: 'Is a site\'s certificate valid?', text: EXAMPLES[3] },
+    { group: 'Book and buy', badge: 'Errand', type: 'site', items: [
+        { title: 'The cheapest flight to Tokyo in March', text: EXAMPLES[0] },
+        { title: 'The best standing desk under $500', text: EXAMPLES[1] },
     ] },
-    { group: 'Research with sources', badge: 'Research', type: 'report', items: [
-        { title: 'What changed in the latest Node.js LTS', text: EXAMPLES[1] },
-        { title: 'Which licences let you sell hosted copies', text: 'Which open-source licences let me sell hosted copies of the software? Compare MIT, Apache-2.0, GPL-3.0 and AGPL-3.0, with sources.' },
+    { group: 'Check and research', badge: 'Research', type: 'report', items: [
+        { title: 'Is this true? Check it with sources', text: EXAMPLES[2] },
+        { title: 'What people say about the new iPhone today', text: 'What are people saying about the newest iPhone today on Reddit, X and the news? Give me the short version.' },
     ] },
-    { group: 'Write and explain', badge: 'Write', type: 'post', items: [
-        { title: 'A mutex and a semaphore, explained', text: EXAMPLES[2] },
-        { title: 'A note telling viewers the stream moves', text: 'Write a short, friendly note telling my viewers the stream starts an hour later on Friday.', mode: 'cheapest' },
+    { group: 'Watch for it', badge: 'Watch', type: 'cam', items: [
+        { title: 'A used RTX 4090 under $900 on eBay', text: EXAMPLES[3] },
+    ] },
+    { group: 'Plan and list', badge: 'Plan', type: 'post', items: [
+        { title: 'A weekend in Lisbon for two', text: 'Plan a weekend in Lisbon for two: a hotel under $150 a night, where to eat, and a plan for each day.' },
+        { title: '20 small gaming streamers, in a table', text: 'Make a table of 20 small gaming streamers (under 10k followers) with their channel links and when they stream.' },
     ] },
     { group: 'Across OpenVibe', badge: 'OpenVibe', type: 'stream', items: [
-        { title: 'The best posts and clips on Pi robots', text: 'Find recent posts and clips on OpenVibe about Raspberry Pi robots, and link the best three.' },
+        { title: 'Who is live on OpenVibe, and about what', text: 'Open openvibe.live, find the channels that are live right now, and tell me what is happening on each.' },
     ] },
     { group: 'Your robot', badge: 'Robot', type: 'toy', needs: 'Turn on Your agent on the robot\'s panel first.', items: [
         { title: 'Drive your rover and say hello', text: 'Drive my rover forward for two seconds, turn on its headlights, then say hello.' },
@@ -83,7 +91,6 @@ const TEMPLATES = [
         { title: 'The ten largest files in your Downloads', text: 'On my computer, list the ten largest files in my Downloads folder.' },
     ] },
     { group: 'On a desk of its own', badge: 'Desk', type: 'cam', needs: 'Needs a computer or desk host with the OpenVibe Node\'s computer plugin. Watch the desk and take it over from the task.', items: [
-        { title: 'Who is live on OpenVibe, and about what', text: 'On my computer, open openvibe.live in your own browser on a desk of your own, and tell me who is live right now and what each stream is about.' },
         { title: 'Sign in on its desk, then read your account', text: 'On my computer, open the sign-in page of <a site I use> on your desk and hand it to me to sign in; then tell me what my account page shows.' },
     ] },
     { group: 'Private', badge: 'Private', type: 'person', needs: 'Answered on OpenVibe\'s own model; nothing leaves OpenVibe.', items: [
@@ -118,7 +125,7 @@ const msText = (n) => {
 // A model id as people say it: "deepseek:deepseek-flash" → "DeepSeek Flash", "openai:gpt-5.1" → "GPT-5.1".
 const BRANDS = { deepseek: 'DeepSeek', gpt: 'GPT', openai: 'OpenAI', minimax: 'MiniMax', claude: 'Claude', gemini: 'Gemini', qwen: 'Qwen', glm: 'GLM', kimi: 'Kimi' };
 function modelName(id) {
-    const m = String(id || '').split(':').pop();
+    const m = String(id || '').split(':').pop().replace(/-\d{4}-\d{2}-\d{2}$/, '');
     if (!m) return 'another model';
     if (/^gpt-/i.test(m)) return `GPT-${m.slice(4)}`;
     return m.split('-').map((w) => BRANDS[w.toLowerCase()] || (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ');
@@ -427,7 +434,11 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
         const signed = viewer.kind === 'user' && viewer.subject;
         // A template link (/?task=…&mode=…#task) fills the task box; the page itself stays the canonical /.
         if (!form.text && typeof query.task === 'string') form = { text: query.task.slice(0, 2000), mode: MODES.includes(query.mode) ? query.mode : 'balanced' };
-        const working = agents.filter((a) => a.available).length;
+        // Real numbers (the owner, 2026-11-01: "are you sure this number is correct?"): the agents Actor can pick from
+        // right now, and the tasks running this minute (zero is left out of the strip, so an idle Actor claims nothing).
+        const ready = agents.filter((a) => a.available).length;
+        const st = engine && typeof engine.status === 'function' ? engine.status() : null;
+        const running = st ? (Number(st.running) || 0) + (Number(st.waiting) || 0) : 0;
         const faq = faqItems(agents);
         const hero = showcase.hero({
             eyebrow: 'OpenVibe.Actor · your agent for everything · alpha',
@@ -439,7 +450,8 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
         });
         // One strip of numbers (it scrolls sideways on a phone instead of stacking four tiles); zero is left out.
         const stats = kit.stats([
-            [working, working === 1 ? 'agent working now' : 'agents working now', '#agents'],
+            [running, running === 1 ? 'task running now' : 'tasks running now', '/tasks'],
+            [ready, ready === 1 ? 'agent to choose from' : 'agents to choose from', '#agents'],
             [tools.length, 'tools it can run', '#tools'],
             [MODES.length, 'ways to choose', '/agents#modes'],
             [tier.tasksPerDay, 'free tasks a day', '#faq'],
@@ -553,7 +565,7 @@ ${raw(foldBlock({
         return [
             ['What does OpenVibe.Actor do?', 'You describe a task in plain words. Actor sorts it, picks the agent that can do it best within your budget and mode, runs it while you watch its steps, has a second model check the answer, and shows you the answer with its sources, what it cost and why that agent.'],
             ['What does it cost?', `The free tier gives ${tier.tasksPerDay} tasks a day, up to ${usd(tier.perTaskUsd)} each, with no card. Every task shows its real cost to a fraction of a cent.`],
-            list ? ['Which agents does it use?', `${list} are working now. The agents page lists each one with its price per million tokens and what it can do.`] : null,
+            list ? ['Which agents does it use?', `${list} are ready to pick from. The agents page lists each one with its price per million tokens and what it can do.`] : null,
             ['Is the answer checked?', 'Yes. A second model reads every answer before you see it, from another model family where one is available. An answer that fails its check goes to the next agent that can do the task.'],
             ['What is private mode?', 'Private mode uses only an open model on OpenVibe\'s own server, so the task never leaves OpenVibe. It is for short answers; tasks that need search or tools go to the other agents in the other modes.'],
             ['Can it use my computer or my robot?', 'Only if you turn it on. On openvibe.bot you let your agent use a computer or drive a robot, one at a time. On a computer at the ask level, each program or write waits for your approval on that computer.'],
@@ -565,8 +577,8 @@ ${raw(foldBlock({
     function routerCard(agents) {
         const shown = agents.filter((a) => a.id !== 'codes');
         return html`<figure class="router-card" aria-label="How Actor picked an agent for a sample task">
-<figcaption><span class="muted small">Sample task · Balanced</span><b>“Who handles the mail for openvibe.network, and is DMARC set up?”</b></figcaption>
-<ol>${shown.map((a, i) => html`<li class="${i === 0 ? 'pick' : ''}"><span class="rc-name">${a.name}</span><span class="rc-cost">~${usd(catalog.typicalCost(a.id, config))}</span><span class="rc-why">${i === 0 ? 'can run the DNS tools; cheapest that can' : a.can.includes('task:lookup') ? 'can do it, costs more' : 'cannot run lookups'}</span></li>`)}</ol>
+<figcaption><span class="muted small">Sample task · Balanced</span><b>“Find the best standing desk under $500, and where it is cheapest today.”</b></figcaption>
+<ol>${shown.map((a, i) => html`<li class="${i === 0 ? 'pick' : ''}"><span class="rc-name">${a.name}</span><span class="rc-cost">~${usd(catalog.typicalCost(a.id, config))}</span><span class="rc-why">${i === 0 ? 'searches and reads the shops; cheapest that can' : a.can.includes('task:lookup') ? 'can do it, costs more' : 'cannot run lookups'}</span></li>`)}</ol>
 <p class="rc-foot">Checked by a second model before you see it.</p></figure>`;
     }
 
@@ -581,7 +593,7 @@ ${raw(foldBlock({
         const mode = MODES.includes(req.body && req.body.mode) ? req.body.mode : 'balanced';
         const out = await createTask({ s, config, engine, principal: { requester: requesterOf(req), project: null }, body: { task: text, mode } });
         if (out.code) return home(req, res, { status: out.status === 503 || out.status === 429 ? out.status : 422, form: { text, mode, problem: out.detail } });
-        return res.redirect(303, `/tasks/${out.task.id}`);
+        return res.redirect(303, `/chat/${out.task.id}`);
     });
 
     // A follow-up (Actor v2, stage V2-5b): a new task of the same person's that continues an answered one, with its
@@ -603,7 +615,7 @@ ${raw(foldBlock({
         if (!text) return res.redirect(303, `/tasks/${parent.id}#follow-up`);
         const out = await createTask({ s, config, engine, principal: { requester: requesterOf(req), project: null }, body: { task: text, mode: parent.mode }, parentId: parent.id });
         if (out.code) return res.redirect(303, `/tasks/${parent.id}?follow=${encodeURIComponent(out.code)}#follow-up`);
-        return res.redirect(303, `/tasks/${out.task.id}`);
+        return res.redirect(303, `/chat/${out.task.id}#t-${out.task.id}`);
     });
 
     // ── Durable runs (stage V2-9): fork from a saved step, and compare two runs ──────
@@ -988,6 +1000,9 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
     });
 
     r.get('/tasks/:id', async (req, res) => {
+        if (req.get('sec-fetch-mode') === 'navigate' && req.query.view !== 'details' && TASK_ID.test(req.params.id) && signedIn(req)) {
+            return res.redirect(303, `/chat/${req.params.id}#t-${req.params.id}`);
+        }
         const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
         if (!row || row.requester !== requesterOf(req)) {
             return page(req, res, { title: 'Task not found', body: html`<h1>Task not found</h1><p>${signedIn(req) ? 'There is no task here that belongs to you.' : html`<a href="/auth/login?next=${encodeURIComponent(req.originalUrl)}">Sign in</a> to see your task.`}</p>` }, 404);
@@ -1333,34 +1348,42 @@ ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates |
         const agents = catalog.list(config);
         return {
             agent: true, index: true, cache: PUBLIC_CACHE,
-            title: 'The agents',
-            description: 'Every agent system OpenVibe.Actor routes a task to — OpenVibe\'s own runtime, OpenAI\'s web agent, an open model on OpenVibe hardware, OpenVibe.Codes — with what each can do, its trust class and its price per million tokens.',
+            title: 'Who does the work',
+            description: 'The agents OpenVibe.Actor gives a task to: OpenVibe\'s own, OpenAI\'s web agent, an open model on OpenVibe hardware and OpenVibe.Codes, with what each is good at, where it runs, what it costs and how fast it is.',
             crumbs: [{ label: 'Agents' }],
-            body: html`<h1>The agents</h1>
-<p>Actor is a router for agents, the way OpenRouter is one for models: each task goes to the agent system that can do it, then by your mode. Prices are typed in from each provider's own price page by a person, with the day it was checked; Actor charges the real usage of each call at these prices. Machine-readable: <a href="/api/v1/agents"><code>GET /api/v1/agents</code></a>.</p>
-${table(['Agent', 'Kind', 'Can do', 'Trust', 'Price', 'Typical time', 'Now'], agents.map((a) => [
-                // What each one is (the home lists the agents as rows that link here).
-                html`<strong id="${a.id}">${a.name}</strong><br><code>${a.id}</code>${a.model ? html`<br><span class="muted small">${a.model}</span>` : ''}${(catalog.byId(a.id) || {}).blurb ? html`<p class="agent-blurb">${catalog.byId(a.id).blurb}</p>` : ''}`,
-                a.kind,
-                a.can.filter((c) => c.startsWith('task:')).map((c) => c.slice(5)).join(', '),
-                a.trust,
-                html`${priceText(a.rate_card)}<br><a class="muted small" href="${a.rate_card.source}" rel="noopener">source</a> <span class="muted small">checked ${a.rate_card.verified_at}</span>`,
-                `~${Math.round(a.typical_latency_ms / 1000)} s`,
-                a.available ? badge('working', 'ok') : html`${badge('not here')}<br><span class="muted small">${a.reason}</span>`,
-            ]))}
-<h2 id="modes">Modes</h2>
-${table(['Mode', 'What it picks'], MODES.map((m) => [html`<strong>${MODE_LABEL[m]}</strong> <code>${m}</code>`, MODE_TEXT[m]]))}
-<h2 id="classes">What a task needs</h2>
+            // Plain cards, not a seven-column table (the owner, 2026-11-01: "how does this system even work? This is
+            // confusing"; the table ran off a phone). The rarer parts are folds. Plan L55 C3 turns this into Settings:
+            // your model, your keys, your machine.
+            body: html`<h1>Who does the work</h1>
+<p class="ag-lede">For each task Actor picks one of these, the one that can do it at the lowest price for your mode, and a second model checks its answer before you see it. Leave it on <b>Balanced</b>, or pick another mode in the chat.</p>
+<ul class="ag-cards">${agents.map((a) => {
+                const can = a.can.filter((c) => c.startsWith('task:')).map((c) => c.slice(5));
+                const where = a.id === 'codes' ? 'On your own machine' : a.trust === 'first-party' ? 'On OpenVibe\'s own hardware' : a.id === 'openvibe-runtime' ? 'OpenVibe\'s code; its model runs at DeepSeek' : a.id === 'openai-agent' ? 'At OpenAI' : 'At the provider';
+                return html`<li class="ag-card${a.available ? '' : ' is-off'}" id="${a.id}">
+<div class="ag-head"><strong>${a.name}</strong>${a.available ? badge('ready', 'ok') : badge('not available')}</div>
+${(catalog.byId(a.id) || {}).blurb ? html`<p class="agent-blurb">${catalog.byId(a.id).blurb}</p>` : ''}
+<dl class="ag-facts"><div><dt>Good at</dt><dd>${can.length ? can.map((c) => html`<span class="ag-chip">${CLASS_WORD[c] || c}</span>`) : '—'}</dd></div>
+<div><dt>Where it runs</dt><dd>${where}</dd></div>
+<div><dt>Cost</dt><dd>${priceText(a.rate_card)} <a class="muted small" href="${a.rate_card.source}" rel="noopener">source</a></dd></div>
+<div><dt>Speed</dt><dd>about ${Math.round(a.typical_latency_ms / 1000)} s</dd></div></dl>
+${a.available ? '' : html`<p class="muted small">${a.reason}</p>`}
+<p class="ag-id muted small"><code>${a.id}</code>${a.model ? html` · ${a.model}` : ''} · prices checked ${a.rate_card.verified_at}</p>
+</li>`;
+            })}</ul>
+<p class="ag-soon">Coming: your own models and API keys, and your own computer through the OpenVibe Node.</p>
+<details class="ag-fold" id="modes"><summary>Modes: how Actor picks (${MODES.length})</summary>
+${table(['Mode', 'What it picks'], MODES.map((m) => [html`<strong>${MODE_LABEL[m]}</strong> <code>${m}</code>`, MODE_TEXT[m]]))}</details>
+<details class="ag-fold" id="classes"><summary>What a task needs (5 kinds)</summary>
 <p>Actor sorts each task first, and only agents that can do that kind of task are considered:</p>
 <ul><li><strong>answer</strong>: writing, explaining, planning, anything a capable model knows.</li>
 <li><strong>lookup</strong>: facts about a domain, address or site (DNS, mail records, certificates, headers, WHOIS), from OpenVibe.Tools.</li>
 <li><strong>research</strong>: reading the pages a task names, or OpenVibe's own content.</li>
 <li><strong>web</strong>: a live web search, for anything recent.</li>
-<li><strong>code</strong>: writing or changing code, through OpenVibe.Codes.</li></ul>
-<h2 id="check">The check</h2>
-<p>Before you see an answer, a model of another family reads it: DeepSeek's answers are checked by OpenAI's smallest model and OpenAI's by DeepSeek. In private mode only OpenVibe's own model may read the task, so it checks its own answer and the task says so. A failed check sends the task to the next agent that can do it.</p>
-<h2 id="trust">Trust</h2>
-<p><strong>first-party</strong> runs on OpenVibe's own hardware; <strong>external</strong> means the task's text goes to that provider (the OpenVibe runtime is OpenVibe's code, but its model runs at DeepSeek). Private mode takes only first-party agents.</p>`,
+<li><strong>code</strong>: writing or changing code, through OpenVibe.Codes.</li></ul></details>
+<details class="ag-fold" id="check"><summary>The check</summary>
+<p>Before you see an answer, a model of another family reads it: DeepSeek's answers are checked by OpenAI's smallest model and OpenAI's by DeepSeek. In private mode only OpenVibe's own model may read the task, so it checks itself.</p></details>
+<details class="ag-fold" id="trust"><summary>Where your words go</summary>
+<p><strong>On OpenVibe's own hardware</strong> means nothing leaves OpenVibe. Anything else means the task's text goes to that provider (the OpenVibe runtime is OpenVibe's code, but its model runs at DeepSeek). Private mode takes only OpenVibe's own model. Machine-readable: <a href="/api/v1/agents"><code>GET /api/v1/agents</code></a>.</p></details>`,
         };
     }
     r.get('/agents', (req, res) => page(req, res, agentsPage()));
@@ -1447,4 +1470,4 @@ ${table(['Code', 'Meaning'], [
     return r;
 }
 
-module.exports = { createPageRoutes, MODE_TEXT };
+module.exports = { createPageRoutes, MODE_TEXT, chipify, toolLabel, inputText, modelName, msText, usd };

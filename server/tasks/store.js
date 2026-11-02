@@ -38,7 +38,7 @@ const getTask = (s, id) => s.db.maybe('SELECT * FROM tasks WHERE id = $1', [id])
  * question and its answer, only the same person's, only answered ones. An answer's [E#] citations belonged to its own
  * run, so they are taken out: the new run cites only what it fetches itself. Each answer is clipped to `clip` chars.
  */
-async function followContext(s, row, { depth = 3, clip = 3000 } = {}) {
+async function followContext(s, row, { depth = 6, clip = 2500 } = {}) {
     const out = [];
     let at = row && row.parent_id;
     for (let i = 0; at && i < depth; i++) {
@@ -134,6 +134,15 @@ function deskFrom(events) {
         else if (/"running":false/.test(t)) desk = null;
     }
     return desk;
+}
+
+/**
+ * Where a desk is, from Bot's screen page address (agents/computers.js watchUrl): { machine, desk }, the desk 'main'
+ * when the address names none; null for any other address. What a watch link needs (plan L55 C1b).
+ */
+function deskPlace(url) {
+    const at = /\/machines\/(dev_[A-Za-z0-9_-]{1,64})\/screen(?:\?desk=([a-z0-9-]{1,40}))?$/.exec(String(url || ''));
+    return at ? { machine: at[1], desk: at[2] || 'main' } : null;
 }
 
 async function taskDesk(s, row) {
@@ -250,4 +259,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, deskPlace, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };

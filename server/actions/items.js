@@ -76,13 +76,28 @@ function answerOf(result) {
     return '';
 }
 
-function taskItem(row, { lastEvent = null, steps = null } = {}) {
+/**
+ * The quiet line a waiting task shows (plan A2): the wait's own words and how long it has waited. The task's
+ * state is still running (a wait is a row beside the task, not a new state), so this is where the person sees
+ * that nothing is happening on purpose.
+ */
+function waitLineOf(wait, now = () => Date.now()) {
+    const line = plain(wait && wait.line ? wait.line : '', 200);
+    if (!line) return null;
+    const started = Date.parse(String(wait.created_at || ''));
+    if (!Number.isFinite(started)) return line;
+    const mins = Math.max(0, Math.round((now() - started) / 60_000));
+    return `${line} · ${mins} min`;
+}
+
+function taskItem(row, { lastEvent = null, steps = null, wait = null, now = () => Date.now() } = {}) {
     const needs = needsYou(lastEvent);
     const state = needs ? 'needs_you' : row.state;
     const bucket = bucketFor(row.state, { needsYou: Boolean(needs) });
     const updated = row.finished_at || (lastEvent && lastEvent.at) || row.created_at;
     const last = lastEvent && (lastEvent.text || (lastEvent.tool ? `Using ${lastEvent.tool}` : ''));
-    const summary = needs ? needs.what : (row.state === 'failed' ? row.error_detail : (answerOf(row.result) || last));
+    const waiting = waitLineOf(wait, now);
+    const summary = waiting || (needs ? needs.what : (row.state === 'failed' ? row.error_detail : (answerOf(row.result) || last)));
     return {
         service: 'actor',
         id: row.id,
@@ -145,4 +160,4 @@ function scheduledItem(agent) {
     };
 }
 
-module.exports = { PUBLIC_ORIGIN, OPEN, bucketFor, actionsFor, plain, needsYou, taskItem, approvalItem, scheduledItem };
+module.exports = { PUBLIC_ORIGIN, OPEN, bucketFor, actionsFor, plain, needsYou, waitLineOf, taskItem, approvalItem, scheduledItem };

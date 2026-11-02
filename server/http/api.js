@@ -30,6 +30,7 @@ const personal = require('../agents/personal');
 const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
 const items = require('../actions/items');
+const modelPrefs = require('../runtime/model-prefs');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_ID = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -61,7 +62,13 @@ function createApi(ctx) {
             WHERE t.requester = $1 AND (t.state = ANY($2) OR COALESCE(t.finished_at, t.created_at) >= $3)
             ORDER BY COALESCE(t.finished_at, le.at, t.created_at) DESC
             LIMIT 50`, [requester, store.OPEN, cutoff]);
-        const tasks = rows.map((row) => items.taskItem(row, { lastEvent: store.parseJson(row.last_event), steps: Number(row.tool_steps) }));
+        // The waits (plan A2): a task that waits shows the quiet line the person reads.
+        const openWaits = ctx.waits ? await ctx.waits.listOpen() : [];
+        const waitFor = new Map(openWaits.map((w) => [w.task_id, w]));
+        const tasks = rows.map((row) => items.taskItem(row, {
+            lastEvent: store.parseJson(row.last_event), steps: Number(row.tool_steps),
+            wait: waitFor.get(row.id) || null, now: s.now,
+        }));
         const asks = (await approvals.list(s, requester))
             .filter((a) => a.state === 'pending')
             .map(items.approvalItem);
@@ -185,6 +192,35 @@ function createApi(ctx) {
         res.status(204).end();
     });
 
+    // ── The person's model choice (plan L55 C3) ─────────────────────────────────
+    // Which model their tasks run on: 'auto' (Actor decides, as today), 'openvibe' (OpenVibe's own keys, through
+    // OpenVibe.AI) or 'own:<provider>' (their OWN key for that provider, sealed in OpenVibe.AI's vault — a key never
+    // reaches Actor, and Actor never stores one).
+    //
+    // The person's own session or token, never a service: what a person spends their own key on is theirs to choose.
+    // (A service token may read it — it must know which provider to ask for — but not change it.)
+    const personOnly = (req, res, next) => {
+        const p = req.principal;
+        if (!p || p.kind !== 'user' || !p.requester || !p.requester.startsWith('user:')) {
+            return problem(req, res, 404, 'actor.model.not_found', 'No such setting.');
+        }
+        return next();
+    };
+
+    r.get('/me/model', principal.requireCapability('actor.model.manage'), personOnly, limits.reads('actor.model.manage'), async (req, res) => {
+        const row = await modelPrefs.get(s, req.principal.requester);
+        // The providers the person allowed THIS service to use their own key for, and that they hold a key for:
+        // names only, never key material. Null when OpenVibe.AI does not say (the person allowed us nothing yet).
+        const subject = String(req.principal.requester || '').replace(/^user:/, '');
+        const keys = ctx.models && typeof ctx.models.allowedKeys === 'function' ? await ctx.models.allowedKeys(subject) : null;
+        res.json({ ...modelPrefs.wire(row), keys });
+    });
+
+    r.put('/me/model', principal.requireCapability('actor.model.manage'), personOnly, limits.budget('actor.model.manage'), async (req, res) => {
+        const out = await modelPrefs.put(s, req.principal.requester, req.body || {});
+        if (out.error) return problem(req, res, 422, 'actor.model.invalid', out.error);
+        res.json({ ...modelPrefs.wire(out.row), keys: null });
+    });
     r.post('/route', limits.budget('actor.route'), (req, res) => {
         const b = req.body || {};
         if (typeof b.task !== 'string' || !b.task.trim() || b.task.length > 20000) return problem(req, res, 422, 'actor.task.invalid', 'task: the instruction in plain words (1 to 20000 characters)');
@@ -199,10 +235,15 @@ function createApi(ctx) {
     // ── Tasks ────────────────────────────────────────────────
     // A delegated caller (a service acting for the person) owns only the person's tasks it started itself.
     const owns = (p, row) => row && ((row.requester === p.requester && (!p.via || row.via === p.via)) || (p.project && row.project_id === p.project));
-    async function load(req, res) {
+    async function load(req, res, { delegated = false } = {}) {
         if (!TASK_ID.test(req.params.id)) { problem(req, res, 404, 'actor.task.not_found', 'No such task.'); return null; }
         const row = await store.getTask(s, req.params.id);
-        if (!owns(req.principal, row)) { problem(req, res, 404, 'actor.task.not_found', 'No such task.'); return null; }
+        // A service acting for the person (the Action Center's Cancel, plan A2) may reach that person's task:
+        // the token carries the capability and the request names the person in X-OV-Subject.
+        const mine = delegated
+            ? row && req.principal && row.requester === req.principal.requester
+            : owns(req.principal, row);
+        if (!mine) { problem(req, res, 404, 'actor.task.not_found', 'No such task.'); return null; }
         return row;
     }
     const wire = (row) => store.toWire(row, { baseUrl: config.baseUrl });
@@ -271,7 +312,12 @@ function createApi(ctx) {
     });
 
     r.post('/tasks/:id/cancel', principal.requireCapability('actor.task.create'), async (req, res) => {
-        const row = await load(req, res);
+        // The Action Center's Cancel comes from OpenVibe.Network acting for the person: the delegated case. Only
+        // Network: any other first-party service acting for a person still cancels only the tasks it started itself
+        // (owns(): the via check), so one service can never stop what another one asked for.
+        const p = req.principal;
+        const delegated = Boolean(p && p.kind === 'app' && p.via === 'service:network' && p.claims && String(p.requester || '').startsWith('user:'));
+        const row = await load(req, res, { delegated });
         if (!row) return;
         const after = await engine.cancel(row.id, req.principal.requester);
         res.status(store.OPEN.includes(after.state) ? 202 : 200).json(wire(after));

@@ -5,7 +5,7 @@
  * tool and input three times) or the answer. No 10-turn cap.
  */
 const assert = require('assert');
-const { createLoop, SYSTEM, withoutMeta } = require('../server/runtime/loop');
+const { createLoop, SYSTEM, withoutMeta, splitCheck } = require('../server/runtime/loop');
 const configLib = require('../server/config');
 
 const results = [];
@@ -199,6 +199,48 @@ const runArgs = (m, extra = {}) => ({
         assert.match(prompt, /state the facts the evidence supports, with their \[E#\], and leave the rest out/);
         // Nothing in the prompt asks the model to narrate what it could not ground.
         assert.ok(!/tell the person what you could not verify/i.test(prompt));
+    });
+
+    await ok('steering: what the person says while it works reaches the model at its next turn, never inside a tool round', async () => {
+        const control = {};
+        const m = make({
+            smart: [
+                { text: 'Looking.', tools: [call('lookup', { q: 'vps' }, 's1')] },
+                { text: 'Hetzner CX22 [E1].' },
+            ],
+            run: async (name, input) => {
+                // The person types while the tool runs.
+                const out = await control.steer('only look at Hetzner');
+                assert.deepStrictEqual(out, { ok: true });
+                return { text: JSON.stringify({ name, input }), data: { name, input }, sources: [] };
+            },
+            config: { ACTOR_LOOP_SELF_REFLECTIONS: '0' },
+        });
+        const out = await m.loop.run(runArgs(m, { control }));
+        assert.strictEqual(out.text, 'Hetzner CX22 [E1].');
+        const work = m.models.chats.filter((c) => c.tier !== 'fast');
+        const last = work[work.length - 1].messages;
+        const said = last.findIndex((x) => x.role === 'user' && /While you work, the person says: only look at Hetzner/.test(String(x.content)));
+        assert.ok(said > 0, 'the next model turn hears it');
+        assert.ok(last.slice(0, said).some((x) => x.role === 'tool'), 'after the tool round it arrived in, not inside it');
+        assert.ok(m.events.some((e) => e.step === 'text' && e.text === 'You: only look at Hetzner'), 'the steps show it as the person\'s');
+        assert.deepStrictEqual(await control.steer('   '), { ok: false, reason: 'nothing was said' });
+        await m.loop.close(out.state);
+    });
+
+    await ok('a reflection written out before a "Final answer" heading is the check, not the answer (2026-11-01)', async () => {
+        const leaked = 'None of the claims in the existing draft are live facts, so no evidence is required, no tools need to be called.\n\n'
+            + '**Claim-by-claim reflection**\n\nYour rule applies to:\n\n- Prices\n- Scores or standings\n\nThe draft I gave earlier only contains:\n\n- Descriptions of my capabilities\n\n'
+            + 'Therefore:\n\n- There are **no claims that need tool-backed evidence or [E#] citations**.\n\n'
+            + '**Final answer (unchanged in substance, now with your constraints in mind)**\n\n'
+            + 'I can help you think, create, fix, and decide.\n\nIf you tell me what you are working on, I can start.';
+        assert.strictEqual(withoutMeta(leaked), 'I can help you think, create, fix, and decide.\n\nIf you tell me what you are working on, I can start.');
+        assert.match(splitCheck(leaked).check, /^None of the claims/);
+        assert.match(splitCheck(leaked).check, /no claims that need tool-backed evidence/);
+        // A heading named "Final answer" in an answer that has no check before it stays as it is.
+        const plain = 'Here are the scores.\n\n## Final answer\nArsenal won 2–1 [E1].';
+        assert.strictEqual(splitCheck(plain).text, plain);
+        assert.strictEqual(splitCheck('Final answer: 42 [E1].').text, 'Final answer: 42 [E1].');
     });
 
     await ok('a grounding preamble or postamble is dropped, a cited fact paragraph is not', async () => {

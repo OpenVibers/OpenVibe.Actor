@@ -13,7 +13,7 @@ const contracts = require('openvibe-contracts');
 const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
-const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task'];
+const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task', 'actor.model.manage'];
 const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 // Routes added after the pinned contracts release but covered by an existing grant (or public on purpose). The trace is
 // the task's own read, so actor.task.read decides it exactly as it decides GET /api/v1/tasks/:id. The live-stats reads
@@ -34,7 +34,7 @@ const CONTROL_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'regist
 function codeRoutes() {
     const out = new Map();
     for (const [source, prefix] of [[API_SRC, '/api/v1'], [INDEX_SRC, '/api/v1/resources'], [CONTROL_SRC, '/api/v1/resources'], [A2A_SRC, '']]) {
-        for (const m of source.matchAll(/^\s*r\.(get|post|patch|delete)\('([^']+)'(.*)$/gm)) {
+        for (const m of source.matchAll(/^\s*r\.(get|post|put|patch|delete)\('([^']+)'(.*)$/gm)) {
             const guard = m[3].match(/requireCapability\('([a-z0-9.]+)'\)/);
             const read = m[3].match(/limits\.reads\('([a-z0-9.]+)'\)/);
             out.set(`${m[1].toUpperCase()} ${prefix}${m[2] === '/' ? '' : m[2]}`, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });

@@ -31,9 +31,17 @@ const TABLES = [
     // cascade).
     { table: 'actor_artifacts', subject: 'owner', value: (usr) => `user:${usr}`, file: 'artifacts.json', erase: 'delete',
         columns: ['id', 'task_id', 'owner', 'name', 'mime', 'size', 'created_at'] },
+    // The files they attached to their messages in the chat (plan L55 C2): the rows here (with what the run read of
+    // each), the bytes with the artifacts' in the extra part. Before tasks, for the same reason.
+    { table: 'actor_task_inputs', subject: 'owner', value: (usr) => `user:${usr}`, file: 'attachments.json', erase: 'delete',
+        columns: ['id', 'task_id', 'owner', 'name', 'mime', 'size', 'text', 'created_at'] },
     // A finished task they offered as an OpenVibe.Bench case (stage V2-10): the task text and the answer, nothing else.
     // Before tasks, so its rows are counted before the task's cascade would take them.
     { table: 'actor_bench_offers', subject: 'owner', value: (usr) => `user:${usr}`, file: 'bench-offers.json' },
+    // The waits of their tasks (plan A2): what a task of theirs is waiting for, until when, and the line it
+    // shows. Before the tasks, so the rows are counted before the task's cascade would take them.
+    { table: 'actor_waits', subject: 'requester', value: (usr) => `user:${usr}`, file: 'waits.json',
+        columns: ['id', 'task_id', 'requester', 'step', 'kind', 'until', 'filter', 'deadline_at', 'on_timeout', 'line', 'status', 'created_at', 'updated_at', 'finished_at'] },
     // Every column but webhook_secret (a task's signing secret is a credential, not the person's data).
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',
@@ -54,6 +62,11 @@ const TABLES = [
     { table: 'actor_agents', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agents.json' },
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
+    // The model they chose for their tasks (plan L55 C3): which provider their own key is for, and the model id
+    // they picked. Never a key: the key itself is sealed in OpenVibe.AI's vault, and this row only names the
+    // provider. It goes with the person.
+    { table: 'actor_model_prefs', subject: 'requester', value: (usr) => `user:${usr}`, file: 'model-prefs.json',
+        columns: ['requester', 'choice', 'model', 'updated_at'] },
     // What they asked Actor in chat (chat/asks.js): the message it answered, the room, the task it became.
     { table: 'actor_chat_asks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'chat-asks.json' },
     // The connections they added (stage V2-11): the servers and agents, and which of their tools are on. The token
@@ -73,7 +86,8 @@ const CONTENT_BUDGET = 4 * 1024 * 1024;
  */
 async function exportFiles(db, subject) {
     const rows = await db.many(
-        'SELECT id, name, mime, size, bytes FROM actor_artifacts WHERE owner = ANY($1::text[]) ORDER BY created_at DESC',
+        `SELECT id, name, mime, size, bytes, created_at FROM actor_artifacts WHERE owner = ANY($1::text[])
+         UNION ALL SELECT id, name, mime, size, bytes, created_at FROM actor_task_inputs WHERE owner = ANY($1::text[]) ORDER BY created_at DESC`,
         [[`user:${subject}`]],
     );
     const out = [];

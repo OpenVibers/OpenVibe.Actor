@@ -6,7 +6,8 @@ const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 
 const SAME = { 'sec-fetch-site': 'same-origin' };
-const ID = /\/tasks\/(tsk_[0-9A-HJKMNP-TV-Z]{26})$/;
+// A follow-up opens in the chat (plan L55 C1): /chat/<id>#t-<id>.
+const ID = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
 
 (async () => {
     const t = await boot();
@@ -68,10 +69,10 @@ const ID = /\/tasks\/(tsk_[0-9A-HJKMNP-TV-Z]{26})$/;
             assert.strictEqual(Number(await s.db.value('SELECT count(*) FROM tasks')), before, 'none of those made a task');
         });
 
-        await check('the conversation reaches back three answers at most, and never into another person\'s task', async () => {
+        await check('the conversation reaches back six answers at most (a chat, L55), and never into another person\'s task', async () => {
             const { followContext } = require('../server/tasks/store');
             const ids = [first];
-            for (let i = 0; i < 4; i++) {
+            for (let i = 0; i < 7; i++) {
                 t.providers.state.script = [{ content: `Answer ${i + 2}.` }];
                 const r = await follow(ids[ids.length - 1], `Question ${i + 2}?`);
                 const id = ID.exec(r.headers.get('location'))[1];
@@ -80,8 +81,8 @@ const ID = /\/tasks\/(tsk_[0-9A-HJKMNP-TV-Z]{26})$/;
             }
             const last = await s.db.maybe('SELECT * FROM tasks WHERE id = $1', [ids[ids.length - 1]]);
             const ctx = await followContext(s, last);
-            assert.deepStrictEqual(ctx.map((c) => c.task), ['Question 2?', 'Question 3?', 'Question 4?'], 'the three before it, oldest first');
-            await s.db.query('UPDATE tasks SET requester = $2 WHERE id = $1', [ids[3], `user:${bo.subject}`]);
+            assert.deepStrictEqual(ctx.map((c) => c.task), ['Question 2?', 'Question 3?', 'Question 4?', 'Question 5?', 'Question 6?', 'Question 7?'], 'the six before it, oldest first');
+            await s.db.query('UPDATE tasks SET requester = $2 WHERE id = $1', [ids[ids.length - 2], `user:${bo.subject}`]);
             assert.deepStrictEqual((await followContext(s, last)).map((c) => c.task), [], 'a parent that is not the same person\'s ends the thread');
         });
 

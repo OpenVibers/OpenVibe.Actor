@@ -189,7 +189,11 @@ function normalize(out) {
             source: r.source == null ? null : String(r.source).slice(0, 32), source_task: r.source_task == null ? null : String(r.source_task).slice(0, 64),
             agent_id: r.agent_id == null ? null : String(r.agent_id).slice(0, 64),
         })) : [];
-    return { text, data, sources, artifacts, refs, isError: out.isError === true, secret: out.secret === true };
+    // The park marker (plan A2): a tool that parks the run (wait_for) says so here. The loop stops there, with no
+    // model running, until the event or the deadline comes. Only a wait may set it.
+    const park = out.park && typeof out.park === 'object' && typeof out.park.wait_id === 'string'
+        ? { wait_id: out.park.wait_id.slice(0, 64) } : null;
+    return { text, data, sources, artifacts, refs, isError: out.isError === true, secret: out.secret === true, park };
 }
 
 module.exports = { createRegistry, validateTool, allowedBy, normalize, SCOPES, MAX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS };

@@ -30,6 +30,8 @@ const BUDGETS = {
     'actor.task.create': { minute: 6, hour: 60 },
     'actor.agent.run': { minute: 6, hour: 60 },
     'actor.agent.manage': { minute: 30, hour: 600 },
+    // The person's own model choice (plan L55 C3): a setting, not a task.
+    'actor.model.manage': { minute: 30, hour: 600 },
     'actor.route': { minute: 30, hour: 600 },
     'actor.task.stream': { minute: 30, hour: 600 },
     'actor.approval.decide': { minute: 30, hour: 600 },
