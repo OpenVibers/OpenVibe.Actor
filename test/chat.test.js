@@ -165,7 +165,12 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
 
         await check('in the browser (public/js/chat.js): the live stream, the turn fragment, Stop, Enter on a keyboard only', async () => {
             const js = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'js', 'chat.js'), 'utf8');
-            assert.match(js, /new EventSource\('\/api\/v1\/tasks\/' \+ encodeURIComponent\(id\) \+ '\/events\?after='/, 'follows the task\'s own event stream');
+            assert.match(js, /new EventSource\('\/api\/v1\/tasks\/' \+ encodeURIComponent\(id\) \+ '\/events\?deltas=1&after='/, 'follows the task\'s own event stream, with the answer as it is written');
+            // The answer as it is written (plan L55 C2): delta events build a draft from DOM nodes, never from HTML.
+            assert.match(js, /src\.addEventListener\('delta'/, 'the draft follows the delta events');
+            const drawing = js.slice(js.indexOf('function drawInline'), js.indexOf('function refresh('));
+            assert.ok(drawing.length > 200 && !/innerHTML/.test(drawing), 'the draft is drawn with text nodes only');
+            assert.match(js, /turn\.querySelector\('\[data-ovt-draft\]'\)\) turn\.removeAttribute\('data-open'\)/, 'an answer already watched is not typed in again');
             assert.match(js, /fetch\('\/chat\/turn\/' \+ encodeURIComponent\(id\)/, 'the server draws each turn; the page swaps it in');
             assert.match(js, /'\/tasks\/' \+ encodeURIComponent\(w\.getAttribute\('data-task'\)\) \+ '\/cancel'/, 'Stop cancels the working turn');
             assert.match(js, /'\/chat\/' \+ encodeURIComponent\(w\.getAttribute\('data-task'\)\) \+ '\/steer'/, 'what you write while it works steers it');

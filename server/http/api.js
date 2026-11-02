@@ -306,6 +306,8 @@ function createApi(ctx) {
         const after = Math.max(0, parseInt(req.get('last-event-id') || req.query.after, 10) || 0);
         await stream.serve(req, res, {
             taskId: row.id, after,
+            // The answer as it is written (plan L55 C2), for a reader that asks: transient delta events.
+            deltas: req.query.deltas === '1',
             readBacklog: () => store.eventsAfter(s, row.id, after),
             isEnded: async () => { const cur = await store.getTask(s, row.id); return !cur || !store.OPEN.includes(cur.state); },
         });

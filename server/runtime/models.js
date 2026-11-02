@@ -31,7 +31,7 @@
 
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { serviceAuth } = require('openvibe-contracts');
-const { chatClient, priceUsage, ProviderError } = require('../agents/providers');
+const { chatClient, priceUsage, readStream, ProviderError } = require('../agents/providers');
 
 class ModelError extends Error {
     constructor(message, { code = 'actor.model.unavailable' } = {}) { super(message); this.code = code; }
@@ -297,7 +297,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
      * (x-openvibe-credential: <provider>:<subject>, the bare usr_… id AI expects — never "user:usr_…"). AI answers
      * with that key, or refuses: the person has no key for that provider yet, and the message says where to add it.
      */
-    async function chatViaAi({ choice, messages, tools, json, maxTokens, signal }) {
+    async function chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta = null }) {
         const tokens = aiTokenClient();
         if (!tokens) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
         const base = trimSlash(ai.url);
@@ -313,6 +313,8 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             temperature: 0.2,
             // L37: a wish, not a pin. The provider is the one the person's own key is for, so the wish holds.
             prefer: { provider, ...(choice.model ? { model: choice.model } : {}) },
+            // The answer streams in (plan L55 C2): AI passes the upstream's pieces on as they arrive.
+            ...(onDelta ? { stream: true, stream_options: { include_usage: true } } : {}),
         };
         const timeout = AbortSignal.timeout(ai.timeoutMs || 180_000);
         const sig = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -322,7 +324,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    accept: 'application/json',
+                    accept: onDelta ? 'text/event-stream' : 'application/json',
                     ...(await tokens.authHeaders()),
                     // The person's own key for this provider, and who the person is (the bare usr_… id).
                     'x-openvibe-credential': provider + ':' + choice.subject,
@@ -334,9 +336,12 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             if (signal && signal.aborted) throw new ProviderError('cancelled', { code: 'actor.task.cancelled' });
             throw new ProviderError(err && err.name === 'TimeoutError' ? 'OpenVibe.AI did not answer in time' : 'OpenVibe.AI could not be reached', { code: 'actor.provider.unreachable' });
         }
-        const raw = await res.text();
+        let raw = '';
         let answer = null;
-        try { answer = JSON.parse(raw); } catch { /* not JSON */ }
+        if (!res.ok || !onDelta) {
+            raw = await res.text();
+            try { answer = JSON.parse(raw); } catch { /* not JSON */ }
+        }
         if (!res.ok) {
             const err = (answer && answer.error) || {};
             const code = String(err.code || '');
@@ -353,6 +358,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             }
             throw new ProviderError('HTTP ' + res.status + ': ' + clip(msg, 300), { status: res.status, code: res.status === 429 ? 'actor.provider.rate_limited' : 'actor.provider.error' });
         }
+        if (onDelta) answer = await readStream(res, onDelta, { signal, who: 'OpenVibe.AI' });
         if (!answer) throw new ProviderError('OpenVibe.AI answered with something that is not JSON');
         const first = (answer.choices && answer.choices[0]) || {};
         const message = first.message || { role: 'assistant', content: '' };
@@ -371,11 +377,11 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         };
     }
     /** One model call. The caller checks the budget first and meters cost_usd after; this layer only prices it. */
-    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null } = {}) {
+    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null } = {}) {
         // The person's own key (plan L55 C3): every model call of this run goes to OpenVibe.AI with it.
         const choice = currentChoice();
         if (choice && choice.provider) {
-            const r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal });
+            const r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta });
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }
         await warm();
@@ -386,7 +392,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         // The check is a short structured call, so its thinking is off; the loop keeps it on.
         const extraBody = d.provider === 'deepseek' && tier === 'check' ? { thinking: { type: 'disabled' } } : null;
         const client = chatClient({ baseUrl: endpoints[d.provider].baseUrl, apiKey: endpoints[d.provider].apiKey, model: d.model, rates: d.rates, fetchImpl, timeoutMs: 180_000, extraBody });
-        const r = await client({ messages, tools, json, maxTokens, signal });
+        const r = await client({ messages, tools, json, maxTokens, signal, onDelta });
         return { ...r, cost_usd: r.cost_usd || priceUsage(d.rates, r.usage || {}), tier, provider: d.provider, family: d.family };
     }
 

@@ -43,7 +43,7 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 |---|---|---|
 | `POST /api/v1/tasks` | `actor.task.create` | `actor.task-create-request@1` → `platform.task@1` (201, queued; with `webhooks`, the answer carries `webhook_secret` once) |
 | `GET /api/v1/tasks/:id` | `actor.task.read` | the task |
-| `GET /api/v1/tasks/:id/events` | `actor.task.read` | server-sent events, `actor.task-event@1`, resumable with `Last-Event-ID` |
+| `GET /api/v1/tasks/:id/events` | `actor.task.read` | server-sent events, `actor.task-event@1`, resumable with `Last-Event-ID`; `?deltas=1` adds `delta` events (`{ text, n }`: the next piece of the text the model is writing in its n-th call; no id, not stored, not replayed) |
 | `GET /api/v1/tasks/:id/trace` | `actor.task.read` | the task's spans: every model, tool, check, judge and sub-agent call with its time and cost, and the totals |
 | `POST /api/v1/tasks/:id/cancel` | `actor.task.create` | stop it |
 | `GET /api/v1/tasks` | `actor.task.list` | `actor.task-list-result@1` |
