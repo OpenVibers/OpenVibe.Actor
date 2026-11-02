@@ -390,6 +390,7 @@ ${modelChip(model)}
         const model = modelPrefs.wire(await modelPrefs.get(s, requesterOf(req)).catch(() => null));
         const current = model.provider ? `own:${model.provider}` : 'auto';
         const saved = req.query.saved === '1';
+        const runsSaved = req.query.saved === 'runs';
         const error = typeof req.query.error === 'string' ? req.query.error.slice(0, 200) : '';
         const radio = (choice, title, sub, extra = '') => html`<label class="cm-opt"><input type="radio" name="choice" value="${choice}"${choice === current ? raw(' checked') : ''}><span><b>${title}</b><small>${sub}</small></span>${raw(extra)}</label>`;
         return send(res, 200, {
@@ -407,6 +408,14 @@ ${modelPrefs.KEY_PROVIDERS.map((p) => radio(`own:${p}`, PROVIDER_NAMES[p] || p, 
 ${radio('own:node', 'Your computer', 'A model you run at home (Ollama, LM Studio or llama.cpp) through OpenVibe Node v0.36.0 or newer: nothing is billed, and it answers only while that computer is on. Usually slower than a cloud model.', `<a class="cm-setup" href="${allowUrl('node').replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add your computer's model and allow Actor</a>`)}
 <label class="cm-modelid"><span>A model id, if you want one <small>(leave empty and OpenVibe.AI picks the provider's best fit)</small></span><input name="model" value="${model.model || ''}" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9._:/\-]{0,119}" placeholder="for example gpt-5.1, claude-sonnet-4-5, deepseek-chat" spellcheck="false" autocomplete="off"></label>
 <button class="cm-save" type="submit">Save</button>
+</form>
+<h2 class="cm-h2" id="runs-on">Where it runs</h2>
+<p class="cm-lede">On your computer, the model you run at home does all of Actor's thinking, whatever you picked above, and a coding task runs entirely on your machine through OpenVibe.Codes. Searching and reading the web still happen on OpenVibe. Private mode always stays on OpenVibe's own open model.</p>
+${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on ${model.runs_on === 'computer' ? 'your computer' : 'OpenVibe'}.</p>` : ''}
+<form class="cm-form" method="post" action="/chat/runs-on">
+<label class="cm-opt"><input type="radio" name="runs_on" value="openvibe"${model.runs_on !== 'computer' ? raw(' checked') : ''}><span><b>OpenVibe</b><small>Quick, from anywhere, on the model you chose above.</small></span></label>
+<label class="cm-opt"><input type="radio" name="runs_on" value="computer"${model.runs_on === 'computer' ? raw(' checked') : ''}><span><b>My computer</b><small>Nothing is billed for the model, and it answers only while your computer is on. Needs OpenVibe Node v0.36.0 or newer with a local model (Ollama, LM Studio or llama.cpp). Usually slower.</small></span><span class="cm-setups"><a class="cm-setup" href="${allowUrl('node')}" target="_blank" rel="noopener">Add your computer's model</a><a class="cm-setup" href="https://openvibe.bot/machines" target="_blank" rel="noopener">Add your machine for coding</a></span></label>
+<button class="cm-save" type="submit">Save</button>
 </form></main>`,
         });
     });
@@ -419,6 +428,15 @@ ${radio('own:node', 'Your computer', 'A model you run at home (Ollama, LM Studio
         const out = await modelPrefs.put(s, requesterOf(req), { choice: body.choice, model: body.model ? String(body.model) : null });
         if (out.error) return res.redirect(303, `/chat/model?error=${encodeURIComponent('That did not save: ' + out.error)}`);
         return res.redirect(303, '/chat/model?saved=1');
+    });
+
+    r.post('/chat/runs-on', express.urlencoded({ extended: false, limit: '1kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req)) return res.redirect(303, loginTo(req));
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('Change this on openvibe.actor itself.');
+        const out = await modelPrefs.setRunsOn(s, requesterOf(req), (req.body || {}).runs_on);
+        if (out.error) return res.redirect(303, `/chat/model?error=${encodeURIComponent('That did not save: ' + out.error)}#runs-on`);
+        return res.redirect(303, '/chat/model?saved=runs#runs-on');
     });
 
     r.get('/chat', async (req, res) => {

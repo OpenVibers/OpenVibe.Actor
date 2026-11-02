@@ -112,6 +112,7 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 .cm { max-width: 640px; margin: 0 auto; padding: 24px 16px 96px; }
 .cm-back { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted, #7386a3); text-decoration: none; font-size: 14px; }
 .cm h1 { margin: 14px 0 8px; font-size: clamp(24px, 4vw, 32px); line-height: 1.15; text-wrap: balance; }
+.cm-h2 { margin: 40px 0 8px; padding-top: 24px; border-top: 1px solid var(--line); font-size: clamp(19px, 3vw, 22px); line-height: 1.2; scroll-margin-top: 72px; }
 .cm-lede { margin: 0 0 18px; color: var(--text-secondary, #a8b3c7); line-height: 1.55; }
 .cm-ok, .cm-err { padding: 10px 14px; border-radius: 12px; font-size: 14px; }
 .cm-ok { background: color-mix(in srgb, #22c55e 14%, transparent); }
@@ -124,6 +125,7 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 .cm-opt > span { flex: 1; min-width: 180px; display: grid; gap: 2px; }
 .cm-opt small { color: var(--text-muted, #7386a3); font-size: 12.5px; }
 .cm-setup { font-size: 13px; font-weight: 700; color: var(--accent, #4f7cff); }
+.cm-setups { display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .cm-modelid { display: grid; gap: 6px; margin-top: 12px; font-size: 14px; }
 .cm-modelid small { color: var(--text-muted, #7386a3); }
 .cm-modelid input { min-height: 42px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

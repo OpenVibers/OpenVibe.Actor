@@ -217,7 +217,14 @@ function createApi(ctx) {
     });
 
     r.put('/me/model', principal.requireCapability('actor.model.manage'), personOnly, limits.budget('actor.model.manage'), async (req, res) => {
-        const out = await modelPrefs.put(s, req.principal.requester, req.body || {});
+        const body = req.body || {};
+        // Where it runs (plan L55 C3) may come alone or with the model choice.
+        if (body.runs_on !== undefined) {
+            const r = await modelPrefs.setRunsOn(s, req.principal.requester, body.runs_on);
+            if (r.error) return problem(req, res, 422, 'actor.model.invalid', r.error);
+            if (body.choice === undefined && body.model === undefined) return res.json({ ...modelPrefs.wire(await modelPrefs.get(s, req.principal.requester)), keys: null });
+        }
+        const out = await modelPrefs.put(s, req.principal.requester, body);
         if (out.error) return problem(req, res, 422, 'actor.model.invalid', out.error);
         res.json({ ...modelPrefs.wire(out.row), keys: null });
     });

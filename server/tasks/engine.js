@@ -316,6 +316,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             if (fromChat && !PUBLIC_CLASSES.includes(cls)) {
                 return await setState(id, 'failed', { error_code: 'actor.task.not_public', error_detail: 'Asked in a public chat, Actor uses public tools only: ask on openvibe.actor to use your own computers, robots or code.', finished_at: iso() });
             }
+            // Where the person's tasks run (plan L55 C3, /chat/model): 'computer' sends every model call of the loop to
+            // the model on their own computer, and a coding task to Codes on their machine. Never in private mode (the
+            // open model on OpenVibe's server is the point) nor for a public chat's ask.
+            const runsOn = row.mode === 'private' || fromChat || !String(row.requester || '').startsWith('user:')
+                ? 'openvibe' : await modelPrefs.runsOnFor(s, row.requester).catch(() => 'openvibe');
 
             // Actor v2: every non-private task that is not code-only runs through the one loop. Private mode keeps
             // the local model with no network tools, and a coding task keeps the Codes agent (which the loop can also
@@ -330,7 +335,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 const notifyTask = (kind, detail) => tellPerson(row, kind, detail || {});
                 const why = resume ? `the one agent loop resumed after a restart (step ${resume.step})`
                     : fork ? `the one agent loop forked from step ${fork.step}`
-                        : `the one agent loop (${row.mode === 'best' ? 'best' : 'smart'} tier)`;
+                        : runsOn === 'computer' ? 'the one agent loop, thinking on the model on your computer (Runs on: my computer)'
+                            : `the one agent loop (${row.mode === 'best' ? 'best' : 'smart'} tier)`;
                 explanation.push({ selected: agentId, objective: row.mode === 'best' ? 'correctness' : 'balanced', reasons: [why], candidates: [], decided_at: iso() });
                 await store.updateTask(s, id, { explanation });
                 if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: 'The agent starts with a plan, then works through it.' });
@@ -352,7 +358,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 const attachments = await inputs.forRun(s, id, { models, meter, signal, log }).catch((err) => { log.warn('[Actor] attachments:', err && err.message); return []; });
                 // The person's own model choice for this run (plan L55 C3): their own key, through OpenVibe.AI.
                 // Every model call of the run — the loop's, the plan's, the check's — reads it, and no other run's does.
-                const choice = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
+                let choice = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
+                // "Runs on: my computer": the model on the person's computer, whatever else they chose above it (a
+                // model id they gave for their computer is kept).
+                if (runsOn === 'computer' && !(choice && choice.provider === 'node')) choice = modelPrefs.computerChoice(row.requester);
                 try {
                     out = await withChoice(models, choice, async () => loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
@@ -530,13 +539,18 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 }
             }
 
+            // "Runs on: my computer" (plan L55 C3): a coding task goes to the codes agent, OpenVibe.Codes on the person's
+            // own paired machine, unless the task already names its agent.
+            const pinnedAgent = row.agent || (runsOn === 'computer' && cls === 'code' ? 'codes' : null);
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-                const placement = route({ cls, mode: row.mode, agent: row.agent, budgetUsd: Math.max(0, budgetLeft()), config, tried, now: now(), floor: row.mode === 'private' ? null : floor });
+                const placement = route({ cls, mode: row.mode, agent: pinnedAgent, budgetUsd: Math.max(0, budgetLeft()), config, tried, now: now(), floor: row.mode === 'private' ? null : floor });
                 explanation.push(placement);
                 await store.updateTask(s, id, { explanation });
                 if (!placement.selected) {
                     if (attempt > 1) break;
-                    const why = whyNone(placement, { cls, mode: row.mode, budgetUsd: budgetLeft() });
+                    const why = pinnedAgent === 'codes' && !row.agent
+                        ? { code: 'actor.no_agent', detail: 'Your coding tasks run on your own machine (Runs on: my computer) through OpenVibe.Codes, and it is not connected here. Add your machine on https://openvibe.bot/machines, or switch Runs on back to OpenVibe at https://openvibe.actor/chat/model.' }
+                        : whyNone(placement, { cls, mode: row.mode, budgetUsd: budgetLeft() });
                     return await setState(id, 'failed', { error_code: why.code, error_detail: why.detail, finished_at: iso() });
                 }
                 const agentId = placement.selected;
