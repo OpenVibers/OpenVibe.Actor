@@ -34,10 +34,10 @@ const modelPrefs = require('../runtime/model-prefs');
 
 // The model a person's tasks run on (plan L55 C3; the owner, 11-01: "use your own API keys, or OpenVibe's"). Auto is
 // OpenVibe's own; "own:<provider>" is the person's key, sealed in OpenVibe.AI, which Actor never sees.
-const PROVIDER_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', deepseek: 'DeepSeek', google: 'Google Gemini', openrouter: 'OpenRouter', mistral: 'Mistral' };
+const PROVIDER_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', deepseek: 'DeepSeek', google: 'Google Gemini', openrouter: 'OpenRouter', mistral: 'Mistral', node: 'computer' };
 const AI_SITE = 'https://ai.openvibe.services';
 const allowUrl = (provider) => `${AI_SITE}/you?allow=actor&provider=${encodeURIComponent(provider)}`;
-const modelLabel = (m) => (m && m.provider ? `Your ${PROVIDER_NAMES[m.provider] || m.provider} key` : 'Auto');
+const modelLabel = (m) => (m && m.provider === 'node' ? 'Your computer' : m && m.provider ? `Your ${PROVIDER_NAMES[m.provider] || m.provider} key` : 'Auto');
 const glyphs = require('openvibe-shared/glyphs');
 // One conversation UI for the network (plan L55 C4): the sidebar, the turns, the work, the answer and the composer.
 const thread = require('openvibe-shared/thread');
@@ -290,7 +290,9 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 <div class="ccm-panel" role="group" aria-label="The model your tasks run on">
 <ul class="ccm-list"><li>${item('auto', 'Auto, OpenVibe\'s', 'Actor picks a model for each step, on OpenVibe\'s keys.')}</li></ul>
 <p class="ccm-head">Your own key</p>
-<ul class="ccm-list">${modelPrefs.OWN_PROVIDERS.map((p) => html`<li class="ccm-own" data-ccm-provider="${p}">${item(`own:${p}`, PROVIDER_NAMES[p] || p, 'Your key, kept in OpenVibe.AI')}<a class="ccm-setup" href="${allowUrl(p)}" target="_blank" rel="noopener" data-ccm-setup>Set up</a></li>`)}</ul>
+<ul class="ccm-list">${modelPrefs.KEY_PROVIDERS.map((p) => html`<li class="ccm-own" data-ccm-provider="${p}">${item(`own:${p}`, PROVIDER_NAMES[p] || p, 'Your key, kept in OpenVibe.AI')}<a class="ccm-setup" href="${allowUrl(p)}" target="_blank" rel="noopener" data-ccm-setup>Set up</a></li>`)}</ul>
+<p class="ccm-head">Your computer</p>
+<ul class="ccm-list"><li class="ccm-own" data-ccm-provider="node">${item('own:node', 'Your computer', 'A model you run at home, through OpenVibe Node. Nothing billed.')}<a class="ccm-setup" href="${allowUrl('node')}" target="_blank" rel="noopener" data-ccm-setup>Set up</a></li></ul>
 <p class="ccm-fine" data-ccm-fine>A key you add stays sealed in OpenVibe.AI: Actor never sees it, and only uses it once you allow Actor there. <a href="/chat/model">All settings</a></p>
 </div></details>`;
     }
@@ -375,12 +377,14 @@ ${modelChip(model)}
             css: ['css/chat.css'], scripts: [],
             body: html`<main class="cm"><a class="cm-back" href="/chat">${raw(glyphs.svg('back', { size: 18 }))} Chat</a>
 <h1>The model your tasks run on</h1>
-<p class="cm-lede">Actor can run on OpenVibe's keys, or on your own key for a provider you use. Your key stays sealed in OpenVibe.AI: Actor never sees it, and only uses it after you allow Actor there.</p>
+<p class="cm-lede">Actor can run on OpenVibe's keys, on your own key for a provider you use, or on a model you run on your own computer. Your key stays sealed in OpenVibe.AI: Actor never sees it, and only uses it (or your computer) after you allow Actor there.</p>
 ${saved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on ${modelLabel(model)}.</p>` : ''}${error ? html`<p class="cm-err" role="alert">${error}</p>` : ''}
 <form class="cm-form" method="post" action="/chat/model">
 ${radio('auto', 'Auto, OpenVibe\'s', 'Actor picks a model for each step, on OpenVibe\'s keys. Free within the daily allowance.')}
 <p class="cm-head">Your own key</p>
-${modelPrefs.OWN_PROVIDERS.map((p) => radio(`own:${p}`, PROVIDER_NAMES[p] || p, 'Billed by the provider to you, not counted against Actor\'s allowance.', `<a class="cm-setup" href="${allowUrl(p).replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add or allow the key</a>`))}
+${modelPrefs.KEY_PROVIDERS.map((p) => radio(`own:${p}`, PROVIDER_NAMES[p] || p, 'Billed by the provider to you, not counted against Actor\'s allowance.', `<a class="cm-setup" href="${allowUrl(p).replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add or allow the key</a>`))}
+<p class="cm-head">Your computer</p>
+${radio('own:node', 'Your computer', 'A model you run at home (Ollama, LM Studio or llama.cpp) through OpenVibe Node v0.36.0 or newer: nothing is billed, and it answers only while that computer is on. Usually slower than a cloud model.', `<a class="cm-setup" href="${allowUrl('node').replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add your computer's model and allow Actor</a>`)}
 <label class="cm-modelid"><span>A model id, if you want one <small>(leave empty and OpenVibe.AI picks the provider's best fit)</small></span><input name="model" value="${model.model || ''}" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9._:/\-]{0,119}" placeholder="for example gpt-5.1, claude-sonnet-4-5, deepseek-chat" spellcheck="false" autocomplete="off"></label>
 <button class="cm-save" type="submit">Save</button>
 </form></main>`,

@@ -84,6 +84,22 @@ function fakeFetch(calls, chatAnswer) {
             assert.ok(!JSON.stringify(map.columns).includes('key'), 'no key material is exported');
         });
 
+        await check('your computer (L55 C3): own:node runs through OpenVibe.AI on the person\'s own machine, with the tools', async () => {
+            const put = await t.get('/api/v1/me/model', { as: alice, method: 'PUT', json: { choice: 'own:node' }, headers: SAME });
+            assert.strictEqual(put.status, 200, put.text);
+            assert.deepStrictEqual([put.json().choice, put.json().provider], ['own:node', 'node']);
+            const calls = [];
+            const models = createModels({ config: aiConfig(), fetchImpl: fakeFetch(calls), log: { log() {}, warn() {}, error() {} } });
+            await models.withChoice({ subject: PERSON, provider: 'node', model: null }, () => models.chat({
+                tier: 'smart', messages: [{ role: 'user', content: 'hello' }],
+                tools: [{ type: 'function', function: { name: 'noop', parameters: { type: 'object', properties: {} } } }],
+            }));
+            assert.strictEqual(calls.length, 1);
+            assert.strictEqual(calls[0].headers['x-openvibe-credential'], 'node:' + PERSON, 'AI\'s name for their computer');
+            assert.ok(Array.isArray(calls[0].body.tools), 'the loop\'s tools go with it');
+            await t.get('/api/v1/me/model', { as: alice, method: 'PUT', json: { choice: 'auto' }, headers: SAME });
+        });
+
         await check('a run with the person\'s own key goes to OpenVibe.AI, and no key reaches Actor', async () => {
             const calls = [];
             const models = createModels({ config: aiConfig(), fetchImpl: fakeFetch(calls), log: { log() {}, warn() {}, error() {} } });

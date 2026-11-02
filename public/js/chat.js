@@ -451,11 +451,11 @@
                     });
                     var p = j && j.provider;
                     var name = p ? (b.querySelector('b') || {}).textContent : '';
-                    if (label) label.textContent = p ? 'Your ' + name + ' key' : 'Auto';
+                    if (label) label.textContent = p === 'node' ? 'Your computer' : p ? 'Your ' + name + ' key' : 'Auto';
                     // Chosen but not allowed yet: say what is left to do instead of letting the next task fail.
                     if (p && ready && ready.indexOf(p) === -1 && fine) {
                         fine.textContent = '';
-                        fine.append('Your next task runs on your ' + name + ' key once you allow Actor to use it: ');
+                        fine.append(p === 'node' ? 'Your next task runs on your computer once you add its model and allow Actor: ' : 'Your next task runs on your ' + name + ' key once you allow Actor to use it: ');
                         var a = document.createElement('a');
                         a.href = 'https://ai.openvibe.services/you?allow=actor&provider=' + encodeURIComponent(p);
                         a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'allow it at OpenVibe.AI';
