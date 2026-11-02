@@ -51,6 +51,7 @@
 .fold-h > h2 { margin: 0; font-size: clamp(22px, 2.6vw, 30px); letter-spacing: -.02em; flex: 1 1 auto; }
 .fold-h:focus-within { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
 .fold-mark { flex: none; }
+.fold-n { flex: none; font-size: .82rem; font-weight: 600; color: var(--text-muted, #7386a3); font-variant-numeric: tabular-nums; }
 .fold-mark::after { content: "+"; font-size: 20px; font-weight: 400; color: var(--text-muted, #7386a3); }
 .fold-toggle:checked ~ .fold-h .fold-mark::after { content: "\2212"; }
 .fold-body { display: none; }
@@ -66,7 +67,7 @@
     .fold { margin-top: 56px; }
     .fold-toggle { display: none; }
     .fold-h { min-height: 0; margin-bottom: 10px; cursor: default; }
-    .fold-mark { display: none; }
+    .fold-mark, .fold-n { display: none; }
     .fold-body { display: block; }
     .fold-bare > .fold-h { display: none; }
     .fold-bare { margin-top: 0; }
