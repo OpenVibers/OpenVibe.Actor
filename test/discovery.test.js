@@ -48,8 +48,12 @@ const PRIVATE = ['/tasks', '/auth/', '/api/', '/limits.json'];
             assert.match(r.headers.get('content-type'), /^text\/plain/);
             assert.match(r.headers.get('cache-control') || '', /public, max-age=\d+/);
             assert.ok(r.text.startsWith('# OpenVibe.Actor'), 'no title');
-            assert.ok(r.text.includes('(https://openvibe.actor/agents)'), 'no agents link');
-            assert.ok(r.text.includes('(https://openvibe.actor/docs)'), 'no API link');
+            // AGT-5: own pages are linked at their Markdown twins; Optional is the last section.
+            assert.ok(r.text.includes('(https://openvibe.actor/agents.md)'), 'no agents link');
+            assert.ok(r.text.includes('(https://openvibe.actor/docs.md)'), 'no API link');
+            assert.ok(r.text.includes('(https://openvibe.actor/index.md)'), 'the home links its twin');
+            assert.ok(r.text.includes('(https://openvibe.actor/api/v1/agents)') && r.text.includes('(https://openvibe.actor/limits.json)'), 'the API and files keep their URL');
+            assert.ok(r.text.includes('\n## Optional\n') && r.text.lastIndexOf('\n## ') === r.text.indexOf('\n## Optional\n'), 'Optional is last');
             assert.ok(r.text.includes('(https://openvibe.services)'), 'no pointer to the developer platform');
             assert.ok(r.text.includes('https://openvibe.actor/sitemap.xml'), 'sitemap not listed');
             assert.ok(r.text.includes('(https://openvibe.actor/llms-full.txt)'), 'llms-full.txt not listed');

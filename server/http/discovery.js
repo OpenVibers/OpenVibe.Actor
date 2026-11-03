@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const seo = require('openvibe-shared/seo');
+const { twinUrl } = require('openvibe-shared/agent-layer');
 const cache = require('openvibe-shared/cache-policy');
 const { asyncRouter } = require('./router');
 
@@ -52,12 +53,22 @@ const publicPages = () => [
  * follows it gets nothing. So a section may carry notes: plain lines that describe such an
  * endpoint (POST /api/v1/route — ...) instead of linking it. Every real GET link stays a link.
  */
-function llmsTxt({ name, summary, details, sections = [] }) {
+// AGT-5: each of the site's own pages is linked at its Markdown twin (/agents → /agents.md, / → /index.md); a file, an
+// /api/ or /.well-known/ path and another site's link keep their URL, as openvibe-shared's seo.llmsTxt markdown mode
+// does. `optional` is llmstxt.org's "## Optional", last.
+function twinOf(url, base) {
+    let u;
+    try { u = new URL(url); } catch { return url; }
+    if (!base || u.origin !== new URL(base).origin || /^\/(api|\.well-known)(\/|$)/.test(u.pathname) || /\.[a-z0-9]{1,8}$/i.test(u.pathname.split('/').pop())) return url;
+    return twinUrl(url);
+}
+
+function llmsTxt({ name, summary, details, sections = [], optional = [], base = null }) {
     const out = [`# ${name}`, '', `> ${String(summary || '').replace(/\s+/g, ' ').trim()}`, ''];
     if (details) out.push(String(details).trim(), '');
-    for (const sec of sections) {
+    for (const sec of [...sections, ...(optional.length ? [{ title: 'Optional', links: optional }] : [])]) {
         if (!sec) continue;
-        const links = (sec.links || []).map((l) => '- [' + l.title + '](' + l.url + ')' + (l.note ? ': ' + String(l.note).replace(/\s+/g, ' ').trim() : ''));
+        const links = (sec.links || []).map((l) => '- [' + l.title + '](' + twinOf(l.url, base) + ')' + (l.note ? ': ' + String(l.note).replace(/\s+/g, ' ').trim() : ''));
         const notes = (sec.notes || []).map((n) => String(n).replace(/\s+/g, ' ').trim());
         if (!links.length && !notes.length) continue;
         out.push('## ' + sec.title, '');
@@ -84,6 +95,7 @@ function createDiscoveryRoutes(ctx) {
     r.get('/llms.txt', (_req, res) => {
         res.type('text/plain').set('Cache-Control', TEXT).send(llmsTxt({
             name: SITE_NAME,
+            base: site,
             summary: 'OpenVibe.Actor: an AI agent router and OpenVibe\'s own agent. A task in plain words goes to the best agent system for it, by what the task needs and the caller\'s mode (cheapest, balanced, best, fastest, private); a second model family checks the answer; the task records its cost to a fraction of a cent and why that agent was picked.',
             details: 'Agents today: the OpenVibe runtime (a DeepSeek model acting through OpenVibe.Search and OpenVibe.Tools: DNS, mail records, certificates, headers, WHOIS and more), OpenAI\'s web agent (live web search with sources), and an open model on OpenVibe\'s own server for private mode. Coding goes to OpenVibe.Codes. Every page is server-rendered and readable without JavaScript. The API: POST /api/v1/tasks, GET /api/v1/tasks/:id, GET /api/v1/tasks/:id/events (server-sent events), POST /api/v1/tasks/:id/cancel, GET /api/v1/agents and POST /api/v1/route (public dry run). Tasks are platform.task@1 in openvibe-contracts.',
             sections: [
@@ -97,17 +109,17 @@ function createDiscoveryRoutes(ctx) {
                     { title: 'The agents (JSON)', url: abs('/api/v1/agents'), note: 'actor.agent-list-result@2' },
                     { title: 'The agent manifest (JSON)', url: abs('/.well-known/agent.json'), note: 'what this site tells an agent about itself' },
                     { title: 'The free tier (JSON)', url: abs('/limits.json') },
-                    { title: 'Sitemap', url: abs('/sitemap.xml') },
-                    { title: 'Full text for language models', url: abs('/llms-full.txt') },
-                    { title: 'Release metadata (JSON)', url: abs('/release.json') },
                 ], notes: [
                     'POST /api/v1/route — dry-run the router: send { task, mode? } and get which agent would take it and why (platform.placement-result@1). It answers POST only, so there is no page here to fetch; the API is described at /docs.',
                 ] },
-                { title: 'Elsewhere', links: [
-                    { title: 'OpenVibe.Codes', url: 'https://openvibe.codes', note: 'the coding-agent harness Actor sends coding work to' },
-                    { title: 'OpenVibe.Tools', url: 'https://openvibe.tools', note: 'the tools the OpenVibe runtime uses' },
-                    { title: 'OpenVibe.Services', url: 'https://openvibe.services', note: 'apps, keys and actor.task.* grants' },
-                ] },
+            ],
+            optional: [
+                { title: 'Sitemap', url: abs('/sitemap.xml') },
+                { title: 'Full text for language models', url: abs('/llms-full.txt') },
+                { title: 'Release metadata (JSON)', url: abs('/release.json') },
+                { title: 'OpenVibe.Codes', url: 'https://openvibe.codes', note: 'the coding-agent harness Actor sends coding work to' },
+                { title: 'OpenVibe.Tools', url: 'https://openvibe.tools', note: 'the tools the OpenVibe runtime uses' },
+                { title: 'OpenVibe.Services', url: 'https://openvibe.services', note: 'apps, keys and actor.task.* grants' },
             ],
         }));
     });
