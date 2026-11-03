@@ -131,6 +131,24 @@ ${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${pages}/
 <p class="cn-more"><a href="${pages}/robots">Robots on OpenVibe.Bot</a></p></section>`;
     }
 
+    /**
+     * Signed out, the console's own cards say what each will hold, so the page shows what it is instead of a sign-in
+     * button over empty space (11-03, the phone review). No numbers and no sample rows: nothing that could read as
+     * someone's data. Each card links to the public page there is for it.
+     */
+    function previewGrid() {
+        const cards = [
+            ['Now', 'Every task your agents are running: what each has done so far and what it cost. The page refreshes while something runs.', null, true],
+            ['Waiting for you', 'What an agent asks before it acts. Approve or decline here, in the Node\'s tray, or from a notification.', null, false],
+            ['Today', `How many of your ${String(tier.tasksPerDay)} free tasks a day you have used and what they cost, with the last 7 days.`, null, false],
+            ['Your agents', 'Tasks you set up once, with a memory and a schedule.', ['/agents', 'See the agents'], false],
+            ['Your computers', 'Your own machines running jobs for your agents.', [`${pages}/machines`, 'Machines on OpenVibe.Bot'], false],
+            ['Your robots', 'Robots your agents may drive, with their battery and e-stop.', [`${pages}/robots`, 'Robots on OpenVibe.Bot'], false],
+        ];
+        return html`<div class="cn-grid cn-preview" aria-label="What the console shows">${cards.map(([title, what, link, wide], i) => html`<section class="cn-card${wide ? ' cn-wide' : ''}" aria-labelledby="cn-p${String(i)}"><h2 id="cn-p${String(i)}">${title}</h2>
+<p class="cn-empty">${what}</p>${link ? html`<p class="cn-more"><a href="${link[0]}">${link[1]}</a></p>` : ''}</section>`)}</div>`;
+    }
+
     r.get('/console', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         if (!signedIn(req)) {
@@ -138,7 +156,8 @@ ${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${pages}/
                 title: 'Console', crumbs: [{ label: 'Console' }],
                 body: html`<header class="cn-head"><p class="cn-eyebrow">OpenVibe.Actor · console</p><h1>Console</h1>
 <p class="cn-lede">One place for everything your agents do: the tasks running now, what waits for your approval, your agents, your own computers and robots, and what it all cost today.</p></header>
-<p><a class="cn-run" href="/auth/login?next=${encodeURIComponent(req.originalUrl.startsWith('/console') && req.originalUrl.length <= 500 ? req.originalUrl : '/console')}">Sign in to open your console</a></p>`,
+<p><a class="cn-run" href="/auth/login?next=${encodeURIComponent(req.originalUrl.startsWith('/console') && req.originalUrl.length <= 500 ? req.originalUrl : '/console')}">Sign in to open your console</a></p>
+${previewGrid()}`,
             });
         }
         const requester = `user:${req.viewer.subject}`;

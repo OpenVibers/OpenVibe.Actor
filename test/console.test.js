@@ -49,6 +49,10 @@ const approvals = require('../server/agents/approvals');
             const r = await t.get('/console');
             assert.strictEqual(r.status, 200);
             assert.match(r.text, /Sign in to open your console/);
+            // What each card will hold, instead of empty space under the button; no numbers or rows of anyone's.
+            for (const h of ['Now', 'Waiting for you', 'Today', 'Your agents', 'Your computers', 'Your robots']) assert.ok(r.text.includes(`>${h}</h2>`), h);
+            assert.match(r.text, /class="cn-grid cn-preview" aria-label="What the console shows"/);
+            assert.ok(!/cn-count|cn-meter|cn-tasks/.test(r.text), 'no counts, meters or task rows signed out');
             assert.ok(!asked.length, 'nothing asked of Bot for nobody');
         });
 
