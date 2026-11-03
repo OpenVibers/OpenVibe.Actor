@@ -10,6 +10,7 @@ module.exports = {
     site: 'openvibe.actor',
     api: '/api/v1',
     docs: '/docs',
+    openapi: '/openapi.json',
     policy: {
         auth: ['none', 'Network OIDC', 'bearer'],
         rateLimit: '240 API requests a minute per address; 300 page requests a minute; 60 sign-in attempts per 15 minutes',
