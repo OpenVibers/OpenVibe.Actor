@@ -93,6 +93,10 @@ function load(env = process.env) {
             clientId: env.OV_OAUTH_CLIENT_ID || 'actor',
             clientSecret: env.OV_OAUTH_CLIENT_SECRET || '',
             timeoutMs: Math.max(5000, int(env.ACTOR_AI_TIMEOUT_MS, 180_000)),
+            // The AI Exchange catalog (PLAN G-P9), off by default: GET /v1/models from OpenVibe.AI, cached, to offer
+            // its aliases and exact ids where a person picks the model their tasks run on. Off, the model field is
+            // the plain one it was before.
+            catalog: env.ACTOR_AI_CATALOG === '1' || env.ACTOR_AI_CATALOG === 'true',
         },
         // The model providers behind the agent systems (server/agents/catalog.js). A provider without its key is
         // listed as unavailable, with the reason; nothing is invented. Keys are the operator's.
