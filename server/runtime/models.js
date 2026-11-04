@@ -288,11 +288,11 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     // broken page or a retry storm.
     let aiCatalogCache = null;   // { at, entries } — entries null when the flag is on but the read failed/legacy
     let aiCatalogInFlight = null;
-    const aiCatalogOn = Boolean(ai.catalog);
+    const aiCatalogOn = () => Boolean(ai.catalog);   // D11 owner settings: read live
 
     /** The catalog's entries (aliases first, then exact ids), or null: today's model field, unchanged. */
     async function aiCatalog() {
-        if (!aiCatalogOn) return null;
+        if (!aiCatalogOn()) return null;
         const at = now();
         if (aiCatalogCache && at - aiCatalogCache.at < aiCatalogLib.CACHE_MS) return aiCatalogCache.entries;
         if (aiCatalogInFlight) return aiCatalogInFlight;
