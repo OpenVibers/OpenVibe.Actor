@@ -67,8 +67,11 @@ function actor(req) {
 const requireFresh = (req) => String((req.headers && req.headers['x-ov-fresh']) || '') === '1';
 
 async function create({ db, keys, config, env = process.env, log = console, onActivate = null }) {
+    // ACTOR_AI_CATALOG has always accepted 1/true; the shared store's boolean pin reads true/1.
+    const storeEnv = { ...env };
+    if (['1', 'true'].includes(String(storeEnv.ACTOR_AI_CATALOG || '').trim().toLowerCase())) storeEnv.ACTOR_AI_CATALOG = '1';
     const store = await shared.createConfigStore({
-        db, service: SERVICE, namespace: NAMESPACE, schema: SCHEMA, defaults: DEFAULTS, env, log,
+        db, service: SERVICE, namespace: NAMESPACE, schema: SCHEMA, defaults: DEFAULTS, env: storeEnv, log,
         onActivate: async (values) => { if (onActivate) await onActivate(values); },
         onChange: ({ namespace, keys: changed, actor: who, revision }) => {
             log.info(`[config] ${SERVICE} ${namespace} revision ${revision} by ${who && who.id ? `${who.type}:${who.id}` : 'unknown'}: ${changed.join(', ')}`);
