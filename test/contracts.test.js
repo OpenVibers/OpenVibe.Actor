@@ -13,7 +13,7 @@ const contracts = require('openvibe-contracts');
 const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
-const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task', 'actor.model.manage'];
+const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task', 'actor.model.manage', 'actor.config.manage'];
 const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 // Routes added after the pinned contracts release but covered by an existing grant (or public on purpose). The trace is
 // the task's own read, so actor.task.read decides it exactly as it decides GET /api/v1/tasks/:id. The live-stats reads
@@ -97,6 +97,7 @@ function codeRoutes() {
     await check('every capability is implemented by routes that exist, and every route is some capability\'s', () => {
         const declared = new Set();
         for (const id of CAPS) {
+            if (id === 'actor.config.manage') continue;   // /internal/config, openvibe-shared/config's adminRoutes
             const impl = contracts.capabilities.get(id).implementedBy;
             // A planned resource capability lists no routes; an active one lists exactly the index's two.
             const expected = id === 'actor.resource.read' ? INDEX_ROUTES : impl;
@@ -116,6 +117,7 @@ function codeRoutes() {
 
     await check('each guarded route requires the capability that lists it; the agent reads are public', () => {
         for (const id of CAPS) {
+            if (id === 'actor.config.manage') continue;   // /internal/config is guarded by capabilityGuard, not a route in this map
             const implemented = id === 'actor.resource.read' ? INDEX_ROUTES : contracts.capabilities.get(id).implementedBy;
             for (const r of implemented) {
                 const route = routes.get(r);

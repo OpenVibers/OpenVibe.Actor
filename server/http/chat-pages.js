@@ -31,6 +31,7 @@ const { sameOrigin } = require('./principal');
 const looks = require('../agents/looks');
 const inputs = require('../tasks/inputs');
 const modelPrefs = require('../runtime/model-prefs');
+const aiCatalog = require('../runtime/ai-catalog');
 
 // The model a person's tasks run on (plan L55 C3; the owner, 11-01: "use your own API keys, or OpenVibe's"). Auto is
 // OpenVibe's own; "own:<provider>" is the person's key, sealed in OpenVibe.AI, which Actor never sees.
@@ -317,6 +318,31 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 </div></details>`;
     }
 
+    /**
+     * The model field of /chat/model (PLAN G-P9; ACTOR_AI_CATALOG, off by default). With OpenVibe.AI's catalog read,
+     * the dynamic aliases come first (marked Dynamic) and then the exact ids, each with its retail output price and
+     * availability in the option's data-desc/data-state for Shared's select; the chosen id is posted unchanged. With
+     * no catalog (the flag off, a failed read, or AI's legacy single model) it is the plain input it always was.
+     */
+    function modelField(models, current) {
+        if (!Array.isArray(models) || !models.length) {
+            return html`<label class="cm-modelid"><span>A model id, if you want one <small>(leave empty and OpenVibe.AI picks the provider's best fit)</small></span><input name="model" value="${current || ''}" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9._:/\-]{0,119}" placeholder="for example gpt-5.1, claude-sonnet-4-5, deepseek-chat" spellcheck="false" autocomplete="off"></label>`;
+        }
+        const option = (e) => {
+            const desc = e.output_nano_usd_per_m ? aiCatalog.priceDescription(e.output_nano_usd_per_m)
+                : (e.dynamic ? 'Dynamic: the router picks the model per request; the price follows it' : 'Output price not listed');
+            const label = e.dynamic ? `${e.id} · ${e.name}` : e.id;
+            return html`<option value="${e.id}"${e.id === current ? raw(' selected') : ''}${e.dynamic ? raw(' data-badge="Dynamic"') : ''} data-desc="${desc}" data-state="${e.state}"${e.available ? '' : raw(' disabled')}>${label}</option>`;
+        };
+        const aliases = models.filter((e) => e.dynamic);
+        const exact = models.filter((e) => !e.dynamic);
+        const saved = current && !models.some((e) => e.id === current);
+        return html`<label class="cm-modelid"><span>A model id, if you want one <small>(an alias lets OpenVibe.AI pick per request; an exact id pins one build)</small></span>
+<select name="model" data-ov-title="A model for OpenVibe.AI">
+<option value="">OpenVibe.AI picks the provider's best fit</option>${saved ? html`<option value="${current}" selected>${current}</option>` : ''}${aliases.length ? html`<optgroup label="Dynamic aliases">${aliases.map(option)}</optgroup>` : ''}${exact.length ? html`<optgroup label="Exact ids">${exact.map(option)}</optgroup>` : ''}
+</select></label>`;
+    }
+
     const ATTACH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>';
     const ATTACH_ACCEPT = '.txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,.pdf,application/pdf,image/png,image/jpeg,image/webp,image/gif';
     function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '', model = null } = {}) {
@@ -389,6 +415,9 @@ ${modelChip(model)}
         if (!signedIn(req)) return res.redirect(303, loginTo(req));
         const model = modelPrefs.wire(await modelPrefs.get(s, requesterOf(req)).catch(() => null));
         const current = model.provider ? `own:${model.provider}` : 'auto';
+        // OpenVibe.AI's aliases and exact ids (PLAN G-P9; ACTOR_AI_CATALOG, off by default). No catalog (the flag
+        // off, a failed read, or AI's legacy `openvibe`) leaves the plain model input below exactly as it was.
+        const aiModels = ctx.models && typeof ctx.models.aiCatalog === 'function' ? await ctx.models.aiCatalog().catch(() => null) : null;
         const saved = req.query.saved === '1';
         const runsSaved = req.query.saved === 'runs';
         const error = typeof req.query.error === 'string' ? req.query.error.slice(0, 200) : '';
@@ -406,7 +435,7 @@ ${radio('auto', 'Auto, OpenVibe\'s', 'Actor picks a model for each step, on Open
 ${modelPrefs.KEY_PROVIDERS.map((p) => radio(`own:${p}`, PROVIDER_NAMES[p] || p, 'Billed by the provider to you, not counted against Actor\'s allowance.', `<a class="cm-setup" href="${allowUrl(p).replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add or allow the key</a>`))}
 <p class="cm-head">Your computer</p>
 ${radio('own:node', 'Your computer', 'A model you run at home (Ollama, LM Studio or llama.cpp) through OpenVibe Node v0.36.0 or newer: nothing is billed, and it answers only while that computer is on. Usually slower than a cloud model.', `<a class="cm-setup" href="${allowUrl('node').replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add your computer's model and allow Actor</a>`)}
-<label class="cm-modelid"><span>A model id, if you want one <small>(leave empty and OpenVibe.AI picks the provider's best fit)</small></span><input name="model" value="${model.model || ''}" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9._:/\-]{0,119}" placeholder="for example gpt-5.1, claude-sonnet-4-5, deepseek-chat" spellcheck="false" autocomplete="off"></label>
+${modelField(aiModels, model.model || '')}
 <button class="cm-save" type="submit">Save</button>
 </form>
 <h2 class="cm-h2" id="runs-on">Where it runs</h2>
@@ -425,7 +454,8 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
         if (!signedIn(req)) return res.redirect(303, loginTo(req));
         if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('Change this on openvibe.actor itself.');
         const body = req.body || {};
-        const out = await modelPrefs.put(s, requesterOf(req), { choice: body.choice, model: body.model ? String(body.model) : null });
+        const out = await modelPrefs.put(s, requesterOf(req), { choice: body.choice, model: body.model ? String(body.model) : null },
+            { exactIds: Boolean(config.ai && config.ai.catalog) });
         if (out.error) return res.redirect(303, `/chat/model?error=${encodeURIComponent('That did not save: ' + out.error)}`);
         return res.redirect(303, '/chat/model?saved=1');
     });

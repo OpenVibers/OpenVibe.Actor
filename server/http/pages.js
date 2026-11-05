@@ -124,8 +124,13 @@ const msText = (n) => {
 };
 // A model id as people say it: "deepseek:deepseek-flash" → "DeepSeek Flash", "openai:gpt-5.1" → "GPT-5.1".
 const BRANDS = { deepseek: 'DeepSeek', gpt: 'GPT', openai: 'OpenAI', minimax: 'MiniMax', claude: 'Claude', gemini: 'Gemini', qwen: 'Qwen', glm: 'GLM', kimi: 'Kimi' };
+// An exact AI Exchange id (org/model[:quant]@revision, D3) is shown as itself: splitting it would hide the org,
+// the quant and the revision that the person or the run disclosure named.
+const EXACT_MODEL_ID = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(?::[A-Za-z0-9._-]+)?@[A-Za-z0-9._-]+$/;
 function modelName(id) {
-    const m = String(id || '').split(':').pop().replace(/-\d{4}-\d{2}-\d{2}$/, '');
+    const raw = String(id || '');
+    if (EXACT_MODEL_ID.test(raw)) return raw;
+    const m = raw.split(':').pop().replace(/-\d{4}-\d{2}-\d{2}$/, '');
     if (!m) return 'another model';
     if (/^gpt-/i.test(m)) return `GPT-${m.slice(4)}`;
     return m.split('-').map((w) => BRANDS[w.toLowerCase()] || (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ');

@@ -26,16 +26,21 @@ const KEY_PROVIDERS = ['openai', 'anthropic', 'deepseek', 'google', 'openrouter'
 const OWN_PROVIDERS = [...KEY_PROVIDERS, 'node'];
 // A model id: letters, digits and the marks providers use (gpt-5.1, claude-sonnet-4-5, deepseek/flash, org/model).
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/;
+// An exact id (D3: org/model[:quant]@revision), accepted only while the AI catalog is on: `@` and `_` are marks an
+// exact id carries and today's model names did not. 256 is AI's own limit for a requested model.
+const EXACT_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 
 /**
  * Read a choice from a request body. Returns { choice, provider, model } or { error } (never throws: a bad choice
- * is a 422, not a crash).
+ * is a 422, not a crash). `exactIds` (ACTOR_AI_CATALOG) lets an exact id through unchanged.
  */
-function parse(body) {
+function parse(body, { exactIds = false } = {}) {
     const raw = body && typeof body === 'object' ? body : {};
     const choice = String(raw.choice == null ? 'auto' : raw.choice).trim();
     const model = raw.model == null ? null : String(raw.model).trim();
-    if (model && !MODEL_RE.test(model)) return { error: 'model: a model id (letters, digits, and . _ : - /)' };
+    if (model && !(exactIds ? EXACT_MODEL_RE : MODEL_RE).test(model)) {
+        return { error: exactIds ? 'model: a model id, including an exact id (letters, digits, and . _ : - / @)' : 'model: a model id (letters, digits, and . _ : - /)' };
+    }
     if (CHOICES.includes(choice)) return { choice, provider: null, model: model || null };
     if (choice.startsWith('own:')) {
         const provider = choice.slice(4).trim().toLowerCase();
@@ -53,8 +58,8 @@ async function get(s, requester) {
 }
 
 /** Write the person's choice. Returns { row } or { error }. */
-async function put(s, requester, body, now = () => new Date().toISOString()) {
-    const parsed = parse(body);
+async function put(s, requester, body, { now = () => new Date().toISOString(), exactIds = false } = {}) {
+    const parsed = parse(body, { exactIds });
     if (parsed.error) return { error: parsed.error };
     if (!requester) return { error: 'no person' };
     const at = now();

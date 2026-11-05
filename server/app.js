@@ -24,6 +24,7 @@ const { createSso } = require('./auth/sso');
 const catalog = require('./agents/catalog');
 const { createAdapters } = require('./agents/adapters');
 const { createModels } = require('./runtime/models');
+const createAiCatalogConfig = require('./ai-catalog-config').create;
 const { createRegistry } = require('./runtime/tools');
 const { createLoop } = require('./runtime/loop');
 const { createStats } = require('./runtime/stats');
@@ -85,6 +86,9 @@ async function createApp(opts = {}) {
     const s = opts.store || await openStore(config, { now: opts.now, log });
 
     const keys = createKeyStore({ config, fetchImpl, log });
+    // D11 owner settings (actor.ai): the catalog switch reads through the store, env pins winning.
+    const aiCatalogConfig = await createAiCatalogConfig({ db: s.db, keys, config, env: opts.env || process.env, log });
+    Object.defineProperty(config.ai, 'catalog', { enumerable: true, configurable: true, get: () => aiCatalogConfig.get('catalog') });
     // A self-hosted Actor signs its one owner in itself (auth/local.js); otherwise OpenVibe.Network does (auth/sso.js).
     if (config.selfHosted.on) checkSelfHosted(config);
     const sso = config.selfHosted.on ? createLocalSignIn({ config, now: s.now }) : createSso({ config, keys, fetchImpl, now: s.now, log });
@@ -135,7 +139,7 @@ async function createApp(opts = {}) {
         createTask: (args) => createTask({ s, config, engine, webhooks, ...args }) });
     // Each personal agent's run that passed its check also goes to its owner's Vibe chat (agents/vibe-deliver.js).
     const vibeDelivery = require('./agents/vibe-deliver').createVibeDelivery({ s, config, chat: chatClient, log });
-    const ctx = { config, s, keys, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits };
+    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;
@@ -150,6 +154,7 @@ async function createApp(opts = {}) {
     ctx.accountSend = accountSend;
 
     const app = express();
+    aiCatalogConfig.mount(app);
     // GET /openapi.json (SEO-3): this service's public API as OpenAPI 3.1, generated from the contracts
     // (openvibe-contracts); the operations they mark internal-only are left out.
     app.get('/openapi.json', (_req, res) => {
