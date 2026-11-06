@@ -32,6 +32,9 @@
 
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { serviceAuth } = require('openvibe-contracts');
+const { createClient: createSdkClient } = require('openvibe-sdk/core');
+const { createAiClient } = require('openvibe-sdk/ai');
+const { createServiceTokenClient } = require('openvibe-sdk/auth');
 const { chatClient, priceUsage, readStream, ProviderError } = require('../agents/providers');
 const aiCatalogLib = require('./ai-catalog');
 
@@ -61,9 +64,9 @@ const SMALL = { test: (m) => !FULL.has(String(m)) && SMALL_RE.test(String(m)) };
 
 const TIERS = ['fast', 'smart', 'best', 'check', 'vision'];
 const PROVIDERS = ['openai', 'deepseek', 'runtime', 'compatible', 'local'];
-// OpenVibe.AI (plan L55 C3): the gateway, NOT one of the operator's providers. It is never resolved as a tier (a
-// person who did not choose it keeps today's behaviour), and it holds no key of its own: the call goes to AI, and AI
-// answers with the person's own key (sealed in AI's vault) or with OpenVibe's.
+// OpenVibe.AI (plan L55 C3): the gateway, NOT one of the operator's providers. It holds no key of its own. With
+// ACTOR_AI_ROUTER on it IS the model layer (every tier is a run of ai.complete on AI's router); with it off, it is
+// still reached when a person chooses their own key (sealed in AI's vault).
 const AI_PROVIDER = 'openvibe-ai';
 
 /** Parse a pinned tier value: "openai:gpt-5.1", or a bare model on the first configured provider. */
@@ -124,6 +127,27 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             return { available: true };
         }
         return { available: true };
+    }
+
+    // ── OpenVibe.AI's router (the AI layer of this product) ────────────────────────────────────────
+    // With ACTOR_AI_ROUTER on, every tier is a name on AI's router (a policy alias, or an exact id) and no provider
+    // key is read. The token is Actor's own service token; the person the task belongs to rides as on_behalf_of, so
+    // their allowance and their Balance pay and the run is theirs.
+    const routerModels = ai.models && typeof ai.models === 'object' ? ai.models : {};
+    const routerOn = () => Boolean(ai.router) && availability(AI_PROVIDER).available;
+    const routerModel = (tier) => String(routerModels[tier] || 'openvibe');
+    let routerClients = null;
+    function routerClient() {
+        if (routerClients) return routerClients;
+        if (!routerOn()) return null;
+        const tokens = createServiceTokenClient({
+            tokenUrl: `${config.networkInternalUrl || config.networkUrl}/oauth/token`,
+            clientId: ai.clientId, clientSecret: ai.clientSecret,
+            audience: ai.audience || 'openvibe.ai', scope: ai.scope || 'ai.run.create', fetch: fetchImpl,
+        });
+        const client = createSdkClient({ baseUrl: trimSlash(ai.url), getToken: async () => tokens.getToken(), fetch: fetchImpl, retries: 0 });
+        routerClients = { tokens, client, ai: createAiClient(client, { baseUrl: trimSlash(ai.url) }) };
+        return routerClients;
     }
 
     async function listAt(key) {
@@ -189,6 +213,9 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             // when one offers a model. If none does, the pin stands (the verdict says it was not cross-family).
             if (!(avoidFamily && endpoints[key].family === avoidFamily)) return descriptor(tier, key, pin.model);
         }
+        // The router is the model layer: the tier's name on it is the policy (or the exact id), and AI says which
+        // model actually ran. A pin above wins, so an operator can still move one tier back to a provider of theirs.
+        if (routerOn()) return descriptor(tier, AI_PROVIDER, routerModel(tier), { available: true });
         for (const key of order) {
             if (!availability(key).available) continue;
             if (avoidFamily && endpoints[key].family === avoidFamily) continue;
@@ -422,12 +449,118 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             cost_usd: Number(x.cost_usd) || 0,
         };
     }
+    /**
+     * One call through OpenVibe.AI's router (ACTOR_AI_ROUTER): a run of ai.complete, Actor's service token, the
+     * person's id in on_behalf_of. No provider key is touched here — AI holds the offers, prices and failover.
+     *
+     * The tier's name (openvibe/economy|balanced|fast|auto|private, or an exact id) is the policy. The answer's
+     * model is whatever AI says ran, never the wish.
+     */
+    async function chatViaRouter({ tier, messages = [], tools = null, json = false, maxTokens = 4000, signal, onDelta = null, subject = null, target = null }) {
+        const c = routerClient();
+        if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
+        const input = {
+            messages,
+            model: routerModel(tier),
+            ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {}),
+            ...(json ? { response_format: { type: 'json_object' } } : {}),
+            max_tokens: Math.max(1, Math.min(Number(maxTokens) || 1500, 16000)),
+            temperature: 0.2,
+            ...(ai.maxCostUsd != null ? { max_cost_usd: ai.maxCostUsd } : {}),
+        };
+        const body = {
+            workflow: 'ai.complete', input,
+            ...(subject ? { on_behalf_of: { type: 'user', id: String(subject) } } : {}),
+            ...(target ? { target } : {}),
+        };
+        const timeoutMs = Math.max(5000, Number(ai.timeoutMs) || 180_000);
+        const sig = typeof AbortSignal.any === 'function'
+            ? AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)])
+            : (signal || AbortSignal.timeout(timeoutMs));
+        let run;
+        try {
+            if (onDelta) run = await routerStream(c, body, { onDelta, signal: sig });
+            else {
+                const created = await c.ai.runs.create('ai.complete', input, {
+                    wait: Math.max(1000, Number(ai.waitMs) || 120_000),
+                    ...(subject ? { onBehalfOf: { type: 'user', id: String(subject) } } : {}),
+                    ...(target ? { target } : {}), options: { cache: false }, signal: sig,
+                });
+                run = created.run;
+                if (!['succeeded', 'cached', 'failed', 'cancelled'].includes(run.status)) run = await c.ai.runs.waitFor(run.id, { timeoutMs, signal: sig });
+            }
+        } catch (err) {
+            if (signal && signal.aborted) throw new ProviderError('cancelled', { code: 'actor.task.cancelled' });
+            if (err instanceof ProviderError || err instanceof ModelError) throw err;
+            const code = String((err && err.code) || '');
+            if (/timeout|deadline|aborted/.test(code)) throw new ProviderError('OpenVibe.AI did not answer in time', { code: 'actor.provider.unreachable' });
+            throw new ProviderError(`OpenVibe.AI: ${String((err && (err.message || err.code)) || 'request failed').slice(0, 300)}`, { status: err && err.status, code: 'actor.provider.error' });
+        }
+        if (run.status === 'failed' || run.status === 'cancelled') {
+            const e = (run.error && (run.error.detail || run.error.code)) || run.status;
+            throw new ProviderError(`OpenVibe.AI's run ${run.status}: ${String(e).slice(0, 300)}`, { code: String((run.error && run.error.code) || 'actor.provider.error') });
+        }
+        if (!run.output || !Array.isArray(run.output.choices)) throw new ProviderError('OpenVibe.AI answered without a completion');
+        const first = run.output.choices[0] || {};
+        const message = first.message || { role: 'assistant', content: '' };
+        const u = run.usage || {};
+        return {
+            message,
+            text: typeof message.content === 'string' ? message.content : '',
+            toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [],
+            finish: first.finish_reason || null,
+            model: run.output.model || (run.provenance && run.provenance.model) || input.model,
+            usage: { input: u.tokens_in || 0, cached: u.tokens_cached || 0, output: u.tokens_out || 0 },
+            cost_usd: Number(u.cost_usd) || 0,
+        };
+    }
+
+    /** The router's streamed run (POST /api/v1/runs?stream=1): `delta` events as they come, then the run. */
+    async function routerStream(c, body, { onDelta, signal }) {
+        const { response } = await c.client.request({
+            method: 'POST', path: '/api/v1/runs', query: { stream: 1, wait: Math.max(1000, Number(ai.waitMs) || 120_000) },
+            json: body, responseType: 'response', idempotencyKey: false, retries: 0, signal,
+        });
+        if (!response || !response.body) throw new ProviderError('OpenVibe.AI sent no stream');
+        const decoder = new TextDecoder();
+        let buf = '', event = 'message', data = [], run = null, failure = null;
+        const take = () => {
+            if (!data.length) { event = 'message'; return; }
+            const raw = data.join('\n'); data = [];
+            const name = event; event = 'message';
+            let j = null;
+            try { j = JSON.parse(raw); } catch { return; }
+            if (name === 'delta' && j && typeof j.text === 'string') { try { onDelta(j.text); } catch { /* the listener's problem */ } }
+            else if (name === 'run' && j && j.run) run = j.run;
+            else if (name === 'error') failure = j || {};
+        };
+        for await (const chunk of response.body) {
+            buf += decoder.decode(chunk, { stream: true });
+            let i;
+            while ((i = buf.indexOf('\n')) >= 0) {
+                let line = buf.slice(0, i); buf = buf.slice(i + 1);
+                if (line.endsWith('\r')) line = line.slice(0, -1);
+                if (!line) { take(); continue; }
+                if (line.startsWith('event:')) event = line.slice(6).trim();
+                else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+            }
+        }
+        if (failure) throw new ProviderError(`OpenVibe.AI: ${String(failure.message || failure.code || 'stream error').slice(0, 300)}`, { code: String(failure.code || 'actor.provider.error') });
+        if (!run) throw new ProviderError('OpenVibe.AI ended the stream without the run');
+        return run;
+    }
+
     /** One model call. The caller checks the budget first and meters cost_usd after; this layer only prices it. */
     async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null } = {}) {
         // The person's own key (plan L55 C3): every model call of this run goes to OpenVibe.AI with it.
         const choice = currentChoice();
         if (choice && choice.provider) {
             const r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta });
+            return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
+        }
+        // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
+        if (routerOn()) {
+            const r = await chatViaRouter({ tier, messages, tools, json, maxTokens, signal, onDelta, subject: choice && choice.subject, target: choice && choice.target });
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }
         await warm();
@@ -462,6 +595,8 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             out.push({ provider: key, model, family: endpoints[key].family });
         };
         for (const key of order) for (const model of candidatesFor(key)) add(key, model);
+        // The router: each tier's name on AI (a policy or a pin), so the listing says what this server can reach.
+        if (routerOn()) for (const tier of TIERS) add(AI_PROVIDER, routerModel(tier));
         // A tier the operator pinned is reachable whether or not the provider's list mentions it.
         for (const value of Object.values(cfg.tiers || {})) {
             const pin = parsePin(value);
