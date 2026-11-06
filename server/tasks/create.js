@@ -14,6 +14,8 @@ const { checkWebhookUrl } = require('../net/webhook-post');
 const { mintSecret } = require('./webhooks');
 const learn = require('../runtime/brain/learn');
 
+const usd = (n) => (n === 0 ? '$0' : n < 0.01 ? `$${Number(n).toFixed(4)}` : `$${Number(n).toFixed(2)}`);
+
 function untilMidnight(nowMs) {
     const n = new Date(nowMs);
     return Math.ceil((Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1) - n.getTime()) / 1000);
@@ -23,7 +25,10 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     const v = contracts.validate('actor.task-create-request@1', body);
     if (!v.valid) return { status: 422, code: 'actor.task.invalid', detail: (v.errors || []).map((e) => `${e.path || e.instancePath || ''} ${e.message}`.trim()).join('; ').slice(0, 500) || 'invalid request' };
     const tier = config.allowance;
-    const perTask = body.budget && body.budget.per_task_usd != null ? body.budget.per_task_usd : tier.perTaskUsd;
+    // A budget the request named is the first word; without one, the task gets up to a tier task's worth and, below
+    // that, what the day has left (so a cheap run leaves room for the next one).
+    const requestedTaskUsd = body.budget && body.budget.per_task_usd != null ? body.budget.per_task_usd : null;
+    const perTask = requestedTaskUsd == null ? tier.perTaskUsd : requestedTaskUsd;
     const perDay = body.budget && body.budget.per_day_usd != null ? body.budget.per_day_usd : tier.perDayUsd;
     if (perTask > tier.perTaskUsd || perDay > tier.perDayUsd) {
         return { status: 422, code: 'actor.budget.over_tier', detail: `The free tier allows up to $${tier.perTaskUsd} per task and $${tier.perDayUsd} a day; paid tiers come with OpenVibe.Billing.` };
@@ -60,9 +65,11 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     const out = await s.tx(async () => {
         const { mine, all } = await store.lockSpendToday(s, principal.requester);
         if (mine.tasks >= tier.tasksPerDay) return { status: 429, code: 'actor.allowance.exhausted', detail: `The free tier runs ${tier.tasksPerDay} tasks a day; it resets at midnight UTC.`, retryAfter };
-        if (mine.usd >= perDay || mine.usd + mine.reserved + perTask > perDay + 1e-9) {
-            return { status: 429, code: 'actor.budget.day_spent', detail: `Today's tasks cost $${mine.usd.toFixed(3)} and running ones may use $${mine.reserved.toFixed(3)} of the $${perDay} daily budget; it resets at midnight UTC.`, retryAfter };
+        const remaining = perDay - mine.usd - mine.reserved;
+        if (remaining <= 1e-9 || (requestedTaskUsd != null && requestedTaskUsd > remaining + 1e-9)) {
+            return { status: 429, code: 'actor.budget.day_spent', detail: `You have used today's free allowance (${usd(perDay)}). It comes back at midnight UTC. To keep going now, add your own model key at ${config.baseUrl}/chat/model: Actor runs on it, and it does not count against the free allowance.`, retryAfter };
         }
+        const budgetTask = requestedTaskUsd == null ? Math.round(Math.min(perTask, remaining) * 1e6) / 1e6 : requestedTaskUsd;
         if (all.usd >= config.spendCapUsdPerDay || all.usd + all.reserved + perTask > config.spendCapUsdPerDay + 1e-9) {
             return { status: 503, code: 'actor.capacity.spent', detail: 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.', retryAfter };
         }
@@ -72,7 +79,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         }
         const row = await store.insertTask(s, {
             id: s.newId('tsk'), requester: principal.requester, via: principal.via || null, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,
-            budget_task: perTask, budget_day: perDay, idem_key: body.idempotency_key || null, idem_hash: body.idempotency_key ? hash : null, created_at: s.iso(),
+            budget_task: budgetTask, budget_day: perDay, idem_key: body.idempotency_key || null, idem_hash: body.idempotency_key ? hash : null, created_at: s.iso(),
             webhooks, webhook_secret: ownSecret ? mintSecret() : null, parent_id: parentId,
             // A fork (stage V2-9) starts from its parent's checkpoint at this step, with the one change the person
             // picked; it is a new task with its own budget and its own clock.

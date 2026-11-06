@@ -188,7 +188,9 @@ async function lockSpendToday(s, requester) {
 
 async function spendToday(s, requester) {
     const row = await s.db.maybe('SELECT usd, tasks FROM spend_daily WHERE requester = $1 AND day = $2', [requester, dayOf(s.now())]);
-    return { usd: row ? Number(row.usd) : 0, tasks: row ? Number(row.tasks) : 0 };
+    // What runs still open may yet spend: the same reservation the create gate counts, read without locking.
+    const open = await s.db.maybe('SELECT COALESCE(sum(budget_task), 0) AS reserved FROM tasks WHERE requester = $1 AND state = ANY($2)', [requester, OPEN]);
+    return { usd: row ? Number(row.usd) : 0, tasks: row ? Number(row.tasks) : 0, reserved: Number(open.reserved) };
 }
 
 /** The last `days` days of a requester's spend, oldest first, each day present (0 when nothing ran). */

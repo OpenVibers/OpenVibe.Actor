@@ -23,6 +23,7 @@ const { html, raw } = require('../render/html');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
 const store = require('../tasks/store');
+const { leftLine } = require('../tasks/allowance');
 const { createTask } = require('../tasks/create');
 const { MODES } = require('../agents/router');
 const catalog = require('../agents/catalog');
@@ -345,7 +346,7 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 
     const ATTACH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>';
     const ATTACH_ACCEPT = '.txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,.pdf,application/pdf,image/png,image/jpeg,image/webp,image/gif';
-    function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '', model = null } = {}) {
+    function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '', model = null, allowance = null } = {}) {
         const tools = html`<button type="button" class="cc-attach" data-cc-attach aria-label="Attach files" title="Attach text, code, CSV, JSON, PDFs or images" hidden>${raw(ATTACH_ICON)}</button><input type="file" multiple hidden data-cc-files accept="${ATTACH_ACCEPT}">
 ${modelChip(model)}
 <label class="cc-mode" title="How Actor picks the agent"><span class="sr-only">Mode</span><select name="mode" data-cc-mode>${MODES.map((m) => html`<option value="${m}" title="${MODE_HINT[m] || ''}"${m === mode ? raw(' selected') : ''}>${MODE_LABEL[m] || m}</option>`)}</select></label>
@@ -362,7 +363,7 @@ ${modelChip(model)}
             hidden: { parent },
             top: String(html`${problem ? html`<p class="cc-problem" role="alert">${problem}</p>` : ''}<ul class="cc-files" data-cc-chips hidden></ul>`),
             tools: String(tools),
-            note: `Actor checks each answer with a second model.${config.allowance ? ` Free: ${config.allowance.tasksPerDay} tasks a day.` : ''}`,
+            note: `Actor checks each answer with a second model.${allowance ? ` ${allowance}` : ''}`,
         }));
     }
 
@@ -383,7 +384,7 @@ ${modelChip(model)}
 
     async function render(req, res, { row = null, problem = null, text = '', status = 200 } = {}) {
         const requester = requesterOf(req);
-        const [chats, turns] = await Promise.all([chatsFor(requester), row ? chainOf(row) : []]);
+        const [chats, turns, today] = await Promise.all([chatsFor(requester), row ? chainOf(row) : [], store.spendToday(s, requester)]);
         const first = turns[0] || null;
         const lastTurn = turns[turns.length - 1] || null;
         const busy = Boolean(lastTurn && (OPEN.includes(lastTurn.state) || lastTurn.state === 'needs_you'));
@@ -402,7 +403,7 @@ ${modelChip(model)}
                 turns: turnHtmls.map(String),
                 empty: first ? '' : String(html`<div class="ct-hello"><span class="ct-hello-mark" aria-hidden="true"></span><h2>What should Actor do?</h2><p>It browses, clicks and types for you. Watch it work, steer it, or go do something else.</p>
 <ul class="ct-starters">${STARTERS.map(([icon, k, v]) => html`<li><button type="button" data-ovt-starter="${v}">${raw(glyphs.svg(icon, { size: 20 }))}<b>${k}</b><span>${v}</span></button></li>`)}</ul></div>`),
-                composer: String(composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model })),
+                composer: String(composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model, allowance: leftLine(config.allowance, today) })),
                 label: first ? 'Conversation' : 'New chat',
             }))}</div>`,
         });
@@ -568,7 +569,7 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
 
     const PROBLEM = {
         'actor.allowance.exhausted': 'You have used today\'s free tasks. They come back at midnight UTC.',
-        'actor.budget.day_spent': 'Today\'s budget is spent. It resets at midnight UTC.',
+        'actor.budget.day_spent': 'You have used today\'s free allowance. It comes back at midnight UTC. Add your own model key at /chat/model, and Actor runs on it without charging the allowance.',
         'actor.capacity.spent': 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.',
     };
     r.post('/chat', express.urlencoded({ extended: false, limit: '64kb' }), express.json({ limit: '18mb' }), async (req, res) => {

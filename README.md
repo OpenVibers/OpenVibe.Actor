@@ -84,7 +84,7 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
 
 ## Money
 
-- **Free tier, per person:** `ACTOR_FREE_TASKS_PER_DAY` (20) tasks a day, up to `ACTOR_FREE_PER_TASK_USD` ($0.05) a task and `ACTOR_FREE_PER_DAY_USD` ($0.25) a day.
+- **Free tier, per person:** `ACTOR_FREE_TASKS_PER_DAY` (20) tasks a day, up to `ACTOR_FREE_PER_TASK_USD` ($0.05) a task and `ACTOR_FREE_PER_DAY_USD` ($0.05) a day. Past it, tasks are refused with `actor.budget.day_spent` until midnight UTC; the person can add their own model key at `/chat/model` and keep going.
 - **Operator ceiling:** `ACTOR_MAX_COST_USD_PER_DAY` ($2) over everyone; past it, new tasks answer 503 `actor.capacity.spent` until midnight UTC.
 - **Budgets are hard:**
   - a budget above the tier is refused, never lowered;

@@ -178,7 +178,7 @@ function load(env = process.env) {
         allowance: {
             tasksPerDay: Math.max(0, int(env.ACTOR_FREE_TASKS_PER_DAY, 20)),
             perTaskUsd: num(env.ACTOR_FREE_PER_TASK_USD, 0.05),
-            perDayUsd: num(env.ACTOR_FREE_PER_DAY_USD, 0.25),
+            perDayUsd: num(env.ACTOR_FREE_PER_DAY_USD, 0.05),
         },
         spendCapUsdPerDay: num(env.ACTOR_MAX_COST_USD_PER_DAY, 2),
         agents: {

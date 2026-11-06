@@ -28,6 +28,9 @@ async function boot(opts = {}) {
     const providers = await startProviders();
     const env = {
         NODE_ENV: 'test', PORT: '0', BASE_URL: 'https://openvibe.actor', TRUST_PROXY: '1',
+        // A test boot makes many runs in one "day"; the free allowance is measured in free-allowance.test.js, which
+        // sets its own. This keeps the other suites about what they are about.
+        ACTOR_FREE_PER_DAY_USD: '1000',
         OV_NETWORK_URL: network.url, OV_NETWORK_INTERNAL_URL: network.url,
         OV_OAUTH_CLIENT_ID: 'actor', OV_OAUTH_CLIENT_SECRET: 'actor-secret', COOKIE_SECURE: 'false',
         ...providers.env,

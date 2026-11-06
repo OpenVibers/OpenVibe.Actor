@@ -18,6 +18,7 @@ const { asyncRouter } = require('./router');
 const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const { sameOrigin } = require('./principal');
 const { html, raw, table, notice, time, badge } = require('../render/html');
+const { leftLine } = require('../tasks/allowance');
 const { foldBlock } = require('../render/short');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
@@ -398,7 +399,7 @@ function createPageRoutes(ctx) {
     const tier = config.allowance;
 
     // ── The task box ─────────────────────────────────────────
-    function taskForm(viewer, { text = '', mode = 'balanced', problem = null } = {}) {
+    function taskForm(viewer, { text = '', mode = 'balanced', problem = null, today = null } = {}) {
         // What a chosen template needs (a robot, a computer, a desk, private mode) is said where it is about to run.
         const needs = NEEDS.has(text) ? html`<p class="hm-needs">${NEEDS.get(text)}</p>` : '';
         if (!(viewer.kind === 'user' && viewer.subject)) {
@@ -417,6 +418,7 @@ ${problem ? notice(problem, 'warn') : ''}
 ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" value="${m}"${m === mode ? raw(' checked') : ''}><span><b>${MODE_LABEL[m]}</b><small>${MODE_TEXT[m]}</small></span></label>`)}
 </fieldset>
 <div class="task-actions"><button class="sc-btn sc-primary" type="submit">Run it</button><span class="muted small">Up to ${usd(tier.perTaskUsd)} a task on the free tier; you see the real cost to a fraction of a cent.</span></div>
+${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p>` : ''}
 </form>`;
     }
 
@@ -437,6 +439,8 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
         const agents = catalog.list(config);
         const tools = await callableTools();
         const signed = viewer.kind === 'user' && viewer.subject;
+        // What is left of today's free allowance, where the person is about to start a run.
+        const today = signed ? await store.spendToday(s, `user:${viewer.subject}`) : null;
         // A template link (/?task=…&mode=…#task) fills the task box; the page itself stays the canonical /.
         if (!form.text && typeof query.task === 'string') form = { text: query.task.slice(0, 2000), mode: MODES.includes(query.mode) ? query.mode : 'balanced' };
         // Real numbers (the owner, 2026-11-01: "are you sure this number is correct?"): the agents Actor can pick from
@@ -450,7 +454,7 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
             title: 'Ask once.', accent: 'The right agent does it.',
             lede: 'Give Actor a task in plain words. It picks the agent that fits, OpenVibe\'s own or another platform\'s, has a second model check the answer, and shows you what it cost and why. Like OpenRouter, for agents.',
             actions: signed ? [{ label: 'Give it a task', href: '#task', primary: true }, { label: 'Your tasks', href: '/tasks' }] : [{ label: 'Sign in to start', href: '/auth/login?next=%2F', primary: true }, { label: 'See the agents', href: '/agents' }],
-            note: `Open source (AGPL-3.0). Free: ${tier.tasksPerDay} tasks a day, up to ${usd(tier.perTaskUsd)} each, no card.`,
+            note: `Open source (AGPL-3.0). Free: ${tier.tasksPerDay} tasks a day and ${usd(tier.perDayUsd)} of model use, no card.`,
             aside: { html: String(routerCard(agents)) },
         });
         // One strip of numbers (it scrolls sideways on a phone instead of stacking four tiles); zero is left out.
@@ -467,7 +471,7 @@ ${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" valu
             items: TEMPLATES.flatMap((g) => g.items.map((t) => kit.card({ href: templateHref(t), title: t.title, type: g.type, ratio: '3/1', badge: g.badge, corner: t.mode && MODE_LABEL[t.mode] !== g.badge ? MODE_LABEL[t.mode] : '', peek: t.text, share: false }))),
         });
         // Signed out and nothing chosen yet, the hero's Sign in is the door: the box would only repeat it.
-        const box = signed || form.text ? taskForm(viewer, form)
+        const box = signed || form.text ? taskForm(viewer, { ...form, today })
             : html`<p class="sc-lede"><a href="/auth/login?next=%2F%23task">Sign in</a> with your OpenVibe account and ask in plain words, or pick a task below: it waits in the box while you sign in.</p>`;
         // A part read once folds (kit.fold). Its anchor sits inside the fold, so a link to it (#tools, #api) opens it.
         const fold = ({ id, body, ...o }) => raw(kit.fold({ ...o, body: `<div id="${id}">${body}</div>` }));
@@ -569,7 +573,7 @@ ${raw(foldBlock({
         const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
         return [
             ['What does OpenVibe.Actor do?', 'You describe a task in plain words. Actor sorts it, picks the agent that can do it best within your budget and mode, runs it while you watch its steps, has a second model check the answer, and shows you the answer with its sources, what it cost and why that agent.'],
-            ['What does it cost?', `The free tier gives ${tier.tasksPerDay} tasks a day, up to ${usd(tier.perTaskUsd)} each, with no card. Every task shows its real cost to a fraction of a cent.`],
+            ['What does it cost?', `The free tier gives ${tier.tasksPerDay} tasks a day and ${usd(tier.perDayUsd)} of model use, with no card. Every task shows its real cost to a fraction of a cent, and what is left of today's allowance is beside the box.`],
             list ? ['Which agents does it use?', `${list} are ready to pick from. The agents page lists each one with its price per million tokens and what it can do.`] : null,
             ['Is the answer checked?', 'Yes. A second model reads every answer before you see it, from another model family where one is available. An answer that fails its check goes to the next agent that can do the task.'],
             ['What is private mode?', 'Private mode uses only an open model on OpenVibe\'s own server, so the task never leaves OpenVibe. It is for short answers; tasks that need search or tools go to the other agents in the other modes.'],
@@ -606,7 +610,7 @@ ${raw(foldBlock({
     // inside the same allowance as any task.
     const FOLLOW_ERROR = {
         'actor.allowance.exhausted': 'You have used today\'s free tasks. They come back at midnight UTC.',
-        'actor.budget.day_spent': 'Today\'s budget is spent. It resets at midnight UTC.',
+        'actor.budget.day_spent': 'You have used today\'s free allowance. It comes back at midnight UTC. Add your own model key at /chat/model, and Actor runs on it without charging the allowance.',
         'actor.capacity.spent': 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.',
     };
     r.post('/tasks/:id/follow-up', require('express').urlencoded({ extended: false, limit: '64kb' }), async (req, res) => {
@@ -638,7 +642,7 @@ ${raw(foldBlock({
     };
     const forkProblem = (code) => ({
         'actor.allowance.exhausted': 'You have used today\'s free tasks. They come back at midnight UTC.',
-        'actor.budget.day_spent': 'Today\'s budget is spent. It resets at midnight UTC.',
+        'actor.budget.day_spent': 'You have used today\'s free allowance. It comes back at midnight UTC. Add your own model key at /chat/model, and Actor runs on it without charging the allowance.',
         'actor.capacity.spent': 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.',
         acting: 'That step was stopped mid-action, so it cannot be forked. Pick an earlier saved step.',
     }[code] || 'That fork could not start. Try again in a moment.');
@@ -891,8 +895,8 @@ ${enough ? html`<form method="post" action="/tasks/${row.id}/challenge">
         page(req, res, {
             title: 'Your tasks', crumbs: [{ label: 'Your tasks' }], styles: [showcase.STYLESHEET],
             body: html`<h1>Your tasks</h1>
-<p class="muted">Today: ${today.tasks} of ${tier.tasksPerDay} free tasks, ${usd(today.usd)} of ${usd(tier.perDayUsd)}. Tasks are kept ${store.RETENTION_DAYS} days. · <a href="/memory">Memory</a></p>
-${taskForm(req.viewer)}
+<p class="muted">Today: ${today.tasks} of ${tier.tasksPerDay} free tasks, ${usd(today.usd)} of ${usd(tier.perDayUsd)}. ${leftLine(tier, today)} Tasks are kept ${store.RETENTION_DAYS} days. · <a href="/memory">Memory</a></p>
+${taskForm(req.viewer, { today })}
 ${table(['Task', 'State', 'Agent', 'Cost', 'Started'], pageRows.rows.map((t) => {
                 const result = t.result ? (typeof t.result === 'string' ? JSON.parse(t.result) : t.result) : null;
                 return [html`<a href="/tasks/${t.id}">${t.task.length > 90 ? `${t.task.slice(0, 89)}…` : t.task}</a>`, badge(t.state, STATE_KIND[t.state]), result ? (catalog.byId(result.agent) || {}).name || result.agent : '—', usd(t.cost_usd == null ? null : Number(t.cost_usd)), time(t.created_at)];
