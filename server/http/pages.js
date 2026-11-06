@@ -387,7 +387,7 @@ ${[['a', cmp.a, rowA], ['b', cmp.b, rowB]].map(([side, run, row]) => html`<secti
 
 
 function createPageRoutes(ctx) {
-    const { config, s, engine } = ctx;
+    const { config, s, engine, sharing } = ctx;
     // Durable runs (stage V2-9): the sealed checkpoints are the engine's, read here only for their step metadata.
     const checkpoints = ctx.checkpoints || null;
     const checkpointsOn = Boolean(checkpoints && checkpoints.enabled);
@@ -396,6 +396,30 @@ function createPageRoutes(ctx) {
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const requesterOf = (req) => `user:${req.viewer.subject}`;
+    /** The one Share sheet's button: its owner gets the audience part too; a reader gets Send it only. */
+    const shareButton = (row, owner) => {
+        const title = String(row.task || 'An agent run').split('\n')[0].slice(0, 90);
+        return owner
+            ? html`<button type="button" class="sc-btn" data-ov-share-sheet data-kind="run" data-id="${row.id}" data-title="${title}">Share</button>`
+            : html`<button type="button" class="sc-btn" data-ov-share-sheet data-title="${title}">Share</button>`;
+    };
+    /** Specific people, and this reader is not on the list: the audience, never the task or an answer. */
+    const sharedGate = (req, res, id) => {
+        const signedInAs = signedIn(req) ? (req.viewer.username || '') : '';
+        const signInUrl = `/auth/login?next=${encodeURIComponent(req.originalUrl)}`;
+        return page(req, res, {
+            title: 'Shared with specific people', styles: [showcase.STYLESHEET, 'ov-share.css'], sharedScripts: ['ov-share.js'],
+            body: html`<div class="wrap"><div id="share-gate"><h1>This run is shared with specific people</h1>
+<p>Sign in with the OpenVibe account it was shared with, or ask its owner for access.</p></div></div>
+<script>
+window.addEventListener('DOMContentLoaded', function () {
+  var el = document.getElementById('share-gate');
+  if (el && window.OVShare) OVShare.gate(el, { kind: 'run', id: ${raw(JSON.stringify(String(id)))},
+    signedInAs: ${raw(JSON.stringify(signedInAs))}, signInUrl: ${raw(JSON.stringify(signInUrl))} });
+});
+</script>`,
+        }, 404);
+    };
     const tier = config.allowance;
 
     // ── The task box ─────────────────────────────────────────
@@ -920,8 +944,10 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
 
     // What the agent last saw (agents/looks.js): its task's owner only, never cached.
     r.get('/tasks/:id/look', async (req, res) => {
-        const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
-        const look = row && row.requester === requesterOf(req) ? looks.get(row.id) : null;
+        const row = TASK_ID.test(req.params.id) ? await store.getTask(s, req.params.id) : null;
+        const mine = Boolean(row && signedIn(req) && row.requester === requesterOf(req));
+        const allowed = mine || (row && sharing ? await sharing.canView(req.viewer, row.id).catch(() => false) : false);
+        const look = allowed ? looks.get(row.id) : null;
         if (!look) return res.status(404).type('text').send('No picture');
         res.setHeader('Cache-Control', 'private, no-store');
         res.type(look.format === 'png' ? 'image/png' : 'image/jpeg').send(look.data);
@@ -934,8 +960,10 @@ ${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</
     // sandbox with nothing allowed to load, and never sniffed (nosniff). Only a raster image is shown in place;
     // an SVG or an HTML page is a download unless it is shown with <img>.
     r.get('/tasks/:id/files/:artifact', async (req, res) => {
-        const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
-        if (!row || row.requester !== requesterOf(req)) return res.status(404).type('text').send('No such file');
+        const row = TASK_ID.test(req.params.id) ? await store.getTask(s, req.params.id) : null;
+        const mine = Boolean(row && signedIn(req) && row.requester === requesterOf(req));
+        const allowed = mine || (row && sharing ? await sharing.canView(req.viewer, row.id).catch(() => false) : false);
+        if (!allowed) return res.status(404).type('text').send('No such file');
         const found = await findArtifact(s.db, row.id, req.params.artifact);
         if (!found) return res.status(404).type('text').send('No such file');
         return sendArtifact(res, found);
@@ -1007,21 +1035,31 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
     });
 
     r.get('/tasks/:id', async (req, res) => {
-        if (req.get('sec-fetch-mode') === 'navigate' && req.query.view !== 'details' && TASK_ID.test(req.params.id) && signedIn(req)) {
-            return res.redirect(303, `/chat/${req.params.id}#t-${req.params.id}`);
-        }
-        const row = TASK_ID.test(req.params.id) && signedIn(req) ? await store.getTask(s, req.params.id) : null;
-        if (!row || row.requester !== requesterOf(req)) {
+        const row = TASK_ID.test(req.params.id) ? await store.getTask(s, req.params.id) : null;
+        const mine = Boolean(row && signedIn(req) && row.requester === requesterOf(req));
+        if (!row) {
             return page(req, res, { title: 'Task not found', body: html`<h1>Task not found</h1><p>${signedIn(req) ? 'There is no task here that belongs to you.' : html`<a href="/auth/login?next=${encodeURIComponent(req.originalUrl)}">Sign in</a> to see your task.`}</p>` }, 404);
         }
+        if (!mine) {
+            const allowed = sharing ? await sharing.canView(req.viewer, row.id).catch(() => false) : false;
+            if (!allowed) {
+                const audience = sharing ? await sharing.audienceOf(row.id).catch(() => null) : null;
+                if (audience === 'people') return sharedGate(req, res, row.id);
+                return page(req, res, { title: 'Task not found', body: html`<h1>Task not found</h1><p>There is no task here that belongs to you.</p>` }, 404);
+            }
+        }
+        if (mine && req.get('sec-fetch-mode') === 'navigate' && req.query.view !== 'details') {
+            return res.redirect(303, `/chat/${req.params.id}#t-${req.params.id}`);
+        }
+        const shared = !mine;
         const t = store.toWire(row, { baseUrl: config.baseUrl });
         const events = await store.eventsAfter(s, row.id, 0);
-        const deliveries = row.webhooks ? await ctx.webhooks.forTask(row.id) : [];
+        const deliveries = !shared && row.webhooks ? await ctx.webhooks.forTask(row.id) : [];
         const live = store.OPEN.includes(row.state);
         const waiting = row.state === 'needs_you';
         const open = live || waiting;
         const questionEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'question');
-        const question = waiting && questionEvent ? {
+        const question = !shared && waiting && questionEvent ? {
             text: String(questionEvent.text || ''),
             options: Array.isArray(questionEvent.options) ? questionEvent.options : [],
             // The resume card (stage V2-9): the run was stopped inside an action, not before it started.
@@ -1033,18 +1071,18 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
         const assumeProblem = req.query.assume === 'gone' ? 'Those assumptions could not be changed: the task is no longer running.' : null;
         const cls = (events.find((e) => e.step === 'plan' && !e.agent && /"(\w+)" task/.test(e.text || '')) || { text: '' }).text.match(/"(\w+)"/);
         const kind = cls ? CLASS_TEXT[cls[1]] || cls[1] : null;
-        const desk = open ? store.deskFrom(events) : null;
-        const look = looks.get(row.id);
+        const desk = !shared && open ? store.deskFrom(events) : null;
+        const look = shared ? null : looks.get(row.id);
         const parentRow = row.parent_id ? await store.getTask(s, row.parent_id) : null;
         const parentTask = parentRow && parentRow.requester === row.requester ? parentRow : null;
-        const follows = t.state === 'succeeded' ? await store.followUps(s, row) : [];
+        const follows = !shared && t.state === 'succeeded' ? await store.followUps(s, row) : [];
         // The saved steps (stage V2-9) and the runs this one can be compared with. A running task has no fork dialog.
-        const saved = !open && checkpointsOn ? await checkpoints.list(row.id) : [];
-        const forks = row.state === 'queued' ? [] : await store.forks(s, row);
-        const others = !open && (row.state === 'succeeded' || row.state === 'failed')
+        const saved = !shared && !open && checkpointsOn ? await checkpoints.list(row.id) : [];
+        const forks = shared || row.state === 'queued' ? [] : await store.forks(s, row);
+        const others = !shared && !open && (row.state === 'succeeded' || row.state === 'failed')
             ? await store.recentSucceeded(s, row.requester, row.id, 4) : [];
         const forkProblem = req.query.fork === 'gone' ? 'That saved step is no longer there, so it could not be forked. Pick another step below.' : null;
-        const offer = t.state === 'succeeded' ? await benchOffers.get(s, row.id, requesterOf(req)) : null;
+        const offer = !shared && t.state === 'succeeded' ? await benchOffers.get(s, row.id, requesterOf(req)) : null;
         const spans = await trace.spansFor(s, row.id);
         const followProblem = typeof req.query.follow === 'string' ? (FOLLOW_ERROR[req.query.follow] || 'That follow-up could not start. Try again in a moment.') : null;
         const planEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'plan' && taskEvents.plan(e.text));
@@ -1059,8 +1097,8 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
             // How it went is the agents' session (openvibe-shared/agent-session.js, js/task.js mounts it from the events
             // below and, while the task runs, from its live stream); the attempts drawn here stay for a page without scripts.
             scripts: waiting ? [] : ['js/task-events.js', 'js/task.js'],
-            sharedScripts: waiting ? [] : ['agent-session.js'],
-            styles: [showcase.STYLESHEET],
+            sharedScripts: [...(waiting ? [] : ['agent-session.js']), 'ov-share.js'],
+            styles: [showcase.STYLESHEET, 'ov-share.css'],
             css: ['css/task.css'],
             noReferrer: true,
             body: html`${live ? raw('<noscript><meta http-equiv="refresh" content="4"></noscript>') : ''}
@@ -1072,17 +1110,18 @@ ${parentTask ? html`<p class="follows-on">${row.fork_of_step != null
             : html`Following up on <a href="/tasks/${parentTask.id}">${parentTask.task.length > 90 ? `${parentTask.task.slice(0, 89)}…` : parentTask.task}</a>`}</p>` : ''}
 <h1 class="task-text">${row.task}</h1>
 </header>
+${shared ? html`<p class="muted">${shareButton(row, false)} <span class="small">This run was shared with you. Only its owner can change it.</span></p>` : html`<p>${shareButton(row, true)}</p>`}
 ${answerProblem ? notice(answerProblem, 'warn') : ''}
 ${assumeProblem ? notice(assumeProblem, 'warn') : ''}
 ${forkProblem ? notice(forkProblem, 'warn') : ''}
 ${question ? questionCard(row, question) : ''}
 ${outcome(t, row, { acting: actingCard })}
-${t.state === 'succeeded' ? benchBlock(row, offer) : ''}
-${t.state === 'succeeded' ? followBlock(row, follows, followProblem) : ''}
-${savedStepsBlock(row, saved, spans)}
-${relatedRunsBlock(row, { forks, others })}
-${open ? planCard(plan, { editable: live || (waiting && !(question && question.kind === 'acting')), taskId: row.id }) : ''}
-${open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
+${!shared && t.state === 'succeeded' ? benchBlock(row, offer) : ''}
+${!shared && t.state === 'succeeded' ? followBlock(row, follows, followProblem) : ''}
+${!shared ? savedStepsBlock(row, saved, spans) : ''}
+${!shared ? relatedRunsBlock(row, { forks, others }) : ''}
+${open ? planCard(plan, { editable: !shared && (live || (waiting && !(question && question.kind === 'acting'))), taskId: row.id }) : ''}
+${!shared && open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
 <p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
 <a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
 </section>` : ''}

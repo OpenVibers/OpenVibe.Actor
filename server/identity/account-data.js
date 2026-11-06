@@ -63,6 +63,8 @@ const TABLES = [
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_chat_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'chat-app-approvals.json' },
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
+    // The sharing default they chose for new runs (design 2026-11-06): the audience the next one starts as.
+    { table: 'actor_share_defaults', subject: 'subject', value: (usr) => usr, file: 'share-defaults.json' },
     // The model they chose for their tasks (plan L55 C3): which provider their own key is for, and the model id
     // they picked. Never a key: the key itself is sealed in OpenVibe.AI's vault, and this row only names the
     // provider. It goes with the person.
@@ -158,7 +160,26 @@ async function exportExtra(db, subject) {
 
 /** The account-data handle for Actor's store (server/db.js createStore). */
 function create({ db, note = 'A task row holds the task the person asked for, in their own words.', log = console } = {}) {
-    return createAccountData({ db, service: 'actor', tables: TABLES, note, log, extraExport: exportExtra });
+    async function extraErase(t, subjects, { erased, add }) {
+        // The sharing system's own rows (openvibe-sdk/share) name a person as a member or as somebody who asked for
+        // access. Their subject column is jsonb (a subject object), which the table map cannot express, so they are
+        // erased here. The runs' own share rows go with the runs' ids below.
+        const forms = subjects.map((s) => JSON.stringify({ type: 'user', id: s }));
+        const members = await t.exec('DELETE FROM share_members WHERE subject = ANY($1::jsonb[])', [forms]);
+        const requests = await t.exec('DELETE FROM share_access_requests WHERE subject = ANY($1::jsonb[])', [forms]);
+        const owned = await t.exec("DELETE FROM shares WHERE service = 'actor' AND owner_subject = ANY($1::jsonb[])", [forms]);
+        if (Number(members) || Number(requests) || Number(owned)) {
+            add(erased, 'share_rows', Number(members) + Number(requests) + Number(owned));
+        }
+    }
+    return createAccountData({ db, service: 'actor', tables: TABLES, note, log, extraErase, extraExport: exportExtra });
 }
 
-module.exports = { create, TABLES, TOPICS, exportFiles, exportSpans, exportCheckpoints, exportConnectionTools, exportExtra };
+// The sharing system's own tables carry a person (a member, an access request). Their subject column is jsonb, so the
+// table map cannot express them: they are erased in extraErase, with the rest of the person's rows.
+const EXEMPT = {
+    share_members: 'the sharing system own member rows: the subject is a jsonb subject, so they are erased in extraErase',
+    share_access_requests: 'the sharing system own access requests: the subject is a jsonb subject, so they are erased in extraErase',
+};
+
+module.exports = { create, TABLES, TOPICS, EXEMPT, exportFiles, exportSpans, exportCheckpoints, exportConnectionTools, exportExtra };

@@ -92,7 +92,7 @@ function tookOf(row) {
 }
 
 function createChatPages(ctx, { computers = null } = {}) {
-    const { config, s, engine } = ctx;
+    const { config, s, engine, sharing } = ctx;
     const r = asyncRouter();
     // Bot's computers, for the live desk in a turn (plan L55 C1b): made when first asked for.
     let pcsMade = computers;
@@ -105,6 +105,49 @@ function createChatPages(ctx, { computers = null } = {}) {
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const requesterOf = (req) => `user:${req.viewer.subject}`;
     const now = () => (typeof s.now === 'function' ? s.now() : Date.now());
+    /** The one Share sheet's button: its owner gets the audience part too; a reader gets Send it only. */
+    const shareButton = (row, owner) => {
+        const title = String(row.task || 'An agent run').split('\n')[0].slice(0, 90);
+        return owner
+            ? html`<button type="button" class="ovt-btn" data-ov-share-sheet data-kind="run" data-id="${row.id}" data-title="${title}">Share</button>`
+            : html`<button type="button" class="ovt-btn" data-ov-share-sheet data-title="${title}">Share</button>`;
+    };
+    /** Specific people, and this reader is not on the list: the audience, never the question or an answer. */
+    const sharedGate = (req, res, id) => {
+        const signedInAs = signedIn(req) ? (req.viewer.username || '') : '';
+        const signInUrl = `/auth/login?next=${encodeURIComponent(req.originalUrl)}`;
+        return send(res, 404, {
+            viewer: req.viewer, config, path: req.originalUrl, title: 'Shared with specific people', app: true, noReferrer: true,
+            styles: ['kit.css', 'ov-share.css'], sharedScripts: ['kit-web.js', 'ov-share.js'],
+            body: html`<div class="ct-wrap"><div id="share-gate" class="ct-gate"><h1>This run is shared with specific people</h1>
+<p>Sign in with the OpenVibe account it was shared with, or ask its owner for access.</p></div></div>
+<script>
+window.addEventListener('DOMContentLoaded', function () {
+  var el = document.getElementById('share-gate');
+  if (el && window.OVShare) OVShare.gate(el, { kind: 'run', id: ${raw(JSON.stringify(String(id)))},
+    signedInAs: ${raw(JSON.stringify(signedInAs))}, signInUrl: ${raw(JSON.stringify(signInUrl))} });
+});
+</script>`,
+        });
+    };
+
+    const AUDIENCE_TEXT = { private: 'Only me', people: 'Specific people', link: 'Anyone with the link', public: 'Everyone' };
+    /**
+     * "New runs: Only me", with "Apply to all my existing runs" (design rule 1 and 2). The Share button on a run
+     * changes just that one; this is only what the next one starts as.
+     */
+    async function defaultsHtml(requester) {
+        if (!sharing) return '';
+        const current = await sharing.defaultOf(requester).catch(() => 'private');
+        const options = ['private', 'people', 'link', 'public']
+            .map((a) => html`<option value="${a}"${a === current ? raw(' selected') : ''}>${AUDIENCE_TEXT[a]}</option>`);
+        return html`<form class="ct-share-defaults" method="post" action="/chat/defaults">
+<label for="ct-share-default">New runs</label><select id="ct-share-default" name="audience">${options}</select>
+<label class="ct-check"><input type="checkbox" name="apply_all" value="1"> Apply to all my existing runs</label>
+<button class="sc-btn" type="submit">Save</button>
+<span class="muted small">Only me unless you choose otherwise. Each run's Share button changes just that run.</span>
+</form>`;
+    }
 
     async function chatsFor(requester) {
         const rows = await s.db.many(
@@ -224,17 +267,21 @@ function createChatPages(ctx, { computers = null } = {}) {
         }));
     }
 
-    function questionBlock(row, events) {
+    function questionBlock(row, events, readOnly = false) {
         const q = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'question');
         if (!q) return html`<div class="ovt-card is-wait"><p><b>Actor is waiting for you.</b></p><p><a href="/tasks/${row.id}?view=details#question">Open the question</a></p></div>`;
         const options = Array.isArray(q.options) ? q.options : [];
         const acting = q.question_kind === 'acting';
+        if (readOnly) {
+            return html`<div class="ovt-card is-wait"><p><b>${acting ? 'Actor was stopped mid-action' : 'One question first'}</b></p><p>${String(q.text || '')}</p>
+${options.length ? html`<p class="ct-opts">${options.map((o) => html`<span class="ct-opt">${o}</span>`)}</p>` : ''}</div>`;
+        }
         return html`<div class="ovt-card is-wait"><p><b>${acting ? 'Actor was stopped mid-action' : 'One question first'}</b></p><p>${String(q.text || '')}</p>
 <form method="post" action="/tasks/${row.id}/answer" class="ct-opts">${options.map((o) => html`<button class="ct-opt" type="submit" name="answer" value="${o}">${o}</button>`)}</form>
 ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class="ct-own"><input name="answer" type="text" maxlength="2000" required placeholder="Or answer in your own words" aria-label="Your answer"><button class="ct-opt" type="submit">Answer</button></form>`}</div>`;
     }
 
-    function failedBlock(row, t) {
+    function failedBlock(row, t, readOnly = false) {
         const err = t.error || {};
         const why = {
             'actor.agents.exhausted': 'No answer passed its check, so nothing unchecked was shown.',
@@ -242,8 +289,8 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
             'actor.task.timeout': 'It ran too long and was stopped.',
             'actor.task.interrupted': 'Actor restarted while this was running. Nothing more was charged.',
         }[err.code] || err.detail || 'It stopped without saying why.';
-        return html`<div class="ovt-card is-bad"><p><b>Actor couldn't finish this.</b> ${why}</p>
-<form method="post" action="/chat" class="ct-retry"><input type="hidden" name="task" value="${row.task}"><input type="hidden" name="mode" value="best">${isFollow(row) ? html`<input type="hidden" name="parent" value="${row.parent_id}">` : ''}<button class="ct-opt" type="submit">Try again in Best mode</button><a class="ct-act" href="/tasks/${row.id}?view=details">Details</a></form></div>`;
+        const retry = readOnly ? '' : html`<form method="post" action="/chat" class="ct-retry"><input type="hidden" name="task" value="${row.task}"><input type="hidden" name="mode" value="best">${isFollow(row) ? html`<input type="hidden" name="parent" value="${row.parent_id}">` : ''}<button class="ct-opt" type="submit">Try again in Best mode</button><a class="ct-act" href="/tasks/${row.id}?view=details">Details</a></form>`;
+        return html`<div class="ovt-card is-bad"><p><b>Actor couldn't finish this.</b> ${why}</p>${retry}${readOnly ? html`<a class="ct-act" href="/tasks/${row.id}?view=details">Details</a>` : ''}</div>`;
     }
 
     /**
@@ -251,7 +298,7 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
      * it with no event (the run checks for itself); Stop waiting ends the wait and the run carries on without it. The
      * deadline is written as a <time> the page shows in the reader's own zone (js/chat.js), "in about 2 h" without it.
      */
-    function waitBlock(row, wait) {
+    function waitBlock(row, wait, readOnly = false) {
         if (!wait) return '';
         const left = Math.max(0, Date.parse(wait.deadline_at) - now());
         const mins = Math.round(left / 60000);
@@ -259,7 +306,7 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
         return html`<form class="ovt-card is-info ct-wait" method="post" action="/chat/${row.id}/wait" data-ct-wait>
 <p class="ovt-card-h">${raw(glyphs.svg('clock', { size: 18 }))}<span><b>Waiting</b> ${String(wait.line || 'for something to happen').replace(/^waiting\s+/i, '').replace(/[.\s]+$/, '')}. Nothing is spent while it waits.</span></p>
 <p class="ct-wait-until">It gives up <time datetime="${new Date(wait.deadline_at).toISOString()}" data-ct-local>${about}</time>, then ${wait.on_timeout === 'fail' ? 'stops' : wait.on_timeout === 'retry' ? 'tries that step once more' : 'asks you what next'}.</p>
-<div class="ovt-card-acts"><button type="submit" class="ovt-card-btn" name="do" value="wake">Wake now</button><button type="submit" class="ovt-card-btn is-quiet" name="do" value="cancel">Stop waiting</button></div></form>`;
+${readOnly ? '' : html`<div class="ovt-card-acts"><button type="submit" class="ovt-card-btn" name="do" value="wake">Wake now</button><button type="submit" class="ovt-card-btn is-quiet" name="do" value="cancel">Stop waiting</button></div>`}</form>`;
     }
 
     /** The files beside the question (thread.files draws them). */
@@ -267,20 +314,20 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
         return (files || []).map((f) => ({ href: `/chat/file/${row.id}/${f.id}`, name: f.name, size: f.size, image: inputs.IMAGE.test(f.mime) }));
     }
 
-    async function turnHtml(row, { events = null, files = null } = {}) {
+    async function turnHtml(row, { events = null, files = null, readOnly = false } = {}) {
         const attached = files || (await inputs.list(s, [row.id])).get(row.id) || [];
         const t = store.toWire(row, { baseUrl: config.baseUrl });
         const evs = events || await store.eventsAfter(s, row.id, 0);
         const open = OPEN.includes(row.state);
         let reply;
         if (row.state === 'succeeded') reply = html`${workBlock(row, evs, false)}${screenBlock(row, evs, false)}${answerBlock(row, t)}`;
-        else if (row.state === 'needs_you') reply = html`${workBlock(row, evs, false)}${questionBlock(row, evs)}`;
-        else if (row.state === 'failed') reply = html`${workBlock(row, evs, false)}${failedBlock(row, t)}`;
+        else if (row.state === 'needs_you') reply = html`${workBlock(row, evs, false)}${questionBlock(row, evs, readOnly)}`;
+        else if (row.state === 'failed') reply = html`${workBlock(row, evs, false)}${failedBlock(row, t, readOnly)}`;
         else if (row.state === 'cancelled') reply = html`${workBlock(row, evs, false)}<p class="ct-stopped">Stopped. What it spent before stopping stays spent.</p>`;
         else {
             // A turn parked on a wait says what it waits for (plan A2); otherwise it is working.
             const parked = ctx.waits && typeof ctx.waits.listForTask === 'function' ? (await ctx.waits.listForTask(row.id).catch(() => [])).find((w) => w.status === 'waiting') : null;
-            reply = html`${workBlock(row, evs, true)}${screenBlock(row, evs, true)}${waitBlock(row, parked)}`;
+            reply = html`${workBlock(row, evs, true)}${screenBlock(row, evs, true)}${waitBlock(row, parked, readOnly)}`;
         }
         // data-task and data-last are Actor's (js/chat.js follows the task's event stream from data-last).
         return raw(thread.turn({ id: row.id, state: row.state, open, you: { text: row.task, files: filesOf(row, attached) }, reply: String(reply), attrs: { 'data-task': row.id, 'data-last': row.last_seq } }));
@@ -382,34 +429,57 @@ ${modelChip(model)}
         ['globe', 'Use a website', 'Open openvibe.live, find a channel that is live right now, and tell me what is happening on it.'],
     ];
 
-    async function render(req, res, { row = null, problem = null, text = '', status = 200 } = {}) {
+    /**
+     * A run's page, or the same conversation read-only for somebody it was shared with: no sidebar, no composer and
+     * no turn that asks or retries. The Share button is its owner's; a reader gets Send it only.
+     */
+    async function render(req, res, { row = null, problem = null, text = '', status = 200, shared = false } = {}) {
         const requester = requesterOf(req);
-        const [chats, turns, today] = await Promise.all([chatsFor(requester), row ? chainOf(row) : [], store.spendToday(s, requester)]);
+        const [chats, turns, today] = await Promise.all([
+            shared ? Promise.resolve([]) : chatsFor(requester),
+            row ? chainOf(row) : [],
+            shared ? Promise.resolve({ usd: 0 }) : store.spendToday(s, requester),
+        ]);
         const first = turns[0] || null;
         const lastTurn = turns[turns.length - 1] || null;
         const busy = Boolean(lastTurn && (OPEN.includes(lastTurn.state) || lastTurn.state === 'needs_you'));
         const fileMap = await inputs.list(s, turns.map((t) => t.id));
-        const model = modelPrefs.wire(await modelPrefs.get(s, requester).catch(() => null));
-        const turnHtmls = await Promise.all(turns.map((t) => turnHtml(t, { files: fileMap.get(t.id) || [] })));
+        const model = shared ? null : modelPrefs.wire(await modelPrefs.get(s, requester).catch(() => null));
+        const turnHtmls = await Promise.all(turns.map((t) => turnHtml(t, { files: fileMap.get(t.id) || [], readOnly: shared })));
         const title = first ? clip(first.task, 60) : 'New chat';
+        const actions = row ? String(shareButton(row, !shared)) : '';
+        const defaults = !shared && !row ? String(await defaultsHtml(requester)) : '';
         return send(res, status, {
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
             // The network's sidebar (kit.css, kit-web.js) and its conversation UI (thread.css, ov-thread.js).
-            css: ['css/chat.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css'], sharedScripts: ['kit-web.js', 'ov-thread.js'],
-            body: html`${busy ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
+            css: ['css/chat.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css'],
+            sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-share.js'],
+            body: html`${busy && !shared ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
 <div class="chat" data-chat="${first ? first.id : ''}">${raw(thread.page({
-                sidebar: String(sidebar(chats, first ? first.id : null)),
-                head: thread.head({ title, newHref: first ? '/chat' : null }),
+                sidebar: shared ? '' : String(sidebar(chats, first ? first.id : null)),
+                head: thread.head({ title, newHref: shared ? null : (first ? '/chat' : null), actions }),
                 turns: turnHtmls.map(String),
                 empty: first ? '' : String(html`<div class="ct-hello"><span class="ct-hello-mark" aria-hidden="true"></span><h2>What should Actor do?</h2><p>It browses, clicks and types for you. Watch it work, steer it, or go do something else.</p>
 <ul class="ct-starters">${STARTERS.map(([icon, k, v]) => html`<li><button type="button" data-ovt-starter="${v}">${raw(glyphs.svg(icon, { size: 20 }))}<b>${k}</b><span>${v}</span></button></li>`)}</ul></div>`),
-                composer: String(composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model, allowance: leftLine(config.allowance, today) })),
+                composer: shared ? '' : String(composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model, allowance: leftLine(config.allowance, today) })),
                 label: first ? 'Conversation' : 'New chat',
-            }))}</div>`,
+            }))}${defaults}${shared ? html`<p class="ct-shared-note">This run was shared with you. Only its owner can carry it on.</p>` : ''}</div>`,
         });
     }
 
     const loginTo = (req) => `/auth/login?next=${encodeURIComponent(req.originalUrl)}`;
+
+    r.post('/chat/defaults', express.urlencoded({ extended: false, limit: '1kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req)) return res.redirect(303, loginTo(req));
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('Change this on openvibe.actor itself.');
+        if (!sharing) return res.redirect(303, '/chat');
+        const body = req.body || {};
+        const audience = ['private', 'people', 'link', 'public'].includes(body.audience) ? body.audience : 'private';
+        await sharing.setDefault(requesterOf(req), audience, { applyAll: String(body.apply_all || '') === '1' })
+            .catch((e) => ctx.log.warn('[Actor] the run default was not saved:', e.message));
+        return res.redirect(303, '/chat');
+    });
 
     r.get('/chat/model', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
@@ -479,19 +549,29 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
 
     r.get('/chat/turn/:id', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
-        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return res.status(404).end();
+        if (!TASK_ID.test(req.params.id)) return res.status(404).end();
         const row = await store.getTask(s, req.params.id);
-        if (!row || row.requester !== requesterOf(req)) return res.status(404).end();
-        res.type('html').send(require('../render/html').render(await turnHtml(row)));
+        if (!row) return res.status(404).end();
+        const mine = signedIn(req) && row.requester === requesterOf(req);
+        if (!mine) {
+            const allowed = sharing ? await sharing.canView(req.viewer, row.id).catch(() => false) : false;
+            if (!allowed) return res.status(404).end();
+        }
+        res.type('html').send(require('../render/html').render(await turnHtml(row, { readOnly: !mine })));
     });
 
     // An attached file, to its own person only: an image shown in place; a PDF downloaded as itself; anything else
     // downloaded as plain text. In a sandbox, never sniffed.
     r.get('/chat/file/:taskId/:id', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
-        if (!signedIn(req) || !TASK_ID.test(req.params.taskId) || !/^inp_[A-Za-z0-9_-]{6,20}$/.test(req.params.id)) return res.status(404).end();
+        if (!TASK_ID.test(req.params.taskId) || !/^inp_[A-Za-z0-9_-]{6,20}$/.test(req.params.id)) return res.status(404).end();
         const row = await store.getTask(s, req.params.taskId);
-        if (!row || row.requester !== requesterOf(req)) return res.status(404).end();
+        if (!row) return res.status(404).end();
+        const mine = signedIn(req) && row.requester === requesterOf(req);
+        if (!mine) {
+            const allowed = sharing ? await sharing.canView(req.viewer, row.id).catch(() => false) : false;
+            if (!allowed) return res.status(404).end();
+        }
         const f = await inputs.get(s, row.id, req.params.id);
         if (!f) return res.status(404).end();
         const bytes = Buffer.isBuffer(f.bytes) ? f.bytes : Buffer.from(f.bytes || []);
@@ -503,11 +583,25 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
         return res.type('text/plain; charset=utf-8').send(bytes);
     });
 
+    /**
+     * A run's page is its owner's. Someone it was shared with reads the same conversation without the composer or a
+     * turn's moves; anybody else gets the gate for Specific people, or "not found" when it is Only me.
+     */
     r.get('/chat/:id', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
-        if (!signedIn(req)) return res.redirect(303, loginTo(req));
         const row = TASK_ID.test(req.params.id) ? await store.getTask(s, req.params.id) : null;
-        if (!row || row.requester !== requesterOf(req)) return render(req, res, { status: 404, problem: 'That chat is not here: it may have expired (tasks are kept 30 days) or belong to someone else.' });
+        const mine = Boolean(row && signedIn(req) && row.requester === requesterOf(req));
+        if (row && !mine) {
+            const allowed = sharing ? await sharing.canView(req.viewer, row.id).catch(() => false) : false;
+            if (allowed) return render(req, res, { row, shared: true });
+            const audience = sharing ? await sharing.audienceOf(row.id).catch(() => null) : null;
+            if (audience === 'people') return sharedGate(req, res, row.id);
+            return render(req, res, { status: 404, problem: 'That chat is not here: it may have expired (tasks are kept 30 days) or belong to someone else.' });
+        }
+        if (!mine) {
+            if (!signedIn(req)) return res.redirect(303, loginTo(req));
+            return render(req, res, { status: 404, problem: 'That chat is not here: it may have expired (tasks are kept 30 days) or belong to someone else.' });
+        }
         return render(req, res, { row });
     });
 

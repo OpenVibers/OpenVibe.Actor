@@ -14,6 +14,14 @@ const { checkWebhookUrl } = require('../net/webhook-post');
 const { mintSecret } = require('./webhooks');
 const learn = require('../runtime/brain/learn');
 
+/**
+ * The sharing system (design 2026-11-06), injected once by server/app.js. A run is its owner's until the Share sheet
+ * says otherwise; a run no person owns is never registered, and a sharing system that is unavailable leaves the run
+ * unreadable to others (every read asks canView, and a missing row answers no).
+ */
+let sharing = null;
+function setSharing(store) { sharing = store || null; }
+
 const usd = (n) => (n === 0 ? '$0' : n < 0.01 ? `$${Number(n).toFixed(4)}` : `$${Number(n).toFixed(2)}`);
 
 function untilMidnight(nowMs) {
@@ -96,6 +104,14 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     });
     // The engine starts the task only once its row has committed; a webhook that asked for `queued` hears it now.
     if (out.status === 201) {
+        if (sharing) {
+            try {
+                const audience = await sharing.defaultOf(out.task.requester).catch(() => 'private');
+                await sharing.register(out.task.requester, out.task.id, audience);
+            } catch (e) {
+                console.warn(`[Actor] task ${out.task.id}: not registered with the sharing system: ${String((e && e.message) || e).slice(0, 200)}`);
+            }
+        }
         // A follow-up that says the answer was wrong teaches the router; a fork is a different run, not a correction.
         if (parent && forkOfStep == null) await learn.correction({ store: s, parent, text: body.task, now: () => s.now() }).catch(() => {});
         if (webhooks.length && webhookQueue) await webhookQueue.enqueue(out.task.id, 'queued');
@@ -104,4 +120,4 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     return out;
 }
 
-module.exports = { createTask, untilMidnight };
+module.exports = { createTask, untilMidnight, setSharing };

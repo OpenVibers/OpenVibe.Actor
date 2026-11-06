@@ -306,6 +306,24 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
             const parts = url.pathname.replace(/^\/api\/v1\/projects\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
             return await projectsApi(req, raw, json, u, parts, url.searchParams);
         }
+        // The sharing system's (openvibe-sdk/share) name lookups and notifications.
+        if (url.pathname === '/internal/identity/resolve' && req.method === 'GET') {
+            const name = String(url.searchParams.get('username') || '').toLowerCase();
+            const u = st.byUsername.get(name);
+            if (!u) return problem(json, 404, 'identity.name_not_found', 'no such person');
+            return json(200, { subject: { type: 'user', id: u.subject }, username: u.username, display_name: u.display_name });
+        }
+        if (url.pathname === '/internal/identity/resolve-batch' && req.method === 'POST') {
+            const ids = JSON.parse(raw.toString('utf8') || '{}').subject_ids || [];
+            const results = {};
+            for (const subjectId of ids) {
+                const u = [...st.users.values()].find((x) => x.subject === subjectId);
+                if (u) results[subjectId] = { subject: { type: 'user', id: u.subject }, username: u.username, display_name: u.display_name };
+            }
+            return json(200, { results });
+        }
+        if (url.pathname === '/internal/notifications/push' && req.method === 'POST') return json(200, { ok: true });
+
         return json(404, { error: 'not found' });
     });
     issuer = srv.url;
