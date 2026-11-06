@@ -43,6 +43,7 @@ function createApi(ctx) {
     r.use(express.json({ limit: '64kb' }));
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
     r.use(principal.middleware);
+    r.use('/chat-apps', require('../chat-apps/routes').router(ctx));
 
     // An Action Center read is a first-party service acting for one person, named in the query. A person's own token
     // never reaches another person's items through it.

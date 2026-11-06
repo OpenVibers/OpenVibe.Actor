@@ -21,7 +21,7 @@ function untilMidnight(nowMs) {
     return Math.ceil((Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1) - n.getTime()) / 1000);
 }
 
-async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, afterInsert = null, parentId = null, forkOfStep = null, forkChange = null }) {
+async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, chatContext = null, afterInsert = null, parentId = null, forkOfStep = null, forkChange = null }) {
     const v = contracts.validate('actor.task-create-request@1', body);
     if (!v.valid) return { status: 422, code: 'actor.task.invalid', detail: (v.errors || []).map((e) => `${e.path || e.instancePath || ''} ${e.message}`.trim()).join('; ').slice(0, 500) || 'invalid request' };
     const tier = config.allowance;
@@ -91,6 +91,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         // What belongs with the task from its first moment (the chat's attached files), in the same transaction: the
         // engine starts it only after this commits, so the run never begins without them.
         if (afterInsert) await afterInsert(row);
+        if (chatContext) await s.db.query('INSERT INTO actor_chat_tasks (task_id, agent_id, policy, conversation) VALUES ($1, $2, $3, $4)', [row.id, chatContext.agentId, chatContext.policy, chatContext.conversation]);
         return { status: 201, task: row };
     });
     // The engine starts the task only once its row has committed; a webhook that asked for `queued` hears it now.

@@ -129,7 +129,7 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
     function definitions(ctx = {}) {
         const { requester = null, mode = null } = ctx;
         return [...byName.values()]
-            .filter((t) => allowedBy(t.scope, { requester, mode }))
+            .filter((t) => allowedBy(t.scope, { requester, mode }) && require('../../chat-apps/policy').allowed(t, ctx.chatPolicy))
             .filter((t) => (typeof t.available === 'function' ? t.available(ctx) !== false : true))
             .map((t) => ({
                 type: 'function',
@@ -149,6 +149,10 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
         const tool = byName.get(name) || dynamic;
         if (!tool) return { text: JSON.stringify({ error: `unknown tool ${name}` }), data: null, sources: [], isError: true };
         if (!allowedBy(tool.scope, ctx)) return { text: JSON.stringify({ error: `tool ${name} is not available for this task` }), data: null, sources: [], isError: true };
+        if (!require('../../chat-apps/policy').allowed(tool, ctx.chatPolicy)) return normalize({ text: 'This tool is unavailable in this chat.', isError: true });
+        if (ctx.chatPolicy && tool.acts === true) {
+            if (!ctx.approveChatTool || !await ctx.approveChatTool(name, input)) return normalize({ text: 'The action was not approved. Nothing ran.', isError: true });
+        }
         const signal = ctx.signal;
         const timeoutMs = Math.min(tool.timeoutMs || DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
         const timeout = AbortSignal.timeout(timeoutMs);
