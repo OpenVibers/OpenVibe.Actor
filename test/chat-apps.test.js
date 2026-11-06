@@ -40,6 +40,9 @@ const { createRegistry } = require('../server/runtime/tools');
         assert.equal(decisions.filter(Boolean).length, 1);
         assert.equal(await pending, true);
         assert.ok((await s.db.maybe('SELECT consumed_at FROM actor_chat_approvals WHERE id = $1', [ask.id])).consumed_at);
+        // Every argument must fit the approval card: a larger call is refused, not truncated or shown in part.
+        assert.equal(await policy.approve(s, { taskId, owner, tool: 'send_message', input: { text: 'x'.repeat(1300) }, signal: new AbortController().signal }), false);
+        assert.equal(Number(await s.db.value('SELECT count(*) FROM actor_chat_approvals')), 1, 'the large call wrote no approval row');
         const registry = createRegistry({ strict: true });
         let calls = 0, gates = 0;
         registry.byName.set('send_message', { name: 'send_message', scope: 'public', acts: true, input: { type: 'object' }, description: 'send', run: async () => { calls++; return { text: 'sent' }; } });
