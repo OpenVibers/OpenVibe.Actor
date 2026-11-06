@@ -37,10 +37,11 @@ function aiModels(calls) {
 
 (async () => {
     const calls = [];
+    const seenChoices = [];
     const models = aiModels(calls);
     // The loop, reduced to one model call: what matters here is which model the run's calls go to.
     const loop = {
-        run: async ({ task }) => { const r = await models.chat({ tier: 'smart', messages: [{ role: 'user', content: task }] }); return { text: r.text, state: {} }; },
+        run: async ({ task }) => { seenChoices.push(models.currentChoice()); const r = await models.chat({ tier: 'smart', messages: [{ role: 'user', content: task }] }); return { text: r.text, state: {} }; },
         close: async () => {}, planText: () => '', escalate: async () => null, revise: async () => null,
     };
     const t = await boot({ models, loop });
@@ -81,6 +82,8 @@ function aiModels(calls) {
             const row = await t.waitFor(made.json().id);
             assert.strictEqual(row.state, 'succeeded', JSON.stringify([row.error_code, row.error_detail]));
             assert.ok(calls.every((c) => !c.headers['x-openvibe-credential']), 'no person credential');
+            // The AI layer (ACTOR_AI_ROUTER) needs the person on every call even with no key chosen: on_behalf_of.
+            assert.strictEqual(seenChoices[seenChoices.length - 1].subject, kim.subject || kim.id, 'the run names its person for the router');
         });
 
         await check('private mode stays on OpenVibe\'s own open model even when it is set to the computer', async () => {
