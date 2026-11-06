@@ -17,13 +17,15 @@
  */
 
 const KINDS = new Set(['model', 'tool', 'check', 'judge', 'delegate']);
-const MAX_NAME = 120;
+// 256 is OpenVibe.AI's own limit for a requested model, so an exact id (org/model[:quant]@revision) is kept whole.
+const MAX_NAME = 256;
 const MAX_SHORT = 64;
 
 const clip = (s, n) => { const t = String(s == null ? '' : s); return t.length > n ? t.slice(0, n) : t; };
 // A name is an identifier (a model id or a tool name), never a sentence: anything that is not identifier-shaped becomes
-// an underscore, so a provider echoing a prompt in its model id cannot put the person's words in a span.
-const safeName = (s) => clip(String(s == null ? '' : s).replace(/[^a-zA-Z0-9._:/-]+/g, '_'), MAX_NAME);
+// an underscore, so a provider echoing a prompt in its model id cannot put the person's words in a span. `@` is the
+// revision mark of an exact AI Exchange id (D3), so it is kept as itself.
+const safeName = (s) => clip(String(s == null ? '' : s).replace(/[^a-zA-Z0-9._:@/-]+/g, '_'), MAX_NAME);
 const short = (v, n = MAX_SHORT) => (typeof v === 'string' && /^[a-zA-Z0-9_.:-]+$/.test(v) ? v.slice(0, n) : null);
 const intOrNull = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.round(Number(v)) : null));
 

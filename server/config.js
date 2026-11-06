@@ -111,6 +111,10 @@ function load(env = process.env) {
             },
             // The per-call liability ceiling (USD, exact decimal) AI holds against the person's Balance. Unset: no cap.
             maxCostUsd: optNum(env.ACTOR_AI_MAX_COST_USD),
+            // The AI Exchange catalog (PLAN G-P9), off by default: GET /v1/models from OpenVibe.AI, cached, to offer
+            // its aliases and exact ids where a person picks the model their tasks run on. Off, the model field is
+            // the plain one it was before.
+            catalog: env.ACTOR_AI_CATALOG === '1' || env.ACTOR_AI_CATALOG === 'true',
         },
         // The model providers behind the agent systems (server/agents/catalog.js). A provider without its key is
         // listed as unavailable, with the reason; nothing is invented. Keys are the operator's.
@@ -192,7 +196,7 @@ function load(env = process.env) {
         allowance: {
             tasksPerDay: Math.max(0, int(env.ACTOR_FREE_TASKS_PER_DAY, 20)),
             perTaskUsd: num(env.ACTOR_FREE_PER_TASK_USD, 0.05),
-            perDayUsd: num(env.ACTOR_FREE_PER_DAY_USD, 0.25),
+            perDayUsd: num(env.ACTOR_FREE_PER_DAY_USD, 0.05),
         },
         spendCapUsdPerDay: num(env.ACTOR_MAX_COST_USD_PER_DAY, 2),
         agents: {

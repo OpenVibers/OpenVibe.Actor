@@ -25,7 +25,8 @@
  * cost_usd goes back to the caller, which meters it (the task's `meter`).
  *
  * createModels({ config, rates, fetchImpl, log, now }) → {
- *   warm(), chat(...), resolve(tier, { avoidFamily }), tierList(), modelList(), providerList(), tierConfig
+ *   warm(), chat(...), resolve(tier, { avoidFamily }), tierList(), modelList(), providerList(), tierConfig,
+ *   aiCatalog()   OpenVibe.AI's aliases and exact ids (PLAN G-P9; ACTOR_AI_CATALOG, cached ~5 minutes)
  * }
  */
 
@@ -35,6 +36,7 @@ const { createClient: createSdkClient } = require('openvibe-sdk/core');
 const { createAiClient } = require('openvibe-sdk/ai');
 const { createServiceTokenClient } = require('openvibe-sdk/auth');
 const { chatClient, priceUsage, readStream, ProviderError } = require('../agents/providers');
+const aiCatalogLib = require('./ai-catalog');
 
 class ModelError extends Error {
     constructor(message, { code = 'actor.model.unavailable' } = {}) { super(message); this.code = code; }
@@ -307,6 +309,40 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         } catch { return null; }
     }
 
+    // ── OpenVibe.AI's model catalog (PLAN G-P9), behind ACTOR_AI_CATALOG ───────────────────────────
+    // GET /v1/models, read with the same service token, for the aliases and exact ids a person may pick. Cached for
+    // about five minutes, failures included: a failed read is today's behaviour for the next few minutes, never a
+    // broken page or a retry storm.
+    let aiCatalogCache = null;   // { at, entries } — entries null when the flag is on but the read failed/legacy
+    let aiCatalogInFlight = null;
+    const aiCatalogOn = () => Boolean(ai.catalog);   // D11 owner settings: read live
+
+    /** The catalog's entries (aliases first, then exact ids), or null: today's model field, unchanged. */
+    async function aiCatalog() {
+        if (!aiCatalogOn()) return null;
+        const at = now();
+        if (aiCatalogCache && at - aiCatalogCache.at < aiCatalogLib.CACHE_MS) return aiCatalogCache.entries;
+        if (aiCatalogInFlight) return aiCatalogInFlight;
+        aiCatalogInFlight = (async () => {
+            let entries = null;
+            const tokens = aiTokenClient();
+            if (tokens && ai.url) {
+                try {
+                    const res = await fetchImpl(trimSlash(ai.url) + '/v1/models', {
+                        headers: { accept: 'application/json', ...(await tokens.authHeaders()) },
+                        signal: AbortSignal.timeout(Math.max(500, cfg.listTimeoutMs || 5000)),
+                    });
+                    if (res.ok) entries = aiCatalogLib.parse(await res.json());
+                } catch (err) {
+                    if (log && log.warn) log.warn('[Actor] OpenVibe.AI model catalog:', (err && err.message) || err);
+                }
+            }
+            aiCatalogCache = { at: now(), entries };
+            return entries;
+        })().finally(() => { aiCatalogInFlight = null; });
+        return aiCatalogInFlight;
+    }
+
     /** Run the rest of the work with this person's model choice in force. */
     function withChoice(choice, fn) {
         return choiceStore.run(choice || null, fn);
@@ -383,6 +419,11 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                 const said = String(msg || '').trim();
                 throw new ModelError(said ? said.charAt(0).toUpperCase() + said.slice(1) : 'This service may not use your key yet', { code: 'actor.model.not_allowed' });
             }
+            // An exact id AI refuses (PLAN G-P9): shown as that refusal, never retried on another model. AI's own
+            // message says why (no such artifact, or one that cannot run this request).
+            if ((res.status === 404 && code === 'ai.model_not_found') || (res.status === 400 && code === 'ai.model_unavailable')) {
+                throw new ModelError(clip(msg, 300), { code });
+            }
             throw new ProviderError('HTTP ' + res.status + ': ' + clip(msg, 300), { status: res.status, code: res.status === 429 ? 'actor.provider.rate_limited' : 'actor.provider.error' });
         }
         if (onDelta) answer = await readStream(res, onDelta, { signal, who: 'OpenVibe.AI' });
@@ -391,13 +432,18 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         const message = first.message || { role: 'assistant', content: '' };
         const u = answer.usage || {};
         const usage = { input: u.prompt_tokens || 0, cached: 0, output: u.completion_tokens || 0 };
-        const x = answer.x_openvibe || {};
+        // The run disclosure (D3', PLAN G-P9): x_openvibe already carries the cost; resolved_model names the artifact
+        // that answered, so this is the model every existing model/cost record and page shows. Absent (the catalog is
+        // off on AI), the upstream model name is kept exactly as before.
+        const x = answer.x_openvibe && typeof answer.x_openvibe === 'object' ? answer.x_openvibe : {};
+        const resolved = typeof x.resolved_model === 'string' && x.resolved_model.trim() ? x.resolved_model.trim() : null;
         return {
             message,
             text: typeof message.content === 'string' ? message.content : '',
             toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [],
             finish: first.finish_reason || null,
-            model: answer.model || choice.model || 'openvibe',
+            model: resolved || answer.model || choice.model || 'openvibe',
+            resolved_model: resolved,
             usage,
             // AI prices the call (it knows the provider, and whether the person's own key paid for it).
             cost_usd: Number(x.cost_usd) || 0,
@@ -563,7 +609,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     return {
-        warm, chat, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys,
+        warm, chat, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },
         listErrors: () => ({ ...listErrors }),

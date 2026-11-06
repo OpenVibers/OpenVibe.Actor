@@ -224,7 +224,7 @@ function createApi(ctx) {
             if (r.error) return problem(req, res, 422, 'actor.model.invalid', r.error);
             if (body.choice === undefined && body.model === undefined) return res.json({ ...modelPrefs.wire(await modelPrefs.get(s, req.principal.requester)), keys: null });
         }
-        const out = await modelPrefs.put(s, req.principal.requester, body);
+        const out = await modelPrefs.put(s, req.principal.requester, body, { exactIds: Boolean(config.ai && config.ai.catalog) });
         if (out.error) return problem(req, res, 422, 'actor.model.invalid', out.error);
         res.json({ ...modelPrefs.wire(out.row), keys: null });
     });

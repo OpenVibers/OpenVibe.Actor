@@ -20,6 +20,7 @@ const { testDb } = require('./helpers/db');
 const EXEMPT = {
     account_data_events: 'the ledger of requests itself: which export and deletion Actor applied',
     actor_brain_outcomes: 'counts of outcomes by task kind, tier and tool: no person column and no task text',
+    config_snapshots: 'D11 configuration revisions: created_by names the owner who changed a setting, not a person\'s account data',
 };
 
 const A = 'usr_01JZ0000000000000000000AAA';

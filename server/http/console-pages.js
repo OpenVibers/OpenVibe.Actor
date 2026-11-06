@@ -15,6 +15,7 @@ const { asyncRouter } = require('./router');
 const { html, raw, time } = require('../render/html');
 const { send } = require('../render/layout');
 const store = require('../tasks/store');
+const { leftLine } = require('../tasks/allowance');
 const personal = require('../agents/personal');
 const approvals = require('../agents/approvals');
 const catalog = require('../agents/catalog');
@@ -69,10 +70,11 @@ function createConsolePages(ctx, { robots = null, computers = null } = {}) {
         return from ? `${ask}${ask ? '\n\n' : ''}(On this page: ${from})` : ask;
     }
 
-    function commandBox(start = '') {
+    function commandBox(start = '', today = null) {
         return html`<form class="cn-command" method="post" action="/tasks" aria-labelledby="cn-command-h">
 <h2 id="cn-command-h" class="cn-sr">Give Actor a task</h2>
 <label class="cn-sr" for="cn-task">What should Actor do?</label>
+${today ? html`<p class="cn-note" data-allowance>${leftLine(tier, today)}</p>` : ''}
 <textarea id="cn-task" name="task" rows="${start ? '4' : '2'}" maxlength="20000" required${start ? raw(' autofocus') : ''} placeholder="Tell Actor what to do: “check my site's certificate”, “what changed in my repo today?”, “drive my rover to the door”">${start}</textarea>
 <div class="cn-command-row"><label class="cn-mode">Mode <select name="mode">${MODES.map((m) => html`<option value="${m}"${m === 'balanced' ? raw(' selected') : ''}>${MODE_LABEL[m]}</option>`)}</select></label>
 <button class="cn-run" type="submit">Run it</button></div>
@@ -181,7 +183,7 @@ ${previewGrid()}`,
             scripts: live.length ? ['js/console.js'] : [],
             body: html`${live.length ? raw('<noscript><meta http-equiv="refresh" content="10"></noscript>') : ''}<header class="cn-head"${live.length ? raw(' data-live="10"') : ''}><p class="cn-eyebrow">OpenVibe.Actor · console · alpha</p><h1>Console</h1>
 <p class="cn-lede">What your agents, computers and robots are doing, and one box to tell them what to do next.</p></header>
-${commandBox(prefill(req))}
+${commandBox(prefill(req), today)}
 <div class="cn-grid">
 <section class="cn-card cn-wide" aria-labelledby="cn-now"><h2 id="cn-now">Now${live.length ? html` <span class="cn-count">${String(live.length)}</span>` : ''}</h2>
 ${live.length ? html`<ul class="cn-tasks">${live.map(taskRow)}</ul><p class="cn-note">This page refreshes every 10 seconds while something runs.</p>` : html`<p class="cn-empty">Nothing is running.</p>`}</section>
@@ -193,7 +195,7 @@ ${nWaiting ? '' : html`<p class="cn-empty">Nothing waits for you.</p>`}
 <section class="cn-card" aria-labelledby="cn-today"><h2 id="cn-today">Today</h2>
 <p class="cn-stat"><b>${String(today.tasks)}</b> of ${String(tier.tasksPerDay)} free tasks</p>
 <div class="cn-meter" role="progressbar" aria-label="Free tasks used today" aria-valuemin="0" aria-valuemax="${String(tier.tasksPerDay)}" aria-valuenow="${String(today.tasks)}"><span style="width:${String(pct(today.tasks, tier.tasksPerDay))}%"></span></div>
-<p class="cn-stat"><b>${usd(today.usd)}</b> of ${usd(tier.perDayUsd)}</p>
+<p class="cn-stat"><b>${usd(today.usd)}</b> of ${usd(tier.perDayUsd)} · ${leftLine(tier, today)}</p>
 <div class="cn-meter" role="progressbar" aria-label="Spent today" aria-valuemin="0" aria-valuemax="${String(tier.perDayUsd)}" aria-valuenow="${String(today.usd)}"><span style="width:${String(pct(today.usd, tier.perDayUsd))}%"></span></div>
 ${spendChart(week, { caption: 'Last 7 days' })}
 <p class="cn-more"><a href="/me/spend">Last 30 days</a> · <a href="/tasks">Your tasks</a></p></section>

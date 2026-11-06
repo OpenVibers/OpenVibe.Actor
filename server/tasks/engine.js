@@ -404,7 +404,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         : err && err.code === 'actor.budget.exceeded' ? 'actor.budget.exceeded'
                             : err && err.code === 'actor.checkpoint.invalid' ? 'actor.checkpoint.invalid'
                                 : err && err.code === 'actor.acting.unresolved' ? 'actor.acting.unresolved'
-                                    : 'actor.agent.failed';
+                                    // An exact AI Exchange id AI refused (PLAN G-P9): the person sees AI's own error.
+                                    : err && (err.code === 'ai.model_not_found' || err.code === 'ai.model_unavailable') ? err.code
+                                        : 'actor.agent.failed';
                     return await setState(id, 'failed', { error_code: code, error_detail: detail.slice(0, 2000), finished_at: iso() });
                 }
                 try {
