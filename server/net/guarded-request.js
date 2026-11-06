@@ -7,7 +7,9 @@
  * https only, a public address only, a timeout and a response cap. The address check is openvibe-shared/egress:
  * a name that resolves to localhost, to a private range or to a cloud metadata address is refused before a byte
  * is sent, and the check runs again at connect time (the safe lookup), so a name that answers 127.0.0.1 later
- * is refused too. Redirects are never followed: a 302 is a result, not a hop.
+ * is refused too. An IP literal is checked here because Node does not call the lookup for one: without this,
+ * https://127.0.0.1/ or https://169.254.169.254/ would reach this machine or cloud metadata. Redirects are never
+ * followed: a 302 is a result, not a hop.
  *
  *   const res = await request(url, { method: "POST", json: payload, headers, timeoutMs });
  *   const data = await json(url, { json: payload, headers });
@@ -15,6 +17,7 @@
  * A test injects lookup and isAllowed so a local fake server can be reached; production uses the defaults.
  */
 const https = require("https");
+const net = require("net");
 const egress = require("openvibe-shared/egress");
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -37,7 +40,10 @@ function checkUrl(url, { ports = ALLOWED_PORTS } = {}) {
     if (u.username || u.password) throw new GuardedError("a URL with a password in it is not allowed");
     const port = u.port || "443";
     if (!ports.includes(port)) throw new GuardedError("port " + port + " is not allowed; use 443 or 8443");
-    if (egress.isInternalName(u.hostname)) throw new GuardedError(u.hostname + " is not a public host name");
+    const host = egress.normalizeHost(u.hostname);
+    if (net.isIP(host) ? !egress.isPublicAddress(host) : egress.isInternalName(host)) {
+        throw new GuardedError(host + (net.isIP(host) ? " is not a public address" : " is not a public host name"));
+    }
     return u;
 }
 

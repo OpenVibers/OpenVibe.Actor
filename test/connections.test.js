@@ -20,6 +20,7 @@ const mcp = require("../server/connections/mcp");
 const a2a = require("../server/connections/a2a");
 const { actsFor, aliasOf, taskText } = require("../server/connections/service");
 const { shortlistTools } = require("../server/runtime/brain/shortlist");
+const { createRegistry } = require("../server/runtime/tools");
 const { createPrincipal } = require("../server/http/principal");
 
 const results = [];
@@ -89,8 +90,23 @@ function fakeMcp() {
             try { await egress.assertPublicUrl(url, { protocols: ["https:"] }); } catch { refused = true; }
             assert.ok(refused, url + " was not refused");
         }
+        // Node does not call the lookup for an IP literal, so checkUrl has to refuse it itself.
+        for (const url of ["https://127.0.0.1/mcp", "https://10.0.0.5/mcp", "https://192.168.1.4/mcp", "https://169.254.169.254/latest/meta-data", "https://[::1]/mcp", "https://[::ffff:127.0.0.1]/mcp"]) {
+            assert.throws(() => checkUrl(url), /not a public (address|host name)/, url + " was not refused by checkUrl");
+        }
         assert.throws(() => checkUrl("http://example.com/mcp"), /not allowed/);
         assert.throws(() => checkUrl("https://example.com:8080/mcp"), /port/);
+    });
+
+    await ok("a private IP literal is refused before any connection is made", async () => {
+        let hits = 0;
+        const server = https.createServer(cert(fs.mkdtempSync(path.join(os.tmpdir(), "actor-guard-"))), (req, res) => { hits++; res.end("internal"); });
+        await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const port = server.address().port;
+        try {
+            assert.throws(() => request(`https://127.0.0.1:${port}/mcp`, { ports: [String(port)], timeoutMs: 2000 }), /not a public address/);
+            assert.strictEqual(hits, 0, "the guard connected to a private address");
+        } finally { await new Promise((resolve) => server.close(resolve)); }
     });
 
     await ok("a fake MCP server lists its tools and answers a call", async () => {
@@ -131,6 +147,32 @@ function fakeMcp() {
         assert.ok(short.length <= 41, "the shortlist is not longer than the limit: " + short.length);
         assert.ok(short.some((d) => d.function.name === "tool_7"), "the tool that fits the step was kept");
         assert.strictEqual(shortlistTools(defs.slice(0, 10), state).length, 10, "below the limit every tool is offered");
+    });
+
+    await ok("a connector tool follows the chat policy and asks before it acts", async () => {
+        const registry = createRegistry({ strict: true });
+        let calls = 0;
+        let gates = 0;
+        const tool = {
+            name: "mcp:cnx_TEST:write_note", alias: "mcp__cnx_TEST__write_note", scope: "person", acts: true,
+            input: { type: "object", properties: {} }, description: "Write a note.", run: async () => { calls++; return { text: "wrote" }; },
+        };
+        const ctx = {
+            requester: "user:usr_test", chatPolicy: "answer_only",
+            approveChatTool: async () => { gates++; return true; }, dynamicTools: new Map([[tool.alias, tool]]),
+        };
+        assert.equal((await registry.run(tool.alias, {}, ctx)).isError, true, "answer_only never reaches an acting connector");
+        assert.deepStrictEqual([calls, gates], [0, 0]);
+        // A person-scope connector is never offered to a group, even one that may act with approvals.
+        assert.equal((await registry.run(tool.alias, {}, { ...ctx, chatPolicy: "act_with_approvals" })).isError, true);
+        assert.deepStrictEqual([calls, gates], [0, 0]);
+        // In a direct message the person's approval is the gate: a refused or missing one runs nothing.
+        assert.equal((await registry.run(tool.alias, {}, { ...ctx, chatPolicy: "dm", approveChatTool: async () => { gates++; return false; } })).isError, true);
+        assert.deepStrictEqual([calls, gates], [0, 1]);
+        assert.equal((await registry.run(tool.alias, {}, { requester: ctx.requester, chatPolicy: "dm", dynamicTools: ctx.dynamicTools })).isError, true, "an acting tool without a person to ask does not run");
+        assert.strictEqual(calls, 0);
+        await registry.run(tool.alias, {}, { ...ctx, chatPolicy: "dm" });
+        assert.deepStrictEqual([calls, gates], [1, 2]);
     });
 
     await ok("the A2A card names the skills and the auth", async () => {

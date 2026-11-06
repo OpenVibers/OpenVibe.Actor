@@ -28,14 +28,16 @@
     "Free tier per person and an operator daily ceiling; costs metered per call at the published rate cards",
     "Pages: home with the task box, your tasks, a task's live page, the agents, the API reference, updates; robots, sitemap, llms.txt",
     "Account export and deletion (ADR-033): tasks, spend, personal agents and every memory note are exported and erased for the person",
-    "Personal agents v1 in the worktree: named instructions, editable memory, hourly/daily/weekly schedules, manual runs and ordinary Actor task limits; awaiting test run and deployment"
+    "Personal agents: named instructions, editable memory, hourly/daily/weekly schedules, manual and scheduled runs, and their own approval inbox before work on the person's machine",
+    "Reach from Chat (A4): Chat starts the person's own agent for a message (POST /api/v1/chat-apps/tasks, svc:chat acting for a linked person); a direct message runs with their memory, a group with the stranger's text as untrusted data and no personal tools, and an acting tool under act_with_approvals waits for the person's decision. Shipped with Chat #358 and Network #591 (Actor #296)",
+    "MCP servers and A2A agents as tools (V2-11): a person connects their own MCP server by URL or an OpenVibe-offered one on /connections, turns each tool on, and the run calls it like any other tool; ask_agent talks to a connected A2A agent. Every call goes through the egress guard, is recorded as evidence with the server and tool as its source, and follows the run's approval policy (Actor #206)",
+    "Task webhooks on state changes: up to 8 https endpoints per task, signed with the task's own secret (or a project secret by reference), retried with backoff, with a delivery log on the task page and public addresses only"
   ],
   "notYet": [
     "Browser and desktop agents on OpenVibe's own servers (OpenVibe.Run workers), watchable and taken over",
     "Coding tasks through OpenVibe.Codes on hosted sandboxes (listed as unavailable with the reason)",
     "More agent platforms, bring-your-own keys through OpenVibe.AI, paid tiers through OpenVibe.Billing",
-    "Personal agent Events triggers, approvals, reach from Chat and the Frame",
-    "Webhooks on task state changes"
+    "Personal agent Events triggers, the rest of the approval inbox (only coding tasks ask today) and the Frame"
   ],
   "capabilitiesRegistered": true,
   "serviceManifestRegistered": true,
@@ -49,7 +51,9 @@
     "private mode on OpenVibe hardware",
     "cross-family answer checks",
     "live task progress",
-    "task webhooks (signed per task, retried with backoff, public https endpoints only)"
+    "task webhooks (signed per task, retried with backoff, public https endpoints only)",
+    "MCP servers and A2A agents as tools (V2-11; egress guard, evidence, approval policy)",
+    "reach from Chat (A4; chat apps' agent, approvals and group policy)"
   ],
   "updated": "2026-11-06"
 }
