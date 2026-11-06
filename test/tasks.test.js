@@ -375,17 +375,25 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         const store = require('../server/tasks/store');
         const u = t.network.addUser('burst');
         const who = `user:${u.subject}`;
-        const { perTaskUsd, perDayUsd } = t.config.allowance;
-        const fit = Math.floor(perDayUsd / perTaskUsd + 1e-9);
-        // `fit` tasks are open (queued) with nothing spent yet: their budgets are reserved.
-        for (let i = 0; i < fit; i++) {
-            await store.insertTask(t.ctx.s, { id: t.ctx.s.newId('tsk'), requester: who, task: `open ${i}`, mode: 'balanced', budget_task: perTaskUsd, budget_day: perDayUsd, created_at: t.ctx.s.iso() });
+        // This boot's day is generous (many suites run here); give this check a day of one task's worth, so filling
+        // it takes one open reservation rather than thousands.
+        const saved = t.config.allowance.perDayUsd;
+        t.config.allowance.perDayUsd = t.config.allowance.perTaskUsd;
+        try {
+            const { perTaskUsd, perDayUsd } = t.config.allowance;
+            const fit = Math.floor(perDayUsd / perTaskUsd + 1e-9);
+            // `fit` tasks are open (queued) with nothing spent yet: their budgets are reserved.
+            for (let i = 0; i < fit; i++) {
+                await store.insertTask(t.ctx.s, { id: t.ctx.s.newId('tsk'), requester: who, task: `open ${i}`, mode: 'balanced', budget_task: perTaskUsd, budget_day: perDayUsd, created_at: t.ctx.s.iso() });
+            }
+            assert.strictEqual((await store.spendToday(t.ctx.s, who)).usd, 0, 'nothing has accrued yet');
+            const r = await create({ task: 'one too many' }, { as: u });
+            assert.strictEqual(r.status, 429, r.text);
+            assert.strictEqual(r.json().code, 'actor.budget.day_spent');
+        } finally {
+            t.config.allowance.perDayUsd = saved;
+            await t.ctx.s.db.query("UPDATE tasks SET state = 'cancelled' WHERE requester = $1", [who]);
         }
-        assert.strictEqual((await store.spendToday(t.ctx.s, who)).usd, 0, 'nothing has accrued yet');
-        const r = await create({ task: 'one too many' }, { as: u });
-        assert.strictEqual(r.status, 429, r.text);
-        assert.strictEqual(r.json().code, 'actor.budget.day_spent');
-        await t.ctx.s.db.query("UPDATE tasks SET state = 'cancelled' WHERE requester = $1", [who]);
     });
 
     await check('the operator\'s daily ceiling over everyone stops new tasks', async () => {
