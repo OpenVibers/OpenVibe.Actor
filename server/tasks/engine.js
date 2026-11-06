@@ -362,6 +362,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // "Runs on: my computer": the model on the person's computer, whatever else they chose above it (a
                 // model id they gave for their computer is kept).
                 if (runsOn === 'computer' && !(choice && choice.provider === 'node')) choice = modelPrefs.computerChoice(row.requester);
+                // The person the task belongs to rides on every router call (on_behalf_of): their allowance pays,
+                // even when they chose no key. A task with no person (a watch, a webhook) names nobody, and AI
+                // serves it from free or untolled capacity only.
+                if (!choice || !choice.subject) {
+                    const subject = String(row.requester || '').startsWith('user:') ? row.requester.slice(5) : null;
+                    if (subject) choice = { ...(choice || {}), subject };
+                }
                 try {
                     out = await withChoice(models, choice, async () => loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,

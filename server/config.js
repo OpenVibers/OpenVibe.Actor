@@ -12,6 +12,7 @@ const int = (v, def) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : de
 const num = (v, def) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : def);
 // An optional price: undefined when nobody typed one, so the provider's published card is used.
 const optNum = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : undefined);
+const bool = (v) => /^(1|true|on|yes)$/i.test(String(v == null ? '' : v).trim());
 // A JSON list from the environment (the connector servers OpenVibe offers); a broken value is no list, never a crash.
 const jsonList = (v) => { if (!v) return []; try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } };
 
@@ -82,10 +83,10 @@ function load(env = process.env) {
         },
         cookies: { secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction },
 
-        // OpenVibe.AI (plan L55 C3): the model gateway a person's own keys live in. Actor holds NO provider key of
-        // its own for this: it asks AI to run the call, and AI answers with the key the person chose (their own,
-        // sealed in AI's vault) or with OpenVibe's own keys. The token is Actor's service token for audience
-        // openvibe.ai (the grant: ai.run.create, namespace ai.complete); the person is named in the request.
+        // OpenVibe.AI (plan L55 C3): the model gateway a person's own keys live in, and — with the router on — the
+        // model layer of this product. Actor then holds NO provider key at all: every model call is a run of
+        // ai.complete on AI, which picks the offer (price, latency, policy) for each tier and says which model ran.
+        // The token is Actor's service token for audience openvibe.ai (the grant: ai.run.create, namespace ai.complete).
         ai: {
             url: trim(env.OV_AI_URL || 'https://ai.openvibe.services'),
             audience: 'openvibe.ai',
@@ -93,6 +94,23 @@ function load(env = process.env) {
             clientId: env.OV_OAUTH_CLIENT_ID || 'actor',
             clientSecret: env.OV_OAUTH_CLIENT_SECRET || '',
             timeoutMs: Math.max(5000, int(env.ACTOR_AI_TIMEOUT_MS, 180_000)),
+            waitMs: Math.max(1000, int(env.ACTOR_AI_WAIT_MS, 120_000)),
+            // The AI layer of every product: with this on, the tiers below run on AI's router and the operator's
+            // provider keys (ACTOR_DEEPSEEK_API_KEY, ACTOR_OPENAI_API_KEY, …) are not used. Off by default so a
+            // self-hosted Actor keeps its own model choices; production sets ACTOR_AI_ROUTER=1.
+            router: bool(env.ACTOR_AI_ROUTER),
+            // Each tier's policy on the router: floor and ceiling in one name (economy = cheapest healthy, fast =
+            // quickest, balanced = price and latency, auto = the router's own, private = OpenVibe-run/local only).
+            // An exact id (<org>/<model>@<revision>) pins a model when AI's catalog is on.
+            models: {
+                fast: env.ACTOR_AI_MODEL_FAST || 'openvibe/economy',
+                smart: env.ACTOR_AI_MODEL_SMART || 'openvibe/balanced',
+                best: env.ACTOR_AI_MODEL_BEST || 'openvibe/auto',
+                check: env.ACTOR_AI_MODEL_CHECK || 'openvibe/economy',
+                vision: env.ACTOR_AI_MODEL_VISION || 'openvibe/auto',
+            },
+            // The per-call liability ceiling (USD, exact decimal) AI holds against the person's Balance. Unset: no cap.
+            maxCostUsd: optNum(env.ACTOR_AI_MAX_COST_USD),
         },
         // The model providers behind the agent systems (server/agents/catalog.js). A provider without its key is
         // listed as unavailable, with the reason; nothing is invented. Keys are the operator's.

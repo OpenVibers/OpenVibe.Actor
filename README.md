@@ -139,7 +139,8 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
   - **Limits:** 5 asks an hour per person and 60 across everyone (`ACTOR_CHAT_ASKS_PER_HOUR`, `ACTOR_CHAT_ASKS_ALL_PER_HOUR`). Past a limit, one reply says so and further asks are dropped quietly.
   - **Data:** `actor_chat_asks` (migration 0009) is part of the person's export and erasure.
   - `ACTOR_CHAT_ASKS=0` turns it off.
-- **The model providers**: DeepSeek (`ACTOR_DEEPSEEK_API_KEY`, `api.deepseek.com`), OpenAI (`ACTOR_OPENAI_API_KEY`, `api.openai.com/v1`) for the web-search agent and the cross-family check, and an OpenAI-compatible local server (`ACTOR_LOCAL_LLM_URL`) for private mode.
+- **Models: OpenVibe.AI's router** (`ACTOR_AI_ROUTER=1`, set in production). Every model call is a run of `ai.complete` on OpenVibe.AI with Actor's service token (audience `openvibe.ai`, `ai.run.create`); each tier names a policy on it — `fast` `openvibe/economy`, `smart` `openvibe/balanced`, `best` `openvibe/auto`, `check` `openvibe/economy`, `vision` `openvibe/auto` (`ACTOR_AI_MODEL_*`) — and AI picks the offer by price, latency, uptime and policy, fails over, and says which model ran. The person a task belongs to rides as `on_behalf_of`: their allowance and their Balance pay, and the run is theirs. `ACTOR_AI_MAX_COST_USD` caps each call. **Actor then holds no provider key**: `ACTOR_DEEPSEEK_API_KEY`, `ACTOR_OPENAI_API_KEY`, `ACTOR_LOCAL_LLM_URL`/`ACTOR_LOCAL_LLM_MODEL`, `ACTOR_RUNTIME_*` and `ACTOR_COMPAT_*` are unused (the cross-family check is one family now: the verdict says so). A person can still bring their own key, sealed in OpenVibe.AI.
+- **The model providers** (a self-hosted Actor, router off): DeepSeek (`ACTOR_DEEPSEEK_API_KEY`, `api.deepseek.com`), OpenAI (`ACTOR_OPENAI_API_KEY`, `api.openai.com/v1`) for the web-search agent and the cross-family check, and an OpenAI-compatible local server (`ACTOR_LOCAL_LLM_URL`) for private mode.
 
 **Programs:** poppler-utils' `pdftotext` reads the text of a PDF attached in the chat (`ACTOR_PDFTOTEXT` names another path); without it a PDF is kept but its text is not read, and the run is told so.
 
@@ -178,7 +179,7 @@ A self-hosted Actor ([docs/self-host.md](docs/self-host.md)): `npm run selfhost:
 See [.env.example](.env.example). Required in production:
 - `OV_OAUTH_CLIENT_SECRET` (the `actor` principal; `server/setup/service-principal.js create actor` on the Network writes it);
 - `BASE_URL`, `DATABASE_URL` and `DATABASE_DIRECT_URL`;
-- at least one agent: `ACTOR_DEEPSEEK_API_KEY`, `ACTOR_OPENAI_API_KEY`, or `ACTOR_LOCAL_LLM_URL` + `ACTOR_LOCAL_LLM_MODEL`.
+- at least one agent: `ACTOR_AI_ROUTER=1` (OpenVibe.AI's router), or `ACTOR_DEEPSEEK_API_KEY`, `ACTOR_OPENAI_API_KEY`, or `ACTOR_LOCAL_LLM_URL` + `ACTOR_LOCAL_LLM_MODEL`.
 
 Readiness requires the database and at least one available agent.
 

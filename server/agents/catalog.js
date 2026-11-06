@@ -102,9 +102,17 @@ function effective(agent, config) {
     };
 }
 
+/** Is the OpenVibe.AI router this server's model layer? (ACTOR_AI_ROUTER, with a Network client secret.) */
+function routerOn(config) {
+    const ai = config && config.ai;
+    return Boolean(ai && ai.router && ai.url && ai.clientSecret);
+}
+
 /** Is the agent usable with this configuration? { available, reason }. */
 function availability(agent, config) {
     const p = config.providers || {};
+    // The runtime's model comes from OpenVibe.AI's router: this server holds no provider key at all.
+    if (agent.id === 'openvibe-runtime' && routerOn(config)) return { available: true };
     if (agent.id === 'openvibe-runtime' && runtimeOverride(config)) return { available: true };
     if (agent.providerKey === 'deepseek') return p.deepseek && p.deepseek.apiKey ? { available: true } : { available: false, reason: 'no DeepSeek key is configured on this server' };
     if (agent.providerKey === 'openai') return p.openai && p.openai.apiKey ? { available: true } : { available: false, reason: 'no OpenAI key is configured on this server' };
@@ -118,6 +126,7 @@ function availability(agent, config) {
 
 /** The model an agent runs with this configuration (for the listing and the task's explanation). */
 function modelOf(agent, config) {
+    if (agent.id === 'openvibe-runtime' && routerOn(config)) return config.ai.models && config.ai.models.smart ? config.ai.models.smart : 'openvibe';
     if (agent.id === 'openvibe-runtime' && runtimeOverride(config)) return runtimeOverride(config).model;
     const p = (config.providers || {})[agent.providerKey];
     return p && p.model ? p.model : undefined;
