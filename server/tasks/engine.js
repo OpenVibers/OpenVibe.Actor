@@ -312,8 +312,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', text: `This is a "${cls}" task.` });
             // Asked in a public chat (chat/asks.js): the answer is posted where everyone reads it, so only what needs
             // nothing of the person's own — never their computers, robots or code on their machine.
-            const fromChat = row.via === 'chat';
-            if (fromChat && !PUBLIC_CLASSES.includes(cls)) {
+            const chatContext = await s.db.maybe('SELECT * FROM actor_chat_tasks WHERE task_id = $1', [id]);
+            const chatPolicy = chatContext ? chatContext.policy : null;
+            const fromChat = row.via === 'chat' || (chatPolicy && chatPolicy !== 'dm');
+            if (chatPolicy && (!loop || !models)) return await setState(id, 'failed', { error_code: 'actor.chat.unavailable', error_detail: 'The chat agent is unavailable.', finished_at: iso() });
+            if (fromChat && !chatPolicy && !PUBLIC_CLASSES.includes(cls)) {
                 return await setState(id, 'failed', { error_code: 'actor.task.not_public', error_detail: 'Asked in a public chat, Actor uses public tools only: ask on openvibe.actor to use your own computers, robots or code.', finished_at: iso() });
             }
             // Where the person's tasks run (plan L55 C3, /chat/model): 'computer' sends every model call of the loop to
@@ -325,11 +328,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // Actor v2: every non-private task that is not code-only runs through the one loop. Private mode keeps
             // the local model with no network tools, and a coding task keeps the Codes agent (which the loop can also
             // reach as codes_task). Approval inbox, budgets, cancel, webhooks and the event stream are unchanged.
-            if (loop && models && row.mode !== 'private' && cls !== 'code') {
+            if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy)) {
                 const agentId = LOOP_AGENT;
                 // The person-authored part of the task (never a run input that may come from a watch or a webhook),
                 // and the personal agent this run is for, so the memory tools scope their writes.
-                const ownAgent = /^agent:agt_/.test(String(row.via || '')) ? row.via.slice(6) : null;
+                const ownAgent = chatContext && chatPolicy === 'dm' ? chatContext.agent_id : /^agent:agt_/.test(String(row.via || '')) ? row.via.slice(6) : null;
                 const personText = ownAgent ? require('../agents/personal').personText(row.task)
                     : (row.via == null || row.via === 'chat' ? row.task : '');
                 const notifyTask = (kind, detail) => tellPerson(row, kind, detail || {});
@@ -372,6 +375,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         // The loop streams a model call only while such a reader is there (wanted).
                         delta: typeof stream.delta === 'function' ? Object.assign((d) => stream.delta(id, d), { wanted: () => stream.wants(id) }) : null,
                         meter, budgetLeft, waitForPerson, requestApproval,
+                        chatPolicy, approveChatTool: chatPolicy ? (tool, input) => require('../chat-apps/policy').approve(s, { taskId: id, owner: row.requester, tool, input, signal }) : null,
                         personText, agentId: ownAgent, notifyTask,
                         askPerson, control, resume, fork, spent: () => spent,
                         waits, waitEvent: wakePayload, attachments,

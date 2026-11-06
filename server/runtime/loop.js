@@ -846,7 +846,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
      * a span; and drives on from the step it stopped at. A checkpoint whose last step already answered is delivered
      * without another model call.
      */
-    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null }) {
+    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null }) {
         const source = resume && resume.state ? resume.state : (fork && fork.checkpoint && fork.checkpoint.state);
         const restored = restoreState(source);
         if (!restored) throw Object.assign(new Error('the saved step could not be read'), { code: 'actor.checkpoint.invalid' });
@@ -867,7 +867,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // delivers a saved final answer without calling the model again.
         if (fork) state.answered = false;
         const ctx = {
-            config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, artifacts,
+            config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, chatPolicy, approveChatTool, artifacts,
             store, now, agentId, personText: personText == null ? String(task) : String(personText),
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
@@ -889,11 +889,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // The live tool list, at most the checkpoint's allow-list. A tool the registry no longer offers is dropped; the
         // delegate is kept only for a "best" run that already had it (never added by a fork).
         // The waits (plan A2) travel with the tool list: wait_for offers itself only when the run may wait.
-    const offered = registry.definitions({ requester, mode, config, models, signal, artifacts, store, agentId, taskId, now, waits });
+    const offered = registry.definitions({ requester, mode, chatPolicy, config, models, signal, artifacts, store, agentId, taskId, now, waits });
         // The connector tools of this person (stage V2-11), at most the checkpoint's allow-list.
         const dynamic = await connectorTools({ requester, mode });
         ctx.dynamicTools = dynamic.byAlias;
-        const offeredAll = offered.concat(dynamic.definitions);
+        const offeredAll = offered.concat(dynamic.definitions.filter(d => require('../chat-apps/policy').allowed(dynamic.byAlias.get(d.function.name), chatPolicy)));
         const byName = new Map(offeredAll.map((d) => [d.function.name, d]));
         const allowedNames = state.allow instanceof Set ? state.allow : new Set(Array.isArray(state.allow) ? state.allow : []);
         const savedNames = Array.isArray(state.tools) && state.tools.length ? state.tools : [...allowedNames];
@@ -1004,9 +1004,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         }
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null }) {
         if (resume || fork) {
-            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta });
+            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta });
         }
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
@@ -1030,7 +1030,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             },
         };
         const ctx = {
-            config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, artifacts,
+            config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, chatPolicy, approveChatTool, artifacts,
             store, now, agentId, personText: personText == null ? String(task) : String(personText),
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
@@ -1082,11 +1082,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // Which tools are offered first: the demoted ones last, never removed (stage V2-8). Below about 40 tools
             // the model sees them all — no LLM picker and no embedding shortlist here.
             // The waits (plan A2) travel with the tool list: wait_for offers itself only when the run may wait.
-    const offered = registry.definitions({ requester, mode, config, models, signal, artifacts, store, agentId, taskId, now, waits });
+    const offered = registry.definitions({ requester, mode, chatPolicy, config, models, signal, artifacts, store, agentId, taskId, now, waits });
             // The connections of this person (stage V2-11): the MCP tools they turned on and ask_agent for their agents.
             const dynamic = await connectorTools({ requester, mode });
             ctx.dynamicTools = dynamic.byAlias;
-            const offeredAll = offered.concat(dynamic.definitions);
+            const offeredAll = offered.concat(dynamic.definitions.filter(d => require('../chat-apps/policy').allowed(dynamic.byAlias.get(d.function.name), chatPolicy)));
             let statsRows = [];
             if (stats) { try { statsRows = await stats.tools(); } catch { statsRows = []; } }
             const ordered = orderTools(offeredAll, statsRows);
