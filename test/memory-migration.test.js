@@ -42,8 +42,10 @@ const owner = 'user:usr_01JZ0000000000000000000AAA';
             [agentMemoryId, agentId, owner, oldStyleText, 'agent', now]);
         // 0017 on top of the running schema.
         const second = await db.migrate({ dir: MIGRATIONS });
-        // 0025 is the person's own model choice (plan L55 C3): it is a migration of its own, like every one before it.
-        assert.deepStrictEqual(second.applied.map((m) => m.id), ['0017', '0018', '0019', '0020', '0021', '0022', '0023', '0024', '0025', '0026', '0027', '0028', '0029', '0030', '0031', '0032', '0033', '0034']);
+        // Every migration after 0016 applies on top, in order: the list is read from the directory, so a new
+        // expand-only migration (like 0035, the timeline's Computer) does not need this test edited.
+        const later = fs.readdirSync(MIGRATIONS).filter((x) => x.endsWith('.sql') && x >= '0017').map((x) => x.slice(0, 4)).sort();
+        assert.deepStrictEqual(second.applied.map((m) => m.id), later);
 
         await check('an old-style INSERT still works after 0017, and a 900-character row is intact', async () => {
             const old = await db.maybe('SELECT id, text, origin, status, kind, uses FROM actor_agent_memory WHERE id = $1', [agentMemoryId]);

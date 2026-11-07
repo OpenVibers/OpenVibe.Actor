@@ -152,6 +152,27 @@ async function taskDesk(s, row) {
     return deskFrom(rows.map((r) => parse(r.body)).reverse());
 }
 
+/**
+ * The Computer a task opened (plan 2026-11-07: one id), read from its own computer_desk results: the last start that
+ * carried one, cleared by a stop. The event's `computer` is set by the loop from the tool's own answer, never by the
+ * model. → { session_id, machine, where, cost_hint } or null.
+ */
+function computerFrom(events) {
+    let computer = null;
+    for (const e of events) {
+        if (!e || e.step !== 'tool_result' || e.tool !== 'computer_desk' || e.is_error) continue;
+        if (e.computer === null) computer = null;
+        else if (e.computer && typeof e.computer === 'object' && !Array.isArray(e.computer)) computer = e.computer;
+    }
+    return computer;
+}
+
+async function taskComputer(s, row) {
+    if (!row || !OPEN.includes(row.state)) return null;
+    const rows = await s.db.many('SELECT body FROM task_events WHERE task_id = $1 ORDER BY seq DESC LIMIT 200', [row.id]);
+    return computerFrom(rows.map((r) => parse(r.body)).reverse());
+}
+
 async function eventsAfter(s, taskId, after = 0) {
     const rows = await s.db.many('SELECT body FROM task_events WHERE task_id = $1 AND seq > $2 ORDER BY seq', [taskId, after]);
     return rows.map((r) => parse(r.body));
@@ -266,4 +287,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, deskPlace, taskDesk, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, deskPlace, taskDesk, computerFrom, taskComputer, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };

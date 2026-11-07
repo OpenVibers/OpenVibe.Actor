@@ -20,8 +20,15 @@ const PERSON_QUIET_MS = 20_000;
 const AGENT_PROFILE = 'agent';
 
 function deskRun(taskId = null) {
-    return { name: `desk-${crypto.randomBytes(5).toString('hex')}`, taskId, named: null, kinds: new Map(), keeps: new Set(), used: new Set(), placed: null };
+    return { name: `desk-${crypto.randomBytes(5).toString('hex')}`, taskId, named: null, kinds: new Map(), keeps: new Set(), used: new Set(), placed: null, names: new Map() };
 }
+
+/** The person's own word for their machine (their name for it), remembered from list_my_computers. */
+function rememberMachines(run, computers) {
+    if (!run || !Array.isArray(computers)) return;
+    for (const m of computers) if (m && typeof m.id === 'string') run.names.set(m.id, String(m.name || 'your computer').slice(0, 80));
+}
+const machineWord = (run, machine) => (run && run.names.get(machine)) || 'your computer';
 
 /** The task's own desk for a machine that runs several; else the machine's one private desk. */
 async function deskFor(run, person, machine, { core, signal }) {
@@ -29,6 +36,7 @@ async function deskFor(run, person, machine, { core, signal }) {
     if (run.named === null) {
         const mine = await core.pcs.mine(person, { signal });
         const computers = (mine && mine.computers) || [];
+        rememberMachines(run, computers);
         run.named = new Set(computers.filter((m) => m.desks_at_once).map((m) => m.id));
         run.kinds = new Map(computers.filter((m) => Array.isArray(m.desk_kinds)).map((m) => [m.id, m.desk_kinds]));
         run.keeps = new Set(computers.filter((m) => m.keeps_sign_ins).map((m) => m.id));
@@ -47,8 +55,9 @@ function deskKind(run, machine, asked) {
 }
 
 /** Where a desk for machine "any" goes: the online machines that run several, desk hosts first, then the most free. */
-async function placementOrder(person, { core, signal }) {
+async function placementOrder(person, { core, signal, run = null }) {
     const mine = await core.pcs.mine(person, { signal });
+    rememberMachines(run, (mine && mine.computers) || []);
     const free = (m) => (Number(m.desks_at_once) || 1) - (Number(m.desks_running) || 0);
     const ownScreen = (m) => ((m.can || []).includes('screen') ? 1 : 0);
     return ((mine && mine.computers) || [])
@@ -144,5 +153,5 @@ async function prepareDesk(tool, a, person, core, ctx) {
 
 module.exports = {
     personOf, deskRun, deskFor, deskKind, placementOrder, closeDesks, lookAtScreen, handToPerson, prepareDesk, SCREEN_SYSTEM,
-    PERSON_WAIT_MS, PERSON_POLL_MS, PERSON_QUIET_MS, AGENT_PROFILE, DESK_TOOLS,
+    PERSON_WAIT_MS, PERSON_POLL_MS, PERSON_QUIET_MS, AGENT_PROFILE, DESK_TOOLS, rememberMachines, machineWord,
 };

@@ -2,6 +2,7 @@
 
 const { serviceFor, json, personOf } = require('./_openvibe');
 const { prepareDesk } = require('./_person');
+const driving = require('../../agents/driving');
 
 const machine = { type: 'string', description: 'the machine id (dev_…) from list_my_computers' };
 
@@ -15,6 +16,10 @@ module.exports = {
     timeoutMs: 60_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.botUrl && personOf(ctx.requester)),
     async run(input, ctx) {
+        // While the person drives, the agent may read the page but never act on it (Take over / Give it back).
+        if (input && input.action && !['read', 'close'].includes(input.action) && driving.is(ctx.taskId)) {
+            return { text: json({ error: 'The person is using the desk right now (they took it over): wait until they give it back, then read the page again before you act.' }), isError: true };
+        }
         const core = serviceFor(ctx);
         const person = personOf(ctx.requester);
         if (!core.pcs.enabled || !person) return { text: json({ error: 'computers are only for a signed-in person\'s task' }), isError: true };

@@ -417,7 +417,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const shown = displayName(p.name, ctx);
             const item = state.ledger.add({ tool: shown, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
             state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: shown, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
-            await ctx.emit({ step: 'tool_result', tool: shown, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
+            await ctx.emit({ step: 'tool_result', tool: shown, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}), ...(out.computer !== undefined ? { computer: out.computer } : {}) });
             if (out.isError) { errorResults += 1; lastTool = p.name; } else okResults += 1;
             if (state.brain) {
                 state.brain.toolRuns = (state.brain.toolRuns || 0) + 1;
@@ -792,7 +792,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const shown = displayName(name, ctx);
             const item = state.ledger.add({ tool: shown, input: args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
             state.messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ evidence: item.id, tool: shown, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
-            await ctx.emit({ step: 'tool_result', tool: shown, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}) });
+            await ctx.emit({ step: 'tool_result', tool: shown, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}), ...(out.computer !== undefined ? { computer: out.computer } : {}) });
             await spanCall(ctx.trace, { kind: 'tool', name, startedAt, ms: now() - startedAt, ok: !(out && out.isError), errorCode: out && out.isError ? 'actor.tool.failed' : null, step: state.calls });
             note(name, !(out && out.isError));
         };

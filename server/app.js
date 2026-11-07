@@ -146,7 +146,10 @@ async function createApp(opts = {}) {
     // The one sharing system (design 2026-11-06): an agent's run is its owner's until the Share sheet says otherwise.
     const sharing = opts.sharing || createSharing({ db: s.db, config, fetchImpl, log });
     setSharing(sharing);
-    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing };
+    // The person's computers (agents/computers.js): one adapter for the task's still proxy, made here so a test can
+    // stand Bot/Run in (opts.bot.computers) exactly as the Console pages do.
+    const computers = (opts.bot && opts.bot.computers) || require('./agents/computers').createComputers({ config, fetchImpl: providerFetch, log });
+    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;

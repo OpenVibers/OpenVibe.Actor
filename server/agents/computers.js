@@ -26,6 +26,7 @@
 const { serviceAuth } = require('openvibe-contracts');
 
 const MACHINE_ID = /^dev_[0-9A-HJKMNP-TV-Z]{26}$/;
+const SESSION_ID = /^ses_[0-9A-HJKMNP-TV-Z]{26}$/;
 // A desk on a desk host, through an OpenVibe.Run session (Desks plan D6): the task's "machine" is then run:<session id>.
 const SESSION_MACHINE = /^run:(ses_[0-9A-HJKMNP-TV-Z]{26})$/;
 const SESSION_KINDS = new Set(['screen', 'input', 'browser']);
@@ -90,7 +91,8 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (!USER_SUBJECT.test(subject)) return { error: 'a session is only for a signed-in person' };
         const body = { kind: 'browser', ttl_s: Math.min(14400, Math.max(60, Math.round(ttlS))), idle_s: 900,
             ...(Number.isInteger(width) ? { width } : {}), ...(Number.isInteger(height) ? { height } : {}),
-            ...(taskId ? { idempotency_key: `actor:${taskId}` } : {}) };
+            // The session carries the task back (contracts 0.327.0): one id across Surf, the Computer and Actor.
+            ...(taskId ? { idempotency_key: `actor:${taskId}`, task_id: taskId } : {}) };
         const made = await runCall('POST', '/sessions', subject, { body, signal });
         if (!made.ok) return runProblem(made, 'a browser session');
         let s = made.data;
@@ -111,6 +113,32 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (!m || !sessionsOn) return { error: 'not a session desk' };
         const r = await runCall('POST', `/sessions/${m[1]}/end`, subject, { signal });
         return r.ok ? { running: false, stopped: true } : runProblem(r, 'ending the session');
+    }
+
+    /**
+     * The session's newest frame (plan 2026-11-07): Run's still, as Actor's service token acting for the person
+     * (run.session.read, X-OV-Subject). Run itself accepts only the session's person or a capable service, answers
+     * the curtain picture while Curtain now is up, and captures at most once a second. → { bytes, type } or { error }.
+     */
+    async function still(subject, sessionId, { signal } = {}) {
+        if (!sessionsOn) return { error: 'no session service is reachable from here' };
+        if (!USER_SUBJECT.test(subject) || !SESSION_ID.test(String(sessionId || ''))) return { error: 'not a session of the person\'s' };
+        const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(12_000)]) : AbortSignal.timeout(12_000);
+        let res;
+        try {
+            res = await fetchImpl(`${runBase}/api/v1/sessions/${sessionId}/still`, {
+                headers: { Accept: 'image/jpeg, image/png', 'X-OV-Subject': subject, ...(await runTokens.authHeaders()) }, signal: sig,
+            });
+        } catch {
+            return { error: 'the session service did not answer' };
+        }
+        if (!res.ok) return { status: res.status, error: 'the session has no picture' };
+        // Only a picture is ever passed on: a broken or hostile upstream cannot serve HTML from openvibe.actor.
+        const type = String(res.headers.get('content-type') || '').split(';')[0].trim();
+        if (!/^image\/(jpeg|png|webp)$/.test(type)) return { status: 502, code: 'still.bad_type', error: 'the session sent a picture that is not an image' };
+        const bytes = Buffer.from(await res.arrayBuffer());
+        if (!bytes.length || bytes.length > 4 * 1024 * 1024) return { status: 502, error: 'the session service sent no picture' };
+        return { bytes, type };
     }
 
     async function call(method, path, subject, { body, signal, timeoutMs = 15_000 } = {}) {
@@ -404,7 +432,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { url: data.url, expires_at: data.expires_at || null, control: !!data.control, desk: data.desk || desk };
     }
 
-    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, openSession, endSession, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
+    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, openSession, endSession, still, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
 }
 
 module.exports = { createComputers };
