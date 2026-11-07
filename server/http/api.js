@@ -37,6 +37,7 @@ const { findArtifact, sendArtifact } = require('../runtime/artifacts');
 const trace = require('../runtime/trace');
 const personal = require('../agents/personal');
 const contacts = require('../agents/contacts');
+const voice = require('../agents/voice');
 const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
 const items = require('../actions/items');
@@ -277,6 +278,29 @@ function createApi(ctx) {
     });
     r.get('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (row) res.json(row);
+    });
+    // The agent's voice as a file (actor.voice@1). Another person's agent is the same 404 as one that does not exist.
+    r.get('/me/agents/:id/voice', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
+        const row = await loadAgent(req, res); if (!row) return;
+        const subject = (req.principal && req.principal.subject) || String((req.principal && req.principal.requester) || '').replace(/^user:/, '');
+        const doc = voice.build(row, { subject });
+        res.set('Content-Disposition', 'attachment; filename="voice.json"');
+        res.json(doc);
+    });
+    // Import a voice: an actor.voice@1 document becomes a new agent, at level ask whatever the file says.
+    r.post('/me/agents/import', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
+        const body = req.body || {};
+        const read = voice.read(body.voice || body.document || null);
+        if (read.error) return problem(req, res, 422, 'actor.voice.invalid', read.error);
+        const fields = voice.toContact(read.doc, { source: 'file' });
+        const out = await contacts.create(s, config, req.principal.requester, {
+            name: fields.name, face: fields.face, model: fields.model, apps: fields.apps, memory: null,
+            level: fields.level, instructions: fields.instructions,
+        }, { bio: fields.bio, rules: fields.rules, suggested_apps: fields.suggested_apps, voice_author: fields.voice_author, voice_author_name: fields.voice_author_name,
+            voice_author_checked: fields.voice_author_checked, voice_source: fields.voice_source });
+        if (!out.row) return failed(req, res, out);
+        res.set('Location', `/api/v1/me/agents/${out.row.id}`);
+        res.status(201).json(out.row);
     });
     r.patch('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
         const out = await personal.update(s, config, req.principal.requester, req.params.id, req.body);

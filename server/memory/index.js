@@ -109,7 +109,7 @@ const fromRow = (r) => (r ? {
     id: r.id, owner: r.owner, agent_id: r.agent_id || null, text: r.text, kind: r.kind, source: r.origin, status: r.status,
     source_task: r.source_task || null, created_at: r.created_at, updated_at: r.updated_at,
     last_used_at: r.last_used_at || null, uses: Number(r.uses) || 0,
-    // HO5 (migrations/0039): what the night's tidy did to this note. A note with no merged_into and no retired_at is
+    // HO5 (migrations/0041): what the night's tidy did to this note. A note with no merged_into and no retired_at is
     // exactly the note it always was.
     merged_into: r.merged_into || null, retired_at: r.retired_at || null,
     pinned: Boolean(r.pinned), pinned_by: r.pinned_by || null,

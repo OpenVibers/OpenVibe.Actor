@@ -9,6 +9,8 @@ const personal = require('../agents/personal');
 const contacts = require('../agents/contacts');
 const ui = require('./agent-contacts-ui');
 const approvals = require('../agents/approvals');
+const voice = require('../agents/voice');
+const shares = require('../agents/voice-shares');
 const levels = require('../agents/levels');
 const allows = require('../agents/allows');
 const kinds = require('../agents/kinds');
@@ -49,7 +51,7 @@ const tidy = require('../memory/tidy');
 const CHANGE_LABEL = { merge: 'Merged notes', retire: 'Retired a note', promote: 'Pinned a note' };
 
 function createAgentPages(ctx) {
-    const { config, s } = ctx;
+    const { config, s, limits } = ctx;
     const r = asyncRouter();
     r.use(express.urlencoded({ extended: false, limit: '64kb' }));
     const signed = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
@@ -127,7 +129,7 @@ ${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when })}
 <section class="pa-panel" aria-labelledby="ac-add-h"><h2 id="ac-add-h">Add an agent</h2><p class="pa-hint">Each comes ready with its instructions; change anything after.</p>${ui.presetCards(contacts.presets().presets)}</section>
 <section class="pa-panel" aria-labelledby="pa-templates-h"><h2 id="pa-templates-h">Or set up a standing job</h2><p class="pa-hint">An agent with a schedule: it runs on its own and keeps notes between runs.</p>
 <ul class="pa-templates">${TEMPLATES.map((x) => html`<li><a class="pa-template${chosen && chosen.id === x.id ? ' is-chosen' : ''}" href="/me/agents?template=${x.id}#create"><strong>${x.name}</strong><span>${x.line}</span><small>${when({ schedule: x.schedule, schedule_at: x.schedule_at, schedule_dow: x.schedule_dow })}</small></a></li>`)}</ul></section>
-<section class="pa-panel" id="create"><h2>${chosen ? `Create: ${chosen.name}` : 'Create an agent'}</h2>${chosen ? html`<p class="pa-hint">Fill in the parts in &lt;angle brackets&gt;, then create it. You can change anything later.</p>` : ''}<form method="post" action="/me/agents">${form(chosen ? { ...chosen, id: undefined } : {})}<button type="submit" class="pa-btn pa-primary">Create agent</button></form></section>`);
+${importPanel()}<section class="pa-panel" id="create"><h2>${chosen ? `Create: ${chosen.name}` : 'Create an agent'}</h2>${chosen ? html`<p class="pa-hint">Fill in the parts in &lt;angle brackets&gt;, then create it. You can change anything later.</p>` : ''}<form method="post" action="/me/agents">${form(chosen ? { ...chosen, id: undefined } : {})}<button type="submit" class="pa-btn pa-primary">Create agent</button></form></section>`);
     });
     r.post('/me/agents', async (req, res) => {
         if (!write(req, res)) return;
@@ -211,6 +213,152 @@ ${buttons}`);
         res.redirect(303, out.task ? `/tasks/${out.task.id}` : `/me/approvals/${req.params.id}`);
     });
 
+    // ── An agent's voice as a file (actor.voice@1) ──────────────────────────────────────────────────────
+    // The panel on the agent's page: download its voice, share it as a public link, or import somebody else's.
+    // Nothing here is a signature: the document's integrity block says the file was not edited, never who wrote it.
+    const voicePanel = (a, doc, shared) => html`<section class="pa-panel" id="voice" aria-labelledby="ac-voice-h"><h2 id="ac-voice-h">Its voice</h2>
+<p class="pa-hint">An agent's voice is a small file: its name, a short bio, the house voice it speaks in, its rules, its level, and the model and apps it prefers (ids, never a key). Nothing else — never its memory, never a connector's token, never a file. Whoever you send it to can make an agent that speaks in this voice; it starts at level ask, and they raise it themselves.</p>
+${a.bio ? html`<p>${a.bio}</p>` : ''}
+${a.rules && a.rules.length ? html`<h3>Its rules</h3><ul>${a.rules.map((r) => html`<li>${r}</li>`)}</ul>` : ''}
+<p class="pa-actions"><a class="pa-btn" href="/me/agents/${a.id}/voice" download="voice.json">Download its voice (JSON)</a>
+${shared
+        ? html`<a class="pa-btn" href="/voices/${shared.id}">Its public link</a><form method="post" action="/me/agents/${a.id}/share/stop" class="pa-actions"><button type="submit" class="pa-btn">Stop sharing</button></form>`
+        : html`<form method="post" action="/me/agents/${a.id}/share" class="pa-actions"><button type="submit" class="pa-btn">Share this voice</button></form>`}
+<a class="pa-btn" href="/me/agents#import">Import a voice</a></p>
+${provenance(a)}${suggestedApps(a)}</section>`;
+
+    // Where this agent's voice came from, and what may be said about the author.
+    //   a shared voice   Actor shared it, so Actor knows who wrote it: the author is a link.
+    //   a file           the file may name anyone and nothing checks it: the author is a claim, said plainly.
+    const provenance = (a) => {
+        if (a.voice_source && String(a.voice_source).startsWith('shared:')) {
+            return html`<p class="pa-hint">Borrowed from a shared voice${a.voice_author_name ? html` by <a href="https://openvibe.network/@${a.voice_author_name}">${a.voice_author_name}</a>` : ''}.</p>`;
+        }
+        if (a.voice_source === 'file') {
+            return html`<p class="pa-hint">Imported from a file.${a.voice_author_name ? html` It says it was made by ${a.voice_author_name}; that is not checked.` : ''}</p>`;
+        }
+        return '';
+    };
+    // The apps the voice it came from used: never connected for it, listed so the person can add the ones they want.
+    const suggestedApps = (a) => {
+        let list = a.voice_suggested_apps;
+        if (typeof list === 'string') { try { list = JSON.parse(list); } catch { list = []; } }
+        return Array.isArray(list) && list.length && a.voice_source
+            ? html`<p class="pa-hint">The voice it came from used ${list.join(', ')}. None is connected for it: add the ones you want under its apps.</p>`
+            : '';
+    };
+
+    const importPanel = () => html`<section class="pa-panel" id="import" aria-labelledby="ac-import-h"><h2 id="ac-import-h">Import an agent's voice</h2>
+<p class="pa-hint">A voice file is a small JSON document: an agent's name, a short bio, the house voice it speaks in, its rules, its level, and the model and apps it prefers. It never carries memory, a connector's token or a file. Paste one and it becomes one of your agents, at level ask — you raise it yourself.</p>
+<p class="pa-hint">A file may name an author. Nothing checks that, so the agent will say so rather than claim it is that person's.</p>
+<form method="post" action="/me/agents/import"><label class="pa-wide">Voice file (JSON) <textarea name="voice" rows="6" required placeholder='{"voice":"actor.voice@1","name":"A house voice"}'></textarea></label><button type="submit" class="pa-btn pa-primary">Import this voice</button></form></section>`;
+
+    // The agent's voice as a file: the owner downloads it, and another person's agent is the same 404 as one that does
+    // not exist.
+    r.get('/me/agents/:id/voice', async (req, res) => {
+        if (!signed(req)) return login(req, res);
+        const a = await find(req, res); if (!a) return;
+        const doc = voice.build(a, { subject: req.viewer.subject, name: req.viewer.username || null });
+        res.set('Content-Type', 'application/json; charset=utf-8');
+        res.set('Content-Disposition', 'attachment; filename="voice.json"');
+        res.send(JSON.stringify(doc, null, 2));
+    });
+
+    // Import a voice from a file: a pasted actor.voice@1 document becomes a new agent, at level ask whatever the file
+    // says. The file may name an author; nothing checks that, and the page says so.
+    r.post('/me/agents/import', async (req, res) => {
+        if (!write(req, res)) return;
+        const text = String((req.body || {}).voice || '');
+        let input;
+        try { input = JSON.parse(text); } catch { return voicePage(req, res, 'That file is not JSON.', 422); }
+        const out = await importVoice(req, input, { source: 'file' });
+        if (out.error) return voicePage(req, res, out.error, out.limit ? 429 : 422);
+        res.redirect(303, `/me/agents/${out.row.id}`);
+    });
+
+    // Share this voice: a public link (/voices/<id>) that anybody may borrow from. Actor's own record of who shared
+    // it — the only place a voice's author is vouched for.
+    r.post('/me/agents/:id/share', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const doc = voice.build(a, { subject: req.viewer.subject, name: req.viewer.username || null });
+        const shared = await shares.share(s, owner(req), a, doc, req.viewer.username || null);
+        res.redirect(303, `/voices/${shared.id}`);
+    });
+    // Stop sharing: the link answers 410 from then on.
+    r.post('/me/agents/:id/share/stop', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        await shares.revoke(s, owner(req), a.id);
+        res.redirect(303, `/me/agents/${a.id}#voice`);
+    });
+
+    // The shared voice: anybody may look at it and borrow it. The author is Actor's own record, so it is a link.
+    r.get('/voices/:id.json', async (req, res) => {
+        const row = await shares.get(s, req.params.id);
+        if (!row) return res.status(404).json({ error: 'No such voice.' });
+        if (row.revoked_at) return res.status(410).json({ error: 'This voice is no longer shared.' });
+        res.set('Content-Type', 'application/json; charset=utf-8');
+        res.json(row.voice);
+    });
+    r.get('/voices/:id', async (req, res) => {
+        const id = String(req.params.id || '').replace(/\.json$/, '');
+        const row = await shares.get(s, id);
+        if (!row) return page(req, res, 'Voice not found', html`<h1>Voice not found</h1><p>That link is not a voice.</p>`, 404);
+        if (row.revoked_at) return page(req, res, 'Voice not shared', html`<h1>This voice is no longer shared</h1><p>Its owner stopped sharing it. Ask them for a new link.</p>`, 410);
+        const doc = voice.read(row.voice).doc || row.voice;
+        page(req, res, doc.name, html`<p class="crumbs"><a href="/">OpenVibe.Actor</a></p>
+<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · a shared voice</p><h1>${doc.name}</h1>
+${doc.bio ? html`<p class="pa-lede">${doc.bio}</p>` : ''}</header>
+<section class="pa-panel"><h2>Its instructions</h2><p class="pa-hint">What it is told to do on every run. Borrowing it gives your agent exactly these words; read them first.</p><pre class="pa-pre">${doc.instructions}</pre></section>
+<section class="pa-panel"><h2>Its rules</h2>${doc.rules && doc.rules.length ? html`<ul>${doc.rules.map((r) => html`<li>${r}</li>`)}</ul>` : html`<p>No rules: it speaks in one voice.</p>`}</section>
+${doc.apps && doc.apps.length ? html`<section class="pa-panel"><h2>The apps it uses</h2><p>${doc.apps.join(', ')}</p><p class="pa-hint">A borrowed agent gets none of them: you connect each one yourself, with your own account, on its page.</p></section>` : ''}
+<section class="pa-panel"><h2>Borrow this agent</h2>
+<p class="pa-hint">It asks for level ${doc.level}. Borrowing it makes an agent of your own — at level ask, whatever the file asks for — and you raise it yourself. It keeps no memory and no token of the person who shared it, runs on OpenVibe's own models (never your own keys or your machine until you choose them), and gets none of your apps until you add them.</p>
+${row.owner_name ? html`<p class="pa-hint">Shared by <a href="https://openvibe.network/@${row.owner_name}">${row.owner_name}</a>.</p>` : ''}
+${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><button type="submit" class="pa-btn pa-primary">Borrow this agent</button></form>`
+    : html`<p><a class="pa-btn pa-primary" href="/auth/login?next=${encodeURIComponent(req.originalUrl)}">Sign in to borrow it</a></p>`}</section>`);
+    });
+    // Borrowing a shared voice: the author comes from Actor's record, not from the document.
+    r.post('/voices/:id/borrow', limits.budget('actor.voice.borrow'), async (req, res) => {
+        if (!signed(req)) return login(req, res);
+        if (!write(req, res)) return;
+        const row = await shares.get(s, req.params.id);
+        if (!row) return page(req, res, 'Voice not found', html`<h1>Voice not found</h1>`, 404);
+        if (row.revoked_at) return page(req, res, 'Voice not shared', html`<h1>This voice is no longer shared</h1>`, 410);
+        const read = voice.read(row.voice);
+        if (read.error) return voicePage(req, res, read.error, 422);
+        const out = await importVoice(req, read.doc, {
+            source: `shared:${row.id}`, authorChecked: true,
+            author: { subject: String(row.owner || '').replace(/^user:/, ''), name: row.owner_name || null },
+        });
+        if (out.error) return voicePage(req, res, out.error, out.limit ? 429 : 422);
+        res.redirect(303, `/me/agents/${out.row.id}`);
+    });
+
+    // The page a refused or broken voice ends on: what went wrong, in plain words.
+    function voicePage(req, res, message, status = 422) {
+        return page(req, res, 'Voice not taken', html`<h1>Voice not taken</h1><p>${message}</p><p><a href="/me/agents">Your agents</a></p>`, status);
+    }
+
+    // A voice document becomes an agent: the new agent keeps the voice, starts at level ask and keeps no memory.
+    async function importVoice(req, input, { source = 'file', author = null, authorChecked = false } = {}) {
+        const read = voice.read(input);
+        if (read.error) return { error: read.error };
+        const fields = voice.toContact(read.doc, { source, authorChecked });
+        if (author) {
+            fields.voice_author = author.subject;
+            fields.voice_author_name = author.name || null;
+        }
+        const out = await contacts.create(s, config, owner(req), {
+            name: fields.name, face: fields.face, model: fields.model, apps: fields.apps, memory: null,
+            level: fields.level, instructions: fields.instructions,
+        }, { bio: fields.bio, rules: fields.rules, suggested_apps: fields.suggested_apps, voice_author: fields.voice_author, voice_author_name: fields.voice_author_name,
+            voice_author_checked: fields.voice_author_checked, voice_source: fields.voice_source });
+        if (!out.row) return { error: out.error || 'Agent limit reached.', limit: out.limit };
+        return { row: out.row };
+    }
+
     r.get('/me/agents/:id', async (req, res) => {
         if (!signed(req)) return login(req, res);
         const a = await find(req, res); if (!a) return;
@@ -239,6 +387,10 @@ ${buttons}`);
         const usd = (v) => (v == null || !Number.isFinite(Number(v)) ? '' : ` · $${Number(v) < 0.01 ? Number(v).toFixed(4) : Number(v).toFixed(2)}`);
         const pill = (state) => state === 'succeeded' ? 'pill-succeeded' : state === 'failed' || state === 'cancelled' ? 'pill-failed' : 'pill-running';
         const contact = contacts.wire(a);
+        // The agent's voice as a file (actor.voice@1): what it is, in a form somebody else can speak in.
+        const doc = voice.build(a, { subject: req.viewer.subject, name: req.viewer.username || null });
+        // The voice's public link, when the person shares it.
+        const shared = await shares.current(s, a.owner, a.id);
         page(req, res, a.name, html`<p class="crumbs"><a href="/me/agents">Your agents</a></p>
 <header class="pa-head ac-sheet-head">${ui.face(contact, 64)}<div><h1>${a.name}</h1><p class="ac-sheet-uses">${ui.usesLine(contact)}</p>
 <p class="pa-lede">${ui.levelChip(contact.level)} <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></div></header>
@@ -263,7 +415,7 @@ ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}" class="pa-actions"><button type="submit" name="decision" value="apply" class="pa-btn pa-primary">Add to its instructions</button> <button type="submit" name="decision" value="dismiss" class="pa-btn">Dismiss</button></form></li>`)}</ul>` : ''}
 ${applied.length ? html`<details><summary>Added lately</summary><ul class="pa-notes">${applied.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Added ${time(p.decided_at)}</p>
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}"><button type="submit" name="decision" value="undo" class="pa-danger-link">Undo</button></form></li>`)}</ul></details>` : ''}</section>` : ''}
-<section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Only active notes go into a run. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check; its note is a suggestion until you accept it on <a href="/memory">Memory</a>.</p>
+${voicePanel(a, doc, shared)}<section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Only active notes go into a run. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check; its note is a suggestion until you accept it on <a href="/memory">Memory</a>.</p>
 ${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta"><span class="pill ${n.status === 'suggested' ? 'pill-running' : n.status === 'archived' ? 'pill-failed' : 'pill-succeeded'}">${n.status === 'suggested' ? 'Suggested' : n.status === 'archived' ? 'Archived' : 'Active'}</span> ${n.source === 'agent' ? 'Written by the agent' : 'Written by you'} · ${n.kind} · ${time(n.created_at)}${n.last_used_at ? html` · last used ${time(n.last_used_at)}` : ''}${n.pinned ? ' · pinned' : ''}${n.merged_into ? ' · merged away' : ''}${n.retired_at ? ' · retired' : ''}</p>
 ${n.status === 'suggested' ? html`<form method="post" action="/memory/${n.id}/accept" class="pa-actions"><button type="submit" class="pa-btn pa-primary">Accept</button> <button type="submit" class="pa-btn" formaction="/memory/${n.id}/decline">Decline</button></form>` : ''}
 <form method="post" action="/me/agents/${a.id}/memory/${n.id}/${n.pinned ? 'unpin' : 'pin'}" class="pa-actions"><button type="submit" class="pa-btn">${n.pinned ? 'Unpin' : 'Pin'}</button></form>

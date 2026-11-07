@@ -10,7 +10,7 @@ What changed in OpenVibe.Actor, newest first. Each site also publishes its patch
   answer is DATA: a list of merges, retires and promotions and a short diary, checked against the agent's own notes
   before anything happens. The sources of a merge are kept and marked `merged_into`, a stale note is marked
   `retired_at` and never deleted, a note that keeps coming up becomes a pinned note and the agent reads pinned notes
-  first, and the diary is two to five plain sentences in the agent's voice (migration 0039).
+  first, and the diary is two to five plain sentences in the agent's voice (migration 0041).
 - **The rules the model cannot break**: only the agent's own notes are touched — a note the person wrote, or pinned by
   hand, is left alone; every id in the answer must be one of the notes that were sent, so an id from another agent or
   another person is ignored; a merge longer than its sources together is refused; at most 20 changes a night, per
