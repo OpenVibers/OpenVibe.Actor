@@ -118,6 +118,15 @@ const PRESET_NAMES = ['Researcher', 'Inbox', 'Studio editor', 'Party host'];
             assert.strictEqual((await t.get('/api/v1/agents', { json: { name: 'Nope' } })).status, 401);
         });
 
+        await check('a person\'s first write still creates Vibe first', async () => {
+            const carol = t.network.addUser('contacts-carol');
+            const made = await t.get('/api/v1/agents', { as: carol, json: { name: 'First' }, headers: SAME });
+            assert.strictEqual(made.status, 201, made.text);
+            const roster = (await t.get('/api/v1/agents', { as: carol })).json().agents;
+            assert.deepStrictEqual(roster.map((a) => a.name), ['Vibe', 'First']);
+            assert.strictEqual(Number(await t.ctx.s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1 AND is_vibe', [`user:${carol.subject}`])), 1);
+        });
+
         await check('the OpenAPI document lists every new contact route', async () => {
             const doc = (await t.get('/openapi.json')).json();
             for (const [path, method] of [
