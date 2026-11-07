@@ -46,8 +46,35 @@ function deletes(argv) {
     return parts.some((a, i) => DELETE_CMD.test(a) || (i > 0 && /\b(?:rm|del|erase|shred|truncate|unlink)\b/i.test(a)));
 }
 
-/** The machine a step would touch, in the person's words. */
-const machineOf = (a) => text(a.machine, 60) || 'your computer';
+// HO1: a standing permission is matched on the step's target string, so a target names the step exactly: argv words
+// are quoted when they hold anything but plain characters (two different commands never read the same), nothing is
+// cut and no whitespace is folded. A step that cannot be named within allows.MAX_TARGET has no target, and so can
+// never be always allowed.
+const word = (w) => (/^[A-Za-z0-9_@%+=:,.\/-]+$/.test(w) ? w : JSON.stringify(w));
+const raw = (v) => (typeof v === 'string' ? v : '');
+const machineWord = (a) => (raw(a.machine) && a.machine !== 'any' ? word(a.machine) : 'your computer');
+const MAX_TARGET = 200;
+const exactTarget = (t) => (typeof t === 'string' && t.length > 0 && t.length <= MAX_TARGET && !/[\u0000-\u001f\u007f]/.test(t) ? t : null);
+function runTarget(a) {
+    if (!Array.isArray(a.argv) || !a.argv.length || !a.argv.every((x) => typeof x === 'string')) return null;
+    return exactTarget(`${a.argv.map(word).join(' ')}${raw(a.cwd) ? ` in ${word(a.cwd)}` : ''} on ${machineWord(a)}`);
+}
+// What repeats and when, both, exactly: allowing a schedule must not allow whatever task rides on it.
+function routineTarget(a) {
+    const what = raw(a.task) || raw(a.request);
+    const when = raw(a.cron) ? `cron ${word(a.cron)}${raw(a.timezone) ? ` ${word(a.timezone)}` : ''}`
+        : (a.event && raw(a.event.pattern) ? `when ${word(a.event.pattern)}` : '');
+    return what && when ? exactTarget(`${JSON.stringify(what)} ${when}`) : null;
+}
+/** The target of a coding task in one repository (the engine's own Codes gate uses it too). */
+const repoTarget = (repo) => (raw(repo) ? exactTarget(`repo ${word(repo)}`) : null);
+// Where a post or a publish lands, when the tool's input names it: the target is the tool and that place.
+const DESTINATION_KEYS = ['site', 'host', 'url', 'channel', 'room', 'space_id', 'blog', 'board', 'community'];
+function destinationOf(input) {
+    const o = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+    for (const k of DESTINATION_KEYS) if (typeof o[k] === 'string' && o[k]) return `${k} ${word(o[k])}`;
+    return null;
+}
 
 // The kinds an OpenVibe.Tools tool may be, by its id. The first match wins, so the order is the order of
 // the trust: an install is an install, even when its name also says "post".
@@ -78,7 +105,7 @@ function stepFor(name, input) {
                 kind: 'computer.run',
                 ...(deletes(argv) ? { category: 'delete' } : {}),
                 summary: `Run ${quoted(line, 220) || 'a program'} on your computer`,
-                target: `${line || 'a program'} on ${machineOf(a)}`,
+                target: runTarget(a),
                 payload: safeInput({ machine: a.machine, argv, cwd: a.cwd, desk: a.desk }),
             };
         }
@@ -88,7 +115,7 @@ function stepFor(name, input) {
                 act: 'edit',
                 kind: 'computer.write',
                 summary: `Write ${quoted(path, 220) || 'a file'} on your computer (${text(a.mode, 20) || 'create'})`,
-                target: `${path || 'a file'} on ${machineOf(a)}`,
+                target: raw(a.path) ? exactTarget(`${word(raw(a.mode) || 'create')} ${word(a.path)} on ${machineWord(a)}`) : null,
                 payload: safeInput({ machine: a.machine, path, mode: a.mode, text: a.text }, { removeText: true }),
             };
         }
@@ -100,7 +127,8 @@ function stepFor(name, input) {
                 kind: 'computer.input',
                 ...(password ? { category: 'password' } : {}),
                 summary: action === 'type' ? 'Type on your computer' : `Use ${action || 'the mouse or keyboard'} on your computer`,
-                target: `${action} on ${machineOf(a)}`,
+                // Typing and clicking reach anything on the screen, a terminal included: never always allowed.
+                target: null,
                 payload: safeInput({ machine: a.machine, action, x: a.x, y: a.y, keys: a.keys, text: a.text }, { removeText: action === 'type' }),
             };
         }
@@ -118,7 +146,8 @@ function stepFor(name, input) {
                 kind: 'computer.browser',
                 ...(password ? { category: 'password' } : {}),
                 summary,
-                target: `${action} ${target || 'the page'} on ${machineOf(a)}`,
+                // Only opening one exact address may be always allowed: a click or a fill acts on whatever page is open.
+                target: action === 'open' && raw(a.url) ? exactTarget(`open ${word(a.url)} on ${machineWord(a)}`) : null,
                 payload: safeInput({ machine: a.machine, action, url: a.url, ref: a.ref, selector: a.selector, text: a.text, key: a.key, desk: a.desk }, { removeText: action === 'fill' }),
             };
         }
@@ -129,7 +158,7 @@ function stepFor(name, input) {
                 act: 'act',
                 kind: 'computer.desk',
                 summary: `${action === 'start' ? 'Start' : 'Stop'} your agent's desk${a.machine && a.machine !== 'any' ? ` on ${text(a.machine, 80)}` : ''}`,
-                target: `desk on ${machineOf(a)}`,
+                target: exactTarget(`${action === 'start' ? 'start' : 'stop'} the desk on ${machineWord(a)}`),
                 payload: safeInput({ machine: a.machine, action, kind: a.kind, width: a.width, height: a.height }),
             };
         }
@@ -138,7 +167,7 @@ function stepFor(name, input) {
                 act: 'act',
                 kind: 'robot.move',
                 summary: `Move your robot ${text(a.robot, 80)}: ${quoted(commandOf(a.steps).join(', '), 220)}`,
-                target: `robot ${text(a.robot, 60) || 'unknown'}`,
+                target: raw(a.robot) ? exactTarget(`robot ${word(a.robot)}`) : null,
                 payload: safeInput({ robot: a.robot, steps: a.steps }),
             };
 
@@ -148,7 +177,7 @@ function stepFor(name, input) {
                 act: 'act',
                 kind: 'space',
                 summary: `Create a space${a.name ? ` ${quoted(a.name, 80)}` : ''} on OpenVibe.Space`,
-                target: `space ${text(a.name, 60) || 'new'}`,
+                target: raw(a.name) ? exactTarget(`new space ${word(a.name)}`) : null,
                 payload: safeInput({ name: a.name, description: a.description }),
             };
         case 'space_files_write':
@@ -156,7 +185,7 @@ function stepFor(name, input) {
                 act: 'edit',
                 kind: 'space',
                 summary: `Write ${Array.isArray(a.files) ? Math.min(a.files.length, 20) : 0} file(s) in your space ${text(a.space_id, 64)}`,
-                target: `space ${text(a.space_id, 64) || 'unknown'}`,
+                target: raw(a.space_id) ? exactTarget(`files of space ${word(a.space_id)}`) : null,
                 payload: safeInput({ space_id: a.space_id, files: a.files }),
             };
         case 'space_publish':
@@ -164,7 +193,7 @@ function stepFor(name, input) {
                 act: 'act',
                 kind: 'publish',
                 summary: `Publish your space ${text(a.space_id, 64)} on the open web`,
-                target: `space ${text(a.space_id, 64) || 'unknown'}`,
+                target: raw(a.space_id) ? exactTarget(`publish space ${word(a.space_id)}`) : null,
                 payload: safeInput({ space_id: a.space_id }),
             };
 
@@ -175,7 +204,7 @@ function stepFor(name, input) {
                 act: 'edit',
                 kind: 'codes.task',
                 summary: `Start a coding task on your machine${repo ? ` in ${repo}` : ''}`,
-                target: repo ? `repo ${repo}` : 'any repository',
+                target: repoTarget(a.repo),
                 payload: safeInput({ instruction: a.instruction, repo }),
             };
         }
@@ -189,9 +218,17 @@ function stepFor(name, input) {
             if (!kind) {
                 // A tool whose name says nothing may still be a payment or a deletion: the floor decides.
                 if (!categories.length) return null;
-                return { act: 'act', kind: 'actor.action', category: categories[0], summary, target: tool, payload: safeInput(a.input) };
+                return { act: 'act', kind: 'actor.action', category: categories[0], summary, target: null, payload: safeInput(a.input) };
             }
-            return { act: 'act', kind, category: categories[0] || undefined, summary, target: tool, payload: safeInput(a.input) };
+            // Spending is the floor whatever the words say. A post or a publish may be allowed for one tool and one
+            // place its input names; a send or an install never (kinds.NEVER_ALWAYS), so they carry no target.
+            const floorCategory = kind === 'money' ? 'money' : categories[0];
+            const dest = (kind === 'post' || kind === 'publish') ? destinationOf(a.input) : null;
+            return {
+                act: 'act', kind, ...(floorCategory ? { category: floorCategory } : {}), summary,
+                target: dest && raw(a.tool) ? exactTarget(`${word(a.tool)} to ${dest}`) : null,
+                payload: safeInput(a.input),
+            };
         }
 
         // ── A routine: it keeps running after this turn, so the card says what and when in plain words ──
@@ -203,7 +240,8 @@ function stepFor(name, input) {
                 act: 'act',
                 kind: 'routine',
                 summary: `Set up a task that repeats${when ? ` (${when})` : ''}: ${quoted(what, 160) || 'the one you asked for'}`,
-                target: when || text(a.task || a.request, 80) || 'a repeating task',
+                // What repeats and when, both: allowing a schedule must not allow whatever task rides on it.
+                target: routineTarget(a),
                 payload: safeInput({ request: a.request, task: a.task, cron: a.cron, timezone: a.timezone, event: a.event, agent_id: a.agent_id }),
             };
         }
@@ -222,10 +260,10 @@ function stepFor(name, input) {
                 act: 'act',
                 kind: 'actor.action',
                 summary: `Use ${text(name, 80)}`,
-                target: text(name, 60),
+                target: exactTarget(`tool ${word(String(name || ''))}`),
                 payload: safeInput(a),
             };
     }
 }
 
-module.exports = { stepFor, deletes, safeInput, SECRET_KEYS, PASSWORD_FIELD, toolKind, TOOL_KINDS };
+module.exports = { stepFor, deletes, safeInput, SECRET_KEYS, PASSWORD_FIELD, toolKind, TOOL_KINDS, repoTarget, runTarget };

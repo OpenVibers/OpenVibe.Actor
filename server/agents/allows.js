@@ -15,10 +15,15 @@
  *   matches(rules, kind, target) → true when a rule covers exactly this step
  */
 
+const kinds = require('./kinds');
+
 const ID = /^alw_[0-9A-HJKMNP-TV-Z]{26}$/;
 const MAX_TARGET = 200;
 
-const text = (v, n = MAX_TARGET) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
+// A rule is matched on its target string, so the string must be the step exactly: never cut and never with its
+// whitespace folded (a cut target would also match a different, longer step that starts the same way). A target
+// that is too long, empty or carries a control character cannot be allowed at all (agents/actions.js builds them).
+const exact = (v) => (typeof v === 'string' && v.length > 0 && v.length <= MAX_TARGET && !/[\u0000-\u001f\u007f]/.test(v) ? v : null);
 
 /** The active rules of one agent (newest first). */
 async function list(s, owner, agentId) {
@@ -35,8 +40,9 @@ async function listAll(s, owner) {
 
 /** Make the rule, or find the one that is already there. One rule per (owner, agent, kind, target). */
 async function grant(s, owner, agentId, kind, target) {
-    const scope = text(target);
-    if (!scope) return { error: 'This step has no target to allow.' };
+    if (!kinds.allowable(kind)) return { error: 'This kind of step always asks, so it can never be always allowed.' };
+    const scope = exact(target);
+    if (!scope) return { error: 'This step cannot be named exactly enough to allow it always.' };
     const existing = await s.db.maybe(`SELECT * FROM actor_approval_allows
         WHERE owner = $1 AND agent_id = $2 AND kind = $3 AND target = $4 AND revoked_at IS NULL`, [owner, agentId, kind, scope]);
     if (existing) return { row: existing, made: false };
@@ -67,10 +73,10 @@ async function revoke(s, owner, id) {
 
 /** Does a rule cover exactly this step? The kind and the target must both match. */
 function matches(rules, kind, target) {
-    if (!Array.isArray(rules) || !rules.length) return false;
-    const scope = text(target);
+    if (!Array.isArray(rules) || !rules.length || !kinds.allowable(kind)) return false;
+    const scope = exact(target);
     if (!scope) return false;
     return rules.some((r) => r && r.kind === kind && r.target === scope);
 }
 
-module.exports = { ID, MAX_TARGET, list, listAll, get, grant, revoke, matches };
+module.exports = { ID, MAX_TARGET, exact, list, listAll, get, grant, revoke, matches };

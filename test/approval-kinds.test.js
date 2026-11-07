@@ -78,8 +78,57 @@ const SAMPLE = {
             assert.ok(kinds.isKind(step.kind), `${name}: ${step.kind} is a known kind`);
             assert.ok(kinds.label(step.kind).length > 3, `${name}: the kind reads as plain words`);
             assert.ok(step.summary && step.summary.length > 3, `${name}: a plain summary`);
-            assert.ok(step.target && step.target.length > 1, `${name}: the exact target it would touch`);
+            // A target names the step exactly (it is what a standing permission matches), or is null: then the step
+            // can never be always allowed (typing, a click on whatever page is open, a send, an install, money).
+            assert.ok(step.target === null || (typeof step.target === 'string' && step.target.length > 1 && step.target.length <= allows.MAX_TARGET),
+                `${name}: an exact target or none`);
         }
+        assert.strictEqual(stepFor('computer_run', SAMPLE.computer_run).target, 'git status on dev_x');
+        assert.strictEqual(stepFor('computer_input', SAMPLE.computer_input).target, null, 'typing is never always allowed');
+        assert.strictEqual(stepFor('computer_browser', SAMPLE.computer_browser).target, null, 'a click acts on whatever page is open');
+        assert.strictEqual(stepFor('computer_browser', { machine: 'dev_x', action: 'open', url: 'https://openvibe.blog/' }).target, 'open https://openvibe.blog/ on dev_x');
+    });
+
+    await check('a target names the step exactly: never cut, never folded, two commands never read the same', async () => {
+        const run = (argv, extra = {}) => stepFor('computer_run', { machine: 'dev_x', argv, ...extra }).target;
+        // Quoting: one word with a space is not two words.
+        assert.notStrictEqual(run(['echo', 'a b']), run(['echo', 'a', 'b']));
+        assert.strictEqual(run(['echo', 'a b']), 'echo "a b" on dev_x');
+        // Whitespace is never folded, and a newline is quoted, never a separator.
+        assert.notStrictEqual(run(['sh', '-c', 'make  test']), run(['sh', '-c', 'make test']));
+        assert.strictEqual(run(['sh', '-c', 'make\nrm -rf ~']), 'sh -c "make\\nrm -rf ~" on dev_x');
+        // The working directory is part of the step.
+        assert.notStrictEqual(run(['make'], { cwd: '/a' }), run(['make'], { cwd: '/b' }));
+        // A command too long to name exactly has no target: it can never be always allowed (a cut target would also
+        // match any longer command that starts the same way).
+        const long = ['python', 'job.py', ...Array.from({ length: 40 }, (_, i) => `--flag-${i}`)];
+        assert.strictEqual(run(long), null);
+        assert.strictEqual(allows.exact('x'.repeat(allows.MAX_TARGET + 1)), null);
+        assert.strictEqual(allows.exact('git status\u0000 on dev_x'), null, 'no control characters');
+        assert.strictEqual(allows.matches([{ kind: 'computer.run', target: 'x'.repeat(200) }], 'computer.run', 'x'.repeat(201)), false);
+        // A machine the agent names is quoted too, so it cannot pose as part of the command.
+        assert.strictEqual(stepFor('computer_run', { machine: 'dev_x foo', argv: ['ls'] }).target, 'ls on "dev_x foo"');
+        // A routine names what repeats and when: allowing a schedule never allows another task on it.
+        const daily = (task) => stepFor('schedule_trigger', { cron: '0 9 * * *', task }).target;
+        assert.notStrictEqual(daily('digest'), daily('wire the money'));
+        assert.match(daily('digest'), /^"digest" cron "0 9 \* \* \*"$/);
+        // OpenVibe.Tools: a post is allowed for one tool and one place; a send, an install and money never.
+        assert.strictEqual(stepFor('run_tool', { tool: 'openvibe.blog.post', input: { site: 'openvibe.blog' } }).target, 'openvibe.blog.post to site openvibe.blog');
+        assert.strictEqual(stepFor('run_tool', { tool: 'openvibe.blog.post', input: {} }).target, null, 'no place named, no target');
+        assert.strictEqual(stepFor('run_tool', { tool: 'openvibe.mail.send', input: { to: 'a@b.c' } }).target, null);
+        assert.strictEqual(stepFor('run_tool', { tool: 'openvibe.tools.install_skill', input: { name: 'x' } }).target, null);
+        const pay = stepFor('run_tool', { tool: 'openvibe.wallet.pay', input: {} });
+        assert.strictEqual(pay.target, null);
+        assert.strictEqual(pay.category, 'money', 'money is the floor whatever the words say');
+    });
+
+    await check('some kinds can never be always allowed, whatever the target', async () => {
+        for (const kind of ['money', 'computer.input', 'send', 'install']) {
+            assert.strictEqual(kinds.allowable(kind), false, `${kind} always asks`);
+            assert.strictEqual(allows.matches([{ kind, target: 't' }], kind, 't'), false, `${kind}: no rule covers it`);
+        }
+        const d = await levels.decide({ level: 'ask', categories: [], act: 'act', allow: { kind: 'computer.input', target: 'type on dev_x', rules: [{ kind: 'computer.input', target: 'type on dev_x' }] } });
+        assert.strictEqual(d.ask, true, 'a stored rule for a never-allowed kind is ignored');
     });
 
     await check('the kinds cover the trust spine: computer, money, publishing, posting, sending, installing, routines', async () => {
@@ -153,6 +202,7 @@ const SAMPLE = {
             assert.strictEqual(row.kind, 'computer.run');
             assert.strictEqual(row.target, 'git status on dev_x');
             assert.match(row.summary, /Run "git status" on your computer/);
+            assert.ok(row.categories !== undefined, 'the floor categories are stored');
             assert.strictEqual(row.agent_id, agent.id);
             // The page reads in plain words, and offers both ways to say yes.
             const page = await t.get(`/me/approvals/${row.id}`, { as: ada });
@@ -181,7 +231,8 @@ const SAMPLE = {
         await check('approve and always allow: the next identical ask does not ask, another target does', async () => {
             const row = (await pending())[0];
             const page = await t.get(`/me/approvals/${row.id}`, { as: ada });
-            assert.match(page.text, /Always allow running a program on your computer for this agent/);
+            assert.match(page.text, /Always allow this for Fixer/);
+            assert.match(page.text, /covers exactly this, and nothing else: running a program on your computer · git status on dev_x/);
             const res = await t.get(`/me/approvals/${row.id}`, { as: ada, form: { decision: 'approve_always' }, headers: SAME });
             assert.strictEqual(res.status, 303);
             const after = await approvals.get(t.ctx.s, owner, row.id);
@@ -212,7 +263,7 @@ const SAMPLE = {
             const page = await t.get(`/me/agents/${agent.id}`, { as: ada });
             assert.strictEqual(page.status, 200);
             assert.match(page.text, /running a program on your computer · git status on dev_x/, 'the standing permission is listed');
-            assert.match(page.text, /You approved it and allowed it always/, 'the decision is in the agent\'s activity');
+            assert.match(page.text, /You approved it and allowed it from now on|You approved it and allowed it always/, 'the decision is in the agent\'s activity');
             assert.match(page.text, /You approved it once/, 'the earlier decision is there too');
             assert.match(page.text, /Revoke/);
         });
@@ -239,7 +290,8 @@ const SAMPLE = {
             });
             const page = await t.get(`/me/approvals/${del.id}`, { as: ada });
             assert.ok(!/Always allow/.test(page.text), 'a floor step has no always-allow button');
-            assert.match(page.text, /always asks \(delete\)/);
+            assert.match(page.text, /This always asks, so it can never be always allowed/);
+            assert.match(page.text, /This deletes something/, 'the caution says why');
             const res = await t.get(`/me/approvals/${del.id}`, { as: ada, form: { decision: 'approve_always' }, headers: SAME });
             assert.strictEqual(res.status, 422);
             assert.match(res.text, /can never be always allowed/);

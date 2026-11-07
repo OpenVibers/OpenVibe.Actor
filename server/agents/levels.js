@@ -84,8 +84,7 @@ async function decide({ level = 'ask', categories = [], act = 'act', models = nu
     const floored = floorFor(categories);
     if (floored.length) return { ask: true, floor: floored[0], categories: floored, reason: `Always asks before ${floored.join(', ')} at every level.` };
     // The person's own standing permission for this exact step (plan HO1): it covers the level, never the floor.
-    if (allow && allow.kind && allow.target && Array.isArray(allow.rules)
-        && allow.rules.some((r) => r && r.kind === allow.kind && r.target === allow.target)) {
+    if (allow && require('./allows').matches(allow.rules, allow.kind, allow.target)) {
         return { ask: false, allowed: true, reason: 'You allowed this for this agent.' };
     }
     if (level === 'ask') return { ask: true, reason: 'This agent asks before it acts.' };

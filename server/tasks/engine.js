@@ -658,7 +658,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (agentId === 'codes' && taskAgent && codesRepoIn(row.task)) {
                     const asked = await askForApproval({
                         kind: 'codes.task', summary: `Start a coding task on your machine in ${codesRepoIn(row.task)}`,
-                        payload: { task: row.task }, act: 'edit', agent: agentId, target: `repo ${codesRepoIn(row.task)}`,
+                        payload: { task: row.task }, act: 'edit', agent: agentId, target: require('../agents/actions').repoTarget(codesRepoIn(row.task)),
                     });
                     if (asked.asked) {
                         const result = {

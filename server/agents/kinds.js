@@ -47,7 +47,13 @@ const LABELS = {
     'money': 'spending your money',
 };
 
+// Kinds a person can never "always allow", whatever the target: spending money is the floor itself; typing reaches
+// anything a terminal can run (so one rule would cover every command); a send's recipient and an install's code are
+// not in the step's name, so no target can say exactly what was allowed.
+const NEVER_ALWAYS = ['money', 'computer.input', 'send', 'install'];
+
 const isKind = (kind) => KINDS.includes(String(kind || ''));
+const allowable = (kind) => isKind(kind) && !NEVER_ALWAYS.includes(String(kind));
 
 /** The plain phrase for a kind; an unknown kind reads as an action, never as an empty card. */
 const label = (kind) => LABELS[String(kind || '')] || 'an action';
@@ -59,4 +65,4 @@ const phrase = (kind, target) => {
     return where ? `${what} · ${where}` : what;
 };
 
-module.exports = { KINDS, LABELS, isKind, label, phrase };
+module.exports = { KINDS, LABELS, NEVER_ALWAYS, isKind, allowable, label, phrase };

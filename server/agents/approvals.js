@@ -39,7 +39,7 @@ async function request(s, { owner, agentId = null, taskId = null, kind, summary,
     const expires = new Date(Date.parse(now) + EXPIRES_DAYS * 86400_000).toISOString();
     return await s.db.one(`INSERT INTO actor_approvals (id, owner, agent_id, task_id, kind, summary, payload, target, categories, state, created_at, expires_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, 'pending', $10, $11) RETURNING *`,
-    [id, owner, agentId, taskId, kind, String(summary).slice(0, 500), JSON.stringify(payload), target ? String(target).slice(0, 200) : null,
+    [id, owner, agentId, taskId, kind, String(summary).slice(0, 500), JSON.stringify(payload), allows.exact(target),
         JSON.stringify(categoryList(categories)), now, expires]);
 }
 
@@ -70,10 +70,13 @@ function floorOf(row) {
     try {
         stored = categoryList(typeof row.categories === 'string' ? JSON.parse(row.categories || '[]') : row.categories);
     } catch { stored = []; }
-    if (stored.length) return stored;
     let payload = null;
     try { payload = typeof row.payload === 'string' ? JSON.parse(row.payload || '{}') : row.payload; } catch { payload = null; }
-    return levels.classify({ summary: row.summary, payload });
+    // What the request stored, what its words say, and a command that deletes by its argv (rm, shred …).
+    const argvDeletes = payload && Array.isArray(payload.argv) && require('./actions').deletes(payload.argv);
+    const floor = new Set([...stored, ...levels.classify({ summary: row.summary, payload }), ...(argvDeletes ? ['delete'] : [])]);
+    if (row.kind === 'money') floor.add('money');
+    return [...floor];
 }
 
 /**
@@ -103,6 +106,7 @@ async function decide(ctx, owner, id, decision, { idempotent = false } = {}) {
             return { error: `This step always asks (${floored.join(', ')}), so it can never be always allowed.`, status: 422 };
         }
         if (!row.agent_id) return { error: 'This request has no agent to allow it for.', status: 422 };
+        if (!kinds.allowable(row.kind)) return { error: 'This kind of step always asks, so it can never be always allowed.', status: 422 };
         if (!row.target) return { error: 'This step has no target to allow.', status: 422 };
     }
     // A coding task starts as the person's own task. Every other kind had already stopped when it asked: a yes is
