@@ -19,6 +19,8 @@
  *   GET  /tasks/:id/events       actor.task.read             its live stream (actor.task-event@2, Last-Event-ID)
  *   GET  /tasks/:id/artifacts/:mediaId actor.task.read       one file or chart the task made, from Actor's own database
  *   POST /tasks/:id/cancel       actor.task.create           stop it
+ *   GET  /assignments/:id        actor.assignment.read       one node of the delegated-work tree and its children
+ *   POST /assignments/:id/cancel actor.assignment.cancel     cancel that node and every node below it
  *
  * A task is visible to its requester only (or to tokens of the project it belongs to); anyone else gets 404, the same
  * as a task that does not exist. Creating one goes through tasks/create.js (money limits before any work).
@@ -39,6 +41,7 @@ const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
 const items = require('../actions/items');
 const timeline = require('../agents/timeline');
+const assignments = require('../agents/assignments');
 const modelPrefs = require('../runtime/model-prefs');
 const driving = require('../agents/driving');
 
@@ -396,6 +399,8 @@ function createApi(ctx) {
         }
         out.level = row.level || 'ask';
         try { out.effective_level = await contacts.effectiveLevelFor(s, row, agent); } catch (err) { out.effective_level = out.level; }
+        // An existing task gets its assignment root the first time it is read (plan §12 A-2), never by a backfill.
+        try { await assignments.ensureForTask(s, config, row); } catch (err) { /* the task still reads */ }
         return out;
     };
 
@@ -540,6 +545,26 @@ function createApi(ctx) {
         res.status(store.OPEN.includes(after.state) ? 202 : 200).json(await wireTask(after));
     });
 
+
+    // ── The assignment tree (plan §12 A-2) ───────────────────
+    // One record for all delegated work. Both routes are owner-only: another person's node is the same 404 as one
+    // that does not exist. A cancel cascades down the tree and stops the tasks still running under it.
+    r.get('/assignments/:id', principal.requireCapability('actor.assignment.read'), limits.reads('actor.assignment.read'), async (req, res) => {
+        const p = req.principal;
+        if (!p.requester || !p.requester.startsWith('user:')) return problem(req, res, 404, 'actor.assignment.not_found', 'No such assignment.');
+        const out = await assignments.tree(s, p.requester, req.params.id);
+        if (!out) return problem(req, res, 404, 'actor.assignment.not_found', 'No such assignment.');
+        res.json(out);
+    });
+    r.post('/assignments/:id/cancel', principal.requireCapability('actor.assignment.cancel'), limits.budget('actor.assignment.cancel'), async (req, res) => {
+        const p = req.principal;
+        if (!p.requester || !p.requester.startsWith('user:')) return problem(req, res, 404, 'actor.assignment.not_found', 'No such assignment.');
+        const out = await assignments.cancelTree(s, p.requester, req.params.id);
+        if (!out) return problem(req, res, 404, 'actor.assignment.not_found', 'No such assignment.');
+        const { task_ids: taskIds, ...result } = out;
+        for (const taskId of taskIds) await engine.cancel(taskId, p.requester);
+        res.json(result);
+    });
     return r;
 }
 

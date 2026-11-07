@@ -45,8 +45,14 @@ module.exports = {
         const list = Array.isArray(input && input.files) ? input.files : [];
         if (!list.length) return { text: JSON.stringify({ error: 'send the files the space is made of' }), isError: true };
         const files = list.slice(0, 20).map((f) => ({ path: String((f && f.path) || '').slice(0, 80), content: String((f && f.content) || '').slice(0, 200000) }));
+        const node = typeof ctx.assign === 'function' ? await ctx.assign({ mode: 'work', reply: 'resume', agentId: ctx.agentId || null, state: 'running' }) : null;
+        if (node && node.error) return { text: JSON.stringify({ error: `not started: ${node.error}` }), isError: true, data: node };
         const out = await space.call('PUT', `/api/v1/builder/spaces/${id}/files`, person, { files });
-        if (!out.ok) return { text: JSON.stringify({ error: out.error }), isError: true };
+        if (!out.ok) {
+            if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'failed');
+            return { text: JSON.stringify({ error: out.error }), isError: true };
+        }
+        if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'succeeded');
         const written = (out.data && out.data.files) || [];
         return { text: JSON.stringify({ space_id: id, files: written.map((f) => ({ path: f.path, bytes: String(f.content || '').length })) }), data: { files: written } };
     },

@@ -35,6 +35,8 @@ const BUDGETS = {
     'actor.route': { minute: 30, hour: 600 },
     'actor.task.stream': { minute: 30, hour: 600 },
     'actor.approval.decide': { minute: 30, hour: 600 },
+    // Cancelling a subtree is a write, not a task: the tree is small (one node per hand-off).
+    'actor.assignment.cancel': { minute: 30, hour: 600 },
     // The kill switch and the other controls of the agent (design 2026-11-07).
     'actor.resource.control': { minute: 30, hour: 600 },
 };

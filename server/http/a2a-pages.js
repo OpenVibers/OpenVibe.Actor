@@ -39,7 +39,8 @@ function createA2APages(ctx) {
         }
         const text = messageText(req.body.message);
         if (!text) return contracts.http.sendProblem(res, 422, 'actor.a2a.empty', { detail: 'the task has no text', ctx: req.ov });
-        const out = await createTask({ s, config, engine, principal: { ...p, requester: 'user:' + subject }, body: { task: text, mode: 'balanced' } });
+        // Work from another agent is outside work: it never passes an approval level down to its children.
+        const out = await createTask({ s, config, engine, principal: { ...p, requester: 'user:' + subject }, body: { task: text, mode: 'balanced' }, assignmentOrigin: 'outside' });
         if (!out || !out.task) {
             return contracts.http.sendProblem(res, (out && out.status) || 500, (out && out.code) || 'actor.task.failed', { detail: (out && out.detail) || 'the task could not be started', ctx: req.ov });
         }

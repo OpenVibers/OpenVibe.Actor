@@ -3,9 +3,11 @@
 /**
  * The approval inbox (plan T17: "an approval inbox for consequential actions"). A person's own agent runs while they
  * are away (a schedule, a watch): when its work would act outside Actor on their behalf — today, a coding task on their
- * own machine through OpenVibe.Codes — the run asks instead of acting. The request waits on /me/approvals; approving
- * starts that work as the person's own task (they are present now), declining or letting it expire (7 days) runs
- * nothing. A person's direct task never asks: they are the one asking.
+ * own machine through OpenVibe.Codes, or one of its acting tools (a send, a purchase, a deletion, a password field, a
+ * computer_run, a browser action, a Space publish) — the run asks instead of acting. The request waits on /me/approvals;
+ * approving a codes.task starts that work as the person's own task (they are present now), declining or letting it
+ * expire (7 days) runs nothing. An actor.action approval records the person's yes for a retry: the run that asked had
+ * already stopped, so nothing is replayed on its own. A person's direct task never asks: they are the one asking.
  *
  *   request(s, { owner, agentId, taskId, kind, summary, payload }) → the row (pending)
  *   list(s, owner) / get(s, owner, id)                             → rows, pending past their expiry marked expired
@@ -14,7 +16,7 @@
  */
 const { createTask } = require('../tasks/create');
 
-const KINDS = ['codes.task'];
+const KINDS = ['codes.task', 'actor.action'];
 const EXPIRES_DAYS = 7;
 const ID = /^apr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -65,6 +67,12 @@ async function decide(ctx, owner, id, decision, { idempotent = false } = {}) {
         return { row: done };
     }
     if (decision !== 'approve') return { error: 'Approve or decline.', status: 422 };
+    // An action had already stopped when it asked: a yes is consent for the person to run it again, never a replay
+    // of a call whose arguments only exist in the old run's context.
+    if (row.kind === 'actor.action') {
+        const done = await s.db.one("UPDATE actor_approvals SET state = 'approved', decided_at = $2 WHERE id = $1 AND state = 'pending' RETURNING *", [id, s.iso()]);
+        return { row: done, note: 'Approved. The run that asked had already stopped; run it again to let the agent go on.' };
+    }
     const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
     // The person just approved this exact work, so the thread starts at full access: the engine's approval gate must not
     // ask again. The always-ask floor still applies (the text may still be a deletion or a payment).

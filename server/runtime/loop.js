@@ -651,6 +651,10 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     async function runChild(parent, ctx, args, childTrace = null) {
         const goal = clip(String((args && args.goal) || '').replace(/\s+/g, ' ').trim(), 600);
         if (!goal) return { delegate: true, error: 'a sub-agent needs a goal' };
+        // An agent asking another agent is one node on the assignment tree (plan §12 A-2); the root's budget
+        // decides whether it may start at all.
+        const node = typeof ctx.assign === 'function' ? await ctx.assign({ mode: 'consult', reply: 'resume', state: 'running' }) : null;
+        if (node && node.error) return { delegate: true, error: `not started: ${node.error}` };
         const want = Array.isArray(args.tools) && args.tools.length ? new Set(args.tools.map(String)) : null;
         // Never wider than the parent: its offered tools, narrowed by the call, and never `delegate` (depth 1).
         // A child never gets an acting tool (stage V2-9): it has no checkpoint of its own, so a crash inside it could
@@ -681,7 +685,13 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             { role: 'user', content: `${goal}\n\n(One part of a bigger task: ${clip(parent.task, 300)})` },
         );
         const maxModelCalls = config.loop && config.loop.subAgentCalls != null ? config.loop.subAgentCalls : 8;
-        await drive(child, cctx, { reflections: 0, maxModelCalls });
+        try {
+            await drive(child, cctx, { reflections: 0, maxModelCalls });
+            if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'succeeded');
+        } catch (err) {
+            if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'failed');
+            throw err;
+        }
         // Its evidence joins the parent's ledger, renumbered; its answer's citations follow the new ids.
         const ids = new Map();
         for (const item of child.ledger.items) {
@@ -846,7 +856,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
      * a span; and drives on from the step it stopped at. A checkpoint whose last step already answered is delivered
      * without another model call.
      */
-    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null }) {
+    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null }) {
         const source = resume && resume.state ? resume.state : (fork && fork.checkpoint && fork.checkpoint.state);
         const restored = restoreState(source);
         if (!restored) throw Object.assign(new Error('the saved step could not be read'), { code: 'actor.checkpoint.invalid' });
@@ -867,7 +877,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // delivers a saved final answer without calling the model again.
         if (fork) state.answered = false;
         const ctx = {
-            config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, chatPolicy, approveChatTool, artifacts,
+            config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, artifacts,
             store, now, agentId, personText: personText == null ? String(task) : String(personText),
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
@@ -1004,9 +1014,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         }
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null }) {
         if (resume || fork) {
-            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta });
+            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta });
         }
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
@@ -1030,7 +1040,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             },
         };
         const ctx = {
-            config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, chatPolicy, approveChatTool, artifacts,
+            config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, artifacts,
             store, now, agentId, personText: personText == null ? String(task) : String(personText),
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,

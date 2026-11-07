@@ -27,8 +27,14 @@ module.exports = {
         const person = personOf(ctx.requester);
         const id = spaceIdOf(input);
         if (!id) return { text: JSON.stringify({ error: 'that is not a space id (spc_…)' }), isError: true };
+        const node = typeof ctx.assign === 'function' ? await ctx.assign({ mode: 'work', reply: 'resume', agentId: ctx.agentId || null, state: 'running' }) : null;
+        if (node && node.error) return { text: JSON.stringify({ error: `not started: ${node.error}` }), isError: true, data: node };
         const out = await space.call('POST', `/api/v1/builder/spaces/${id}/publish`, person, {});
-        if (!out.ok) return { text: JSON.stringify({ error: out.error }), isError: true };
+        if (!out.ok) {
+            if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'failed');
+            return { text: JSON.stringify({ error: out.error }), isError: true };
+        }
+        if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'succeeded');
         const data = out.data || {};
         if (data.state === 'published') return { text: JSON.stringify({ space_id: id, state: 'published', url: data.url || null }), data };
         return {

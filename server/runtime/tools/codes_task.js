@@ -6,9 +6,10 @@
  * answers the summary, changed files and patch. The model use is on the person's machine and keys, so nothing is
  * metered here.
  *
- * A personal agent's run that would start coding work on its owner's machine still asks first (the approval inbox,
- * agents/approvals.js): the engine passes requestApproval into the loop's context for those runs, and this tool
- * returns the request's link instead of running anything.
+ * A personal agent's run that would start coding work on its owner's machine asks first (the approval gate,
+ * agents/levels.js and agents/actions.js): the registry calls requestApproval with this tool's act and category
+ * before run(), so nothing reaches Codes until the person approves. Starting Codes is also one node on the
+ * assignment tree.
  */
 
 const { createCodes, repoIn } = require('../../agents/codes');
@@ -36,14 +37,16 @@ module.exports = {
         if (!person) return { text: JSON.stringify({ error: 'coding tasks run on your own machine through OpenVibe.Codes, so they need you signed in' }), isError: true };
         const task = [String(input.instruction || '').slice(0, 8000), input.repo ? String(input.repo).slice(0, 500) : ''].filter(Boolean).join('\n\n');
         const repo = repoIn(task);
-        // A person's own agent, running while they are away, asks before it starts work on their machine.
-        if (repo && typeof ctx.requestApproval === 'function') {
-            const ask = await ctx.requestApproval({ kind: 'codes.task', summary: `Start a coding task on your machine in ${repo}`, payload: { task } });
-            if (ask && ask.pending) {
-                return { text: JSON.stringify({ error: `not started: the person must approve it first at ${ask.url}` }), isError: true, data: ask };
-            }
+        // One hand-off to Codes on the tree: work, its result polled by the parent run.
+        const node = typeof ctx.assign === 'function' ? await ctx.assign({ mode: 'work', reply: 'poll', agentId: ctx.agentId || null, state: 'running' }) : null;
+        if (node && node.error) return { text: JSON.stringify({ error: `not started: ${node.error}` }), isError: true, data: node };
+        try {
+            const out = await codes.adapter({ task, requester: ctx.requester, signal: ctx.signal, emit: ctx.emit, taskId: ctx.taskId || null });
+            if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'succeeded');
+            return { text: out.text, data: { sources: out.sources, model: out.model }, sources: (out.sources || []).map((url) => ({ url })) };
+        } catch (err) {
+            if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'failed');
+            throw err;
         }
-        const out = await codes.adapter({ task, requester: ctx.requester, signal: ctx.signal, emit: ctx.emit, taskId: ctx.taskId || null });
-        return { text: out.text, data: { sources: out.sources, model: out.model }, sources: (out.sources || []).map((url) => ({ url })) };
     },
 };

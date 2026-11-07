@@ -121,7 +121,7 @@ ${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when })}
         if (!signed(req)) return login(req, res);
         const rows = await approvals.list(s, owner(req));
         page(req, res, 'Approvals', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · approvals</p><h1>Approvals</h1>
-<p class="pa-lede">When one of your agents runs while you are away and its work would act for you outside Actor (a coding task on your own machine), it asks here first. Nothing runs until you approve. A request you leave expires after ${String(approvals.EXPIRES_DAYS)} days.</p></header>
+<p class="pa-lede">When one of your agents runs while you are away and its work would act for you outside Actor (a coding task on your own machine, a send, a purchase, a deletion, a password field, a Space publish), it asks here first. Nothing runs until you approve. An action's run had already stopped when it asked, so approving it is consent for you to run the task again. A request you leave expires after ${String(approvals.EXPIRES_DAYS)} days.</p></header>
 ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-card"><a href="/me/approvals/${a.id}"><strong>${a.summary}</strong></a> ${approvalPill(a)}<span class="pa-when">Asked ${time(a.created_at)}</span></li>`)}</ul>`
         : html`<p class="pa-empty">Nothing to approve. Your agents have not asked for anything yet.</p>`}
 <p><a href="/me/agents">Your agents</a></p>`);
@@ -133,9 +133,11 @@ ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-c
         const p = typeof a.payload === 'string' ? JSON.parse(a.payload) : a.payload;
         page(req, res, 'Approval', html`<p class="pa-eyebrow"><a href="/me/approvals">Approvals</a></p><h1>${a.summary}</h1>
 <p>${approvalPill(a)} <span class="pa-when">Asked ${time(a.created_at)}${a.agent_id ? html` by <a href="/me/agents/${a.agent_id}">your agent</a>` : ''}${a.task_id ? html` in <a href="/tasks/${a.task_id}">this run</a>` : ''}</span></p>
-<section class="pa-panel"><h2>What it would do</h2><p>Start a coding task on your own machine through <a href="https://openvibe.codes/run">OpenVibe.Codes</a> with this request. You get the summary, the changed files and the patch; it pushes nowhere unless the request asks for a branch and your machine holds a GitHub token.</p>
-<pre class="pa-pre">${String(p.task || '').slice(0, 8000)}</pre></section>
-${a.state === 'pending' ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">Approve and start it</button> <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>`
+${a.kind === 'actor.action'
+            ? html`<section class="pa-panel"><h2>What it would do</h2><p>${a.summary}</p><pre class="pa-pre">${JSON.stringify(p, null, 2).slice(0, 8000)}</pre></section>`
+            : html`<section class="pa-panel"><h2>What it would do</h2><p>Start a coding task on your own machine through <a href="https://openvibe.codes/run">OpenVibe.Codes</a> with this request. You get the summary, the changed files and the patch; it pushes nowhere unless the request asks for a branch and your machine holds a GitHub token.</p>
+<pre class="pa-pre">${String(p.task || '').slice(0, 8000)}</pre></section>`}
+${a.state === 'pending' ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">${a.kind === 'actor.action' ? 'Approve for a retry' : 'Approve and start it'}</button> <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>`
         : a.result_task_id ? html`<p>Started as <a href="/tasks/${a.result_task_id}">this task</a>.</p>` : ''}`);
     });
     r.post('/me/approvals/:id', async (req, res) => {
