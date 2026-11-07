@@ -17,7 +17,10 @@ function ago(iso, now = Date.now()) {
     if (!Number.isFinite(t)) return '';
     const d = Math.round((t - now) / 1000);
     const a = Math.abs(d);
-    const [n, unit] = a < 60 ? [a, 'second'] : a < 3600 ? [Math.round(a / 60), 'minute'] : a < 86400 ? [Math.round(a / 3600), 'hour'] : [Math.round(a / 86400), 'day'];
+    // A time to come rounds down (6.75 days left is "in 6 days": never promise more time than there is); a time past
+    // rounds to the nearest.
+    const r = d > 0 ? Math.floor : Math.round;
+    const [n, unit] = a < 60 ? [a, 'second'] : a < 3600 ? [r(a / 60), 'minute'] : a < 86400 ? [r(a / 3600), 'hour'] : [r(a / 86400), 'day'];
     if (a < 45) return 'just now';
     const words = `${n} ${unit}${n === 1 ? '' : 's'}`;
     return d < 0 ? `${words} ago` : `in ${words}`;

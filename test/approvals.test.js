@@ -138,6 +138,9 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const asked = (one.text.match(/Asked [\s\S]{0,240}/) || [''])[0];
             assert.match(asked, /title="[^"]+ UTC">(just now|[^<]* ago)</, `a time a person reads, the exact one in its title: ${asked}`);
             assert.match(one.text, /expires <time[^>]*>in [67] days</);
+            const later = await approvals.request(t.ctx.s, { owner, agentId: helper.id, kind: 'actor.action', summary: 'Run "ls" on your computer', payload: { argv: ['ls'], machine: 'dev_x' } });
+            await t.ctx.s.db.query("UPDATE actor_approvals SET expires_at = $2 WHERE id = $1", [later.id, new Date(Date.parse(t.ctx.s.iso()) + 6.75 * 86400000).toISOString()]);
+            assert.match((await t.get(`/me/approvals/${later.id}`, { as: ada })).text, /expires <time[^>]*>in 6 days</, 'never more time than there is');
             assert.ok(one.text.includes('The exact request'), 'the details stay, after the plain words');
         });
     } finally {
