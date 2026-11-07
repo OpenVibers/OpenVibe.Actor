@@ -29,6 +29,7 @@ const { route, whyNone } = require('../agents/router');
 const { check } = require('../agents/check');
 const { check: checkClaims } = require('../runtime/check');
 const approvals = require('../agents/approvals');
+const allows = require('../agents/allows');
 const contacts = require('../agents/contacts');
 const assignments = require('../agents/assignments');
 const runTokens = require('../triggers/tokens');
@@ -333,11 +334,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         let closeAssignment = null;
         // One place every approval gate asks through: the level, then the always-ask floor, then (for approve-for-me)
         // a reviewer model of another family. Returns { asked: false } when the step may go ahead.
-        const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT }) => {
+        // A standing permission the person gave for this exact kind and target (plan HO1) is read here: it lets the
+        // step go on, and it never covers the floor.
+        const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT, target = null }) => {
             const categories = levels.classify({ category, summary, payload, recipientKnown });
-            const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal });
+            const rules = taskAgent ? await allows.list(s, row.requester, taskAgent.id) : [];
+            const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal, allow: { kind, target, rules } });
             if (!decision.ask) return { asked: false, decision };
-            const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary, payload });
+            const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary, payload, target, categories });
             const url = `${config.baseUrl}/me/approvals/${ask.id}`;
             await emit(id, { kind: 'output', step: 'text', agent, text: `Your agent wants to ${String(summary).toLowerCase()} Nothing runs until you approve it: ${url}` });
             await tellPerson(row, 'needs_you', { what: `approve: ${summary}`, url });
@@ -426,8 +430,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // A task that would start coding work on the person's machine asks through the same gate (levels.js):
                 // the level first, then the always-ask floor. Full access or auto-edits may let an edit through; a
                 // payment, password, deletion or a new recipient never does.
-                requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null }) => {
-                    const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown });
+                requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, target = null }) => {
+                    const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown, target });
                     if (!out.asked) return null;
                     return { pending: true, id: out.ask.id, url: out.url };
                 } : null;
@@ -654,7 +658,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (agentId === 'codes' && taskAgent && codesRepoIn(row.task)) {
                     const asked = await askForApproval({
                         kind: 'codes.task', summary: `Start a coding task on your machine in ${codesRepoIn(row.task)}`,
-                        payload: { task: row.task }, act: 'edit', agent: agentId,
+                        payload: { task: row.task }, act: 'edit', agent: agentId, target: `repo ${codesRepoIn(row.task)}`,
                     });
                     if (asked.asked) {
                         const result = {

@@ -10,7 +10,11 @@
  *
  *   LEVELS, RANK, maxLevel(...)
  *   classify({ summary, payload, category, recipientKnown }) → ['money' | 'password' | 'delete' | 'new_recipient']
- *   decide({ level, categories, act, models, summary, payload, signal }) → { ask, floor?, reason, reviewer? }
+ *   decide({ level, categories, act, models, summary, payload, signal, allow }) → { ask, floor?, reason, reviewer? }
+ *
+ * `allow` is the person's standing permission for one exact step (plan HO1): { kind, target, rules }. A rule that
+ * covers this kind and this target lets the step go on at any level. The floor is checked first and is never
+ * covered by a rule: money, a password, a deletion and a new recipient ask every time.
  */
 
 const LEVELS = ['ask', 'auto-edits', 'approve-for-me', 'full'];
@@ -76,9 +80,14 @@ const floorFor = (categories) => (Array.isArray(categories) ? categories : []).f
  * anything else for an outward action. Returns { ask, floor, reason } — and for approve-for-me whose reviewer approves,
  * { ask: false, reviewer }. Never returns ask=false for a floor category.
  */
-async function decide({ level = 'ask', categories = [], act = 'act', models = null, summary = '', payload = null, signal = null } = {}) {
+async function decide({ level = 'ask', categories = [], act = 'act', models = null, summary = '', payload = null, signal = null, allow = null } = {}) {
     const floored = floorFor(categories);
     if (floored.length) return { ask: true, floor: floored[0], categories: floored, reason: `Always asks before ${floored.join(', ')} at every level.` };
+    // The person's own standing permission for this exact step (plan HO1): it covers the level, never the floor.
+    if (allow && allow.kind && allow.target && Array.isArray(allow.rules)
+        && allow.rules.some((r) => r && r.kind === allow.kind && r.target === allow.target)) {
+        return { ask: false, allowed: true, reason: 'You allowed this for this agent.' };
+    }
     if (level === 'ask') return { ask: true, reason: 'This agent asks before it acts.' };
     if (level === 'auto-edits' && (act === 'code' || act === 'edit')) return { ask: false, reason: 'Auto-accept edits.' };
     if (level === 'auto-edits') return { ask: true, reason: 'Auto-accept edits covers edits; other actions ask.' };
