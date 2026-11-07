@@ -22,11 +22,12 @@ function subjectRef(requester) {
 
 async function insertTask(s, t) {
     await s.db.query(
-        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret, timeout_ms, parent_id, fork_of_step, fork_change)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18::jsonb)`,
+        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret, timeout_ms, parent_id, fork_of_step, fork_change, agent_id, level)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18::jsonb, $19, $20)`,
         [t.id, t.requester, t.project_id || null, t.task, t.mode, t.agent || null, t.budget_task, t.budget_day, t.idem_key || null, t.idem_hash || null, t.created_at, t.via || null,
             t.webhooks && t.webhooks.length ? JSON.stringify(t.webhooks) : null, t.webhook_secret || null, t.timeout_ms || null, t.parent_id || null,
-            t.fork_of_step == null ? null : Number(t.fork_of_step), t.fork_change ? JSON.stringify(t.fork_change) : null]);
+            t.fork_of_step == null ? null : Number(t.fork_of_step), t.fork_change ? JSON.stringify(t.fork_change) : null,
+            t.agent_id || null, t.level || 'ask']);
     await addSpend(s, t.requester, 0, { tasks: 1 });
     return getTask(s, t.id);
 }
@@ -253,6 +254,10 @@ function toWire(row, { baseUrl }) {
         cancel: row.cancel_at ? { requested_at: row.cancel_at, ...(row.cancel_by ? { requested_by: subjectRef(row.cancel_by) } : {}) } : null,
         error: row.error_code ? { code: row.error_code, detail: row.error_detail || '' } : null,
     };
+    // A task is a thread (A-1): the contact it runs as and its own level. effective_level needs the parent chain, so
+    // the API adds it on a read (contacts.effectiveLevelFor); the row itself carries the thread's own level.
+    if (row.agent_id) t.agent_id = row.agent_id;
+    t.level = row.level || 'ask';
     if (row.project_id) t.project_id = row.project_id;
     if (t.explanation && !t.explanation.length) t.explanation = null;
     // What the task registered; the signing secret is never part of the task as read (only the creating answer has it).

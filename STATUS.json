@@ -7,12 +7,12 @@
   "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
   "port": 4950,
   "domain": "openvibe.actor",
-  "contracts": "openvibe-contracts v0.316.0",
-  "sdk": "openvibe-sdk v0.94.0",
+  "contracts": "openvibe-contracts v0.322.0",
+  "sdk": "openvibe-sdk v0.96.0",
   "shared": "openvibe-shared v4.129.0",
   "packages": [
-    "openvibe-contracts v0.316.0",
-    "openvibe-sdk v0.94.0",
+    "openvibe-contracts v0.322.0",
+    "openvibe-sdk v0.96.0",
     "openvibe-shared v4.129.0"
   ],
   "summary": "Public at https://openvibe.actor (sudo ovhost deploy actor; unit openvibe-actor on 127.0.0.1:4950). A task in plain words is classified, routed by openvibe-sdk/placement to the agent system that can do it (the OpenVibe runtime acting through OpenVibe.Search and OpenVibe.Tools, OpenAI's web agent, an open model on OpenVibe's server for private mode), run with its steps streamed live, checked by a model of another family, and delivered as platform.task@1 with its cost to a fraction of a cent and the explanation; a failed agent or check hands it to the next agent. Free tier per person with an operator ceiling.",
@@ -24,20 +24,22 @@
     "A cross-family check on every answer; hand-off to the next agent on an error or a failed check",
     "Live progress over server-sent events (actor.task-event@1), cancel, idempotency keys",
     "Sign-in with OpenVibe.Network (PKCE); people's own tokens and app tokens with actor.task.* capabilities",
-    "The public agent catalog with rate cards (GET /api/v1/agents) and a dry-run router (POST /api/v1/route)",
+    "The public agent catalog with rate cards (GET /api/v1/agent-systems; GET /api/v1/agents for a caller with no person) and a dry-run router (POST /api/v1/route)",
     "Free tier per person and an operator daily ceiling; costs metered per call at the published rate cards",
     "Pages: home with the task box, your tasks, a task's live page, the agents, the API reference, updates; robots, sitemap, llms.txt",
     "Account export and deletion (ADR-033): tasks, spend, personal agents and every memory note are exported and erased for the person",
     "Personal agents: named instructions, editable memory, hourly/daily/weekly schedules, manual and scheduled runs, and their own approval inbox before work on the person's machine",
     "Reach from Chat (A4): Chat starts the person's own agent for a message (POST /api/v1/chat-apps/tasks, svc:chat acting for a linked person); a direct message runs with their memory, a group with the stranger's text as untrusted data and no personal tools, and an acting tool under act_with_approvals waits for the person's decision. Shipped with Chat #358 and Network #591 (Actor #296)",
     "MCP servers and A2A agents as tools (V2-11): a person connects their own MCP server by URL or an OpenVibe-offered one on /connections, turns each tool on, and the run calls it like any other tool; ask_agent talks to a connected A2A agent. Every call goes through the egress guard, is recorded as evidence with the server and tool as its source, and follows the run's approval policy (Actor #206)",
-    "Task webhooks on state changes: up to 8 https endpoints per task, signed with the task's own secret (or a project secret by reference), retried with backoff, with a delivery log on the task page and public addresses only"
+    "Task webhooks on state changes: up to 8 https endpoints per task, signed with the task's own secret (or a project secret by reference), retried with backoff, with a delivery log on the task page and public addresses only",
+    "Agents are contacts (A-1): a signed-in person's GET /api/v1/agents is their own roster, Vibe created on first read and never deletable, with a face, voice, model engine, computer, connected apps, Memory scope and approval level; GET /api/v1/agents/presets gives four presets to copy, and GET /api/v1/agent-systems keeps the public catalog for every caller",
+    "Approval levels (A-1): ask (the default), auto-edits, approve-for-me (a reviewer model of another family) and full; money, passwords, deletions and sending to a new recipient ask at every level as a server-side floor. Tasks record agent_id (default Vibe) and their own level; the effective level is the higher of the agent's and the person's own parent chain"
   ],
   "notYet": [
     "Browser and desktop agents on OpenVibe's own servers (OpenVibe.Run workers), watchable and taken over",
     "Coding tasks through OpenVibe.Codes on hosted sandboxes (listed as unavailable with the reason)",
     "More agent platforms, bring-your-own keys through OpenVibe.AI, paid tiers through OpenVibe.Billing",
-    "Personal agent Events triggers, the rest of the approval inbox (only coding tasks ask today) and the Frame"
+    "Personal agent Events triggers, approval questions from acting tools other than coding tasks, and the Frame"
   ],
   "capabilitiesRegistered": true,
   "serviceManifestRegistered": true,
@@ -53,7 +55,8 @@
     "live task progress",
     "task webhooks (signed per task, retried with backoff, public https endpoints only)",
     "MCP servers and A2A agents as tools (V2-11; egress guard, evidence, approval policy)",
-    "reach from Chat (A4; chat apps' agent, approvals and group policy)"
+    "reach from Chat (A4; chat apps' agent, approvals and group policy)",
+    "agents as contacts and approval levels (A-1; actor.agent@1, actor.agent-list@1, actor.level-change@1)"
   ],
   "updated": "2026-11-07"
 }

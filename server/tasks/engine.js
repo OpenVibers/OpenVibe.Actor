@@ -29,6 +29,8 @@ const { route, whyNone } = require('../agents/router');
 const { check } = require('../agents/check');
 const { check: checkClaims } = require('../runtime/check');
 const approvals = require('../agents/approvals');
+const contacts = require('../agents/contacts');
+const levels = require('../agents/levels');
 const { repoIn: codesRepoIn } = require('../agents/codes');
 const memory = require('../memory');
 const taskNotices = require('../notify/task-notices');
@@ -277,6 +279,28 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             await emit(id, { kind: 'output', step: 'answer', agent: LOOP_AGENT, text: String(answer).slice(0, 2000) });
             return answer;
         };
+        // The contact this task runs as and the level its steps run at (A-1). The agent is the thread's own, else the
+        // personal agent that started it, else the person's Vibe. Another person's or a service's work has no contact.
+        let taskAgent = null;
+        let taskLevel = 'ask';
+        try {
+            taskAgent = await contacts.agentForTask(s, config, row);
+            taskLevel = await contacts.effectiveLevelFor(s, row, taskAgent);
+        } catch (err) {
+            log.warn && log.warn('[Actor] task agent/level:', id, (err && err.message) || err);
+        }
+        // One place every approval gate asks through: the level, then the always-ask floor, then (for approve-for-me)
+        // a reviewer model of another family. Returns { asked: false } when the step may go ahead.
+        const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT }) => {
+            const categories = levels.classify({ category, summary, payload, recipientKnown });
+            const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal });
+            if (!decision.ask) return { asked: false, decision };
+            const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary, payload });
+            const url = `${config.baseUrl}/me/approvals/${ask.id}`;
+            await emit(id, { kind: 'output', step: 'text', agent, text: `Your agent wants to ${String(summary).toLowerCase()} Nothing runs until you approve it: ${url}` });
+            await tellPerson(row, 'needs_you', { what: `approve: ${summary}`, url });
+            return { asked: true, decision, ask, url };
+        };
         const explanation = [];
         const tried = new Map();
         // The quality tier a hand-off may not go below: the tier of the best agent tried so far (catalog quality).
@@ -343,13 +367,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 explanation.push({ selected: agentId, objective: row.mode === 'best' ? 'correctness' : 'balanced', reasons: [why], candidates: [], decided_at: iso() });
                 await store.updateTask(s, id, { explanation });
                 if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: 'The agent starts with a plan, then works through it.' });
-                // A personal agent's run that would start coding work on its owner's machine asks first (approvals.js).
-                const requestApproval = /^agent:agt_/.test(String(row.via || '')) ? async ({ kind, summary, payload }) => {
-                    const ask = await approvals.request(s, { owner: row.requester, agentId: row.via.slice(6), taskId: id, kind, summary, payload });
-                    const url = `${config.baseUrl}/me/approvals/${ask.id}`;
-                    await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Your agent wants to ${summary.toLowerCase()} Nothing runs until you approve it: ${url}` });
-                    await tellPerson(row, 'needs_you', { what: `approve: ${summary}`, url });
-                    return { pending: true, id: ask.id, url };
+                // A task that would start coding work on the person's machine asks through the same gate (levels.js):
+                // the level first, then the always-ask floor. Full access or auto-edits may let an edit through; a
+                // payment, password, deletion or a new recipient never does.
+                const requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'code', recipientKnown = null }) => {
+                    const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown });
+                    if (!out.asked) return null;
+                    return { pending: true, id: out.ask.id, url: out.url };
                 } : null;
                 // The wait that ended (plan A2), if this run was woken by one: the notice, and the event as data.
                 const wakePayload = wakes.get(id) || null;
@@ -568,22 +592,22 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 }
                 const agentId = placement.selected;
                 const agent = catalog.byId(agentId);
-                // The approval inbox (agents/approvals.js): a person's own agent, running while they are away, asks
-                // before it starts a coding task on their machine. Nothing runs until they approve.
-                if (agentId === 'codes' && /^agent:agt_/.test(String(row.via || '')) && codesRepoIn(row.task)) {
-                    const ask = await approvals.request(s, {
-                        owner: row.requester, agentId: row.via.slice(6), taskId: id, kind: 'codes.task',
-                        summary: `Start a coding task on your machine in ${codesRepoIn(row.task)}`, payload: { task: row.task },
+                // The approval gate (levels.js + agents/approvals.js): a coding task on the person's machine asks at ask
+                // and for the always-ask floor; auto-edits lets the edit through, full access skips the gate, and
+                // approve-for-me asks a reviewer of another family first.
+                if (agentId === 'codes' && taskAgent && codesRepoIn(row.task)) {
+                    const asked = await askForApproval({
+                        kind: 'codes.task', summary: `Start a coding task on your machine in ${codesRepoIn(row.task)}`,
+                        payload: { task: row.task }, category: 'code', act: 'code', agent: agentId,
                     });
-                    const url = `${config.baseUrl}/me/approvals/${ask.id}`;
-                    await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Your agent wants to start a coding task on your own machine. Nothing runs until you approve it: ${url}` });
-                    await tellPerson(row, 'needs_you', { what: `approve: start a coding task in ${codesRepoIn(row.task)}`, url });
-                    const result = {
-                        answer: `Your agent asked to start a coding task on your own machine (OpenVibe.Codes) in ${codesRepoIn(row.task)}. Nothing has run: approve or decline it at ${url}. The request expires in ${approvals.EXPIRES_DAYS} days.`,
-                        sources: [url], agent: agentId, model: null, class: cls, approval: { id: ask.id, url },
-                        checked: { by: 'none', cross_family: false, reason: 'Nothing was run: its owner decides first.' },
-                    };
-                    return await setState(id, 'succeeded', { result, finished_at: iso() });
+                    if (asked.asked) {
+                        const result = {
+                            answer: `Your agent asked to start a coding task on your own machine (OpenVibe.Codes) in ${codesRepoIn(row.task)}. Nothing has run: approve or decline it at ${asked.url}. The request expires in ${approvals.EXPIRES_DAYS} days.`,
+                            sources: [asked.url], agent: agentId, model: null, class: cls, approval: { id: asked.ask.id, url: asked.url },
+                            checked: { by: 'none', cross_family: false, reason: 'Nothing was run: its owner decides first.' },
+                        };
+                        return await setState(id, 'succeeded', { result, finished_at: iso() });
+                    }
                 }
                 await emit(id, { kind: 'output', step: attempt > 1 ? 'handoff' : 'plan', agent: agentId, text: `${agent.name} takes it${placement.reasons && placement.reasons[0] ? `: ${placement.reasons[0]}` : ''}.` });
                 let out;

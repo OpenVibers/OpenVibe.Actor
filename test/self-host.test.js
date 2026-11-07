@@ -78,7 +78,7 @@ const SECRET = 's'.repeat(43);
     });
 
     await check('the agent list says so; the Network-bound integrations are off', async () => {
-        const agents = (await t.get('/api/v1/agents', { bearer: TOKEN })).json().agents;
+        const agents = (await t.get('/api/v1/agent-systems', { bearer: TOKEN })).json().agents;
         const rt = agents.find((a) => a.id === 'openvibe-runtime');
         assert.deepStrictEqual([rt.available, rt.trust, rt.model, rt.rate_card.input_usd_per_mtok, rt.rate_card.output_usd_per_mtok, rt.rate_card.source], [true, 'user-owned', 'local-model', 0, 0, runtimeUrl]);
         assert.strictEqual(agents.find((a) => a.id === 'codes').available, false);

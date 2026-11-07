@@ -33,8 +33,10 @@ const data = (name) => ({ name, instructions: `Help with ${name}.`, mode: 'balan
             assert.strictEqual((await t.get(`/api/v1/tasks/${taskId}`, { as: alice })).status, 200);
             await t.waitFor(taskId);
         });
-        await check('ten agent maximum', async () => {
-            for (let i = 0; i < 10; i++) assert.strictEqual((await post('/api/v1/me/agents', data(`Agent ${i}`))).status, 201);
+        await check('ten agent maximum, Vibe included', async () => {
+            // The run above created Vibe, the person's first contact (A-1); the ten-agent cap counts it.
+            assert.strictEqual(Number(await t.ctx.s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1 AND is_vibe', [`user:${alice.subject}`])), 1);
+            for (let i = 0; i < 9; i++) assert.strictEqual((await post('/api/v1/me/agents', data(`Agent ${i}`))).status, 201);
             const over = await post('/api/v1/me/agents', data('Over'));
             assert.strictEqual(over.status, 429);
             assert.strictEqual(over.json().code, 'actor.agent.limit');

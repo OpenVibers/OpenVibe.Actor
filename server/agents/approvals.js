@@ -66,7 +66,9 @@ async function decide(ctx, owner, id, decision, { idempotent = false } = {}) {
     }
     if (decision !== 'approve') return { error: 'Approve or decline.', status: 422 };
     const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
-    const out = await createTask({ s, config, engine, webhooks, principal: { requester: owner, via: null, project: null }, body: { task: payload.task, agent: 'codes', mode: 'balanced' } });
+    // The person just approved this exact work, so the thread starts at full access: the engine's approval gate must not
+    // ask again. The always-ask floor still applies (the text may still be a deletion or a payment).
+    const out = await createTask({ s, config, engine, webhooks, principal: { requester: owner, via: null, project: null }, body: { task: payload.task, agent: 'codes', mode: 'balanced', level: 'full' } });
     if (!out.task) return { error: out.detail || 'The task could not start.', status: out.status || 422 };
     const done = await s.db.one("UPDATE actor_approvals SET state = 'approved', decided_at = $2, result_task_id = $3 WHERE id = $1 RETURNING *", [id, s.iso(), out.task.id]);
     return { row: done, task: out.task };

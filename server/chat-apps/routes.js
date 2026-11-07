@@ -16,7 +16,8 @@ function router(ctx) {
         if (!['dm', 'answer_only', 'act_with_approvals'].includes(b.policy) || typeof b.text !== 'string' || !b.text.trim() || b.text.length > 4000
             || !/^[a-z]+:[^\s]{1,180}$/.test(b.conversation || '') || !/^[a-zA-Z0-9:._-]{1,180}$/.test(b.delivery_id || '')) return res.status(422).json({ error: 'Invalid chat request' });
         const owner = req.principal.requester;
-        const agents = (await personal.list(s, owner)).filter(a => a.status === 'active');
+        // Vibe is a contact, not one of the scheduled personal agents Chat may run; it must not become the default here.
+        const agents = (await personal.list(s, owner)).filter(a => a.status === 'active' && !a.is_vibe);
         const agent = agents.find(a => a.id === b.agent_id) || (!b.agent_id && agents[0]);
         if (!agent) return res.status(409).json({ error: 'Create your personal agent on openvibe.actor first' });
         const notes = b.policy === 'dm' ? await memory.forRun(s, owner, agent.id) : [];
