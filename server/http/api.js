@@ -296,7 +296,7 @@ function createApi(ctx) {
         const out = await contacts.create(s, config, req.principal.requester, {
             name: fields.name, face: fields.face, model: fields.model, apps: fields.apps, memory: null,
             level: fields.level, instructions: fields.instructions,
-        }, { bio: fields.bio, rules: fields.rules, voice_author: fields.voice_author, voice_author_name: fields.voice_author_name,
+        }, { bio: fields.bio, rules: fields.rules, suggested_apps: fields.suggested_apps, voice_author: fields.voice_author, voice_author_name: fields.voice_author_name,
             voice_author_checked: fields.voice_author_checked, voice_source: fields.voice_source });
         if (!out.row) return failed(req, res, out);
         res.set('Location', `/api/v1/me/agents/${out.row.id}`);

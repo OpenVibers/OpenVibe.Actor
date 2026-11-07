@@ -223,7 +223,7 @@ ${shared
         ? html`<a class="pa-btn" href="/voices/${shared.id}">Its public link</a><form method="post" action="/me/agents/${a.id}/share/stop" class="pa-actions"><button type="submit" class="pa-btn">Stop sharing</button></form>`
         : html`<form method="post" action="/me/agents/${a.id}/share" class="pa-actions"><button type="submit" class="pa-btn">Share this voice</button></form>`}
 <a class="pa-btn" href="/me/agents#import">Import a voice</a></p>
-${provenance(a)}</section>`;
+${provenance(a)}${suggestedApps(a)}</section>`;
 
     // Where this agent's voice came from, and what may be said about the author.
     //   a shared voice   Actor shared it, so Actor knows who wrote it: the author is a link.
@@ -236,6 +236,14 @@ ${provenance(a)}</section>`;
             return html`<p class="pa-hint">Imported from a file.${a.voice_author_name ? html` It says it was made by ${a.voice_author_name}; that is not checked.` : ''}</p>`;
         }
         return '';
+    };
+    // The apps the voice it came from used: never connected for it, listed so the person can add the ones they want.
+    const suggestedApps = (a) => {
+        let list = a.voice_suggested_apps;
+        if (typeof list === 'string') { try { list = JSON.parse(list); } catch { list = []; } }
+        return Array.isArray(list) && list.length && a.voice_source
+            ? html`<p class="pa-hint">The voice it came from used ${list.join(', ')}. None is connected for it: add the ones you want under its apps.</p>`
+            : '';
     };
 
     const importPanel = () => html`<section class="pa-panel" id="import" aria-labelledby="ac-import-h"><h2 id="ac-import-h">Import an agent's voice</h2>
@@ -300,9 +308,11 @@ ${provenance(a)}</section>`;
         page(req, res, doc.name, html`<p class="crumbs"><a href="/">OpenVibe.Actor</a></p>
 <header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · a shared voice</p><h1>${doc.name}</h1>
 ${doc.bio ? html`<p class="pa-lede">${doc.bio}</p>` : ''}</header>
+<section class="pa-panel"><h2>Its instructions</h2><p class="pa-hint">What it is told to do on every run. Borrowing it gives your agent exactly these words; read them first.</p><pre class="pa-pre">${doc.instructions}</pre></section>
 <section class="pa-panel"><h2>Its rules</h2>${doc.rules && doc.rules.length ? html`<ul>${doc.rules.map((r) => html`<li>${r}</li>`)}</ul>` : html`<p>No rules: it speaks in one voice.</p>`}</section>
+${doc.apps && doc.apps.length ? html`<section class="pa-panel"><h2>The apps it uses</h2><p>${doc.apps.join(', ')}</p><p class="pa-hint">A borrowed agent gets none of them: you connect each one yourself, with your own account, on its page.</p></section>` : ''}
 <section class="pa-panel"><h2>Borrow this agent</h2>
-<p class="pa-hint">It asks for level ${doc.level}. Borrowing it makes an agent of your own — at level ask, whatever the file asks for — and you raise it yourself. It keeps no memory and no token of the person who shared it.</p>
+<p class="pa-hint">It asks for level ${doc.level}. Borrowing it makes an agent of your own — at level ask, whatever the file asks for — and you raise it yourself. It keeps no memory and no token of the person who shared it, runs on OpenVibe's own models (never your own keys or your machine until you choose them), and gets none of your apps until you add them.</p>
 ${row.owner_name ? html`<p class="pa-hint">Shared by <a href="https://openvibe.network/@${row.owner_name}">${row.owner_name}</a>.</p>` : ''}
 ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><button type="submit" class="pa-btn pa-primary">Borrow this agent</button></form>`
     : html`<p><a class="pa-btn pa-primary" href="/auth/login?next=${encodeURIComponent(req.originalUrl)}">Sign in to borrow it</a></p>`}</section>`);
@@ -341,7 +351,7 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
         const out = await contacts.create(s, config, owner(req), {
             name: fields.name, face: fields.face, model: fields.model, apps: fields.apps, memory: null,
             level: fields.level, instructions: fields.instructions,
-        }, { bio: fields.bio, rules: fields.rules, voice_author: fields.voice_author, voice_author_name: fields.voice_author_name,
+        }, { bio: fields.bio, rules: fields.rules, suggested_apps: fields.suggested_apps, voice_author: fields.voice_author, voice_author_name: fields.voice_author_name,
             voice_author_checked: fields.voice_author_checked, voice_source: fields.voice_source });
         if (!out.row) return { error: out.error || 'Agent limit reached.', limit: out.limit };
         return { row: out.row };

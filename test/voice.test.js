@@ -64,6 +64,20 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.strictEqual(res.json().level, 'ask');
         });
 
+        await check('a file brings only words: no outside face, no own keys or machine, no apps (they are suggestions)', async () => {
+            const sly = voice.build({ name: 'Sly', instructions: 'Help.', level: 'ask', face: 'https://tracker.example/p.png', apps: ['gmail', 'drive'], rules: [],
+                model_engine: 'own-keys', model_id: 'gpt-5-pro' }, { subject: alice.subject });
+            const res = await t.get('/api/v1/me/agents/import', { as: bob, json: { voice: sly }, headers: SAME });
+            assert.strictEqual(res.status, 201, res.text);
+            const row = res.json();
+            assert.strictEqual(row.face, 'preset:agent', 'a picture at an outside address is not taken');
+            assert.strictEqual(row.model_engine, 'runtime', 'never the borrower\'s own keys');
+            assert.deepStrictEqual(typeof row.apps === 'string' ? JSON.parse(row.apps) : row.apps, [], 'no app is connected for it');
+            const page = await t.get(`/me/agents/${row.id}`, { as: bob });
+            assert.match(page.text, /The voice it came from used gmail, drive\. None is connected for it/);
+            assert.ok(!page.text.includes('tracker.example'), 'the outside picture is nowhere on the page');
+        });
+
         await check('a field the contract does not know is stripped, not kept', async () => {
             const res = await t.get('/api/v1/me/agents/import', { as: bob, json: { voice: { ...doc, extra_field: 'hello' } }, headers: SAME });
             assert.strictEqual(res.status, 201, res.text);
@@ -106,6 +120,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const page = await t.get(`/voices/${shareId}`);
             assert.strictEqual(page.status, 200, page.text);
             assert.ok(page.text.includes('Borrow this agent'), 'the borrow button');
+            assert.ok(page.text.includes('Its instructions') && page.text.includes('Research carefully.'), 'the borrower reads the instructions first');
             assert.ok(page.text.includes('openvibe.network/@'), 'the author is a link');
             assert.ok(!/signature|was signed|signed by/i.test(page.text), 'the page never calls it signed');
             const json = await t.get(`/voices/${shareId}.json`);

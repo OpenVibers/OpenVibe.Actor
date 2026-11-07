@@ -14,3 +14,6 @@ CREATE INDEX IF NOT EXISTS actor_shared_voices_owner_idx ON actor_shared_voices 
 -- Whether the author of an imported voice may be vouched for: Actor's own record of a shared voice says yes; a file
 -- says only what it claims, and the page says so.
 ALTER TABLE actor_agents ADD COLUMN IF NOT EXISTS voice_author_checked boolean NOT NULL DEFAULT false;
+-- The apps the voice an agent was imported from used: never connected for it (an app binds to the borrower's own
+-- connections), shown on its page so the person adds the ones they want.
+ALTER TABLE actor_agents ADD COLUMN IF NOT EXISTS voice_suggested_apps jsonb NOT NULL DEFAULT '[]'::jsonb;

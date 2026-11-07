@@ -148,6 +148,17 @@ function read(input) {
 /** Does this document still match its own hash? */
 const verify = (doc) => { const r = read(doc); return r.error ? { ok: false, error: r.error } : { ok: true, doc: r.doc }; };
 
+// What an imported voice may bring with it, beyond its words (Opus's review of HO10):
+//   a face: only one of OpenVibe's preset marks. A picture at an address the file names would load from that server
+//           every time the person opens their agents (a tracking pixel), so it is not taken;
+//   a model: only OpenVibe's own runtime or its free GPU models. "own-keys" would spend the borrower's own API money,
+//           and "link" would run on the borrower's machine, at the say of a file somebody else wrote;
+//   apps: none. An app id binds to the borrower's own connections (their mail, their files), so the borrower adds
+//         each one themselves; the file's list is kept as a suggestion the agent's page shows.
+const PRESET_FACE = /^preset:[a-z0-9-]{1,40}$/;
+const IMPORT_ENGINES = ['runtime', 'open-gpu'];
+const DEFAULT_MODEL = { engine: 'runtime', model: 'smart' };
+
 /**
  * The agent a document makes. The level is always ask, whatever the file says, and it keeps no memory.
  * `authorChecked` says who may be vouched for: Actor's own record of a shared voice says yes, a file says only what
@@ -157,12 +168,13 @@ function toContact(doc, { source = null, authorChecked = false } = {}) {
     return {
         name: doc.name.trim(),
         bio: doc.bio || null,
-        face: doc.face || null,
+        face: doc.face && PRESET_FACE.test(doc.face) ? doc.face : 'preset:agent',
         instructions: doc.instructions,
         rules: doc.rules || [],
         level: 'ask',
-        model: doc.model || { engine: 'runtime', model: 'smart' },
-        apps: doc.apps || [],
+        model: doc.model && IMPORT_ENGINES.includes(doc.model.engine) ? doc.model : DEFAULT_MODEL,
+        apps: [],
+        suggested_apps: doc.apps || [],
         memory: null,
         voice_author: doc.author ? doc.author.subject : null,
         voice_author_name: doc.author && doc.author.name ? doc.author.name : null,
@@ -171,4 +183,4 @@ function toContact(doc, { source = null, authorChecked = false } = {}) {
     };
 }
 
-module.exports = { CONTRACT, FIELDS, canonical, hashOf, build, read, verify, toContact, findNever };
+module.exports = { CONTRACT, FIELDS, PRESET_FACE, IMPORT_ENGINES, canonical, hashOf, build, read, verify, toContact, findNever };
