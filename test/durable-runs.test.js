@@ -134,7 +134,7 @@ function minimalState(task, calls = 0) {
             assert.strictEqual(parts[0].content[0].task_id, id);
             assert.strictEqual(parts[0].content[0].step, 1);
             assert.ok(!('state_enc' in parts[0].content[0]), 'the sealed state is not exported');
-            assert.deepStrictEqual(await uncovered(d.db, { tables: accountData.TABLES, exempt: { account_data_events: 'the ledger of requests itself', actor_brain_outcomes: 'counts only', config_snapshots: 'D11 configuration revisions: created_by names the owner who changed a setting, not a person\'s account data' } }), [], 'the guard passes');
+            assert.deepStrictEqual(await uncovered(d.db, { tables: accountData.TABLES, exempt: { account_data_events: 'the ledger of requests itself', actor_brain_outcomes: 'counts only', config_snapshots: 'D11 configuration revisions: created_by names the owner who changed a setting, not a person\'s account data', ...accountData.EXEMPT } }), [], 'the guard passes');
             await s.db.query('DELETE FROM tasks WHERE id = $1', [id]);
             assert.strictEqual(await cp.count(id), 0, 'erased with the task');
         } finally { await d.close(); }

@@ -12,16 +12,17 @@ const { createNetworkSender, uncovered } = require('openvibe-sdk/account-data');
 const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const taskStore = require('../server/tasks/store');
 const personal = require('../server/agents/personal');
-const { TABLES } = require('../server/identity/account-data');
+const { TABLES, EXEMPT } = require('../server/identity/account-data');
 const { testDb } = require('./helpers/db');
 
 // Tables a person does not own. The brain's outcomes are counts keyed by task kind, tier, step kind and tool: no
 // person column, no task text, so deletion has nothing to erase there and the export names no one.
-const EXEMPT = {
+const EXEMPT_OUTSIDE_SHARING = {
     account_data_events: 'the ledger of requests itself: which export and deletion Actor applied',
     actor_brain_outcomes: 'counts of outcomes by task kind, tier and tool: no person column and no task text',
     config_snapshots: 'D11 configuration revisions: created_by names the owner who changed a setting, not a person\'s account data',
 };
+const EXEMPT_ALL = { ...EXEMPT_OUTSIDE_SHARING, ...EXEMPT };
 
 const A = 'usr_01JZ0000000000000000000AAA';
 const B = 'usr_01JZ0000000000000000000BBB';
@@ -110,7 +111,7 @@ async function makeWait(t, subject, taskId, line = 'waiting for your Codes task 
     await check('every table that names a person is covered or exempted with a reason', async () => {
         const d = await testDb();
         try {
-            const missing = await uncovered(d.db, { tables: TABLES, exempt: EXEMPT });
+            const missing = await uncovered(d.db, { tables: TABLES, exempt: EXEMPT_ALL });
             assert.deepStrictEqual(missing, [], `a table with a person column is neither covered nor exempted: ${missing.join(', ')}`);
         } finally { await d.close(); }
     });
@@ -120,7 +121,7 @@ async function makeWait(t, subject, taskId, line = 'waiting for your Codes task 
         try {
             const cols = await d.db.many("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'actor_brain_outcomes'");
             assert.deepStrictEqual(cols.map((c) => c.column_name).sort(), ['failures', 'id', 'step_kind', 'successes', 'task_kind', 'tier', 'tool', 'updated_at']);
-            assert.deepStrictEqual(await uncovered(d.db, { tables: TABLES, exempt: EXEMPT }), [], 'no table with a person column is uncovered');
+            assert.deepStrictEqual(await uncovered(d.db, { tables: TABLES, exempt: EXEMPT_ALL }), [], 'no table with a person column is uncovered');
         } finally { await d.close(); }
     });
 
