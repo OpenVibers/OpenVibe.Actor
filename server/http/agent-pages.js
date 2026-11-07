@@ -9,6 +9,36 @@ const personal = require('../agents/personal');
 const contacts = require('../agents/contacts');
 const ui = require('./agent-contacts-ui');
 const approvals = require('../agents/approvals');
+const levels = require('../agents/levels');
+
+/** "22 minutes ago", "in 6 days": a person reads this, the exact UTC instant stays in the <time> element's title. */
+function ago(iso, now = Date.now()) {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return '';
+    const d = Math.round((t - now) / 1000);
+    const a = Math.abs(d);
+    const [n, unit] = a < 60 ? [a, 'second'] : a < 3600 ? [Math.round(a / 60), 'minute'] : a < 86400 ? [Math.round(a / 3600), 'hour'] : [Math.round(a / 86400), 'day'];
+    if (a < 45) return 'just now';
+    const words = `${n} ${unit}${n === 1 ? '' : 's'}`;
+    return d < 0 ? `${words} ago` : `in ${words}`;
+}
+const whenAt = (iso, now = Date.now()) => (iso ? html`<time datetime="${iso}" title="${String(iso).replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace(/Z$/, ' UTC')}">${ago(iso, now)}</time>` : '');
+
+/** What an always-ask step does, in one plain line, so the person sees it before the details. */
+const CAUTION = {
+    delete: 'This deletes something. It cannot be undone.',
+    money: 'This spends money.',
+    password: 'This types a password or a secret.',
+    new_recipient: 'This sends to someone your agent has not written to before.',
+};
+
+/** The command a computer step runs, as one line, when the request is one; otherwise null. */
+function commandLine(p) {
+    const argv = p && Array.isArray(p.argv) ? p.argv.map(String) : null;
+    if (!argv || !argv.length) return null;
+    const quote = (a) => (/^[A-Za-z0-9_./:=@%+,-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`);
+    return argv.map(quote).join(' ').slice(0, 2000);
+}
 const memoryStore = require('../memory');
 
 function createAgentPages(ctx) {
@@ -131,10 +161,23 @@ ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-c
         const a = await approvals.get(s, owner(req), req.params.id);
         if (!a) return page(req, res, 'Request not found', html`<h1>Request not found</h1><p><a href="/me/approvals">Approvals</a></p>`, 404);
         const p = typeof a.payload === 'string' ? JSON.parse(a.payload) : a.payload;
+        // The agent by its name (a person's own agent: another person's is never looked up here).
+        const agent = a.agent_id ? await contacts.get(s, owner(req), a.agent_id).catch(() => null) : null;
+        const agentName = agent && agent.name ? agent.name : 'your agent';
+        // The always-ask floor, said in plain words before anything technical.
+        // A raw command deletes by its argv (rm, shred …), which words alone do not show: the same check stepFor uses.
+        const argvDeletes = p && Array.isArray(p.argv) && require('../agents/actions').deletes(p.argv);
+        const floor = [...new Set([...levels.classify({ summary: a.summary, payload: p }), ...(argvDeletes ? ['delete'] : [])])].filter((c) => CAUTION[c]);
+        const cmd = a.kind === 'actor.action' ? commandLine(p) : null;
+        const nowMs = Date.parse(s.iso()) || Date.now();   // the service's own clock (a test's clock in a test)
+        const where = p && typeof p.machine === 'string' && p.machine ? p.machine : null;
         page(req, res, 'Approval', html`<p class="pa-eyebrow"><a href="/me/approvals">Approvals</a></p><h1>${a.summary}</h1>
-<p>${approvalPill(a)} <span class="pa-when">Asked ${time(a.created_at)}${a.agent_id ? html` by <a href="/me/agents/${a.agent_id}">your agent</a>` : ''}${a.task_id ? html` in <a href="/tasks/${a.task_id}">this run</a>` : ''}</span></p>
+<p>${approvalPill(a)} <span class="pa-when">Asked ${whenAt(a.created_at, nowMs)}${a.agent_id ? html` by <a href="/me/agents/${a.agent_id}">${agentName}</a>` : ''}${a.task_id ? html` in <a href="/tasks/${a.task_id}">this run</a>` : ''}${a.state === 'pending' && a.expires_at ? html` · expires ${whenAt(a.expires_at, nowMs)}` : ''}</span></p>
+${floor.length ? html`<p class="pa-caution" role="note">${floor.map((c) => CAUTION[c]).join(' ')}</p>` : ''}
 ${a.kind === 'actor.action'
-            ? html`<section class="pa-panel"><h2>What it would do</h2><p>${a.summary}</p><pre class="pa-pre">${JSON.stringify(p, null, 2).slice(0, 8000)}</pre></section>`
+            ? html`<section class="pa-panel"><h2>What it would do</h2><p>${a.summary}</p>
+${cmd ? html`<p class="pa-cmd-where">${where ? html`On <b>${where}</b>, it runs:` : 'It runs:'}</p><pre class="pa-pre pa-cmd">${cmd}</pre>${p && p.cwd ? html`<p class="pa-hint">In ${String(p.cwd).slice(0, 300)}</p>` : ''}` : ''}
+<h3 class="pa-sub">The exact request</h3><pre class="pa-pre">${JSON.stringify(p, null, 2).slice(0, 8000)}</pre></section>`
             : html`<section class="pa-panel"><h2>What it would do</h2><p>Start a coding task on your own machine through <a href="https://openvibe.codes/run">OpenVibe.Codes</a> with this request. You get the summary, the changed files and the patch; it pushes nowhere unless the request asks for a branch and your machine holds a GitHub token.</p>
 <pre class="pa-pre">${String(p.task || '').slice(0, 8000)}</pre></section>`}
 ${a.state === 'pending' ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">${a.kind === 'actor.action' ? 'Approve for a retry' : 'Approve and start it'}</button> <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>`
