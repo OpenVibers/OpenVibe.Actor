@@ -153,9 +153,12 @@ function userPrompt(agent, notes) {
  * through it, 'background' when it cannot ask for batch.
  */
 function latencyFor(ctx) {
+    // 'background' for now (Opus's review of HO5): a provider's own batch (AI's BA2) may take a day, and this call
+    // waits at most ten minutes, so a batch answer would arrive after the night gave up while the provider still bills
+    // it. 'batch' comes back once a night can leave its AI run waiting and collect the answer on the next pass.
     const models = ctx && ctx.models;
-    if (models && typeof models.latencyClass === 'function') return models.latencyClass();
-    return 'batch';
+    if (models && typeof models.latencyClass === 'function' && models.latencyClass() === 'interactive') return 'interactive';
+    return 'background';
 }
 
 /**

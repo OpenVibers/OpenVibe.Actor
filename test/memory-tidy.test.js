@@ -152,12 +152,12 @@ const json = (o) => ({ text: JSON.stringify(o) });
             // The night's record.
             const night = await tidy.lastRun(ctx.s, own, { agentId: agent.id });
             assert.ok(night && night.night_of);
-            assert.strictEqual(night.latency_class, 'batch', 'the run asked for the batch class');
+            assert.strictEqual(night.latency_class, 'background', 'the run asked for the background class (batch once a night can collect it later)');
         });
 
-        await check('the call asks for the batch class, and the person pays for it', async () => {
+        await check('the call asks for a class that can wait (background), and the person pays for it', async () => {
             const call = models.calls[models.calls.length - 1];
-            assert.strictEqual(call.latency, 'batch', 'the batch class, the cheapest that can wait');
+            assert.strictEqual(call.latency, 'background', 'background: Flex at about half price, answered within the call\'s wait');
             assert.strictEqual(call.subject, u.subject, 'the run is the person\'s');
             assert.ok(call.json, 'and it asks for JSON');
             assert.ok(/\[mem_/.test(call.messages[1].content), 'the notes go with their ids');
