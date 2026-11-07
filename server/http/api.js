@@ -477,7 +477,7 @@ function createApi(ctx) {
     // A still is its task's person's, and nobody else's: a signed-out visitor and an app token get the same 404 as a
     // task that does not exist (never a 401 that would confirm one).
     const stillPerson = (req, res, next) => ((req.principal && req.principal.kind === 'user') ? next() : problem(req, res, 404, 'actor.task.not_found', 'No such task.'));
-    r.get('/tasks/:id/still', stillPerson, limits.reads('actor.task.read'), async (req, res) => {
+    r.get('/tasks/:id/still', stillPerson, principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
         const row = await load(req, res);
         if (!row) return;
         const computer = await store.taskComputer(s, row);
