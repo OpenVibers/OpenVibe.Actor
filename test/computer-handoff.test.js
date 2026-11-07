@@ -23,9 +23,10 @@ const COMPUTER = { session_id: SESSION, machine: 'a shared desk host', where: 'n
 (async () => {
     const still = Buffer.from('/9j/4AAQ', 'base64');
     const asked = [];
+    let stillType = 'image/jpeg';
     const computers = {
         enabled: true,
-        async still(subject, sessionId) { asked.push([subject, sessionId]); return { bytes: still, type: 'image/jpeg' }; },
+        async still(subject, sessionId) { asked.push([subject, sessionId]); return { bytes: still, type: stillType }; },
     };
     const t = await boot({ bot: { computers } });
     const kim = t.network.addUser('kim');
@@ -68,6 +69,13 @@ const COMPUTER = { session_id: SESSION, machine: 'a shared desk host', where: 'n
             assert.strictEqual((await mine.buffer.equals(still)), true);
             assert.strictEqual((await t.get(`/api/v1/tasks/${id}/still`, { as: bo })).status, 404, 'another person: the same 404 as a missing task');
             assert.strictEqual((await t.get(`/api/v1/tasks/${id}/still`)).status, 404, 'signed out: 404, never 401');
+            // A broken or hostile upstream cannot serve HTML from openvibe.actor.
+            stillType = 'text/html';
+            const bad = await t.get(`/api/v1/tasks/${id}/still`, { as: kim });
+            assert.strictEqual(bad.status, 502, bad.text);
+            assert.strictEqual(bad.json().code, 'still.bad_type');
+            assert.ok(!bad.text.includes('<html'));
+            stillType = 'image/jpeg';
         });
 
         await check('take over: the person drives, the timeline gets a step, and the agent\'s input is refused', async () => {

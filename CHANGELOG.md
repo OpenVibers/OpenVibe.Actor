@@ -8,7 +8,7 @@ What changed in OpenVibe.Actor, newest first. Each site also publishes its patch
   own step carries `computer` (`session_id` — OpenVibe.Run's `ses_…`, or null on the person's own machine through
   Bot — `machine`, `where` and `cost_hint`) from the tool's answer, never the model's words. `GET /api/v1/tasks/:id`
   reads the same object off the task's own steps, with `driving` while the person holds the desk, and
-  `agent.timeline-entry@1` stores it (migration 0034).
+  `agent.timeline-entry@1` stores it (migration 0035).
 - **Take over / Give it back** are one API on the task: `POST /api/v1/tasks/:id/takeover` and `…/giveback`, built on
   the `hand_to_person` hand-off. While the person drives, `computer_input` and the acting `computer_browser` actions
   are refused with a clear reason; the task's timeline gets one `handoff` step and the Dock's timeline one step with

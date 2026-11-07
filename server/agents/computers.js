@@ -133,8 +133,9 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             return { error: 'the session service did not answer' };
         }
         if (!res.ok) return { status: res.status, error: 'the session has no picture' };
+        // Only a picture is ever passed on: a broken or hostile upstream cannot serve HTML from openvibe.actor.
         const type = String(res.headers.get('content-type') || '').split(';')[0].trim();
-        if (!/^image\/(jpeg|png)$/.test(type)) return { status: 502, error: 'the session service sent no picture' };
+        if (!/^image\/(jpeg|png|webp)$/.test(type)) return { status: 502, code: 'still.bad_type', error: 'the session sent a picture that is not an image' };
         const bytes = Buffer.from(await res.arrayBuffer());
         if (!bytes.length || bytes.length > 4 * 1024 * 1024) return { status: 502, error: 'the session service sent no picture' };
         return { bytes, type };
