@@ -35,7 +35,7 @@ function startSubscriptions({ config, port, secret, eventsUrl = config.events.ur
         // The ADR-033 topics, chat.message.created while asking Actor from chat is on (chat/asks.js), and the
         // agent's own steps (design 2026-11-07): every mode publishes agent.step.* into the network's agent
         // namespace, and Actor keeps the one timeline behind the Dock.
-        for (const topic of [...TOPICS, AGENT_TOPICS, ...extra]) {
+        for (const topic of [...TOPICS, ...AGENT_TOPICS, ...extra]) {
             if (mine.some((s) => s.topic_pattern === topic)) continue;
             const r = await call('POST', '/api/v1/subscriptions', { topic_pattern: topic, endpoint, secret });
             if (!r.ok && r.status !== 409) throw new Error(`subscribing to ${topic}: ${r.status} ${r.body.code || ''}`);
@@ -52,7 +52,7 @@ function startSubscriptions({ config, port, secret, eventsUrl = config.events.ur
     }); };
     timer = setTimeout(run, delays[0]); if (timer.unref) timer.unref();
     // Graceful stop: no further attempts (they run again at the next start).
-    return { topics: TOPICS, endpoint, stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; } };
+    return { topics: [...TOPICS, ...AGENT_TOPICS, ...extra], endpoint, stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; } };
 }
 
-module.exports = { startSubscriptions, TOPICS };
+module.exports = { startSubscriptions, TOPICS, AGENT_TOPICS };
