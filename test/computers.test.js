@@ -409,7 +409,7 @@ const as = { requester: `user:${ME}` };
         const run = t.deskRun('tsk_1');
         const placed = JSON.parse(await t.call('computer_desk', { machine: 'any', action: 'start' }, { ...as, desks: run }));
         assert.deepStrictEqual([placed.machine, placed.running, placed.kind], [`run:${SES}`, true, 'browser'], JSON.stringify(placed));
-        assert.deepStrictEqual(runCalls[0].body, { kind: 'browser', ttl_s: 3600, idle_s: 900, idempotency_key: 'actor:tsk_1' });
+        assert.deepStrictEqual(runCalls[0].body, { kind: 'browser', ttl_s: 3600, idle_s: 900, idempotency_key: 'actor:tsk_1', task_id: 'tsk_1' });
         assert.strictEqual(runCalls[0].subject, ME, 'as the person');
         const page = JSON.parse(await t.call('computer_browser', { machine: 'any', action: 'open', url: 'https://example.org/a', desk: 'private' }, { ...as, desks: run }));
         assert.strictEqual(page.title, 'Example');

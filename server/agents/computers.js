@@ -91,7 +91,8 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (!USER_SUBJECT.test(subject)) return { error: 'a session is only for a signed-in person' };
         const body = { kind: 'browser', ttl_s: Math.min(14400, Math.max(60, Math.round(ttlS))), idle_s: 900,
             ...(Number.isInteger(width) ? { width } : {}), ...(Number.isInteger(height) ? { height } : {}),
-            ...(taskId ? { idempotency_key: `actor:${taskId}` } : {}) };
+            // The session carries the task back (contracts 0.327.0): one id across Surf, the Computer and Actor.
+            ...(taskId ? { idempotency_key: `actor:${taskId}`, task_id: taskId } : {}) };
         const made = await runCall('POST', '/sessions', subject, { body, signal });
         if (!made.ok) return runProblem(made, 'a browser session');
         let s = made.data;
