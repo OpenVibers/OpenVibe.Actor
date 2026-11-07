@@ -169,9 +169,6 @@ function load(env = process.env) {
             // OpenVibe.Watch: where a trigger's subscription lives (plan §12 A-4). The person's own token is
             // always the authority; empty turns triggers off.
             watchUrl: trim(env.ACTOR_WATCH_URL != null ? env.ACTOR_WATCH_URL : (selfHosted ? '' : 'http://127.0.0.1:4730')),
-            // OpenVibe.Exchange: where an agent's voice may be published (the author publishes it there, and the
-            // listing page borrows it from there).
-            exchangeUrl: trim(env.ACTOR_EXCHANGE_URL || 'https://openvibe.exchange'),
         },
 
         // Artifacts (Actor v2, stage V2-4): what one task may make. The bytes live in Actor's own PostgreSQL,
@@ -195,10 +192,6 @@ function load(env = process.env) {
         // connection is sealed under ACTOR_CONNECTOR_KEY (64 hex characters); without a key no token is stored.
         // ACTOR_CONNECTOR_SERVERS is a JSON list of the servers OpenVibe offers ready to turn on (Know's ov-know is
         // one of them).
-        // The hosts a voice link may be read from (server/agents/voice.js). The OpenVibe family is always
-        // allowed; these are the others.
-        voice: { hosts: jsonList(env.ACTOR_VOICE_HOSTS) },
-
         connectors: {
             key: String(env.ACTOR_CONNECTOR_KEY || ''),
             builtins: jsonList(env.ACTOR_CONNECTOR_SERVERS),

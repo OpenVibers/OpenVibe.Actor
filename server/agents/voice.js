@@ -7,10 +7,11 @@
  * speaks in), the rules it keeps, its default level, the model and the apps it prefers (ids, never a key) and an
  * optional face. It never carries memory, a connector's token or a file: a file that does is refused, not stripped.
  *
- * The signature is the author's Network subject, a sha256 over the canonical JSON of the document and the moment it
- * was written. Network has no per-subject signing key today (one server key signs Network's own tokens), so the
- * content hash is the signature and the author is the subject that wrote it. When Network grows a subject key, the
- * key id joins the signature and the hash stays.
+ * The document carries an INTEGRITY block, not a signature: a sha256 over the canonical JSON, which shows the file
+ * was not edited after it was written. It says nothing about who wrote it — anyone can write a file that names an
+ * author and compute its hash — so the author in a document is a claim, and whoever reads a file must say so. Only
+ * Actor, which owns the agent, may vouch for an author, and it does so in its own record of a shared voice
+ * (server/agents/voice-shares.js).
  *
  * Importing a voice makes a new agent at level ask, whatever the file says: a borrowed agent starts cautious, and
  * the person raises it themselves.
@@ -18,13 +19,12 @@
  *   build(row, author)            the document for one of the person's agents
  *   read(input)                   a document in: the fields it keeps, or the reason it is refused
  *   toContact(doc, source)        the new agent a document makes
- *   fetchFrom(url, opts)          a document at a link the author made
  */
 const crypto = require('crypto');
 const levels = require('./levels');
 
 const CONTRACT = 'actor.voice@1';
-const FIELDS = ['voice', 'name', 'bio', 'face', 'instructions', 'rules', 'level', 'model', 'apps', 'author', 'signature'];
+const FIELDS = ['voice', 'name', 'bio', 'face', 'instructions', 'rules', 'level', 'model', 'apps', 'author', 'integrity', 'created_at'];
 const APP = /^[a-z][a-z0-9._-]{0,63}$/;
 const ENGINE = ['runtime', 'own-keys', 'open-gpu', 'link'];
 const SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -32,9 +32,6 @@ const HASH = /^[0-9a-f]{64}$/;
 // A voice never carries these. They are refused, not stripped: a file that smuggles a memory or a token must not
 // become an agent by being imported.
 const NEVER = /^(memory|memories|notes?|tokens?|secret|secrets|keys?|credentials?|files?|attachments?|connectors?)$/i;
-// The hosts a voice link may be read from: the OpenVibe family, plus whatever the service adds. A link anywhere else
-// is not read, so the borrow cannot be used to reach into a network Actor does not know.
-const OPENVIBE_HOST = /(^|\.)openvibe\.(network|exchange|services|chat|link|actor)$/;
 
 const isPlain = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const parse = (v) => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
@@ -49,12 +46,11 @@ function canonical(doc) {
     o.level = doc.level;
     if (doc.model) o.model = { engine: doc.model.engine, model: doc.model.model };
     if (doc.apps && doc.apps.length) o.apps = doc.apps;
-    o.author = doc.author && doc.author.name ? { subject: doc.author.subject, name: doc.author.name } : { subject: doc.author.subject };
-    o.signed_at = doc.signature.signed_at;
+    if (doc.author) o.author = doc.author.name ? { subject: doc.author.subject, name: doc.author.name } : { subject: doc.author.subject };
     return JSON.stringify(o);
 }
 
-/** The sha256 of the canonical JSON: the document's signature. */
+/** The sha256 of the canonical JSON: the document's integrity hash. It says nothing about who wrote the file. */
 const hashOf = (doc) => crypto.createHash('sha256').update(canonical(doc), 'utf8').digest('hex');
 
 const rulesOf = (row) => { const r = parse(row && row.rules); return Array.isArray(r) ? r.filter((x) => typeof x === 'string') : []; };
@@ -63,16 +59,20 @@ const modelOf = (row) => (row && row.model_engine && row.model_id ? { engine: ro
 
 /** The document for one of the person's agents. It never carries the agent's memory, its connectors or any file. */
 function build(row, { subject, name = null, at = null } = {}) {
-    const signed_at = at || new Date().toISOString();
+    const created_at = at || new Date().toISOString();
     const doc = {
         voice: CONTRACT,
         name: String((row && row.name) || '').trim(),
         instructions: String((row && row.instructions) || ''),
         level: levels.LEVELS.includes(row && row.level) ? row.level : 'ask',
-        author: { subject: String(subject || '').replace(/^user:/, '') },
-        signature: { alg: 'sha256', hash: '', signed_at },
+        created_at,
+        integrity: { alg: 'sha256', hash: '' },
     };
-    if (name) doc.author.name = String(name).slice(0, 80);
+    if (subject) {
+        const who = { subject: String(subject).replace(/^user:/, '') };
+        if (name) who.name = String(name).slice(0, 80);
+        doc.author = who;
+    }
     if (row && row.bio) doc.bio = String(row.bio);
     if (row && row.face) doc.face = String(row.face);
     const rules = rulesOf(row);
@@ -81,7 +81,7 @@ function build(row, { subject, name = null, at = null } = {}) {
     if (model) doc.model = model;
     const apps = appsOf(row);
     if (apps.length) doc.apps = apps;
-    doc.signature.hash = hashOf(doc);
+    doc.integrity.hash = hashOf(doc);
     return doc;
 }
 
@@ -102,7 +102,7 @@ function findNever(value, depth = 0) {
 
 /**
  * A document in: the fields it keeps (anything the contract does not know is stripped) or the reason it is refused.
- * The hash is checked last, so a document edited after it was signed does not match.
+ * The hash is checked last, so a document edited after it was written does not match.
  */
 function read(input) {
     if (!isPlain(input)) return { error: 'A voice file must be a JSON object.' };
@@ -128,26 +128,32 @@ function read(input) {
         if (!Array.isArray(doc.apps) || doc.apps.length > 50) return { error: 'The apps must be at most 50 ids.' };
         for (const a of doc.apps) if (typeof a !== 'string' || !APP.test(a)) return { error: 'Each app id must be a connect slug.' };
     }
-    if (!isPlain(doc.author)) return { error: 'The author must be a Network subject.' };
-    const author = { subject: String(doc.author.subject || '').replace(/^user:/, '') };
-    if (!SUBJECT.test(author.subject)) return { error: 'The author must be a Network subject (usr_…).' };
-    if (doc.author.name !== undefined) {
-        if (typeof doc.author.name !== 'string' || doc.author.name.length > 80) return { error: 'The author name must be at most 80 characters.' };
-        author.name = doc.author.name;
+    // The author is a claim: the document may name nobody, and when it names somebody, nothing here checks it.
+    if (doc.author !== undefined) {
+        if (!isPlain(doc.author)) return { error: 'The author must be a Network subject.' };
+        const author = { subject: String(doc.author.subject || '').replace(/^user:/, '') };
+        if (!SUBJECT.test(author.subject)) return { error: 'The author must be a Network subject (usr_…).' };
+        if (doc.author.name !== undefined) {
+            if (typeof doc.author.name !== 'string' || doc.author.name.length > 80) return { error: 'The author name must be at most 80 characters.' };
+            author.name = doc.author.name;
+        }
+        doc.author = author;
     }
-    doc.author = author;
-    if (!isPlain(doc.signature) || doc.signature.alg !== 'sha256' || !HASH.test(String(doc.signature.hash || ''))) return { error: 'The signature must be a sha256 hash.' };
-    if (typeof doc.signature.signed_at !== 'string' || Number.isNaN(Date.parse(doc.signature.signed_at))) return { error: 'The signature must carry the timestamp it was written at.' };
-    if (doc.signature.key_id !== undefined && (typeof doc.signature.key_id !== 'string' || doc.signature.key_id.length > 64)) return { error: 'The key id must be at most 64 characters.' };
-    if (hashOf(doc) !== doc.signature.hash) return { error: 'This voice was changed after it was signed: the hash does not match.' };
+    if (!isPlain(doc.integrity) || doc.integrity.alg !== 'sha256' || !HASH.test(String(doc.integrity.hash || ''))) return { error: 'The integrity block must be a sha256 hash.' };
+    if (doc.created_at !== undefined && (typeof doc.created_at !== 'string' || Number.isNaN(Date.parse(doc.created_at)))) return { error: 'created_at must be a timestamp.' };
+    if (hashOf(doc) !== doc.integrity.hash) return { error: 'This voice was changed after it was written: the hash does not match.' };
     return { doc };
 }
 
-/** Does this document still match its own hash? (An exchange asks the same of a voice it is given.) */
+/** Does this document still match its own hash? */
 const verify = (doc) => { const r = read(doc); return r.error ? { ok: false, error: r.error } : { ok: true, doc: r.doc }; };
 
-/** The agent a document makes. The level is always ask, whatever the file says, and it keeps no memory. */
-function toContact(doc, { source = null } = {}) {
+/**
+ * The agent a document makes. The level is always ask, whatever the file says, and it keeps no memory.
+ * `authorChecked` says who may be vouched for: Actor's own record of a shared voice says yes, a file says only what
+ * it claims.
+ */
+function toContact(doc, { source = null, authorChecked = false } = {}) {
     return {
         name: doc.name.trim(),
         bio: doc.bio || null,
@@ -158,33 +164,11 @@ function toContact(doc, { source = null } = {}) {
         model: doc.model || { engine: 'runtime', model: 'smart' },
         apps: doc.apps || [],
         memory: null,
-        voice_author: doc.author.subject,
-        voice_author_name: doc.author.name || null,
+        voice_author: doc.author ? doc.author.subject : null,
+        voice_author_name: doc.author && doc.author.name ? doc.author.name : null,
+        voice_author_checked: Boolean(authorChecked),
         voice_source: source,
     };
 }
 
-/**
- * A document at a link the author made. Only https on an OpenVibe host is read (a loopback in a test), and a redirect
- * is not followed: the borrow must not be able to reach into a network Actor does not know.
- */
-async function fetchFrom(url, { fetchImpl = globalThis.fetch, hosts = [] } = {}) {
-    let u;
-    try { u = new URL(String(url)); } catch { return { error: 'That link is not a URL.' }; }
-    const loopback = u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.hostname === '::1';
-    if (u.protocol !== 'https:' && !(loopback && u.protocol === 'http:')) return { error: 'A voice link must be https.' };
-    if (!loopback && !hosts.includes(u.hostname) && !OPENVIBE_HOST.test(u.hostname)) return { error: 'That link is not on an OpenVibe host.' };
-    let res;
-    try { res = await fetchImpl(u.toString(), { redirect: 'manual' }); } catch { return { error: 'That link could not be read.' }; }
-    if (!res) return { error: 'That link could not be read.' };
-    if (res.status >= 300 && res.status < 400) return { error: 'That link redirects: use the address it ends at.' };
-    if (!res.ok) return { error: 'That link answered ' + res.status + '.' };
-    let text;
-    try { text = await res.text(); } catch { return { error: 'That link could not be read.' }; }
-    if (text.length > 64 * 1024) return { error: 'That file is too big to be a voice.' };
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { return { error: 'That link did not answer with a voice file.' }; }
-    return { input: parsed, url: u.toString() };
-}
-
-module.exports = { CONTRACT, FIELDS, canonical, hashOf, build, read, verify, toContact, fetchFrom, findNever };
+module.exports = { CONTRACT, FIELDS, canonical, hashOf, build, read, verify, toContact, findNever };
