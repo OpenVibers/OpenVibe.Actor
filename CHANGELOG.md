@@ -2,6 +2,27 @@
 
 What changed in OpenVibe.Actor, newest first. Each site also publishes its patch notes at /updates.
 
+## Unreleased — memory that tidies itself (HO5)
+
+- **An agent's memory that consolidates itself** (plan track HO, wave 2): once a person turns on "Tidy my agents' memory
+  each night" on /memory, one due-based job runs each due agent's own notes through ONE model call a night, in the
+  cheapest class that can wait (OpenVibe.AI's `batch`, or `background` when the client cannot ask for batch), and the
+  answer is DATA: a list of merges, retires and promotions and a short diary, checked against the agent's own notes
+  before anything happens. The sources of a merge are kept and marked `merged_into`, a stale note is marked
+  `retired_at` and never deleted, a note that keeps coming up becomes a pinned note and the agent reads pinned notes
+  first, and the diary is two to five plain sentences in the agent's voice (migration 0039).
+- **The rules the model cannot break**: only the agent's own notes are touched — a note the person wrote, or pinned by
+  hand, is left alone; every id in the answer must be one of the notes that were sent, so an id from another agent or
+  another person is ignored; a merge longer than its sources together is refused; at most 20 changes a night, per
+  person; and the person's own words still make the only active memory.
+- **The person sees it and corrects it**: /memory and the agent's page show the latest diary entry and every change,
+  each with Undo for thirty days (an undo brings the sources back and drops the merged note). A diary entry can be
+  edited or deleted, and a note can be pinned by hand.
+- **Consent and the job**: the setting is off by default and lives in a row per person with a `next_due_at` (never a
+  weekly interval in the code); nothing runs for a person who has not turned it on, and the job is off in a drill and in
+  a test. The diary and the history of the nights are in the account export and go with the account (ADR-033).
+  Test: `test/memory-tidy.test.js`.
+
 ## Unreleased — triggers in conversation
 
 - **The routine's card in the chat** (Opus): the turn that made a trigger shows it — when, in words (with its zone),

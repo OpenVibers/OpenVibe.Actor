@@ -230,7 +230,7 @@ part (ADR-033). Actor receives `network.account.export_requested` and `network.a
 (loopback only) — the two tables are mapped in [server/identity/account-data.js](server/identity/account-data.js), and
 the boot-time subscriptions are created by [server/events-consumer.js](server/events-consumer.js):
 
-- **Exported:** the tasks a person asked for (`tasks.json`), what they spent per UTC day (`spend.json`), their agents (`agents.json`) and every memory note (`agent-memory.json`), pushed to
+- **Exported:** the tasks a person asked for (`tasks.json`), what they spent per UTC day (`spend.json`), their agents (`agents.json`), every memory note (`agent-memory.json`), and — when they turned on the nightly tidy (HO5) — their agents' diaries (`agent-diary.json`), the changes the nights made (`agent-memory-changes.json`), the history of the nights (`agent-memory-nights.json`) and their consent (`agent-memory-tidy.json`), pushed to
   `POST /internal/account-exports/:id/parts` with this service's own token. Nothing here is a secret — Actor stores no
   token, key or credential.
 - **Erased:** all four tables hold the person's own rows, so they are deleted whole and nothing is kept; a task's event log
