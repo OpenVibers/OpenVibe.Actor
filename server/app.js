@@ -45,6 +45,7 @@ function checkSelfHosted(config) {
     if (missing.length) throw new Error(`ACTOR_SELF_HOSTED=1 needs ${missing.join(', ')}: run \`npm run selfhost:init\` (docs/self-host.md)`);
 }
 const { createChatAsks } = require('./chat/asks');
+const timeline = require('./agents/timeline');
 const { createTask } = require('./tasks/create');
 const { createWebhookPoster } = require('./net/webhook-post');
 const { createTaskStream } = require('./tasks/stream');
@@ -244,7 +245,10 @@ async function createApp(opts = {}) {
     // chat.message.created goes to chat/asks.js (ask Actor from chat); anything else is acknowledged and ignored.
     app.use('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, log,
         // A chat message asks Actor a question; anything else may wake a wait (plan A2).
-        onEvent: (ev) => (ev.event_type === 'chat.message.created' ? chatAsks.onEvent(ev) : waits.onEvent(ev)) }));
+        onEvent: (ev) => (ev.event_type === 'chat.message.created' ? chatAsks.onEvent(ev)
+            // The agent's steps (design 2026-11-07): every mode publishes agent.step.* with the person's subject.
+            : String(ev.event_type || '').startsWith('agent.step.') ? timeline.onEvent(ctx.s, ev)
+            : waits.onEvent(ev)) }));
 
     // ── Static assets (content-hashed ?v= → immutable) ──────
     app.use('/shared', require('openvibe-shared/serve').handler());

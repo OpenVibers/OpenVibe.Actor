@@ -14,6 +14,9 @@
 const { serviceAuth } = require('openvibe-contracts');
 const { TOPICS } = require('./identity/account-data');
 
+/** The agent's steps (design 2026-11-07): agent.step.started|updated|ended from every mode. */
+const AGENT_TOPICS = ['agent.step.*'];
+
 /** Create any missing subscription for TOPICS at Events (idempotent; retried in the background at boot). */
 function startSubscriptions({ config, port, secret, eventsUrl = config.events.url, fetchImpl = globalThis.fetch, log = console, topics: extra = [] }) {
     if (!eventsUrl || !secret || !config.oauth.clientSecret || process.env.ACTOR_EVENTS_SUBSCRIBE === '0') return null;
@@ -29,8 +32,10 @@ function startSubscriptions({ config, port, secret, eventsUrl = config.events.ur
         const listed = await call('GET', '/api/v1/subscriptions');
         if (!listed.ok) throw new Error(`listing subscriptions: ${listed.status}`);
         const mine = (listed.body.subscriptions || []).filter((s) => s.endpoint === endpoint);
-        // The ADR-033 topics, and chat.message.created while asking Actor from chat is on (chat/asks.js).
-        for (const topic of [...TOPICS, ...extra]) {
+        // The ADR-033 topics, chat.message.created while asking Actor from chat is on (chat/asks.js), and the
+        // agent's own steps (design 2026-11-07): every mode publishes agent.step.* into the network's agent
+        // namespace, and Actor keeps the one timeline behind the Dock.
+        for (const topic of [...TOPICS, AGENT_TOPICS, ...extra]) {
             if (mine.some((s) => s.topic_pattern === topic)) continue;
             const r = await call('POST', '/api/v1/subscriptions', { topic_pattern: topic, endpoint, secret });
             if (!r.ok && r.status !== 409) throw new Error(`subscribing to ${topic}: ${r.status} ${r.body.code || ''}`);

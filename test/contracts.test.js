@@ -13,7 +13,7 @@ const contracts = require('openvibe-contracts');
 const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
-const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task', 'actor.model.manage', 'actor.config.manage'];
+const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task', 'actor.model.manage', 'actor.config.manage', 'actor.timeline.read'];
 const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 // Routes added after the pinned contracts release but covered by an existing grant (or public on purpose). The trace is
 // the task's own read, so actor.task.read decides it exactly as it decides GET /api/v1/tasks/:id. The live-stats reads
@@ -23,6 +23,11 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/tasks/:id/trace', 'actor.task.read'],
     ['GET /api/v1/stats/tools', null],
     ['GET /api/v1/stats/models', null],
+    // The Dock's answers on the agent (design 2026-11-07): the approvals proxy and the kill switch. They are the
+    // person's own decisions on the agent, guarded by the capability that already covers them.
+    ['GET /api/v1/agent/timeline/:id', 'actor.timeline.read'],
+    ['POST /api/v1/agent/approvals/:product/:id/decide', 'actor.approval.decide'],
+    ['POST /api/v1/agent/kill-switch', 'actor.resource.control'],
 ]);
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 // The A2A surface (stage V2-11): POST /a2a/v1/tasks and GET /a2a/v1/tasks/:id, guarded by actor.a2a.task.
@@ -131,9 +136,9 @@ function codeRoutes() {
         }
     });
 
-    await check('events: the manifest produces none and consumes the two account events (ADR-033) and chat messages (asks from chat); the capabilities declare none', () => {
-        assert.deepStrictEqual(manifest.eventsProduced, []);
-        assert.deepStrictEqual([...manifest.eventsConsumed].sort(), ['chat.message.created', 'network.account.deleted', 'network.account.export_requested']);
+    await check('events: the manifest registers the network agent namespace (agent.step.*: one producer for the family) and consumes the account events, chat messages and the steps of the agent itself', () => {
+        assert.deepStrictEqual([...manifest.eventsProduced].sort(), ['agent.step.ended', 'agent.step.started', 'agent.step.updated']);
+        assert.deepStrictEqual([...manifest.eventsConsumed].sort(), ['agent.step.ended', 'agent.step.started', 'agent.step.updated', 'chat.message.created', 'network.account.deleted', 'network.account.export_requested']);
         for (const id of CAPS) assert.deepStrictEqual(contracts.capabilities.get(id).events, [], id);
     });
 

@@ -63,6 +63,11 @@ const TABLES = [
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_chat_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'chat-app-approvals.json' },
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
+    // The agent's timeline (design 2026-11-07): the steps the agent took for this person, and whether they paused
+    // it. Titles, outcomes and links only: there is no column for a prompt or a diff, so none can be exported.
+    { table: 'agent_timeline', subject: 'subject', value: (usr) => `user:${usr}`, file: 'timeline.json',
+        columns: ['id', 'subject', 'step_id', 'product', 'mode', 'ref', 'title', 'status', 'placement_where', 'placement_why', 'cost_usd', 'link', 'reason', 'transition', 'approval_product', 'approval_id', 'approval_kind', 'audience', 'shared', 'started_at', 'ended_at', 'created_at', 'updated_at'] },
+    { table: 'agent_state', subject: 'subject', value: (usr) => `user:${usr}`, file: 'agent-state.json', columns: ['subject', 'paused', 'updated_at'] },
     // The sharing default they chose for new runs (design 2026-11-06): the audience the next one starts as.
     { table: 'actor_share_defaults', subject: 'subject', value: (usr) => usr, file: 'share-defaults.json' },
     // The model they chose for their tasks (plan L55 C3): which provider their own key is for, and the model id
