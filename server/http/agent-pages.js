@@ -6,6 +6,8 @@ const { sameOrigin } = require('./principal');
 const { html, raw, time } = require('../render/html');
 const { send } = require('../render/layout');
 const personal = require('../agents/personal');
+const contacts = require('../agents/contacts');
+const ui = require('./agent-contacts-ui');
 const approvals = require('../agents/approvals');
 const memoryStore = require('../memory');
 
@@ -77,17 +79,16 @@ function createAgentPages(ctx) {
 
     r.get('/me/agents', async (req, res) => {
         if (!signed(req)) return login(req, res);
-        const agents = await personal.list(s, owner(req));
+        // Vibe is made on the first visit (contacts.ensureVibe), so the roster is never empty.
+        const rows = await contacts.list(s, config, owner(req));
         const waiting = await approvals.pendingCount(s, owner(req));
         const chosen = TEMPLATES.find((x) => x.id === req.query.template) || null;
-        page(req, res, 'Your agents', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · personal agents · alpha</p><h1>Your agents</h1>
-<p class="pa-lede">An agent is a task you set up once: standing instructions, a memory you can read and edit, and a schedule. Every run is an ordinary Actor task, with the same routing, checks, costs and limits.</p>
-<p><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> · what your agents asked to do while you were away · <a href="/memory">Memory</a></p></header>
-${agents.length ? html`<ul class="pa-cards">${agents.map((a) => html`<li class="pa-card"><a href="/me/agents/${a.id}"><strong>${a.name}</strong></a>
-<span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span>
-<span class="pa-when">${when(a)}</span>${a.last_run_at ? html`<span class="pa-when">Last run ${time(a.last_run_at)}</span>` : ''}</li>`)}</ul>`
-        : html`<p class="pa-empty">No agent yet. Start from a template, or create your own below.</p>`}
-<section class="pa-panel" aria-labelledby="pa-templates-h"><h2 id="pa-templates-h">Start from a template</h2>
+        page(req, res, 'Your agents', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · your agents · alpha</p><h1>Your agents</h1>
+<p class="pa-lede">Each agent is a contact: a face, a model, a computer to work on, the apps it may use, its memory, and how much it may do without asking. Every run is an ordinary Actor task, with the same checks, costs and limits.</p>
+<p class="ac-links"><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> <a href="/memory">Memory</a></p></header>
+${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when })}
+<section class="pa-panel" aria-labelledby="ac-add-h"><h2 id="ac-add-h">Add an agent</h2><p class="pa-hint">Each comes ready with its instructions; change anything after.</p>${ui.presetCards(contacts.presets().presets)}</section>
+<section class="pa-panel" aria-labelledby="pa-templates-h"><h2 id="pa-templates-h">Or set up a standing job</h2><p class="pa-hint">An agent with a schedule: it runs on its own and keeps notes between runs.</p>
 <ul class="pa-templates">${TEMPLATES.map((x) => html`<li><a class="pa-template${chosen && chosen.id === x.id ? ' is-chosen' : ''}" href="/me/agents?template=${x.id}#create"><strong>${x.name}</strong><span>${x.line}</span><small>${when({ schedule: x.schedule, schedule_at: x.schedule_at, schedule_dow: x.schedule_dow })}</small></a></li>`)}</ul></section>
 <section class="pa-panel" id="create"><h2>${chosen ? `Create: ${chosen.name}` : 'Create an agent'}</h2>${chosen ? html`<p class="pa-hint">Fill in the parts in &lt;angle brackets&gt;, then create it. You can change anything later.</p>` : ''}<form method="post" action="/me/agents">${form(chosen ? { ...chosen, id: undefined } : {})}<button type="submit" class="pa-btn pa-primary">Create agent</button></form></section>`);
     });
@@ -99,6 +100,19 @@ ${agents.length ? html`<ul class="pa-cards">${agents.map((a) => html`<li class="
         const out = await personal.create(s, config, owner(req), fields(req.body));
         if (!out.row) return page(req, res, 'Create agent', html`<h1>Create agent</h1><p>${out.error || 'Agent limit reached.'}</p><form method="post" action="/me/agents">${form(req.body)}<button type="submit">Create</button></form>`, out.limit ? 429 : 422);
         res.redirect(303, `/me/agents/${out.row.id}`);
+    });
+    r.post('/me/agents/preset', async (req, res) => {
+        if (!write(req, res)) return;
+        const out = await contacts.create(s, config, owner(req), { preset: String((req.body || {}).preset || '') });
+        if (!out.row) return page(req, res, 'Add an agent', html`<h1>Add an agent</h1><p>${out.error || 'Agent limit reached.'}</p><p><a href="/me/agents">Your agents</a></p>`, out.limit ? 429 : 422);
+        res.redirect(303, `/me/agents/${out.row.id}`);
+    });
+    r.post('/me/agents/:id/level', async (req, res) => {
+        if (!write(req, res)) return;
+        const out = await contacts.setLevel(s, config, owner(req), req.params.id, String((req.body || {}).level || ''));
+        if (!out) return page(req, res, 'Agent not found', html`<h1>Agent not found</h1>`, 404);
+        if (out.error) return page(req, res, 'Not saved', html`<h1>Not saved</h1><p>${out.error}</p><p><a href="/me/agents/${req.params.id}">Back</a></p>`, 422);
+        res.redirect(303, `/me/agents/${req.params.id}#level`);
     });
     // The approval inbox (agents/approvals.js): what an agent asked to do while its owner was away.
     const APPROVAL_STATE = { pending: ['Waiting for you', 'pill-running'], approved: ['Approved', 'pill-succeeded'], declined: ['Declined', 'pill-failed'], expired: ['Expired', 'pill-failed'] };
@@ -151,11 +165,14 @@ ${a.state === 'pending' ? html`<form method="post" action="/me/approvals/${a.id}
         };
         const usd = (v) => (v == null || !Number.isFinite(Number(v)) ? '' : ` · $${Number(v) < 0.01 ? Number(v).toFixed(4) : Number(v).toFixed(2)}`);
         const pill = (state) => state === 'succeeded' ? 'pill-succeeded' : state === 'failed' || state === 'cancelled' ? 'pill-failed' : 'pill-running';
+        const contact = contacts.wire(a);
         page(req, res, a.name, html`<p class="crumbs"><a href="/me/agents">Your agents</a></p>
-<header class="pa-head"><h1>${a.name}</h1><p class="pa-lede"><span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></header>
+<header class="pa-head ac-sheet-head">${ui.face(contact, 64)}<div><h1>${a.name}</h1><p class="ac-sheet-uses">${ui.usesLine(contact)}</p>
+<p class="pa-lede">${ui.levelChip(contact.level)} <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></div></header>
 ${a.last_skip_reason ? html`<p class="notice" role="status">The last scheduled run was skipped: ${a.last_skip_reason}</p>` : ''}
 <div class="pa-grid">
 <section class="pa-panel"><h2>Run now</h2><form method="post" action="/me/agents/${a.id}/run"><label>Input (optional) <span class="pa-hint">Anything this run should also consider.</span><textarea name="input" maxlength="8000" rows="3"></textarea></label><button type="submit" class="pa-btn pa-primary">Run now</button></form></section>
+<section class="pa-panel" id="level" aria-labelledby="ac-level-h"><h2 id="ac-level-h">How much it may do on its own</h2>${ui.levelPicker(contact)}</section>
 <section class="pa-panel"><h2>Wake it when something happens</h2><p>Besides its schedule, this agent can run the moment something happens: a channel goes live, a new blog post, a page changes, a price drops, a webhook arrives. <a href="https://openvibe.watch">OpenVibe.Watch</a> watches for it and runs this agent with what it saw.</p>
 <p class="pa-actions"><a class="pa-btn" href="https://openvibe.watch/watches/new?template=event&amp;agent_id=${a.id}">When something happens on OpenVibe</a> <a class="pa-btn" href="https://openvibe.watch/watches/new?template=page&amp;agent_id=${a.id}">When a page changes</a></p></section>
 <section class="pa-panel"><h2>Recent runs</h2>${vibeChat && /^https:\/\/openvibe\.chat\/vibe\/v-[0-9a-f]{12}$/.test(vibeChat.chat_url) ? html`<p class="pa-hint">Each run also lands in <a href="${vibeChat.chat_url}">its Vibe chat</a>, where you can ask Vibe about it.</p>` : ''}${runs.length ? html`<ul class="pa-runs">${runs.map((t) => html`<li><a href="/tasks/${t.id}">${time(t.created_at)}</a> <span class="pill ${pill(t.state)}">${t.state}</span>${usd(t.cost_usd)}${gist(t) ? html`<span class="pa-run-gist">${gist(t)}</span>` : ''}</li>`)}</ul>` : html`<p class="muted">No run yet.</p>`}</section>
