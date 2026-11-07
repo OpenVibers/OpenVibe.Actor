@@ -43,6 +43,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { stepFor } = require('../../agents/actions');
 
 const SCOPES = ['public', 'person', 'private-ok'];
 const NAME = /^[a-z][a-z0-9_]{1,63}$/;
@@ -152,6 +153,26 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
         if (!require('../../chat-apps/policy').allowed(tool, ctx.chatPolicy)) return normalize({ text: 'This tool is unavailable in this chat.', isError: true });
         if (ctx.chatPolicy && tool.acts === true) {
             if (!ctx.approveChatTool || !await ctx.approveChatTool(name, input)) return normalize({ text: 'The action was not approved. Nothing ran.', isError: true });
+        }
+        // The approval gate (plan §12 A-2): every acting tool sees levels.decide with its act and its
+        // always-ask category before it changes anything. A tool that only writes Actor's own working
+        // state says null and goes on. A chat has its own consent card above, so it is not asked twice.
+        if (!ctx.chatPolicy && tool.acts === true && typeof ctx.requestApproval === 'function') {
+            const step = stepFor(name, input);
+            if (step) {
+                let ask;
+                try {
+                    ask = await ctx.requestApproval({ kind: 'actor.action', ...step });
+                } catch (err) {
+                    return normalize({ text: JSON.stringify({ error: `the approval gate could not be asked, so nothing ran: ${(err && err.message) || err}`.slice(0, 300) }), isError: true });
+                }
+                if (ask && ask.pending) {
+                    return normalize({
+                        text: JSON.stringify({ error: `not started: the person must approve it first at ${ask.url}`, approval: { id: ask.id, url: ask.url } }),
+                        data: ask, isError: true,
+                    });
+                }
+            }
         }
         const signal = ctx.signal;
         const timeoutMs = Math.min(tool.timeoutMs || DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);

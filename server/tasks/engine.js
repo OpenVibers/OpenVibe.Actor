@@ -30,6 +30,7 @@ const { check } = require('../agents/check');
 const { check: checkClaims } = require('../runtime/check');
 const approvals = require('../agents/approvals');
 const contacts = require('../agents/contacts');
+const assignments = require('../agents/assignments');
 const levels = require('../agents/levels');
 const { repoIn: codesRepoIn } = require('../agents/codes');
 const memory = require('../memory');
@@ -112,15 +113,41 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         return text;
     }
 
+    // A step event names its assignment node (plan §12 A-2), so the Dock can draw the tree later. New tasks
+    // carry the id on the row; an older task gets its root lazily here, once.
+    const assignmentIds = new Map();
+    async function assignmentIdFor(taskId, row = null) {
+        if (assignmentIds.has(taskId)) return assignmentIds.get(taskId);
+        let id = row && row.assignment_id;
+        if (!id) {
+            const task = row || await store.getTask(s, taskId);
+            if (task) {
+                const node = await assignments.ensureForTask(s, config, task).catch((err) => {
+                    log.warn && log.warn('[Actor] assignment:', taskId, (err && err.message) || err);
+                    return null;
+                });
+                id = node && node.id;
+            }
+        }
+        if (id) assignmentIds.set(taskId, id);
+        return id || null;
+    }
     async function emit(id, body) {
-        const event = await store.appendEvent(s, id, { at: iso(), ...body });
-        stream.publish(id, event);
-        return event;
+        const event = { at: iso(), ...body };
+        if (event.kind === 'output' && !event.assignment_id) {
+            const assignmentId = await assignmentIdFor(id);
+            if (assignmentId) event.assignment_id = assignmentId;
+        }
+        const saved = await store.appendEvent(s, id, event);
+        stream.publish(id, saved);
+        return saved;
     }
     async function setState(id, state, { agentForEvent, ...patch } = {}) {
         const row = await store.updateTask(s, id, { state, ...patch });
         const ended = ['succeeded', 'failed', 'cancelled'].includes(state);
         await emit(id, { kind: ended ? 'end' : 'state', state, ...(agentForEvent ? { agent: agentForEvent } : {}) });
+        // The assignment tree follows the task it runs (plan §12 A-2), and its root's spend is written with it.
+        if (row) await assignments.syncTaskState(s, row).catch((err) => log.warn && log.warn('[Actor] assignment state:', id, (err && err.message) || err));
         if (ended) stream.end(id);
         // "Tell me when it's done" (stage V2-6): done or failed, once per task. Cancelled is the person's own action.
         if (ended && row && (state === 'succeeded' || state === 'failed')) await tellPerson(row, state);
@@ -283,12 +310,20 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         // personal agent that started it, else the person's Vibe. Another person's or a service's work has no contact.
         let taskAgent = null;
         let taskLevel = 'ask';
+        let assignment = null;
         try {
             taskAgent = await contacts.agentForTask(s, config, row);
             taskLevel = await contacts.effectiveLevelFor(s, row, taskAgent);
+            assignment = await assignments.ensureForTask(s, config, row);
+            if (assignment && assignment.effective_level) taskLevel = assignment.effective_level;
         } catch (err) {
             log.warn && log.warn('[Actor] task agent/level:', id, (err && err.message) || err);
         }
+        // Both execution paths get the same gate and assignment callbacks: the one loop passes them into its
+        // tools, and an adapter that starts a Codes task gets them too.
+        let requestApproval = null;
+        let assign = null;
+        let closeAssignment = null;
         // One place every approval gate asks through: the level, then the always-ask floor, then (for approve-for-me)
         // a reviewer model of another family. Returns { asked: false } when the step may go ahead.
         const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT }) => {
@@ -300,6 +335,20 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             await emit(id, { kind: 'output', step: 'text', agent, text: `Your agent wants to ${String(summary).toLowerCase()} Nothing runs until you approve it: ${url}` });
             await tellPerson(row, 'needs_you', { what: `approve: ${summary}`, url });
             return { asked: true, decision, ask, url };
+        };
+        // A child hand-off (a sub-agent's consult, a Codes task, a Space action) is one node below this task's.
+        // The root's budget decides whether it may start at all: when it is spent, nothing below it starts.
+        assign = assignment ? async (spec = {}) => {
+            try {
+                return await assignments.openChild(s, { owner: row.requester, parent: assignment, taskId: id, agentId: taskAgent ? taskAgent.id : null, ...spec });
+            } catch (err) {
+                log.warn && log.warn('[Actor] assignment child:', id, (err && err.message) || err);
+                return { error: 'the assignment could not be recorded, so nothing ran', status: 500, code: 'actor.assignment.failed' };
+            }
+        } : null;
+        closeAssignment = async (nodeId, state) => {
+            try { return await assignments.closeChild(s, row.requester, nodeId, state); }
+            catch (err) { log.warn && log.warn('[Actor] assignment close:', nodeId, (err && err.message) || err); return null; }
         };
         const explanation = [];
         const tried = new Map();
@@ -370,7 +419,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // A task that would start coding work on the person's machine asks through the same gate (levels.js):
                 // the level first, then the always-ask floor. Full access or auto-edits may let an edit through; a
                 // payment, password, deletion or a new recipient never does.
-                const requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'code', recipientKnown = null }) => {
+                requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null }) => {
                     const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown });
                     if (!out.asked) return null;
                     return { pending: true, id: out.ask.id, url: out.url };
@@ -405,7 +454,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         // The answer as it is written (plan L55 C2): to the readers that asked, never stored.
                         // The loop streams a model call only while such a reader is there (wanted).
                         delta: typeof stream.delta === 'function' ? Object.assign((d) => stream.delta(id, d), { wanted: () => stream.wants(id) }) : null,
-                        meter, budgetLeft, waitForPerson, requestApproval,
+                        meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment,
                         chatPolicy, approveChatTool: chatPolicy ? (tool, input) => require('../chat-apps/policy').approve(s, { taskId: id, owner: row.requester, tool, input, signal }) : null,
                         personText, agentId: ownAgent, notifyTask,
                         askPerson, control, resume, fork, spent: () => spent,
@@ -598,7 +647,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (agentId === 'codes' && taskAgent && codesRepoIn(row.task)) {
                     const asked = await askForApproval({
                         kind: 'codes.task', summary: `Start a coding task on your machine in ${codesRepoIn(row.task)}`,
-                        payload: { task: row.task }, category: 'code', act: 'code', agent: agentId,
+                        payload: { task: row.task }, act: 'edit', agent: agentId,
                     });
                     if (asked.asked) {
                         const result = {
@@ -613,7 +662,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 let out;
                 try {
                     // From chat the runtime is never offered the person's own robots or computers (no requester for its tools).
-                    out = await adapters.run[agentId]({ task: row.task, requester: fromChat ? null : row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, waitForPerson, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }) });
+                    out = await adapters.run[agentId]({ task: row.task, requester: fromChat ? null : row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }) });
                 } catch (err) {
                     if (signal.aborted) throw err;
                     const why = (err && err.message) || String(err);

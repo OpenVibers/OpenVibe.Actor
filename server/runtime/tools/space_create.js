@@ -25,11 +25,17 @@ module.exports = {
         const space = spaceFor(ctx);
         if (!space.enabled) return { text: JSON.stringify({ error: 'OpenVibe.Space is not connected to this server' }), isError: true };
         const person = personOf(ctx.requester);
+        const node = typeof ctx.assign === 'function' ? await ctx.assign({ mode: 'work', reply: 'resume', agentId: ctx.agentId || null, state: 'running' }) : null;
+        if (node && node.error) return { text: JSON.stringify({ error: `not started: ${node.error}` }), isError: true, data: node };
         const body = {};
         if (input && input.name) body.name = String(input.name).slice(0, 40);
         if (input && input.description) body.description = String(input.description).slice(0, 400);
         const out = await space.call('POST', '/api/v1/builder/spaces', person, body);
-        if (!out.ok) return { text: JSON.stringify({ error: out.error }), isError: true };
+        if (!out.ok) {
+            if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'failed');
+            return { text: JSON.stringify({ error: out.error }), isError: true };
+        }
+        if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'succeeded');
         const s = out.data && out.data.space;
         return { text: JSON.stringify({ space: s || null }), data: { space: s || null } };
     },

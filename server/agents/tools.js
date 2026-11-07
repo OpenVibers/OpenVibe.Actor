@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const looks = require('./looks');
 const { createNotifier } = require('../notify/client');
+const { stepFor } = require('./actions');
 
 /**
  * What the OpenVibe runtime can do, as model tools — every one of them an OpenVibe service's public API, called the
@@ -296,8 +297,19 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         return { done: false, note: took ? 'The person was still using the desk when the wait ended: look at it, and tell them what is left if it is not done.' : `The person did not take the desk in ${Math.round(granted / 60000)} minutes: tell them in your answer what is left for them to do, with the link.`, watch };
     }
 
-    async function call(name, args, { signal, requester = null, meter = null, budgetLeft = null, desks = null, emit = null, waitForPerson = null } = {}) {
+    async function call(name, args, { signal, requester = null, meter = null, budgetLeft = null, desks = null, emit = null, waitForPerson = null, requestApproval = null } = {}) {
         let a = args && typeof args === 'object' ? args : {};
+        // The approval gate (plan §12 A-2): the act and its always-ask category go through levels.decide
+        // before the step runs. A read, or Actor's own working state, says null and goes on.
+        if (typeof requestApproval === 'function') {
+            const step = stepFor(name, a);
+            if (step) {
+                let ask;
+                try { ask = await requestApproval({ kind: 'actor.action', ...step }); }
+                catch (err) { return json({ error: `the approval gate could not be asked, so nothing ran: ${(err && err.message) || err}`.slice(0, 300) }); }
+                if (ask && ask.pending) return json({ error: `not started: the person must approve it first at ${ask.url}`, approval: { id: ask.id, url: ask.url } });
+            }
+        }
         try {
             if (name === 'list_my_robots' || name === 'robot_steps') {
                 const person = personOf(requester);

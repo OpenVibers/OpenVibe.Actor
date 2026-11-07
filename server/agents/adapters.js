@@ -95,7 +95,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
     const runtimeModel = own ? chatClient({ baseUrl: own.url, apiKey: own.apiKey, model: own.model, rates: ownRates, fetchImpl, timeoutMs: 180_000 }) : deepseek;
     const runtimeModelName = own ? own.model : p.deepseek.model;
 
-    async function runtime({ task, requester = null, taskId = null, signal, emit, meter, budgetLeft, waitForPerson = null }) {
+    async function runtime({ task, requester = null, taskId = null, signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null }) {
         if (!runtimeModel) throw new ProviderError('the runtime has no model configured', { code: 'actor.agent.unavailable' });
         const tools = await ovTools.definitions({ signal, requester });
         const robots = tools.some((d) => d.function && d.function.name === 'robot_steps');
@@ -121,7 +121,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
                     let args = {};
                     try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { args = {}; }
                     await emit({ step: 'tool_call', tool: name, input: summarize(args) });
-                    const out = await ovTools.call(name, args, { signal, requester, meter, budgetLeft, desks, emit, waitForPerson });
+                    const out = await ovTools.call(name, args, { signal, requester, meter, budgetLeft, desks, emit, waitForPerson, requestApproval });
                     evidence.push({ tool: name, result: out.slice(0, 2000) });
                     const isError = /^\{"error"/.test(out);
                     await emit({ step: 'tool_result', tool: name, text: out.slice(0, 600), is_error: isError });

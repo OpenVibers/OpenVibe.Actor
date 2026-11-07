@@ -42,13 +42,17 @@ const TABLES = [
     // shows. Before the tasks, so the rows are counted before the task's cascade would take them.
     { table: 'actor_waits', subject: 'requester', value: (usr) => `user:${usr}`, file: 'waits.json',
         columns: ['id', 'task_id', 'requester', 'step', 'kind', 'until', 'filter', 'deadline_at', 'on_timeout', 'line', 'status', 'created_at', 'updated_at', 'finished_at'] },
+    // The tree of delegated work (plan §12 A-2): one row per hand-off, with the agent, task, level and budget
+    // state. Before tasks, so the rows are counted before a task's cascade could take them.
+    { table: 'actor_assignments', subject: 'owner', value: (usr) => `user:${usr}`, file: 'assignments.json',
+        columns: ['id', 'owner', 'root', 'parent', 'depth', 'origin', 'mode', 'reply', 'agent_id', 'task_id', 'level', 'effective_level', 'budget_usd', 'budget_spent_usd', 'state', 'created_at', 'updated_at', 'started_at', 'ended_at'] },
     // Every column but webhook_secret (a task's signing secret is a credential, not the person's data).
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',
         columns: ['id', 'requester', 'project_id', 'task', 'mode', 'agent', 'budget_task', 'budget_day', 'state', 'result', 'error_code', 'error_detail',
             'cost_usd', 'free_usd', 'explanation', 'cancel_at', 'cancel_by', 'last_seq', 'idem_key', 'idem_hash', 'created_at', 'finished_at', 'timeout_ms', 'via', 'webhooks', 'parent_id',
             // A fork's parent step and the one change it was made with (stage V2-9), and how often it resumed.
-            'fork_of_step', 'fork_change', 'resumes', 'agent_id', 'level'],
+            'fork_of_step', 'fork_change', 'resumes', 'agent_id', 'level', 'assignment_id'],
     },
     // The person's own per-UTC-day spend accounting. Deleted: nothing in Actor keeps a person's spend record for a
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is
