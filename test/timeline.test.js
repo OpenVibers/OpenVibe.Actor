@@ -10,6 +10,9 @@ const { boot, check, done } = require('./helpers/boot');
 // A signed-in write must come from the site itself (the same rule every other write follows).
 const SAME = { 'sec-fetch-site': 'same-origin' };
 const timeline = require('../server/agents/timeline');
+// What OpenVibe.Watch's emitter publishes for a watch waiting on CI (test/fixtures/watch-agent-step.json,
+// kept in step with the emitter by OpenVibe.Watch's own test/agent-step.test.js).
+const WATCH_STEP = require('./fixtures/watch-agent-step.json');
 
 (async () => {
     const t = await boot({});
@@ -94,6 +97,38 @@ const timeline = require('../server/agents/timeline');
             const code = await t.get('/api/v1/agent/timeline?mode=code', { as: ada });
             assert.ok(code.json().entries.every((e) => e.mode === 'code'));
             assert.ok(code.json().counts.run === undefined || code.json().counts.run === 0, 'the counts say what a filter hides');
+        });
+
+        await check('an Act step that waits on CI shows Watch with its deadline, then the transition sentence, then Act', async () => {
+            const t0 = Date.now() - 60000;
+            const at = (ms) => new Date(t0 + ms).toISOString();
+            const act = (id, title, started_at) => step({
+                step_id: id, mode: 'act', product: 'actor', ref: id, title, status: 'running',
+                started_at, link: 'https://actor.openvibe.network/tasks/' + id,
+            });
+            // 1. Act is working: it is merging #167 on the person's desktop.
+            await timeline.upsert(t.ctx.s, adaSubject, act('tsk_01JAB2C3D4E5F6G7H8J9K0MAC1', 'Merging #167 on your desktop', at(0)));
+            // 2. It waits on CI: the Watch step starts waiting, with its deadline in the agent's sentence.
+            await timeline.upsert(t.ctx.s, adaSubject, { ...WATCH_STEP, started_at: at(1000) });
+            // 3. The check sees the CI pass and stays one step; 4. the agent is back in Act, deploying.
+            await timeline.upsert(t.ctx.s, adaSubject, { ...WATCH_STEP, status: 'done', started_at: at(1000), ended_at: at(5000) });
+            await timeline.upsert(t.ctx.s, adaSubject, act('tsk_01JAB2C3D4E5F6G7H8J9K0MAC2', 'Deploying on your machine', at(6000)));
+
+            const res = await t.get('/api/v1/agent/timeline', { as: ada });
+            assert.strictEqual(res.status, 200, res.text);
+            const body = res.json();
+            const watches = body.entries.filter((e) => e.mode === 'watch' && e.title === WATCH_STEP.title);
+            assert.strictEqual(watches.length, 1, 'a watch that checks again is the same entry, not a second one');
+            assert.strictEqual(watches[0].status, 'done');
+            assert.match(watches[0].transition, /Waiting for CI on #167 \(Watch, 4 min\)/, 'the deadline is in the sentence');
+            assert.match(watches[0].transition, /then I'll merge it \(Act\)/, 'and what comes after the watch');
+            assert.strictEqual(watches[0].link, WATCH_STEP.link);
+            assert.strictEqual(body.now && body.now.title, 'Deploying on your machine', 'the agent is back in Act');
+            const order = body.entries.map((e) => e.title);
+            assert.ok(order.indexOf('Deploying on your machine') < order.indexOf(WATCH_STEP.title), 'newest first: Act after the watch');
+            assert.ok(order.indexOf(WATCH_STEP.title) < order.indexOf('Merging #167 on your desktop'), 'the watch sits between the two Act steps');
+            assert.strictEqual(body.counts.watch, 1);
+            assert.ok(!/"prompt"|"diff"/.test(res.text), 'no prompt or diff, only the sentence');
         });
 
         done();
