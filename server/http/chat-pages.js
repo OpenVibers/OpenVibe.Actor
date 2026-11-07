@@ -45,6 +45,8 @@ const glyphs = require('openvibe-shared/glyphs');
 const thread = require('openvibe-shared/thread');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
+const TRIGGER_ID = /^trg_[0-9A-HJKMNP-TV-Z]{26}$/;
+const LAST_RUN = { ok: 'went fine', failed: 'failed', needs_you: 'needs you', running: 'is running' };
 const OPEN = ['queued', 'running', 'verifying'];
 const MODE_LABEL = { cheapest: 'Cheapest', balanced: 'Balanced', best: 'Best', fastest: 'Fastest', private: 'Private' };
 const MODE_HINT = { cheapest: 'the lowest price that can do it', balanced: 'good and cheap', best: 'the strongest agent', fastest: 'the quickest answer', private: 'open model, nothing leaves OpenVibe' };
@@ -304,6 +306,60 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
 ${readOnly ? '' : html`<div class="ovt-card-acts"><button type="submit" class="ovt-card-btn" name="do" value="wake">Wake now</button><button type="submit" class="ovt-card-btn is-quiet" name="do" value="cancel">Stop waiting</button></div>`}</form>`;
     }
 
+    /**
+     * The routines this turn made (plan §12 A-4): one card each, its latest state. What runs and when in words, the
+     * next run in the reader's own zone, how the last run went, and the person's moves as plain forms (they work with
+     * no script): Pause or Resume, Run now, and Undo for ten minutes, then Delete with a confirmation. A shared, read-only
+     * turn shows the card as it was made, with no moves and nothing read beyond the turn itself.
+     */
+    async function triggerBlocks(row, events, readOnly = false) {
+        const latest = new Map();
+        for (const e of events || []) {
+            if (e && e.kind === 'output' && e.step === 'trigger' && e.trigger && TRIGGER_ID.test(String(e.trigger.id || ''))) latest.set(e.trigger.id, e.trigger);
+        }
+        if (!latest.size) return '';
+        const owner = String(row.requester || '').replace(/^user:/, '');
+        const cards = [];
+        for (const [id, made] of latest) {
+            let card = made;
+            let gone = false;
+            if (!readOnly && ctx.triggers && typeof ctx.triggers.get === 'function') {
+                const live = await ctx.triggers.get(owner, id).catch(() => null);
+                if (live) card = live; else gone = true;
+            }
+            cards.push(triggerCard(row, card, { gone, readOnly }));
+        }
+        return html`${cards}`;
+    }
+
+    function triggerCard(row, card, { gone = false, readOnly = false } = {}) {
+        const when = card.when || {};
+        const paused = !gone && card.state === 'paused';
+        const state = gone ? 'Deleted' : paused ? 'Paused' : 'On';
+        const last = card.last_run && LAST_RUN[card.last_run.state] ? card.last_run : null;
+        const undoable = !gone && card.undo_until && Date.parse(card.undo_until) > now();
+        const why = paused ? (card.paused_reason === 'failed' ? `Paused after ${Number(card.failures) || 5} failed runs in a row. Resume it once the cause is fixed.` : 'Paused by you.') : '';
+        const icon = card.kind === 'event' ? 'zap' : 'calendar';
+        const words = String(when.words || (card.kind === 'event' ? 'When it happens' : 'On a schedule'));
+        const zone = card.kind === 'schedule' && when.timezone && !words.includes(when.timezone) ? ` (${when.timezone})` : '';
+        const meta = [];
+        if (!gone && !paused && card.next_run_at) meta.push(html`Next run <time datetime="${new Date(card.next_run_at).toISOString()}" data-ct-local>${new Date(card.next_run_at).toISOString().slice(0, 16).replace('T', ' ')} UTC</time>`);
+        if (last) meta.push(html`<a href="/tasks/${last.task_id}">Last run ${LAST_RUN[last.state]}</a>`);
+        if (card.agent_name) meta.push(html`Runs as ${card.agent_name}`);
+        const moves = gone || readOnly ? '' : html`<div class="ovt-card-acts">
+${paused ? html`<button type="submit" class="ovt-card-btn" name="do" value="resume">Resume</button>` : html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="pause">Pause</button>`}
+<button type="submit" class="ovt-card-btn is-quiet" name="do" value="run">Run now</button>
+${undoable ? html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="undo">Undo</button>`
+        : html`<details class="ct-trig-del"><summary class="ovt-card-btn is-quiet">Delete</summary><p>Delete it for good? No future run happens.</p><button type="submit" class="ovt-card-btn is-danger" name="do" value="delete">Delete it</button></details>`}
+</div>`;
+        return html`<form class="ovt-card ct-trig${paused ? ' is-paused' : ''}${gone ? ' is-gone' : ''}" method="post" action="/chat/${row.id}/trigger/${card.id}" data-ct-trigger="${card.id}">
+<p class="ovt-card-h">${raw(glyphs.svg(icon, { size: 18 }))}<span class="ct-trig-when"><b>${words}</b>${zone}</span><span class="ct-trig-state">${state}</span></p>
+<p class="ct-trig-task">${String(card.task || '')}</p>
+${meta.length ? html`<p class="ct-trig-meta">${meta.map((m, i) => html`${i ? ' · ' : ''}${m}`)}</p>` : ''}
+${why ? html`<p class="ct-trig-why">${why}</p>` : ''}
+${moves}</form>`;
+    }
+
     /** The files beside the question (thread.files draws them). */
     function filesOf(row, files) {
         return (files || []).map((f) => ({ href: `/chat/file/${row.id}/${f.id}`, name: f.name, size: f.size, image: inputs.IMAGE.test(f.mime) }));
@@ -324,6 +380,9 @@ ${readOnly ? '' : html`<div class="ovt-card-acts"><button type="submit" class="o
             const parked = ctx.waits && typeof ctx.waits.listForTask === 'function' ? (await ctx.waits.listForTask(row.id).catch(() => [])).find((w) => w.status === 'waiting') : null;
             reply = html`${workBlock(row, evs, true)}${screenBlock(row, evs, true)}${waitBlock(row, parked, readOnly)}`;
         }
+        // A routine the turn made is its card, after whatever the turn said (plan §12 A-4).
+        const routines = await triggerBlocks(row, evs, readOnly);
+        if (routines) reply = html`${reply}${routines}`;
         // data-task and data-last are Actor's (js/chat.js follows the task's event stream from data-last).
         return raw(thread.turn({ id: row.id, state: row.state, open, you: { text: row.task, files: filesOf(row, attached) }, reply: String(reply), attrs: { 'data-task': row.id, 'data-last': row.last_seq } }));
     }
@@ -629,6 +688,37 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
         if (open && move === 'wake') done = await waits.wakeByPerson(open.id, requesterOf(req));
         else if (open && move === 'cancel') done = await waits.cancel(open.id, requesterOf(req));
         if (wantsJson) return res.status(done ? 202 : 409).json(done ? { ok: true } : { error: open ? 'Say wake or cancel.' : 'It is not waiting any more.' });
+        return res.redirect(303, `/chat/${row.id}#t-${row.id}`);
+    });
+
+    // A routine's card moves (plan §12 A-4): only the turn's requester, only same-origin, only a trigger this turn made.
+    // Watch is called with the person's own session token, never Actor's service token.
+    r.post('/chat/:id/trigger/:tid', express.urlencoded({ extended: false, limit: '1kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        const wantsJson = String(req.get('accept') || '').includes('application/json');
+        if (!signedIn(req) || !TASK_ID.test(req.params.id) || !TRIGGER_ID.test(req.params.tid)) return wantsJson ? res.status(401).json({ error: 'Sign in first.' }) : res.redirect(303, '/auth/login?next=%2Fchat');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('Change a routine from openvibe.actor itself.');
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req)) return wantsJson ? res.status(404).json({ error: 'That chat is not here.' }) : res.redirect(303, '/chat');
+        const events = await store.eventsAfter(s, row.id, 0);
+        const made = events.some((e) => e && e.step === 'trigger' && e.trigger && e.trigger.id === req.params.tid);
+        if (!made || !ctx.triggers) return wantsJson ? res.status(404).json({ error: 'No such routine in this chat.' }) : res.redirect(303, `/chat/${row.id}#t-${row.id}`);
+        const owner = req.viewer.subject;
+        const token = req.token || (req.viewer && req.viewer.token) || null;
+        const move = String((req.body && req.body.do) || '');
+        const t = ctx.triggers;
+        const out = move === 'pause' ? await t.pause(owner, req.params.tid, { token })
+            : move === 'resume' ? await t.resume(owner, req.params.tid, { token })
+                : move === 'run' ? await t.runNow(owner, req.params.tid)
+                    : move === 'undo' ? await t.undo(owner, req.params.tid, { token })
+                        : move === 'delete' ? await t.remove(owner, req.params.tid, { token, confirm: true })
+                            : { error: { status: 400, detail: 'Say pause, resume, run, undo or delete.' } };
+        if (out && out.error) {
+            const status = out.error.status || 409;
+            if (wantsJson) return res.status(status).json({ error: out.error.detail || 'That did not change.', code: out.error.code || null });
+            return render(req, res, { row, problem: out.error.detail || 'That did not change.', status });
+        }
+        if (wantsJson) return res.json(out);
         return res.redirect(303, `/chat/${row.id}#t-${row.id}`);
     });
 
