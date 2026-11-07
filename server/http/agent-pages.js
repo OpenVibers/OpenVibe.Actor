@@ -9,6 +9,8 @@ const personal = require('../agents/personal');
 const contacts = require('../agents/contacts');
 const ui = require('./agent-contacts-ui');
 const approvals = require('../agents/approvals');
+const voice = require('../agents/voice');
+const shares = require('../agents/voice-shares');
 const levels = require('../agents/levels');
 const allows = require('../agents/allows');
 const kinds = require('../agents/kinds');
@@ -125,7 +127,7 @@ ${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when })}
 <section class="pa-panel" aria-labelledby="ac-add-h"><h2 id="ac-add-h">Add an agent</h2><p class="pa-hint">Each comes ready with its instructions; change anything after.</p>${ui.presetCards(contacts.presets().presets)}</section>
 <section class="pa-panel" aria-labelledby="pa-templates-h"><h2 id="pa-templates-h">Or set up a standing job</h2><p class="pa-hint">An agent with a schedule: it runs on its own and keeps notes between runs.</p>
 <ul class="pa-templates">${TEMPLATES.map((x) => html`<li><a class="pa-template${chosen && chosen.id === x.id ? ' is-chosen' : ''}" href="/me/agents?template=${x.id}#create"><strong>${x.name}</strong><span>${x.line}</span><small>${when({ schedule: x.schedule, schedule_at: x.schedule_at, schedule_dow: x.schedule_dow })}</small></a></li>`)}</ul></section>
-<section class="pa-panel" id="create"><h2>${chosen ? `Create: ${chosen.name}` : 'Create an agent'}</h2>${chosen ? html`<p class="pa-hint">Fill in the parts in &lt;angle brackets&gt;, then create it. You can change anything later.</p>` : ''}<form method="post" action="/me/agents">${form(chosen ? { ...chosen, id: undefined } : {})}<button type="submit" class="pa-btn pa-primary">Create agent</button></form></section>`);
+${importPanel()}<section class="pa-panel" id="create"><h2>${chosen ? `Create: ${chosen.name}` : 'Create an agent'}</h2>${chosen ? html`<p class="pa-hint">Fill in the parts in &lt;angle brackets&gt;, then create it. You can change anything later.</p>` : ''}<form method="post" action="/me/agents">${form(chosen ? { ...chosen, id: undefined } : {})}<button type="submit" class="pa-btn pa-primary">Create agent</button></form></section>`);
     });
     r.post('/me/agents', async (req, res) => {
         if (!write(req, res)) return;
@@ -209,6 +211,90 @@ ${buttons}`);
         res.redirect(303, out.task ? `/tasks/${out.task.id}` : `/me/approvals/${req.params.id}`);
     });
 
+    // ── An agent's voice as a file (actor.voice@1) ──────────────────────────────────────────────────────
+    // The panel on the agent's page: download its voice, publish it on the Exchange, or import somebody else's.
+    const voicePanel = (a, doc) => html`<section class="pa-panel" id="voice" aria-labelledby="ac-voice-h"><h2 id="ac-voice-h">Its voice</h2>
+<p class="pa-hint">An agent's voice is a small file: its name, a short bio, the house voice it speaks in, its rules, its level, and the model and apps it prefers (ids, never a key). Nothing else — never its memory, never a connector's token, never a file. Whoever you send it to can make an agent that speaks in this voice; it starts at level ask, and they raise it themselves.</p>
+${a.bio ? html`<p>${a.bio}</p>` : ''}
+${a.rules && a.rules.length ? html`<h3>Its rules</h3><ul>${a.rules.map((r) => html`<li>${r}</li>`)}</ul>` : ''}
+<p class="pa-actions"><a class="pa-btn" href="/me/agents/${a.id}/voice" download="voice.json">Download its voice (JSON)</a><a class="pa-btn" href="${config.services.exchangeUrl}/voices/new?doc=${Buffer.from(JSON.stringify(doc), 'utf8').toString('base64url')}">Publish it on the Exchange</a><a class="pa-btn" href="/me/agents#import">Import a voice</a></p>
+${a.voice_author ? html`<p class="pa-hint">Imported from ${a.voice_author_name || a.voice_author}${a.voice_source ? html` (${a.voice_source})` : ''}.</p>` : ''}</section>`;
+    const importPanel = () => html`<section class="pa-panel" id="import" aria-labelledby="ac-import-h"><h2 id="ac-import-h">Import an agent's voice</h2>
+<p class="pa-hint">A voice file is a small JSON document: an agent's name, a short bio, the house voice it speaks in, its rules, its level, and the model and apps it prefers. It never carries memory, a connector's token or a file. Paste one and it becomes one of your agents, at level ask — you raise it yourself.</p>
+<form method="post" action="/me/agents/import"><label class="pa-wide">Voice file (JSON) <textarea name="voice" rows="6" required placeholder='{"voice":"actor.voice@1","name":"A house voice"}'></textarea></label><button type="submit" class="pa-btn pa-primary">Import this voice</button></form>
+<p class="pa-hint">Or borrow a voice somebody else published: <a href="/borrow">borrow an agent</a>.</p></section>`;
+
+    // The agent's voice as a file: the owner downloads it, and another person's agent is the same 404 as one that does
+    // not exist.
+    r.get('/me/agents/:id/voice', async (req, res) => {
+        if (!signed(req)) return login(req, res);
+        const a = await find(req, res); if (!a) return;
+        const doc = voice.build(a, { subject: req.viewer.subject, name: req.viewer.username || null });
+        res.set('Content-Type', 'application/json; charset=utf-8');
+        res.set('Content-Disposition', 'attachment; filename="voice.json"');
+        res.send(JSON.stringify(doc, null, 2));
+    });
+
+    // Import a voice: a pasted actor.voice@1 document becomes a new agent, at level ask whatever the file says.
+    r.post('/me/agents/import', async (req, res) => {
+        if (!write(req, res)) return;
+        const text = String((req.body || {}).voice || '');
+        let input;
+        try { input = JSON.parse(text); } catch { return voicePage(req, res, 'That file is not JSON.', 422); }
+        const out = await importVoice(req, input, 'imported from a file');
+        if (out.error) return voicePage(req, res, out.error, out.limit ? 429 : 422);
+        res.redirect(303, `/me/agents/${out.row.id}`);
+    });
+
+    // Borrow this agent: a voice at a link the author made. The link is read on the server (https, an OpenVibe host),
+    // checked against its own hash, and the agent it makes starts at level ask.
+    r.get('/borrow', async (req, res) => {
+        const url = String((req.query || {}).url || '');
+        if (!url) return page(req, res, 'Borrow an agent', html`<h1>Borrow an agent</h1><p class="pa-lede">Give the link somebody shared and you can see whose voice it is before you borrow it.</p>
+<form method="get" action="/borrow"><label class="pa-wide">Voice link <input name="url" type="url" required value="${url}" placeholder="https://openvibe.exchange/voices/…"></label><button type="submit" class="pa-btn pa-primary">Look at it</button></form>`, 400);
+        const got = await voice.fetchFrom(url, { fetchImpl: globalThis.fetch, hosts: config.voice.hosts });
+        if (got.error) return voicePage(req, res, got.error, 422);
+        const read = voice.read(got.input);
+        if (read.error) return voicePage(req, res, read.error, 422);
+        const d = read.doc;
+        page(req, res, 'Borrow this agent', html`<p class="crumbs"><a href="/me/agents">Your agents</a></p>
+<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor</p><h1>Borrow this agent</h1>
+<p class="pa-lede">${d.name} speaks in this voice. Borrow it and it becomes one of your agents — at level ask, whatever the file asks for, and you raise it yourself.</p></header>
+<section class="pa-panel"><h2>${d.name}</h2>
+${d.bio ? html`<p>${d.bio}</p>` : ''}
+${d.rules && d.rules.length ? html`<h3>Its rules</h3><ul>${d.rules.map((r) => html`<li>${r}</li>`)}</ul>` : ''}
+<p class="pa-hint">By ${d.author.name || d.author.subject}. It asks for level ${d.level}.</p>
+${signed(req) ? html`<form method="post" action="/borrow"><input type="hidden" name="url" value="${url}"><button type="submit" class="pa-btn pa-primary">Borrow this agent</button></form>`
+    : html`<p><a class="pa-btn pa-primary" href="/auth/login?next=${encodeURIComponent(req.originalUrl)}">Sign in to borrow it</a></p>`}</section>`);
+    });
+    r.post('/borrow', async (req, res) => {
+        if (!write(req, res)) return;
+        const url = String((req.body || {}).url || '');
+        const got = await voice.fetchFrom(url, { fetchImpl: globalThis.fetch, hosts: config.voice.hosts });
+        if (got.error) return voicePage(req, res, got.error, 422);
+        const out = await importVoice(req, got.input, url);
+        if (out.error) return voicePage(req, res, out.error, out.limit ? 429 : 422);
+        res.redirect(303, `/me/agents/${out.row.id}`);
+    });
+
+    // The page a refused or broken voice ends on: what went wrong, in plain words.
+    function voicePage(req, res, message, status = 422) {
+        return page(req, res, 'Voice not taken', html`<h1>Voice not taken</h1><p>${message}</p><p><a href="/me/agents">Your agents</a></p>`, status);
+    }
+
+    // A voice document becomes an agent: the new agent keeps the voice, starts at level ask and keeps no memory.
+    async function importVoice(req, input, source) {
+        const read = voice.read(input);
+        if (read.error) return { error: read.error };
+        const fields = voice.toContact(read.doc, { source });
+        const out = await contacts.create(s, config, owner(req), {
+            name: fields.name, face: fields.face, model: fields.model, apps: fields.apps, memory: null,
+            level: fields.level, instructions: fields.instructions,
+        }, { bio: fields.bio, rules: fields.rules, voice_author: fields.voice_author, voice_author_name: fields.voice_author_name, voice_source: fields.voice_source });
+        if (!out.row) return { error: out.error || 'Agent limit reached.', limit: out.limit };
+        return { row: out.row };
+    }
+
     r.get('/me/agents/:id', async (req, res) => {
         if (!signed(req)) return login(req, res);
         const a = await find(req, res); if (!a) return;
@@ -234,6 +320,8 @@ ${buttons}`);
         const usd = (v) => (v == null || !Number.isFinite(Number(v)) ? '' : ` · $${Number(v) < 0.01 ? Number(v).toFixed(4) : Number(v).toFixed(2)}`);
         const pill = (state) => state === 'succeeded' ? 'pill-succeeded' : state === 'failed' || state === 'cancelled' ? 'pill-failed' : 'pill-running';
         const contact = contacts.wire(a);
+        // The agent's voice as a file (actor.voice@1): what it is, in a form somebody else can speak in.
+        const doc = voice.build(a, { subject: req.viewer.subject, name: req.viewer.username || null });
         page(req, res, a.name, html`<p class="crumbs"><a href="/me/agents">Your agents</a></p>
 <header class="pa-head ac-sheet-head">${ui.face(contact, 64)}<div><h1>${a.name}</h1><p class="ac-sheet-uses">${ui.usesLine(contact)}</p>
 <p class="pa-lede">${ui.levelChip(contact.level)} <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></div></header>
@@ -258,7 +346,7 @@ ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}" class="pa-actions"><button type="submit" name="decision" value="apply" class="pa-btn pa-primary">Add to its instructions</button> <button type="submit" name="decision" value="dismiss" class="pa-btn">Dismiss</button></form></li>`)}</ul>` : ''}
 ${applied.length ? html`<details><summary>Added lately</summary><ul class="pa-notes">${applied.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Added ${time(p.decided_at)}</p>
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}"><button type="submit" name="decision" value="undo" class="pa-danger-link">Undo</button></form></li>`)}</ul></details>` : ''}</section>` : ''}
-<section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Only active notes go into a run. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check; its note is a suggestion until you accept it on <a href="/memory">Memory</a>.</p>
+${voicePanel(a, doc)}<section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Only active notes go into a run. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check; its note is a suggestion until you accept it on <a href="/memory">Memory</a>.</p>
 ${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta"><span class="pill ${n.status === 'suggested' ? 'pill-running' : n.status === 'archived' ? 'pill-failed' : 'pill-succeeded'}">${n.status === 'suggested' ? 'Suggested' : n.status === 'archived' ? 'Archived' : 'Active'}</span> ${n.source === 'agent' ? 'Written by the agent' : 'Written by you'} · ${n.kind} · ${time(n.created_at)}${n.last_used_at ? html` · last used ${time(n.last_used_at)}` : ''}</p>
 ${n.status === 'suggested' ? html`<form method="post" action="/memory/${n.id}/accept" class="pa-actions"><button type="submit" class="pa-btn pa-primary">Accept</button> <button type="submit" class="pa-btn" formaction="/memory/${n.id}/decline">Decline</button></form>` : ''}
 <details><summary>Edit or delete</summary><form method="post" action="/me/agents/${a.id}/memory/${n.id}/edit"><label>Note <input name="text" maxlength="${require('../memory').MAX_TEXT}" value="${n.text}"></label><button type="submit" class="pa-btn">Save</button></form>
