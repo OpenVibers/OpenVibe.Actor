@@ -2,7 +2,7 @@
 
 /**
  * The agent systems Actor routes a task to (ADR-044 §2): what each can do, its trust class, its rate card and whether
- * it can take a task now. GET /api/v1/agents is this list (actor.agent-list-result@2); the router turns each into an
+ * it can take a task now. GET /api/v1/agent-systems is this list (actor.agent-list-result@2); the router turns each into an
  * openvibe-sdk/placement offer (toOffer) so the planner picks by capability first, then by the mode's objective.
  *
  * Rate cards are typed in from the provider's own price page by a person, with the page and the day it was checked;
@@ -156,7 +156,7 @@ function list(config) {
 }
 
 /**
- * GET /api/v1/agents: actor.agent-list-result@2. Every @1 field keeps its place; v2 adds the tiers the one loop
+ * GET /api/v1/agent-systems: actor.agent-list-result@2. Every @1 field keeps its place; v2 adds the tiers the one loop
  * resolves its models to and the models this server's keys reach (server/runtime/models.js).
  */
 function listResult(config, models = null) {
