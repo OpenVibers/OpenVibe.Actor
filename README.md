@@ -261,6 +261,6 @@ Part of the [OpenVibe network](https://openvibe.network). Built in the open by [
 
 <!-- versions:start -->
 - openvibe-contracts: v0.327.0
-- openvibe-sdk: v0.94.0
-- openvibe-shared: v4.136.0
+- openvibe-sdk: v0.96.0
+- openvibe-shared: v4.137.0
 <!-- versions:end -->
