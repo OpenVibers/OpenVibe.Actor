@@ -91,13 +91,37 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.strictEqual(codesCalls.length, 1);
         });
 
-        await check('a person\'s own coding task never asks', async () => {
-            const before = codesCalls.length;
-            const res = await t.get('/api/v1/tasks', { as: ada, json: { task: 'In https://github.com/ada/site fix the bug in the repository.' }, headers: SAME });
-            assert.strictEqual(res.status, 201, res.text);
-            const row = await t.waitFor(res.json().id);
-            assert.strictEqual(row.state, 'succeeded');
+        await check('a direct coding task at Vibe\'s ask level asks first; a full-access thread runs it', async () => {
+            // The default is ask (plan §12), so a person's direct coding task is a thread of their Vibe's and asks.
+            let before = codesCalls.length;
+            const asked = await t.get('/api/v1/tasks', { as: ada, json: { task: 'In https://github.com/ada/site fix the bug in the repository.' }, headers: SAME });
+            assert.strictEqual(asked.status, 201, asked.text);
+            const askedRow = await t.waitFor(asked.json().id);
+            assert.strictEqual(askedRow.state, 'succeeded');
+            const askedResult = typeof askedRow.result === 'string' ? JSON.parse(askedRow.result) : askedRow.result;
+            assert.match(askedResult.answer, /Nothing has run: approve or decline it at https:\/\/openvibe\.actor\/me\/approvals\/apr_/);
+            assert.strictEqual(codesCalls.length, before, 'nothing reached Codes yet');
+            const approved = await t.get(`/me/approvals/${askedResult.approval.id}`, { as: ada, form: { decision: 'approve' }, headers: SAME });
+            assert.strictEqual(approved.status, 303);
+            const ranId = /\/tasks\/(tsk_[0-9A-Z]{26})/.exec(approved.headers.get('location'))[1];
+            assert.strictEqual((await t.waitFor(ranId)).state, 'succeeded');
+            assert.strictEqual(codesCalls.length, before + 1, 'the approval starts it once, without asking again');
+
+            // Full access is the level that lets an ordinary coding task run without a second approval.
+            before = codesCalls.length;
+            const full = await t.get('/api/v1/tasks', { as: ada, json: { task: 'In https://github.com/ada/site fix the typo in the repository.', level: 'full' }, headers: SAME });
+            assert.strictEqual(full.status, 201, full.text);
+            assert.strictEqual((await t.waitFor(full.json().id)).state, 'succeeded');
             assert.strictEqual(codesCalls.length, before + 1);
+
+            // The floor is not the level's to skip: a full-access coding task that would delete something still asks.
+            before = codesCalls.length;
+            const deleting = await t.get('/api/v1/tasks', { as: ada, json: { task: 'In https://github.com/ada/site fix the bug in the repository by deleting the old cache file.', level: 'full' }, headers: SAME });
+            assert.strictEqual(deleting.status, 201, deleting.text);
+            const deleteRow = await t.waitFor(deleting.json().id);
+            const deleteResult = typeof deleteRow.result === 'string' ? JSON.parse(deleteRow.result) : deleteRow.result;
+            assert.match(deleteResult.answer, /Nothing has run: approve or decline it at https:\/\/openvibe\.actor\/me\/approvals\/apr_/);
+            assert.strictEqual(codesCalls.length, before, 'a deletion never runs without its owner, even at full access');
         });
     } finally {
         await t.close();

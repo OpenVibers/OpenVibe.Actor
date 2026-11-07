@@ -97,7 +97,7 @@ function createDiscoveryRoutes(ctx) {
             name: SITE_NAME,
             base: site,
             summary: 'OpenVibe.Actor: an AI agent router and OpenVibe\'s own agent. A task in plain words goes to the best agent system for it, by what the task needs and the caller\'s mode (cheapest, balanced, best, fastest, private); a second model family checks the answer; the task records its cost to a fraction of a cent and why that agent was picked.',
-            details: 'Agents today: the OpenVibe runtime (a DeepSeek model acting through OpenVibe.Search and OpenVibe.Tools: DNS, mail records, certificates, headers, WHOIS and more), OpenAI\'s web agent (live web search with sources), and an open model on OpenVibe\'s own server for private mode. Coding goes to OpenVibe.Codes. Every page is server-rendered and readable without JavaScript. The API: POST /api/v1/tasks, GET /api/v1/tasks/:id, GET /api/v1/tasks/:id/events (server-sent events), POST /api/v1/tasks/:id/cancel, GET /api/v1/agents and POST /api/v1/route (public dry run). Tasks are platform.task@1 in openvibe-contracts.',
+            details: 'Agents today: the OpenVibe runtime (a DeepSeek model acting through OpenVibe.Search and OpenVibe.Tools: DNS, mail records, certificates, headers, WHOIS and more), OpenAI\'s web agent (live web search with sources), and an open model on OpenVibe\'s own server for private mode. Coding goes to OpenVibe.Codes. Every page is server-rendered and readable without JavaScript. The API: POST /api/v1/tasks, GET /api/v1/tasks/:id, GET /api/v1/tasks/:id/events (server-sent events), POST /api/v1/tasks/:id/cancel, GET /api/v1/agent-systems (the public catalog; GET /api/v1/agents is a signed-in person\'s own contacts, actor.agent-list@1, with GET /api/v1/agents/presets) and POST /api/v1/route (public dry run). A person creates, reads, changes and deletes contacts with POST /api/v1/agents and GET/PATCH/DELETE /api/v1/agents/:id and sets an approval level with PUT /api/v1/agents/:id/level (actor.level-change@1). Tasks are platform.task@1 in openvibe-contracts.',
             sections: [
                 { title: 'Start here', links: [
                     { title: 'Give Actor a task', url: abs('/'), note: 'what Actor is, how a task finds its agent, what works today' },
@@ -106,11 +106,15 @@ function createDiscoveryRoutes(ctx) {
                     { title: 'What shipped on OpenVibe.Actor', url: abs('/updates') },
                 ] },
                 { title: 'Machine-readable', links: [
-                    { title: 'The agents (JSON)', url: abs('/api/v1/agents'), note: 'actor.agent-list-result@2' },
+                    { title: 'The agents (JSON, no token)', url: abs('/api/v1/agents'), note: 'actor.agent-list-result@2' },
+                    { title: 'The agent systems (JSON)', url: abs('/api/v1/agent-systems'), note: 'actor.agent-list-result@2, also for a signed-in caller' },
+                    { title: 'The agent-contact presets (JSON)', url: abs('/api/v1/agents/presets'), note: 'Researcher, Inbox, Studio editor, Party host' },
                     { title: 'The agent manifest (JSON)', url: abs('/.well-known/agent.json'), note: 'what this site tells an agent about itself' },
                     { title: 'The free tier (JSON)', url: abs('/limits.json') },
                 ], notes: [
                     'POST /api/v1/route — dry-run the router: send { task, mode? } and get which agent would take it and why (platform.placement-result@1). It answers POST only, so there is no page here to fetch; the API is described at /docs.',
+                    'GET /api/v1/agents — with a person\'s token this is their own contacts (actor.agent-list@1, Vibe first); no token answers the public catalog (actor.agent-list-result@2).',
+                    'POST /api/v1/agents, GET/PATCH/DELETE /api/v1/agents/:id and PUT /api/v1/agents/:id/level — a signed-in person\'s contacts and approval level (actor.agent@1, actor.level-change@1). They answer only to the person, so there is no page to fetch; the shapes are described at /docs.',
                 ] },
             ],
             optional: [

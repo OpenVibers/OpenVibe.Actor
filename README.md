@@ -47,7 +47,10 @@ Rate cards are typed in by a person from each provider's price page, with the pa
 | `GET /api/v1/tasks/:id/trace` | `actor.task.read` | the task's spans: every model, tool, check, judge and sub-agent call with its time and cost, and the totals |
 | `POST /api/v1/tasks/:id/cancel` | `actor.task.create` | stop it |
 | `GET /api/v1/tasks` | `actor.task.list` | `actor.task-list-result@1` |
-| `GET /api/v1/agents` | public | `actor.agent-list-result@2` |
+| `GET /api/v1/agents` | public / person | no person: the agent-system catalog (`actor.agent-list-result@2`); a signed-in person: their own contacts, Vibe first (`actor.agent-list@1`) |
+| `GET /api/v1/agent-systems` | public | the agent-system catalog for any caller, including a signed-in person (`actor.agent-list-result@2`) |
+| `GET /api/v1/agents/presets` | public | the four presets a create can copy: Researcher, Inbox, Studio editor, Party host |
+| `POST /api/v1/agents`, `GET/PATCH/DELETE /api/v1/agents/:id`, `PUT /api/v1/agents/:id/level` | `actor.agent.manage` (signed in) | a person's agent contacts (`actor.agent@1`): create from a preset, read, change, delete (Vibe refuses `actor.agent.vibe`) and set the approval level (`actor.level-change@1`); the default is `ask` |
 | `GET /api/v1/stats/tools`, `GET /api/v1/stats/models` | public | live numbers per tool and model over the last 7 days (n, success rate, p50/p90 ms, mean cost, last failure); only rows with n >= 20 |
 | `GET/POST /api/v1/me/agents` (signed in) | `actor.agent.manage` for a token | list or create your personal agents; signed-out GET keeps the public catalog |
 | `GET/PATCH/DELETE /api/v1/me/agents/:id` | `actor.agent.manage` for a token | read, edit or delete one personal agent |
