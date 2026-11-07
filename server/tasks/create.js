@@ -15,6 +15,8 @@ const { mintSecret } = require('./webhooks');
 const learn = require('../runtime/brain/learn');
 const contacts = require('../agents/contacts');
 const assignments = require('../agents/assignments');
+const triggerStore = require('../triggers/store');
+const runTokens = require('../triggers/tokens');
 
 /**
  * The sharing system (design 2026-11-06), injected once by server/app.js. A run is its owner's until the Share sheet
@@ -31,10 +33,17 @@ function untilMidnight(nowMs) {
     return Math.ceil((Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1) - n.getTime()) / 1000);
 }
 
-async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, chatContext = null, afterInsert = null, parentId = null, forkOfStep = null, forkChange = null, assignmentOrigin = null }) {
+async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, chatContext = null, afterInsert = null, parentId = null, forkOfStep = null, forkChange = null, assignmentOrigin = null, assignmentLevel = null, triggerId = null, personToken = null, timezone = null }) {
     const v = contracts.validate('actor.task-create-request@1', body);
     if (!v.valid) return { status: 422, code: 'actor.task.invalid', detail: (v.errors || []).map((e) => `${e.path || e.instancePath || ''} ${e.message}`.trim()).join('; ').slice(0, 500) || 'invalid request' };
     const tier = config.allowance;
+    // A trigger's run is linked to its card. The trigger must belong to the same person the task is for; the
+    // caller (Watch's delivery or the Run now route) already checked, and this check makes it true for every path.
+    let trigger = null;
+    if (triggerId != null) {
+        trigger = await triggerStore.get(s, String(principal.requester).replace(/^user:/, ''), triggerId);
+        if (!trigger) return { status: 404, code: 'actor.trigger.not_found', detail: 'No such trigger.' };
+    }
     // The contact this thread runs as (A-1). A person's task defaults to their Vibe, created on first read; a personal
     // agent's own run keeps that agent. The thread's level may raise the agent's, never lower it.
     let agentId = typeof body.agent_id === 'string' ? body.agent_id : null;
@@ -117,14 +126,16 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         // engine starts it only after this commits, so the run never begins without them.
         // Every hand-off is one node (plan §12 A-2). The root is made with the task, so the tree exists from
         // its first step; an older task without one gets it lazily (assignments.ensureForTask).
-        const node = await assignments.ensureForTask(s, config, row, { origin: assignmentOrigin });
+        const node = await assignments.ensureForTask(s, config, row, { origin: assignmentOrigin, level: assignmentLevel });
         const task = node ? { ...row, assignment_id: node.id } : row;
+        if (trigger) await triggerStore.addRun(s, trigger.id, task.id, 'queued', s.now());
         if (afterInsert) await afterInsert(task);
         if (chatContext) await s.db.query('INSERT INTO actor_chat_tasks (task_id, agent_id, policy, conversation) VALUES ($1, $2, $3, $4)', [task.id, chatContext.agentId, chatContext.policy, chatContext.conversation]);
         return { status: 201, task };
     });
     // The engine starts the task only once its row has committed; a webhook that asked for `queued` hears it now.
     if (out.status === 201) {
+        if (personToken) runTokens.put(out.task.id, { token: personToken, timezone });
         if (sharing) {
             try {
                 const audience = await sharing.defaultOf(out.task.requester).catch(() => 'private');

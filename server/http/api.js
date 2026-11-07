@@ -49,9 +49,21 @@ const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_ID = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 function createApi(ctx) {
-    const { config, s, engine, stream, principal, limits, webhooks } = ctx;
+    const { config, s, engine, stream, principal, limits, webhooks, triggers } = ctx;
     const r = asyncRouter();
     const problem = (req, res, status, code, detail, extra) => contracts.http.sendProblem(res, status, code, { detail, ctx: req.ov, extra });
+    // A trigger belongs to the person in the request, and its Watch calls use that person's own token: the
+    // Bearer the API was called with, or this site's session token. A service acting for a person is not it.
+    const watchToken = (req) => {
+        // Only a person's own credential: an app or a service acting for them (kind 'app') holds its own token,
+        // and Watch must never see that token as the person's.
+        if (!req.principal || req.principal.kind !== 'user') return null;
+        const h = String(req.headers.authorization || '');
+        if (h.startsWith('Bearer ')) return h.slice(7).trim();
+        return req.token || (req.viewer && req.viewer.token) || null;
+    };
+    const triggerFail = (req, res, out) => problem(req, res, (out.error && out.error.status) || 502, (out.error && out.error.code) || 'actor.trigger.failed', (out.error && out.error.detail) || 'The trigger could not be saved.');
+    const triggerOwner = (req) => String(req.principal.requester || '').replace(/^user:/, '');
 
     r.use(express.json({ limit: '64kb' }));
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -268,7 +280,20 @@ function createApi(ctx) {
     });
     r.post('/me/agents/:id/run', principal.requireCapability('actor.agent.run'), owner, limits.budget('actor.agent.run'), async (req, res) => {
         const row = await loadAgent(req, res); if (!row) return;
-        const out = await personal.run(ctx, row, (req.body || {}).input || '');
+        const body = req.body || {};
+        // Watch wakes an agent when a trigger fires. That run is origin routine and inherits the trigger's own level,
+        // never more: the trigger was made in a person's thread at that thread's level. A person pressing Run now on
+        // the agent page is still origin person.
+        const viaWatch = Boolean(req.principal && req.principal.kind === 'app' && req.principal.via === 'service:watch');
+        const trigger = viaWatch && triggers
+            ? await triggers.forDelivery(row.owner, { triggerId: body.trigger_id, watchId: body.watch_id })
+            : null;
+        if (trigger && trigger.state === 'paused') return problem(req, res, 409, 'actor.trigger.paused', 'This trigger is paused, so nothing ran. Resume it on its card.');
+        const out = await personal.run(ctx, row, body.input || '', {
+            origin: viaWatch ? 'routine' : 'person',
+            level: trigger ? trigger.level : null,
+            triggerId: trigger ? trigger.id : null,
+        });
         if (out.code) return problem(req, res, out.status, out.code, out.detail);
         res.set('Location', `/api/v1/tasks/${out.task.id}`);
         res.status(201).json(await wireTask(out.task));
@@ -405,7 +430,7 @@ function createApi(ctx) {
     };
 
     r.post('/tasks', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), async (req, res) => {
-        const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: req.body || {} });
+        const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: req.body || {}, personToken: watchToken(req), timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null });
         if (out.code) {
             if (out.retryAfter) res.set('Retry-After', String(out.retryAfter));
             return problem(req, res, out.status, out.code, out.detail);
@@ -565,6 +590,59 @@ function createApi(ctx) {
         for (const taskId of taskIds) await engine.cancel(taskId, p.requester);
         res.json(result);
     });
+
+    // ── Triggers made in a conversation (plan §12 A-4) ───────
+    // The Watch subscription is the runner; these routes are the card's own moves. Everything is the person's:
+    // another person's trigger is the same 404 as one that does not exist, and Watch receives their own token.
+    r.get('/triggers', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
+        res.json({ triggers: await triggers.list(triggerOwner(req)) });
+    });
+    r.get('/triggers/:id', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
+        const card = await triggers.get(triggerOwner(req), req.params.id, { token: watchToken(req), live: true });
+        if (!card) return problem(req, res, 404, 'actor.trigger.not_found', 'No such trigger.');
+        res.json({ trigger: card });
+    });
+    r.post('/triggers', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), personOnly, async (req, res) => {
+        const b = req.body || {};
+        const out = await triggers.create({
+            owner: triggerOwner(req), agentId: b.agent_id, task: b.task, kind: b.kind,
+            cron: b.cron, timezone: b.timezone, event: b.event,
+            level: 'ask', turnTaskId: TASK_ID.test(String(b.turn_task_id || '')) ? b.turn_task_id : null,
+            personToken: watchToken(req),
+        });
+        if (out.error) return triggerFail(req, res, out);
+        res.status(201).json({ trigger: out.trigger });
+    });
+    r.patch('/triggers/:id', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), personOnly, async (req, res) => {
+        const out = await triggers.edit(triggerOwner(req), req.params.id, req.body || {}, { token: watchToken(req) });
+        if (out.error) return triggerFail(req, res, out);
+        res.json({ trigger: out.trigger });
+    });
+    r.post('/triggers/:id/pause', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), personOnly, async (req, res) => {
+        const out = await triggers.pause(triggerOwner(req), req.params.id, { token: watchToken(req) });
+        if (out.error) return triggerFail(req, res, out);
+        res.json({ trigger: out.trigger });
+    });
+    r.post('/triggers/:id/resume', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), personOnly, async (req, res) => {
+        const out = await triggers.resume(triggerOwner(req), req.params.id, { token: watchToken(req) });
+        if (out.error) return triggerFail(req, res, out);
+        res.json({ trigger: out.trigger });
+    });
+    r.post('/triggers/:id/run', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), personOnly, async (req, res) => {
+        const out = await triggers.runNow(triggerOwner(req), req.params.id);
+        if (out.error) return triggerFail(req, res, out);
+        res.status(201).json({ task: out.task, trigger: out.trigger });
+    });
+    r.delete('/triggers/:id', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), personOnly, async (req, res) => {
+        const undo = String(req.query.undo || '') === '1' || (req.body && req.body.undo === true);
+        const confirm = String(req.query.confirm || '') === 'delete' || (req.body && req.body.confirm === 'delete');
+        const out = undo
+            ? await triggers.undo(triggerOwner(req), req.params.id, { token: watchToken(req) })
+            : await triggers.remove(triggerOwner(req), req.params.id, { token: watchToken(req), confirm });
+        if (out.error) return triggerFail(req, res, out);
+        res.status(200).json(out);
+    });
+
     return r;
 }
 

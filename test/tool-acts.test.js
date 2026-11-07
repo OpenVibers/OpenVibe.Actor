@@ -46,6 +46,7 @@ const EXPECTED = {
     remember: true,
     robot_steps: true,
     run_tool: true,
+    schedule_trigger: true,
     // Space: the agent builds the person's own spaces (plan 2026-10-22 §Z stage Z1). Making one, writing its files
     // and asking to publish it change the world; listing and reading them do not.
     space_create: true,

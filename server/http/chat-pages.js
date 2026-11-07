@@ -677,6 +677,9 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
         const checked = inputs.check(req.body && req.body.files);
         if (checked.problem) return fail(422, checked.problem, parent, text);
         const out = await createTask({ s, config, engine, principal: { requester: requesterOf(req), project: null }, body: { task: text, mode }, parentId: parent ? parent.id : null,
+            // The person's own token and clock for a trigger made in this turn: their Watch, their timezone.
+            personToken: req.token || (req.viewer && req.viewer.token) || null,
+            timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null,
             afterInsert: checked.files.length ? (made) => inputs.save(s, made.id, requesterOf(req), checked.files) : null });
         if (out.code) return fail(out.status === 503 || out.status === 429 ? out.status : 422, PROBLEM[out.code] || out.detail || 'That could not start. Try again in a moment.', parent, text);
         const row = await store.getTask(s, out.task.id);

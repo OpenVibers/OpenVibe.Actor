@@ -14,6 +14,13 @@
     'use strict';
     var streams = [];
 
+    // The person's own timezone, for a trigger made in the chat: the browser knows it, the server should not guess.
+    // A cookie, not a token or a task field; the parser still refuses a zone Node does not know and asks instead.
+    try {
+        var zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (zone) document.cookie = 'ov_tz=' + encodeURIComponent(zone) + '; Path=/; Max-Age=31536000; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : '');
+    } catch (e) { /* no Intl: the tool asks for the timezone */ }
+
     function start() {
         var chat = document.querySelector('.chat');
         if (!chat || chat.dataset.ready) return;

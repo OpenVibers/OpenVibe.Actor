@@ -101,7 +101,7 @@ function originOf(task, explicit) {
 const agentOf = (s, config, task) => contacts.agentForTask(s, config, task).catch(() => null);
 
 /** Make the task's root node, or return the one it already has. */
-async function ensureForTask(s, config, task, { origin = null } = {}) {
+async function ensureForTask(s, config, task, { origin = null, level = null } = {}) {
     if (!task || !task.id || !String(task.requester || '').startsWith('user:')) return null;
     if (task.assignment_id) {
         const linked = await byId(s, task.requester, task.assignment_id);
@@ -114,7 +114,11 @@ async function ensureForTask(s, config, task, { origin = null } = {}) {
     }
     const agent = await agentOf(s, config, task);
     const own = levels.LEVELS.includes(task.level) ? task.level : 'ask';
-    const effective = effectiveLevel(own, agent && agent.level);
+    // A routine runs at the level the person made it with and never above it: the agent's standing level may raise
+    // an ordinary hand-off, but a trigger made in a thread cannot borrow more autonomy than that thread had.
+    const effective = ORIGINS.includes(origin) && origin === 'routine' && levels.LEVELS.includes(level)
+        ? levels.minLevel(effectiveLevel(own, agent && agent.level), level)
+        : effectiveLevel(own, agent && agent.level);
     const now = s.iso();
     const id = s.newId('asg');
     let row = await s.db.maybe(`INSERT INTO actor_assignments
