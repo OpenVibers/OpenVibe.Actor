@@ -129,11 +129,13 @@ function read(input) {
         for (const a of doc.apps) if (typeof a !== 'string' || !APP.test(a)) return { error: 'Each app id must be a connect slug.' };
     }
     if (!isPlain(doc.author)) return { error: 'The author must be a Network subject.' };
-    doc.author = { subject: String(doc.author.subject || '').replace(/^user:/, '') };
-    if (!SUBJECT.test(doc.author.subject)) return { error: 'The author must be a Network subject (usr_…).' };
+    const author = { subject: String(doc.author.subject || '').replace(/^user:/, '') };
+    if (!SUBJECT.test(author.subject)) return { error: 'The author must be a Network subject (usr_…).' };
     if (doc.author.name !== undefined) {
         if (typeof doc.author.name !== 'string' || doc.author.name.length > 80) return { error: 'The author name must be at most 80 characters.' };
-    } else delete doc.author.name;
+        author.name = doc.author.name;
+    }
+    doc.author = author;
     if (!isPlain(doc.signature) || doc.signature.alg !== 'sha256' || !HASH.test(String(doc.signature.hash || ''))) return { error: 'The signature must be a sha256 hash.' };
     if (typeof doc.signature.signed_at !== 'string' || Number.isNaN(Date.parse(doc.signature.signed_at))) return { error: 'The signature must carry the timestamp it was written at.' };
     if (doc.signature.key_id !== undefined && (typeof doc.signature.key_id !== 'string' || doc.signature.key_id.length > 64)) return { error: 'The key id must be at most 64 characters.' };
