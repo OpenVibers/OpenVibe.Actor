@@ -103,3 +103,8 @@ img.ac-face { background: var(--bg-card, #131c2e); }
 .ac-floor svg { width: 18px; height: 18px; flex: none; margin-top: 1px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .ac-floor b { color: var(--text-primary, #e6edf7); font-weight: 600; }
 @media (max-width: 30rem) { .ac-sheet-head .ac-face { --s: 52px; } .ac-row { padding: .75rem .8rem; } }
+/* An approval (11-07, Opus): the always-ask floor said first, the command as one line, then the exact request. */
+.pa-caution { margin: 0 0 1rem; padding: .75rem 1rem; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--danger-text, #f87171) 45%, transparent); background: color-mix(in srgb, var(--danger-text, #f87171) 12%, transparent); color: var(--text-primary, #e6edf7); font-weight: 650; }
+.pa-cmd-where { margin: .4rem 0 .35rem; font-size: 14px; color: var(--text-secondary, #96a7c2); }
+.pa-cmd { white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 650; }
+.pa-sub { margin: 1rem 0 .4rem; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-secondary, #96a7c2); }
