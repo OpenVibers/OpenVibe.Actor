@@ -84,17 +84,33 @@ function wordsFor(cronExpr, timezone) {
                 return `Every ${days.map((d) => DAY_NAMES[d]).join(', ')} at ${time} (${timezone})`;
             }
         }
-        if (one(rule.minutes) && one(rule.hours) && rule.hours.has(0) && rule.minutes.has(0) && rule.months.size === 12 && rule.days.size === 31 && rule.weekdays.size === 7) return `Every hour (${timezone})`;
-        if (rule.hours.size === 24 && rule.minutes.size === 60) return `Every minute (${timezone})`;
-        if (one(rule.hours) && rule.hours.has(0) && rule.minutes.size === 60) return `Every hour (${timezone})`;
-        if (rule.hours.size === 24 && rule.minutes.size === 1 && !rule.minutes.has(0)) return `Every ${[...rule.minutes][0]} minutes (${timezone})`;
-        if (rule.hours.size === 24 && rule.minutes.size === 1 && [...rule.minutes][0] % 15 === 0 && [...rule.minutes][0] !== 0) return `Every ${[...rule.minutes][0]} minutes (${timezone})`;
-        if (rule.minutes.size === 60 && rule.hours.size < 24) {
-            const step = 24 / rule.hours.size;
-            if (Number.isInteger(step) && rule.hours.has(0)) return `Every ${step} hour${step === 1 ? '' : 's'} (${timezone})`;
+        // Every day, all year: steps through the hour or the day, said the way a person says them.
+        if (rule.months.size === 12 && rule.dayAny && rule.weekdayAny) {
+            if (hours.length === 24) {
+                if (minutes.length === 1) return minutes[0] === 0 ? `Every hour (${timezone})` : `Every hour at :${pad(minutes[0])} (${timezone})`;
+                const step = minutes[1] - minutes[0];
+                if (minutes[0] === 0 && step > 0 && 60 % step === 0 && minutes.length === 60 / step && minutes.every((m, i) => m === i * step)) return `Every ${step} minutes (${timezone})`;
+            } else if (minutes.length === 1 && hours.length > 1) {
+                const times = hours.map((h) => `${pad(h)}:${pad(minutes[0])}`);
+                if (hours.length <= 3) return `Every day at ${times.slice(0, -1).join(', ')} and ${times[times.length - 1]} (${timezone})`;
+                const step = hours[1] - hours[0];
+                const at = minutes[0] ? ` at :${pad(minutes[0])}` : '';
+                if (step > 0 && 24 % step === 0 && hours.length === 24 / step && hours.every((h, i) => h === hours[0] + i * step)) return `Every ${step} hours${at} (${timezone})`;
+            }
+        }
+        // Once a year, on one date.
+        if (one(rule.minutes) && one(rule.hours) && rule.months.size === 1 && !rule.dayAny && rule.weekdayAny && rule.days.size === 1) {
+            const month = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][[...rule.months][0] - 1];
+            if (month) return `Every year on ${[...rule.days][0]} ${month} at ${pad(hours[0])}:${pad(minutes[0])} (${timezone})`;
+        }
+        // Once a month, on one day of it.
+        if (one(rule.minutes) && one(rule.hours) && rule.months.size === 12 && !rule.dayAny && rule.weekdayAny && rule.days.size === 1) {
+            const d = [...rule.days][0];
+            const nth = (d % 100 >= 11 && d % 100 <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[d % 10] || 'th');
+            return `Every month on the ${d}${nth} at ${pad(hours[0])}:${pad(minutes[0])} (${timezone})`;
         }
     } catch { /* fall through */ }
-    return `Cron ${cronExpr} (${timezone})`;
+    return `On a custom schedule, ${cronExpr} (${timezone})`;
 }
 
 /** The schedule phrase and its cron, or null. Longest match wins so "every weekday at 9" beats "every day". */

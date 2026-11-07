@@ -4,6 +4,14 @@ What changed in OpenVibe.Actor, newest first. Each site also publishes its patch
 
 ## Unreleased — triggers in conversation
 
+- **The routine's card in the chat** (Opus): the turn that made a trigger shows it — when, in words (with its zone),
+  what runs, the next run in the reader's own time, how the last run went (a link to it), which agent runs it, and On,
+  Paused or Deleted. Its moves are plain forms that work with no script: Pause or Resume, Run now, and Undo for ten
+  minutes, then Delete with a confirmation; a routine paused after failed runs says so and leads with Resume. Only the
+  turn's requester, same-origin, and only a trigger that turn made (`POST /chat/:id/trigger/:tid`); Watch is called with
+  the person's session. Schedules read the way a person says them: "Every hour at :30" (was "Every 30 minutes"),
+  "Every 15 minutes", "Every 6 hours", "Every day at 08:00 and 20:00", "Every month on the 1st at 09:00", "Every year
+  on 25 December at 09:00"; a rule with no plain phrase is "On a custom schedule, <cron>". Test: `test/trigger-card.test.js`.
 - **Triggers made in the conversation** (plan §12 A-4): `schedule_trigger` turns "every weekday at 9, summarise my inbox"
   or "when a new issue lands in my repo, triage it" into a Watch subscription the person owns, created with their own
   token — never Actor's service token acting for them. The tool parses the sentence, and when it cannot (no time, no
