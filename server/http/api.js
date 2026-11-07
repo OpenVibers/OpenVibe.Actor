@@ -30,6 +30,7 @@ const personal = require('../agents/personal');
 const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
 const items = require('../actions/items');
+const timeline = require('../agents/timeline');
 const modelPrefs = require('../runtime/model-prefs');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -110,6 +111,65 @@ function createApi(ctx) {
         if (!req.principal.requester || !req.principal.requester.startsWith('user:')) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
         return next();
     };
+
+    // ── The one timeline behind the Dock (design 2026-11-07) ──
+    // The person's own steps, newest first, with the cursor and the mode and needs-you filters the Dock's chips use.
+    // Another person's entry is the same 404 as one that does not exist: the list is scoped to the caller.
+    r.get('/agent/timeline', principal.requireCapability('actor.timeline.read'), owner, limits.reads('actor.timeline.read'), async (req, res) => {
+        const out = await timeline.list(s, req.principal.requester, {
+            cursor: req.query.cursor ? String(req.query.cursor) : null,
+            mode: req.query.mode ? String(req.query.mode) : null,
+            needs_you: req.query.needs_you === '1' || req.query.needs_you === 'true',
+            scope: req.query.scope === 'shared' ? 'shared' : 'mine',
+        });
+        res.json(out);
+    });
+
+    // One step of theirs: another person's step is the same 404 as one that does not exist.
+    r.get('/agent/timeline/:id', principal.requireCapability('actor.timeline.read'), owner, limits.reads('actor.timeline.read'), async (req, res) => {
+        const entry = await timeline.get(s, req.principal.requester, req.params.id);
+        if (!entry) return problem(req, res, 404, 'agent.timeline.not_found', 'No such step.');
+        res.json(entry);
+    });
+
+    // The live update stream: every new entry of the person's own timeline as it happens.
+    r.get('/agent/timeline/stream', principal.requireCapability('actor.timeline.read'), owner, async (req, res) => {
+        res.set('Content-Type', 'text/event-stream');
+        res.set('Cache-Control', 'no-store');
+        res.set('Connection', 'keep-alive');
+        if (typeof res.flushHeaders === 'function') res.flushHeaders();
+        const stop = timeline.subscribe(req.principal.requester, res);
+        const beat = setInterval(() => { try { res.write(': beat\n\n'); } catch (err) { /* the reader is gone */ } }, 15000);
+        if (beat.unref) beat.unref();
+        req.on('close', () => { clearInterval(beat); stop(); });
+        res.write('event: ready\ndata: {}\n\n');
+    });
+
+    // The approvals proxy: the person answers in the Dock, and the answer lands in the product that owns it
+    // (Actor's own approvals here; another mode's own route there). The product is the one that decides.
+    r.post('/agent/approvals/:product/:id/decide', principal.requireCapability('actor.approval.decide'), owner, limits.budget('actor.approval.decide'), async (req, res) => {
+        const decision = String((req.body || {}).decision || '');
+        if (!['approve', 'decline'].includes(decision)) return problem(req, res, 422, 'actor.approval.invalid', 'decision must be approve or decline');
+        const product = String(req.params.product || '');
+        const id = String(req.params.id || '');
+        if (product === 'actor') {
+            const decided = await approvals.decide(ctx, req.principal.requester, id, decision, { idempotent: true });
+            if (decided.error) return problem(req, res, decided.status, decided.status === 404 ? 'actor.approval.not_found' : 'actor.approval.invalid', decided.error);
+            return res.json({ product, id, state: decided.row.state });
+        }
+        const proxied = await timeline.proxyApproval(ctx, req, { product, id, decision });
+        if (proxied.error) return problem(req, res, proxied.status || 502, proxied.code || 'actor.approval.proxy_failed', proxied.error);
+        res.json({ product, id, state: proxied.state || decision });
+    });
+
+    // The kill switch: stop what the agent is doing and pause it until the person resumes it.
+    r.post('/agent/kill-switch', principal.requireCapability('actor.resource.control'), owner, limits.budget('actor.resource.control'), async (req, res) => {
+        const action = String((req.body || {}).action || 'stop');
+        if (!['stop', 'resume'].includes(action)) return problem(req, res, 422, 'actor.agent.invalid', 'action must be stop or resume');
+        const out = await timeline.killSwitch(ctx, req, action);
+        res.json(out);
+    });
+
     const loadAgent = async (req, res) => {
         const row = await personal.get(s, req.principal.requester, req.params.id);
         if (!row) problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');

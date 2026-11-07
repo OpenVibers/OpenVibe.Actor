@@ -29,6 +29,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             'actor.route': { minute: 30, hour: 600 },
             'actor.task.stream': { minute: 30, hour: 600 },
             'actor.approval.decide': { minute: 30, hour: 600 },
+            'actor.resource.control': { minute: 30, hour: 600 },
         });
     });
 
