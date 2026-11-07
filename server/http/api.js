@@ -55,6 +55,9 @@ function createApi(ctx) {
     // A trigger belongs to the person in the request, and its Watch calls use that person's own token: the
     // Bearer the API was called with, or this site's session token. A service acting for a person is not it.
     const watchToken = (req) => {
+        // Only a person's own credential: an app or a service acting for them (kind 'app') holds its own token,
+        // and Watch must never see that token as the person's.
+        if (!req.principal || req.principal.kind !== 'user') return null;
         const h = String(req.headers.authorization || '');
         if (h.startsWith('Bearer ')) return h.slice(7).trim();
         return req.token || (req.viewer && req.viewer.token) || null;

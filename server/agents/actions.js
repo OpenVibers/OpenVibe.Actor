@@ -138,6 +138,18 @@ function stepFor(name, input) {
             return { act: 'act', category: categories[0], summary, payload: safeInput(a.input) };
         }
 
+        // ── A routine: it keeps running after this turn, so the card says what and when in plain words ──
+        case 'schedule_trigger': {
+            const what = text(a.task || a.request, 160);
+            const when = a.cron ? `${text(a.cron, 40)}${a.timezone ? `, ${text(a.timezone, 40)}` : ''}`
+                : (a.event && a.event.pattern ? `when ${text(a.event.pattern, 80)} happens` : '');
+            return {
+                act: 'act',
+                summary: `Set up a task that repeats${when ? ` (${when})` : ''}: ${quoted(what, 160) || 'the one you asked for'}`,
+                payload: safeInput({ request: a.request, task: a.task, cron: a.cron, timezone: a.timezone, event: a.event, agent_id: a.agent_id }),
+            };
+        }
+
         // ── Actor's own working state: never asks ──
         case 'make_file':
         case 'make_chart':

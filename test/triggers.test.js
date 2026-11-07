@@ -237,6 +237,28 @@ async function watchStub() {
             assert.deepStrictEqual([card.state, card.paused_reason, card.failures], ['paused', 'failed', 5]);
             assert.strictEqual(card.last_run.state, 'failed');
         });
+        await check('a service acting for a person never leaves its own token as the person\'s', async () => {
+            const now = Math.floor(Date.now() / 1000);
+            const token = serviceAuth.signServiceToken({
+                iss: t.network.url, sub: 'svc:watch', actor_type: 'service', aud: ['openvibe.actor'],
+                cap: ['actor.task.create'], ns: [], iat: now, exp: now + 300, jti: `tok_${crypto.randomBytes(6).toString('hex')}`,
+            }, t.network.privatePem);
+            const res = await t.get('/api/v1/tasks', { bearer: token, headers: { 'X-OV-Subject': ada.subject }, json: { task: 'say hello' } });
+            assert.ok(res.status === 201 || res.status === 202, res.text);
+            const id = (res.json().task && res.json().task.id) || res.json().id;
+            assert.match(String(id), /^tsk_/);
+            assert.strictEqual(require('../server/triggers/tokens').get(id), null, 'Watch would have seen the service\'s token as the person\'s');
+        });
+
+        await check('the approval card for a routine says what and when, in words', async () => {
+            const { stepFor } = require('../server/agents/actions');
+            const step = stepFor('schedule_trigger', { task: 'summarise my inbox', cron: '0 9 * * 1-5', timezone: 'Europe/Berlin' });
+            assert.strictEqual(step.act, 'act');
+            assert.match(step.summary, /repeats \(0 9 \* \* 1-5, Europe\/Berlin\): "summarise my inbox"/);
+            const ev = stepFor('schedule_trigger', { request: 'when a new issue lands, triage it', event: { pattern: 'codes.issue.created' } });
+            assert.match(ev.summary, /when codes\.issue\.created happens/);
+        });
+
         await check('Watch waking an agent is an origin-routine run linked to the trigger', async () => {
             const made = await json('POST', '/api/v1/triggers', { agent_id: vibe.id, task: 'look into it', kind: 'schedule', cron: '0 9 * * *', timezone: 'UTC' });
             const trigger = made.json().trigger;
