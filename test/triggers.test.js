@@ -167,7 +167,11 @@ async function watchStub() {
             assert.strictEqual(root.origin, 'routine');
             assert.strictEqual(root.level, 'ask');
             assert.strictEqual(root.effective_level, 'ask', 'the routine cannot borrow the agent\'s full level');
-            const card = (await call('GET', `/api/v1/triggers/${id}`)).json().trigger;
+            let card = (await call('GET', `/api/v1/triggers/${id}`)).json().trigger;
+            for (let i = 0; i < 80 && !card.last_run; i += 1) {
+                await new Promise((r) => setTimeout(r, 25));
+                card = (await call('GET', `/api/v1/triggers/${id}`)).json().trigger;
+            }
             assert.deepStrictEqual([card.last_run.state, card.last_run.task_id], ['ok', task.id]);
         });
 
