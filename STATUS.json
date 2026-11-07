@@ -7,13 +7,13 @@
   "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
   "port": 4950,
   "domain": "openvibe.actor",
-  "contracts": "openvibe-contracts v0.316.0",
+  "contracts": "openvibe-contracts v0.324.0",
   "sdk": "openvibe-sdk v0.94.0",
-  "shared": "openvibe-shared v4.129.0",
+  "shared": "openvibe-shared v4.134.0",
   "packages": [
-    "openvibe-contracts v0.316.0",
+    "openvibe-contracts v0.324.0",
     "openvibe-sdk v0.94.0",
-    "openvibe-shared v4.129.0"
+    "openvibe-shared v4.134.0"
   ],
   "summary": "Public at https://openvibe.actor (sudo ovhost deploy actor; unit openvibe-actor on 127.0.0.1:4950). A task in plain words is classified, routed by openvibe-sdk/placement to the agent system that can do it (the OpenVibe runtime acting through OpenVibe.Search and OpenVibe.Tools, OpenAI's web agent, an open model on OpenVibe's server for private mode), run with its steps streamed live, checked by a model of another family, and delivered as platform.task@1 with its cost to a fraction of a cent and the explanation; a failed agent or check hands it to the next agent. Free tier per person with an operator ceiling.",
   "works": [
@@ -31,7 +31,8 @@
     "Personal agents: named instructions, editable memory, hourly/daily/weekly schedules, manual and scheduled runs, and their own approval inbox before work on the person's machine",
     "Reach from Chat (A4): Chat starts the person's own agent for a message (POST /api/v1/chat-apps/tasks, svc:chat acting for a linked person); a direct message runs with their memory, a group with the stranger's text as untrusted data and no personal tools, and an acting tool under act_with_approvals waits for the person's decision. Shipped with Chat #358 and Network #591 (Actor #296)",
     "MCP servers and A2A agents as tools (V2-11): a person connects their own MCP server by URL or an OpenVibe-offered one on /connections, turns each tool on, and the run calls it like any other tool; ask_agent talks to a connected A2A agent. Every call goes through the egress guard, is recorded as evidence with the server and tool as its source, and follows the run's approval policy (Actor #206)",
-    "Task webhooks on state changes: up to 8 https endpoints per task, signed with the task's own secret (or a project secret by reference), retried with backoff, with a delivery log on the task page and public addresses only"
+    "Task webhooks on state changes: up to 8 https endpoints per task, signed with the task's own secret (or a project secret by reference), retried with backoff, with a delivery log on the task page and public addresses only",
+    "Space's builder as a task of the person's one agent (plan 2026-10-22 §Z stage Z1): six space_* tools (create, list, read, write, preview, publish) work on the person's own spaces through OpenVibe.Space's builder API; another person's space is the same 404 as one that does not exist, and publishing waits for the person's answer in the Dock"
   ],
   "notYet": [
     "Browser and desktop agents on OpenVibe's own servers (OpenVibe.Run workers), watchable and taken over",

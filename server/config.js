@@ -163,6 +163,9 @@ function load(env = process.env) {
             // OpenVibe.Run: a browser session on a desk host when none of the person's own machines has a desk for the
             // task (Desks plan D6). Empty turns it off.
             runUrl: trim(env.ACTOR_RUN_URL != null ? env.ACTOR_RUN_URL : (selfHosted ? '' : 'http://127.0.0.1:4920')),
+            // OpenVibe.Space: the person's own spaces, which their agent builds (plan 2026-10-22 §Z stage Z1).
+            // Empty turns the space tools off.
+            spaceUrl: trim(env.ACTOR_SPACE_URL != null ? env.ACTOR_SPACE_URL : (selfHosted ? '' : 'http://127.0.0.1:4940')),
         },
 
         // Artifacts (Actor v2, stage V2-4): what one task may make. The bytes live in Actor's own PostgreSQL,
@@ -238,6 +241,13 @@ function load(env = process.env) {
             perHour: Math.max(1, int(env.ACTOR_CHAT_ASKS_PER_HOUR, 5)),
             allPerHour: Math.max(1, int(env.ACTOR_CHAT_ASKS_ALL_PER_HOUR, 60)),
             replyIntervalMs: Math.max(200, int(env.ACTOR_CHAT_REPLY_INTERVAL_MS, 2000)),
+        },
+
+        // OpenVibe.Space, where the person answers the approval to publish a space their agent built (the Dock's
+        // approvals proxy asks the mode that owns the approval; agents/timeline.js productUrl). ACTOR_SPACE_URL
+        // points at it; without it the space tools are off.
+        space: {
+            url: trim(env.ACTOR_SPACE_URL != null ? env.ACTOR_SPACE_URL : (selfHosted ? '' : 'http://127.0.0.1:4940')),
         },
 
         // OpenVibe.Events → this service (server/events-consumer.js). The secret signs a delivery (comma-separated
