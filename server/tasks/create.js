@@ -13,6 +13,7 @@ const catalog = require('../agents/catalog');
 const { checkWebhookUrl } = require('../net/webhook-post');
 const { mintSecret } = require('./webhooks');
 const learn = require('../runtime/brain/learn');
+const contacts = require('../agents/contacts');
 
 /**
  * The sharing system (design 2026-11-06), injected once by server/app.js. A run is its owner's until the Share sheet
@@ -33,6 +34,19 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     const v = contracts.validate('actor.task-create-request@1', body);
     if (!v.valid) return { status: 422, code: 'actor.task.invalid', detail: (v.errors || []).map((e) => `${e.path || e.instancePath || ''} ${e.message}`.trim()).join('; ').slice(0, 500) || 'invalid request' };
     const tier = config.allowance;
+    // The contact this thread runs as (A-1). A person's task defaults to their Vibe, created on first read; a personal
+    // agent's own run keeps that agent. The thread's level may raise the agent's, never lower it.
+    let agentId = typeof body.agent_id === 'string' ? body.agent_id : null;
+    if (!agentId && /^agent:agt_/.test(String(principal.via || ''))) agentId = String(principal.via).slice(6);
+    if (!agentId && /^chat-app:agt_/.test(String(principal.via || ''))) agentId = String(principal.via).slice(9);
+    if (!agentId && String(principal.requester || '').startsWith('user:')) {
+        const vibe = await contacts.ensureVibe(s, config, principal.requester);
+        if (vibe) agentId = vibe.id;
+    }
+    if (agentId && !(await contacts.get(s, principal.requester, agentId))) {
+        return { status: 422, code: 'actor.agent.not_found', detail: 'agent_id names one of your own agents (GET /api/v1/agents).' };
+    }
+    const level = body.level || 'ask';
     // A budget the request named is the first word; without one, the task gets up to a tier task's worth and, below
     // that, what the day has left (so a cheap run leaves room for the next one).
     const requestedTaskUsd = body.budget && body.budget.per_task_usd != null ? body.budget.per_task_usd : null;
@@ -41,7 +55,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     if (perTask > tier.perTaskUsd || perDay > tier.perDayUsd) {
         return { status: 422, code: 'actor.budget.over_tier', detail: `The free tier allows up to $${tier.perTaskUsd} per task and $${tier.perDayUsd} a day; paid tiers come with OpenVibe.Billing.` };
     }
-    if (body.agent && !catalog.byId(body.agent)) return { status: 422, code: 'actor.agent.unknown', detail: `no agent "${body.agent}"; GET /api/v1/agents lists them` };
+    if (body.agent && !catalog.byId(body.agent)) return { status: 422, code: 'actor.agent.unknown', detail: `no agent "${body.agent}"; GET /api/v1/agent-systems lists them` };
     // Webhooks (plan T17): each URL must be one Actor may deliver to (https, port 443/8443, a public address); the
     // send-time check repeats it against what the name resolves to then.
     // A webhook may name a project secret (ADR-056, secret_ref): Network signs its deliveries with it. The secret lives in
@@ -56,7 +70,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     }
     const ownSecret = webhooks.some((h) => !h.secret_ref);
 
-    const hash = crypto.createHash('sha256').update(JSON.stringify({ task: body.task, mode: body.mode || 'balanced', budget: [perTask, perDay], agent: body.agent || null, ...(webhooks.length ? { webhooks } : {}) })).digest('hex');
+    const hash = crypto.createHash('sha256').update(JSON.stringify({ task: body.task, mode: body.mode || 'balanced', budget: [perTask, perDay], agent: body.agent || null, ...(body.agent_id ? { agent_id: body.agent_id } : {}), ...(body.level ? { level: body.level } : {}), ...(webhooks.length ? { webhooks } : {}) })).digest('hex');
     if (body.idempotency_key) {
         const prior = await store.byIdempotency(s, principal.requester, body.idempotency_key);
         if (prior) {
@@ -95,6 +109,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
             fork_change: forkChange || null,
             // A task's own clock (Actor v2): 10 minutes by default; mode best may run up to an hour.
             timeout_ms: (body.mode || 'balanced') === 'best' ? config.bestTimeoutMs : config.taskTimeoutMs,
+            agent_id: agentId, level,
         });
         // What belongs with the task from its first moment (the chat's attached files), in the same transaction: the
         // engine starts it only after this commits, so the run never begins without them.

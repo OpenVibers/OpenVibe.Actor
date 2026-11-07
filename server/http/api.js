@@ -3,7 +3,14 @@
 /**
  * /api/v1 — Actor's API (capabilities in openvibe-contracts manifests/capabilities/actor.*):
  *
- *   GET  /agents                 actor.agent.read (public)   the agent systems, their rate cards and availability
+ *   GET  /agents                 actor.agent.read (public)   no person: the agent systems, their rate cards and availability;
+ *                                                           a signed-in person: their own contacts (actor.agent-list@1)
+ *   GET  /agent-systems          actor.agent.read (public)   the agent systems even for a signed-in caller
+ *   GET  /agents/presets         actor.agent.read (public)   the four presets a contact can copy
+ *   POST /agents                 actor.agent.manage           create one of your contacts (optionally from a preset)
+ *   GET  /agents/:id             actor.agent.manage           one contact (another person's is 404)
+ *   PATCH/DELETE /agents/:id     actor.agent.manage           change it, or delete it (Vibe is 409 actor.agent.vibe)
+ *   PUT  /agents/:id/level       actor.agent.manage           actor.level-change@1: set the approval level
  *   POST /route                  actor.agent.read (public)   which agent a task would go to, and why (nothing runs)
  *   POST /tasks                  actor.task.create           give Actor a task (actor.task-create-request@1 → platform.task@1;
  *                                                           with webhooks, the answer carries webhook_secret once)
@@ -27,6 +34,7 @@ const { createTask } = require('../tasks/create');
 const { findArtifact, sendArtifact } = require('../runtime/artifacts');
 const trace = require('../runtime/trace');
 const personal = require('../agents/personal');
+const contacts = require('../agents/contacts');
 const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
 const items = require('../actions/items');
@@ -94,8 +102,20 @@ function createApi(ctx) {
         res.json(items.approvalItem(out.row));
     });
 
-    // ── The catalog and the dry run (public) ─────────────────
-    r.get('/agents', limits.reads('actor.agent.read'), (req, res) => res.json(catalog.listResult(config, ctx.models)));
+    // ── The catalog, the contacts and the dry run ────────────
+    // GET /api/v1/agents is the public agent-system catalog for no one in particular. A signed-in person's GET is
+    // their own contacts instead (actor.agent-list@1, Vibe first); the explicit /agent-systems path gives them the
+    // public catalog too, so the old contract stays reachable for every caller.
+    r.get('/agents', limits.reads('actor.agent.read'), async (req, res) => {
+        if (req.principal && req.principal.kind === 'user' && req.principal.requester) {
+            const rows = await contacts.list(s, config, req.principal.requester);
+            return res.json({ agents: rows.map(contacts.wire) });
+        }
+        return res.json(catalog.listResult(config, ctx.models));
+    });
+    r.get('/agent-systems', limits.reads('actor.agent.read'), (req, res) => res.json(catalog.listResult(config, ctx.models)));
+    // The four presets the UI can show; data only, no person's row.
+    r.get('/agents/presets', limits.reads('actor.agent.read'), (_req, res) => res.json(contacts.presets()));
 
     // Live per-tool and per-model numbers (stage V2-10), public: names and numbers only, and only rows with n >= 20 so
     // no one person's use shows. The brain (V2-8) reads ctx.stats directly and is not held to that floor.
@@ -111,6 +131,50 @@ function createApi(ctx) {
         if (!req.principal.requester || !req.principal.requester.startsWith('user:')) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
         return next();
     };
+    // Contacts are the person's own: a service or app acting for them is not the person choosing a face or a level.
+    const personOnly = (req, res, next) => {
+        const p = req.principal;
+        if (!p || p.kind !== 'user' || !p.requester || !p.requester.startsWith('user:')) {
+            return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        }
+        return next();
+    };
+
+    // ── Agents as contacts (A-1) ─────────────────────────────
+    // The person's own agents: list (Vibe first, created on this first read), read, create (optionally from a preset),
+    // change, delete (Vibe refuses 409 actor.agent.vibe) and set the level (actor.level-change@1).
+    r.post('/agents', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), async (req, res) => {
+        const out = await contacts.create(s, config, req.principal.requester, req.body || {});
+        if (!out.row) return problem(req, res, out.limit ? 429 : 422, out.limit ? 'actor.agent.limit' : 'actor.agent.invalid', out.error || 'Agent limit reached.');
+        res.set('Location', `/api/v1/agents/${out.row.id}`);
+        res.status(201).json(contacts.wire(out.row));
+    });
+    r.get('/agents/:id', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), async (req, res) => {
+        const row = await contacts.get(s, req.principal.requester, req.params.id);
+        if (!row) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        res.json(contacts.wire(row));
+    });
+    r.patch('/agents/:id', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), async (req, res) => {
+        const out = await contacts.update(s, config, req.principal.requester, req.params.id, req.body || {});
+        if (!out) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        if (!out.row) return problem(req, res, 422, 'actor.agent.invalid', out.error || 'Agent invalid.');
+        res.json(contacts.wire(out.row));
+    });
+    r.delete('/agents/:id', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), async (req, res) => {
+        const out = await contacts.remove(s, req.principal.requester, req.params.id);
+        if (!out) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        if (out.error) return problem(req, res, out.status || 409, out.code || 'actor.agent.vibe', out.error);
+        res.status(204).end();
+    });
+    r.put('/agents/:id/level', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), async (req, res) => {
+        const body = req.body || {};
+        const v = contracts.validate('actor.level-change@1', body);
+        if (!v.valid) return problem(req, res, 422, 'actor.agent.invalid', (v.errors || []).map((e) => `${e.path || e.instancePath || ''} ${e.message}`.trim()).join('; ').slice(0, 500));
+        const out = await contacts.setLevel(s, config, req.principal.requester, req.params.id, body.level);
+        if (!out) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        if (!out.row) return problem(req, res, 422, 'actor.agent.invalid', out.error || 'Level invalid.');
+        res.json(contacts.wire(out.row));
+    });
 
     // ── The one timeline behind the Dock (design 2026-11-07) ──
     // The person's own steps, newest first, with the cursor and the mode and needs-you filters the Dock's chips use.
@@ -194,6 +258,7 @@ function createApi(ctx) {
     });
     r.delete('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (!row) return;
+        if (row.is_vibe) return problem(req, res, 409, 'actor.agent.vibe', 'Vibe is your first agent and cannot be deleted.');
         await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [row.id, row.owner]);
         res.status(204).end();
     });
@@ -202,14 +267,14 @@ function createApi(ctx) {
         const out = await personal.run(ctx, row, (req.body || {}).input || '');
         if (out.code) return problem(req, res, out.status, out.code, out.detail);
         res.set('Location', `/api/v1/tasks/${out.task.id}`);
-        res.status(201).json(store.toWire(out.task, { baseUrl: config.baseUrl }));
+        res.status(201).json(await wireTask(out.task));
     });
     r.get('/me/agents/:id/runs', principal.requireCapability('actor.agent.run'), owner, limits.reads('actor.agent.run'), async (req, res) => {
         const row = await loadAgent(req, res); if (!row) return;
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
         const before = TASK_ID.test(req.query.before || '') ? req.query.before : null;
         const page = await store.listTasks(s, row.owner, { limit, before, via: `agent:${row.id}` });
-        res.json({ tasks: page.rows.map((t) => store.toWire(t, { baseUrl: config.baseUrl })), next: page.next });
+        res.json({ tasks: await Promise.all(page.rows.map(wireTask)), next: page.next });
     });
     // Suggestions the agent made for its instructions (agents/personal.js): list, then apply, dismiss or undo one.
     r.get('/me/agents/:id/suggestions', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
@@ -253,14 +318,8 @@ function createApi(ctx) {
         res.status(204).end();
     });
 
-    // ── The person's model choice (plan L55 C3) ─────────────────────────────────
-    // Which model their tasks run on: 'auto' (Actor decides, as today), 'openvibe' (OpenVibe's own keys, through
-    // OpenVibe.AI) or 'own:<provider>' (their OWN key for that provider, sealed in OpenVibe.AI's vault — a key never
-    // reaches Actor, and Actor never stores one).
-    //
-    // The person's own session or token, never a service: what a person spends their own key on is theirs to choose.
-    // (A service token may read it — it must know which provider to ask for — but not change it.)
-    const personOnly = (req, res, next) => {
+    // The model choice is the person's own too, with its own 404 code.
+    const modelOnly = (req, res, next) => {
         const p = req.principal;
         if (!p || p.kind !== 'user' || !p.requester || !p.requester.startsWith('user:')) {
             return problem(req, res, 404, 'actor.model.not_found', 'No such setting.');
@@ -268,7 +327,14 @@ function createApi(ctx) {
         return next();
     };
 
-    r.get('/me/model', principal.requireCapability('actor.model.manage'), personOnly, limits.reads('actor.model.manage'), async (req, res) => {
+    // ── The person's model choice (plan L55 C3) ─────────────────────────────────
+    // Which model their tasks run on: 'auto' (Actor decides, as today), 'openvibe' (OpenVibe's own keys, through
+    // OpenVibe.AI) or 'own:<provider>' (their OWN key for that provider, sealed in OpenVibe.AI's vault — a key never
+    // reaches Actor, and Actor never stores one).
+    //
+    // The person's own session or token, never a service: what a person spends their own key on is theirs to choose.
+    // (A service token may read it — it must know which provider to ask for — but not change it.)
+    r.get('/me/model', principal.requireCapability('actor.model.manage'), modelOnly, limits.reads('actor.model.manage'), async (req, res) => {
         const row = await modelPrefs.get(s, req.principal.requester);
         // The providers the person allowed THIS service to use their own key for, and that they hold a key for:
         // names only, never key material. Null when OpenVibe.AI does not say (the person allowed us nothing yet).
@@ -277,7 +343,7 @@ function createApi(ctx) {
         res.json({ ...modelPrefs.wire(row), keys });
     });
 
-    r.put('/me/model', principal.requireCapability('actor.model.manage'), personOnly, limits.budget('actor.model.manage'), async (req, res) => {
+    r.put('/me/model', principal.requireCapability('actor.model.manage'), modelOnly, limits.budget('actor.model.manage'), async (req, res) => {
         const body = req.body || {};
         // Where it runs (plan L55 C3) may come alone or with the model choice.
         if (body.runs_on !== undefined) {
@@ -294,7 +360,7 @@ function createApi(ctx) {
         if (typeof b.task !== 'string' || !b.task.trim() || b.task.length > 20000) return problem(req, res, 422, 'actor.task.invalid', 'task: the instruction in plain words (1 to 20000 characters)');
         const mode = b.mode == null ? 'balanced' : b.mode;
         if (!MODES.includes(mode)) return problem(req, res, 422, 'actor.mode.invalid', `mode: one of ${MODES.join(', ')}`);
-        if (b.agent != null && !catalog.byId(b.agent)) return problem(req, res, 422, 'actor.agent.unknown', `no agent "${String(b.agent).slice(0, 64)}"; GET /api/v1/agents lists them`);
+        if (b.agent != null && !catalog.byId(b.agent)) return problem(req, res, 422, 'actor.agent.unknown', `no agent "${String(b.agent).slice(0, 64)}"; GET /api/v1/agent-systems lists them`);
         // The dry run classifies by the free heuristic: it never spends anything.
         const cls = heuristic(b.task);
         res.json({ class: cls, ...route({ cls, mode, agent: b.agent || null, budgetUsd: config.allowance.perTaskUsd, config }) });
@@ -315,6 +381,22 @@ function createApi(ctx) {
         return row;
     }
     const wire = (row) => store.toWire(row, { baseUrl: config.baseUrl });
+    // A task is a thread (A-1): add the contact it runs as, that contact's level and the effective level (the higher
+    // of the agent's and the person's own parent chain). Without a contact (a service or project task) they are absent.
+    const wireTask = async (row) => {
+        const out = wire(row);
+        let agent = null;
+        try { agent = await contacts.agentForTask(s, config, row); } catch (err) { agent = null; }
+        if (agent) {
+            out.agent_id = agent.id;
+            out.agent_level = agent.level || 'ask';
+        } else if (row.agent_id) {
+            out.agent_id = row.agent_id;
+        }
+        out.level = row.level || 'ask';
+        try { out.effective_level = await contacts.effectiveLevelFor(s, row, agent); } catch (err) { out.effective_level = out.level; }
+        return out;
+    };
 
     r.post('/tasks', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), async (req, res) => {
         const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: req.body || {} });
@@ -324,20 +406,20 @@ function createApi(ctx) {
         }
         if (out.status === 201) res.set('Location', `/api/v1/tasks/${out.task.id}`);
         // The signing secret, to its creator only, in this answer (and an idempotent repeat of it) and never again.
-        return res.status(out.status).json({ ...wire(out.task), ...(out.task.webhook_secret ? { webhook_secret: out.task.webhook_secret } : {}) });
+        return res.status(out.status).json({ ...(await wireTask(out.task)), ...(out.task.webhook_secret ? { webhook_secret: out.task.webhook_secret } : {}) });
     });
 
     r.get('/tasks', principal.requireCapability('actor.task.list'), limits.reads('actor.task.list'), async (req, res) => {
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
         const before = typeof req.query.before === 'string' && TASK_ID.test(req.query.before) ? req.query.before : null;
         const page = await store.listTasks(s, req.principal.requester, { limit, before, via: req.principal.via || null });
-        res.json({ tasks: page.rows.map(wire), next: page.next });
+        res.json({ tasks: await Promise.all(page.rows.map(wireTask)), next: page.next });
     });
 
     r.get('/tasks/:id', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
         const row = await load(req, res);
         if (!row) return;
-        const out = wire(row);
+        const out = await wireTask(row);
         // Waiting for its person on its desk (Desks plan D4): what, and the link to the desk.
         const needs = await store.needsYou(s, row);
         if (needs) out.needs_you = needs;
@@ -390,7 +472,7 @@ function createApi(ctx) {
         const row = await load(req, res, { delegated });
         if (!row) return;
         const after = await engine.cancel(row.id, req.principal.requester);
-        res.status(store.OPEN.includes(after.state) ? 202 : 200).json(wire(after));
+        res.status(store.OPEN.includes(after.state) ? 202 : 200).json(await wireTask(after));
     });
 
     return r;
