@@ -58,6 +58,18 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     let waits = waitsArg;
     // Triggers are created after the engine (they need it to run now); the app sets them once.
     let triggers = triggersArg;
+
+    /**
+     * The latency class a run asks AI's router for (plan BA track, HO3/HO4). A routine's run — a schedule, an
+     * event or a goal — may wait, so it asks for "background": AI then picks the cheapest tier that can wait (a
+     * Flex service tier, off-peak, or the host's own idle model). An interactive task asks for nothing and keeps
+     * the router's normal choice. server/runtime/models.js sends the class only when ACTOR_AI_LATENCY_CLASSES is
+     * on, because AI's released run-request contract does not carry it until BA1 merges.
+     */
+    async function latencyClass(taskId) {
+        const root = await s.db.maybe('SELECT origin FROM actor_assignments WHERE task_id = $1 AND depth = 0', [taskId]).catch(() => null);
+        return root && root.origin === 'routine' ? 'background' : null;
+    }
     const setTriggers = (t) => { triggers = t || null; };
     const controls = new Map();     // task id → the run's control object (live assumptions)
     let stopped = false;
@@ -157,7 +169,12 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         if (ended) runTokens.drop(id);
         if (ended) stream.end(id);
         // "Tell me when it's done" (stage V2-6): done or failed, once per task. Cancelled is the person's own action.
-        if (ended && row && (state === 'succeeded' || state === 'failed')) await tellPerson(row, state);
+        // A routine's run is the exception (plan HO4): its answer already goes into the conversation that made the
+        // trigger, so the person is told through notifications only when the routine asked for it.
+        if (ended && row && (state === 'succeeded' || state === 'failed')) {
+            const routine = triggers && typeof triggers.tellsPerson === 'function' ? await triggers.tellsPerson(row).catch(() => null) : null;
+            if (routine !== false) await tellPerson(row, state);
+        }
         // Webhooks that asked for this state hear it; a delivery never holds the task up or fails it.
         if (webhooks && row && row.webhooks) {
             try {
@@ -466,6 +483,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         personText, agentId: ownAgent, notifyTask,
                         askPerson, control, resume, fork, spent: () => spent,
                         waits, waitEvent: wakePayload, attachments,
+                        // A routine's or a goal's run may wait (plan BA/HO): the class it asks AI's router for.
+                        latency: await latencyClass(id),
                     }));
                     // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
                     // ('running' is the closest state there is today), its wall clock waits with it, and its

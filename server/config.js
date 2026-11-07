@@ -111,6 +111,10 @@ function load(env = process.env) {
             },
             // The per-call liability ceiling (USD, exact decimal) AI holds against the person's Balance. Unset: no cap.
             maxCostUsd: optNum(env.ACTOR_AI_MAX_COST_USD),
+            // Latency classes (plan BA/HO): a routine's or a goal's run may wait, so it asks AI's router for the
+            // "background" class (a Flex tier, off-peak, or the host's own idle model). Off until AI's run-request
+            // contract carries options.latency (BA1): its released schema refuses an option it does not know.
+            latencyClasses: bool(env.ACTOR_AI_LATENCY_CLASSES),
             // The AI Exchange catalog (PLAN G-P9), off by default: GET /v1/models from OpenVibe.AI, cached, to offer
             // its aliases and exact ids where a person picks the model their tasks run on. Off, the model field is
             // the plain one it was before.

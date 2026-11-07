@@ -456,7 +456,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
      * The tier's name (openvibe/economy|balanced|fast|auto|private, or an exact id) is the policy. The answer's
      * model is whatever AI says ran, never the wish.
      */
-    async function chatViaRouter({ tier, messages = [], tools = null, json = false, maxTokens = 4000, signal, onDelta = null, subject = null, target = null }) {
+    async function chatViaRouter({ tier, messages = [], tools = null, json = false, maxTokens = 4000, signal, onDelta = null, subject = null, target = null, latency = null }) {
         const c = routerClient();
         if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
         const input = {
@@ -472,6 +472,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             workflow: 'ai.complete', input,
             ...(subject ? { on_behalf_of: { type: 'user', id: String(subject) } } : {}),
             ...(target ? { target } : {}),
+            ...(latency && ai.latencyClasses ? { options: { latency } } : {}),
         };
         const timeoutMs = Math.max(5000, Number(ai.timeoutMs) || 180_000);
         const sig = typeof AbortSignal.any === 'function'
@@ -484,7 +485,13 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                 const created = await c.ai.runs.create('ai.complete', input, {
                     wait: Math.max(1000, Number(ai.waitMs) || 120_000),
                     ...(subject ? { onBehalfOf: { type: 'user', id: String(subject) } } : {}),
-                    ...(target ? { target } : {}), options: { cache: false }, signal: sig,
+                    ...(target ? { target } : {}),
+                    // A routine's run may wait (plan BA/HO): the class the caller asked for, so AI's router may pick a
+                    // Flex tier, off-peak or the host's own idle model. BA1 has not merged yet, so the released
+                    // ai run-request@1 refuses an option it does not know: only send it when this server is told
+                    // ACTOR_AI_LATENCY_CLASSES=on, after AI's contract carries it.
+                    options: { cache: false, ...(latency && ai.latencyClasses ? { latency } : {}) },
+                    signal: sig,
                 });
                 run = created.run;
                 if (!['succeeded', 'cached', 'failed', 'cancelled'].includes(run.status)) run = await c.ai.runs.waitFor(run.id, { timeoutMs, signal: sig });
@@ -551,7 +558,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     /** One model call. The caller checks the budget first and meters cost_usd after; this layer only prices it. */
-    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null } = {}) {
+    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null, latency = null } = {}) {
         // The person's own key (plan L55 C3): every model call of this run goes to OpenVibe.AI with it.
         const choice = currentChoice();
         if (choice && choice.provider) {
@@ -560,7 +567,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         }
         // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
         if (routerOn()) {
-            const r = await chatViaRouter({ tier, messages, tools, json, maxTokens, signal, onDelta, subject: choice && choice.subject, target: choice && choice.target });
+            const r = await chatViaRouter({ tier, messages, tools, json, maxTokens, signal, onDelta, subject: choice && choice.subject, target: choice && choice.target, latency });
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }
         await warm();
