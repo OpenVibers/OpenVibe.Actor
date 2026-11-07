@@ -118,6 +118,15 @@ const PRESET_NAMES = ['Researcher', 'Inbox', 'Studio editor', 'Party host'];
             assert.strictEqual((await t.get('/api/v1/agents', { json: { name: 'Nope' } })).status, 401);
         });
 
+        await check('the OpenAPI document lists every new contact route', async () => {
+            const doc = (await t.get('/openapi.json')).json();
+            for (const [path, method] of [
+                ['/api/v1/agents', 'get'], ['/api/v1/agents', 'post'], ['/api/v1/agents/presets', 'get'],
+                ['/api/v1/agent-systems', 'get'], ['/api/v1/agents/{id}', 'get'], ['/api/v1/agents/{id}', 'patch'],
+                ['/api/v1/agents/{id}', 'delete'], ['/api/v1/agents/{id}/level', 'put'],
+            ]) assert.ok(doc.paths[path] && doc.paths[path][method], `OpenAPI has no ${method.toUpperCase()} ${path}`);
+        });
+
         await check('a task records its contact (default Vibe) and its level; effective max comes from the person\'s own line', async () => {
             const aliceAgent = (await t.get('/api/v1/agents', { as: alice })).json().agents[0];
             const made = await post('/api/v1/tasks', { task: 'Say hello in one word.', agent_id: aliceAgent.id, level: 'auto-edits' });
