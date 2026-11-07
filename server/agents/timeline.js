@@ -22,6 +22,9 @@ const subs = new Map();   // subject → Set<{ res }>: the live update stream
 const iso = (v) => (v instanceof Date ? v.toISOString() : (v ? new Date(v).toISOString() : null));
 const text = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+// The Computer of a step (plan 2026-11-07): a plain object with session_id, machine, where and cost_hint. Anything
+// else — an array, a string, a nested payload — is not stored.
+const computer = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
 
 /** The person an event is for: only a user subject is the agent's. */
 function subjectOf(ev) {
@@ -44,6 +47,7 @@ function entryOf(row) {
         ended_at: iso(row.ended_at),
         status: row.status,
         placement: (row.placement_where || row.placement_why) ? { where: row.placement_where || null, why: row.placement_why || null } : null,
+        computer: row.computer == null ? null : (typeof row.computer === 'object' ? row.computer : (() => { try { return JSON.parse(row.computer); } catch { return null; } })()),
         cost_usd: row.cost_usd === null || row.cost_usd === undefined ? null : Number(row.cost_usd),
         link: row.link || null,
         reason: row.reason || null,
@@ -60,21 +64,21 @@ async function upsert(s, subject, payload) {
     if (!subject || !MODES.has(step.mode) || !STATUSES.has(step.status) || !text(step.step_id, 80)) return null;
     const now = s.iso();
     const row = await s.db.one(`INSERT INTO agent_timeline (id, subject, step_id, product, mode, ref, title, status, placement_where, placement_why,
-                cost_usd, link, reason, transition, approval_product, approval_id, approval_kind, audience, shared, started_at, ended_at, created_at, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'private',false,$18,$19,$20,$20)
+                cost_usd, link, reason, transition, approval_product, approval_id, approval_kind, audience, shared, started_at, ended_at, created_at, updated_at, computer)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'private',false,$18,$19,$20,$20,$21)
         ON CONFLICT (subject, product, step_id) DO UPDATE SET
             mode = EXCLUDED.mode, ref = EXCLUDED.ref, title = EXCLUDED.title, status = EXCLUDED.status,
             placement_where = EXCLUDED.placement_where, placement_why = EXCLUDED.placement_why, cost_usd = EXCLUDED.cost_usd,
             link = EXCLUDED.link, reason = EXCLUDED.reason, transition = EXCLUDED.transition,
             approval_product = EXCLUDED.approval_product, approval_id = EXCLUDED.approval_id, approval_kind = EXCLUDED.approval_kind,
-            ended_at = EXCLUDED.ended_at, updated_at = EXCLUDED.updated_at
+            ended_at = EXCLUDED.ended_at, updated_at = EXCLUDED.updated_at, computer = EXCLUDED.computer
         RETURNING *`,
     [s.newId('tl'), subject, text(step.step_id, 80), text(step.product, 40) || 'agent', step.mode, text(step.ref, 120),
         text(step.title, 160) || 'A step of the agent', step.status,
         text(step.placement && step.placement.where, 160), text(step.placement && step.placement.why, 240),
         num(step.cost_usd), text(step.link, 2048), text(step.reason, 240), text(step.transition, 240),
         text(step.approval && step.approval.product, 40), text(step.approval && step.approval.id, 80), text(step.approval && step.approval.kind, 40),
-        iso(step.started_at) || now, iso(step.ended_at), now]);
+        iso(step.started_at) || now, iso(step.ended_at), now, computer(step.computer) ? JSON.stringify(computer(step.computer)) : null]);
     publish(subject, entryOf(row));
     return row;
 }

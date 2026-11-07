@@ -2,6 +2,21 @@
 
 What changed in OpenVibe.Actor, newest first. Each site also publishes its patch notes at /updates.
 
+## Unreleased — one Computer
+
+- **One Computer** (plan 2026-11-07: "Surf, Computer and Actor are one experience"): when a task opens a desk, its
+  own step carries `computer` (`session_id` — OpenVibe.Run's `ses_…`, or null on the person's own machine through
+  Bot — `machine`, `where` and `cost_hint`) from the tool's answer, never the model's words. `GET /api/v1/tasks/:id`
+  reads the same object off the task's own steps, with `driving` while the person holds the desk, and
+  `agent.timeline-entry@1` stores it (migration 0034).
+- **Take over / Give it back** are one API on the task: `POST /api/v1/tasks/:id/takeover` and `…/giveback`, built on
+  the `hand_to_person` hand-off. While the person drives, `computer_input` and the acting `computer_browser` actions
+  are refused with a clear reason; the task's timeline gets one `handoff` step and the Dock's timeline one step with
+  the same Computer. Only the task's own person.
+- **The still**: `GET /api/v1/tasks/:id/still` asks the session's own service (Run) for the newest frame as Actor's
+  service token acting for the person, and answers the bytes with `Cache-Control: private, no-store`. A person's
+  task only; another person, a signed-out visitor and an app token all get the same 404 as a missing task.
+
 ## 0.3.0 — 2026-11-07
 
 - **Space's builder as a task of the person's one agent** (plan 2026-10-22 §Z, stage Z1): six new tools — `space_create`, `space_files_list`, `space_files_read`, `space_files_write`, `space_preview` and `space_publish`. The agent works on the person's own spaces through OpenVibe.Space's builder API (`/api/v1/builder/spaces`), as the person: another person's space is the same 404 as one that does not exist, and every write goes through the same path, limits and audit as Space's own editor.
