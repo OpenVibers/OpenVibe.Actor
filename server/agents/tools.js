@@ -305,7 +305,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
             const step = stepFor(name, a);
             if (step) {
                 let ask;
-                try { ask = await requestApproval({ kind: 'actor.action', ...step }); }
+                try { ask = await requestApproval({ ...step, kind: step.kind || 'actor.action' }); }
                 catch (err) { return json({ error: `the approval gate could not be asked, so nothing ran: ${(err && err.message) || err}`.slice(0, 300) }); }
                 if (ask && ask.pending) return json({ error: `not started: the person must approve it first at ${ask.url}`, approval: { id: ask.id, url: ask.url } });
             }

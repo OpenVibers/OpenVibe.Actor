@@ -7,6 +7,7 @@
  */
 
 const PUBLIC_ORIGIN = 'https://openvibe.actor';
+const kinds = require('../agents/kinds');
 const OPEN = ['queued', 'running', 'verifying'];
 
 // Actor's own word → the Action Center bucket. A task whose newest event is a "Needs you:" line is waiting, though
@@ -117,18 +118,23 @@ function taskItem(row, { lastEvent = null, steps = null, wait = null, now = () =
     };
 }
 
-function approvalItem(row) {
+function approvalItem(row, { agentName = null, thread = null } = {}) {
     const bucket = bucketFor(row.state);
     const payload = parse(row.payload) || {};
+    // The kind in plain words and the thread it came from (plan HO1): a raw agent id says nothing to a person,
+    // so the agent's own name is used, and the kind reads as a phrase. A request with no thread of its own
+    // (an old row) keeps its own words.
+    const detail = (thread ? plain(thread, 200) : null) || (payload.task ? plain(payload.task, 200) : null);
+    const about = [kinds.label(row.kind), detail].filter(Boolean).join(' · ');
     return {
         service: 'actor',
         id: row.id,
         kind: 'approval',
         title: plain(row.summary || row.id, 160) || row.id,
-        summary: payload.task ? plain(payload.task, 400) : null,
+        summary: about ? plain(about, 400) : null,
         bucket,
         state: row.state,
-        agent: row.agent_id ? plain(row.agent_id, 80) : null,
+        agent: agentName ? plain(agentName, 80) : null,
         cost_usd: null,
         steps: null,
         error: row.state === 'expired' ? 'This approval expired before it was decided.' : null,

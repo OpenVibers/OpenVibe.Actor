@@ -155,7 +155,7 @@ function gate(level, asked) {
             assert.strictEqual(row.state, 'succeeded', JSON.stringify(row.error_detail));
             const ask = await t.ctx.s.db.maybe('SELECT * FROM actor_approvals WHERE task_id = $1', [row.id]);
             assert.ok(ask, 'the approval was recorded');
-            assert.deepStrictEqual([ask.kind, ask.state], ['actor.action', 'pending']);
+            assert.deepStrictEqual([ask.kind, ask.state], ['computer.run', 'pending']);
             assert.strictEqual(JSON.parse(typeof ask.payload === 'string' ? ask.payload : JSON.stringify(ask.payload)).argv[0], 'rm');
         });
 

@@ -10,6 +10,8 @@ const contacts = require('../agents/contacts');
 const ui = require('./agent-contacts-ui');
 const approvals = require('../agents/approvals');
 const levels = require('../agents/levels');
+const allows = require('../agents/allows');
+const kinds = require('../agents/kinds');
 
 /** "22 minutes ago", "in 6 days": a person reads this, the exact UTC instant stays in the <time> element's title. */
 function ago(iso, now = Date.now()) {
@@ -154,8 +156,8 @@ ${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when })}
         if (!signed(req)) return login(req, res);
         const rows = await approvals.list(s, owner(req));
         page(req, res, 'Approvals', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · approvals</p><h1>Approvals</h1>
-<p class="pa-lede">When one of your agents runs while you are away and its work would act for you outside Actor (a coding task on your own machine, a send, a purchase, a deletion, a password field, a Space publish), it asks here first. Nothing runs until you approve. An action's run had already stopped when it asked, so approving it is consent for you to run the task again. A request you leave expires after ${String(approvals.EXPIRES_DAYS)} days.</p></header>
-${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-card"><a href="/me/approvals/${a.id}"><strong>${a.summary}</strong></a> ${approvalPill(a)}<span class="pa-when">Asked ${time(a.created_at)}</span></li>`)}</ul>`
+<p class="pa-lede">When one of your agents runs while you are away and its work would act for you outside Actor (a coding task on your own machine, a send, a purchase, a deletion, a password field, a Space publish), it asks here first. Nothing runs until you approve. An action's run had already stopped when it asked, so approving it is consent for you to run the task again. You may also say "always allow this for this agent": that covers this one kind of step, on this one target, until you revoke it. Spending money, a password, a deletion and a new recipient always ask. A request you leave expires after ${String(approvals.EXPIRES_DAYS)} days.</p></header>
+${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-card"><a href="/me/approvals/${a.id}"><strong>${a.summary}</strong></a> ${approvalPill(a)}<span class="pa-when">${kinds.label(a.kind)} · Asked ${time(a.created_at)}</span></li>`)}</ul>`
         : html`<p class="pa-empty">Nothing to approve. Your agents have not asked for anything yet.</p>`}
 <p><a href="/me/agents">Your agents</a></p>`);
     });
@@ -167,24 +169,38 @@ ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-c
         // The agent by its name (a person's own agent: another person's is never looked up here).
         const agent = a.agent_id ? await contacts.get(s, owner(req), a.agent_id).catch(() => null) : null;
         const agentName = agent && agent.name ? agent.name : 'your agent';
-        // The always-ask floor, said in plain words before anything technical.
-        // A raw command deletes by its argv (rm, shred …), which words alone do not show: the same check stepFor uses.
-        const argvDeletes = p && Array.isArray(p.argv) && require('../agents/actions').deletes(p.argv);
-        const floor = [...new Set([...levels.classify({ summary: a.summary, payload: p }), ...(argvDeletes ? ['delete'] : [])])].filter((c) => CAUTION[c]);
-        const cmd = a.kind === 'actor.action' ? commandLine(p) : null;
+        // The always-ask floor, said in plain words before anything technical: what the request stored, what its words
+        // say, and a raw command that deletes by its argv (rm, shred …), the same checks approvals.decide uses.
+        const floor = approvals.floorOf(a).filter((c) => CAUTION[c]);
+        const coding = a.kind === 'codes.task';
+        const cmd = coding ? null : commandLine(p);
         const nowMs = Date.parse(s.iso()) || Date.now();   // the service's own clock (a test's clock in a test)
         const where = p && typeof p.machine === 'string' && p.machine ? p.machine : null;
+        // "Always allow" (plan HO1): this one kind of step on this one exact target, for this agent. Never a floor step.
+        const canAllow = a.state === 'pending' && !floor.length && Boolean(a.agent_id) && Boolean(a.target);
+        const allowButton = canAllow
+            ? html`<button type="submit" name="decision" value="approve_always" class="pa-btn">Always allow this for ${agentName}</button>`
+            : '';
+        const allowHint = a.state !== 'pending' ? ''
+            : floor.length ? html`<p class="pa-hint">This always asks, so it can never be always allowed.</p>`
+                : canAllow ? html`<p class="pa-hint">Always allowing covers exactly this, and nothing else: ${kinds.phrase(a.kind, a.target)}. Anything different still asks. You can take it back on <a href="/me/agents/${a.agent_id}#always">${agentName}'s page</a>.</p>`
+                    : '';
+        const decided = a.state === 'approved'
+            ? (a.decision_scope === 'always' ? `You approved this and allowed it from now on for ${agentName}.` : 'You approved this once.')
+            : (a.state === 'declined' ? 'You declined this.' : 'Nobody answered this one in time.');
+        const buttons = a.state === 'pending'
+            ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">${coding ? 'Approve and start it' : 'Approve for a retry'}</button> ${allowButton} <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>${allowHint}`
+            : html`<p class="pa-hint">${decided}${a.decided_at ? html` Decided ${whenAt(a.decided_at, nowMs)}.` : ''}</p>${a.result_task_id ? html`<p>Started as <a href="/tasks/${a.result_task_id}">this task</a>.</p>` : ''}`;
         page(req, res, 'Approval', html`<p class="pa-eyebrow"><a href="/me/approvals">Approvals</a></p><h1>${a.summary}</h1>
-<p>${approvalPill(a)} <span class="pa-when">Asked ${whenAt(a.created_at, nowMs)}${a.agent_id ? html` by <a href="/me/agents/${a.agent_id}">${agentName}</a>` : ''}${a.task_id ? html` in <a href="/tasks/${a.task_id}">this run</a>` : ''}${a.state === 'pending' && a.expires_at ? html` · expires ${whenAt(a.expires_at, nowMs)}` : ''}</span></p>
+<p>${approvalPill(a)} <span class="pa-when">${kinds.label(a.kind)} · Asked ${whenAt(a.created_at, nowMs)}${a.agent_id ? html` by <a href="/me/agents/${a.agent_id}">${agentName}</a>` : ''}${a.task_id ? html` in <a href="/tasks/${a.task_id}">this run</a>` : ''}${a.state === 'pending' && a.expires_at ? html` · expires ${whenAt(a.expires_at, nowMs)}` : ''}</span></p>
 ${floor.length ? html`<p class="pa-caution" role="note">${floor.map((c) => CAUTION[c]).join(' ')}</p>` : ''}
-${a.kind === 'actor.action'
+${!coding
             ? html`<section class="pa-panel"><h2>What it would do</h2><p>${a.summary}</p>
 ${cmd ? html`<p class="pa-cmd-where">${where ? html`On <b>${where}</b>, it runs:` : 'It runs:'}</p><pre class="pa-pre pa-cmd">${cmd}</pre>${p && p.cwd ? html`<p class="pa-hint">In ${String(p.cwd).slice(0, 300)}</p>` : ''}` : ''}
 <h3 class="pa-sub">The exact request</h3><pre class="pa-pre">${JSON.stringify(p, null, 2).slice(0, 8000)}</pre></section>`
             : html`<section class="pa-panel"><h2>What it would do</h2><p>Start a coding task on your own machine through <a href="https://openvibe.codes/run">OpenVibe.Codes</a> with this request. You get the summary, the changed files and the patch; it pushes nowhere unless the request asks for a branch and your machine holds a GitHub token.</p>
 <pre class="pa-pre">${String(p.task || '').slice(0, 8000)}</pre></section>`}
-${a.state === 'pending' ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">${a.kind === 'actor.action' ? 'Approve for a retry' : 'Approve and start it'}</button> <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>`
-        : a.result_task_id ? html`<p>Started as <a href="/tasks/${a.result_task_id}">this task</a>.</p>` : ''}`);
+${buttons}`);
     });
     r.post('/me/approvals/:id', async (req, res) => {
         if (!write(req, res)) return;
@@ -201,6 +217,10 @@ ${a.state === 'pending' ? html`<form method="post" action="/me/approvals/${a.id}
         const pendingSuggestions = suggestions.filter((p) => p.state === 'pending');
         const applied = suggestions.filter((p) => p.state === 'applied').slice(0, 5);
         const runs = await s.db.many('SELECT id, state, created_at, result, cost_usd, error_detail FROM tasks WHERE requester = $1 AND via = $2 ORDER BY id DESC LIMIT 20', [a.owner, `agent:${a.id}`]);
+        // What this agent may always do (plan HO1), and every decision the person made about its asks.
+        const allowRules = await allows.list(s, a.owner, a.id);
+        const decisions = await s.db.many(`SELECT id, kind, summary, state, decision_scope, decided_by, decided_at, created_at
+            FROM actor_approvals WHERE owner = $1 AND agent_id = $2 ORDER BY created_at DESC LIMIT 20`, [a.owner, a.id]);
         // Its Vibe chat (agents/vibe-deliver.js), once a run has gone there.
         const vibeChat = a.send_to_vibe ? await s.db.maybe("SELECT chat_url FROM actor_vibe_deliveries WHERE agent_id = $1 AND owner = $2 AND state = 'sent' AND chat_url IS NOT NULL ORDER BY sent_at DESC LIMIT 1", [a.id, a.owner]) : null;
         // The run journal: each run's first line (its answer, or why it did not finish) and what it cost.
@@ -225,6 +245,13 @@ ${a.last_skip_reason ? html`<p class="notice" role="status">The last scheduled r
 <p class="pa-actions"><a class="pa-btn" href="https://openvibe.watch/watches/new?template=event&amp;agent_id=${a.id}">When something happens on OpenVibe</a> <a class="pa-btn" href="https://openvibe.watch/watches/new?template=page&amp;agent_id=${a.id}">When a page changes</a></p></section>
 <section class="pa-panel"><h2>Recent runs</h2>${vibeChat && /^https:\/\/openvibe\.chat\/vibe\/v-[0-9a-f]{12}$/.test(vibeChat.chat_url) ? html`<p class="pa-hint">Each run also lands in <a href="${vibeChat.chat_url}">its Vibe chat</a>, where you can ask Vibe about it.</p>` : ''}${runs.length ? html`<ul class="pa-runs">${runs.map((t) => html`<li><a href="/tasks/${t.id}">${time(t.created_at)}</a> <span class="pill ${pill(t.state)}">${t.state}</span>${usd(t.cost_usd)}${gist(t) ? html`<span class="pa-run-gist">${gist(t)}</span>` : ''}</li>`)}</ul>` : html`<p class="muted">No run yet.</p>`}</section>
 </div>
+<section class="pa-panel" id="always" aria-labelledby="pa-always-h"><h2 id="pa-always-h">What it may always do</h2>
+<p class="pa-hint">When you said "always allow this for this agent", the permission is here: one kind of step, on one target. Take any of them back and the next one asks again. Spending money, a password, a deletion and a new recipient always ask, whatever is allowed here.</p>
+${allowRules.length ? html`<ul class="pa-notes">${allowRules.map((r) => html`<li><p class="pa-note-text">${kinds.phrase(r.kind, r.target)}</p><p class="pa-note-meta">Allowed ${time(r.created_at)}</p>
+<form method="post" action="/me/agents/${a.id}/allows/${r.id}/revoke" class="pa-actions"><button type="submit" class="pa-danger-link">Revoke</button></form></li>`)}</ul>` : html`<p class="muted">Nothing is always allowed for this agent.</p>`}</section>
+<section class="pa-panel" id="decisions" aria-labelledby="pa-dec-h"><h2 id="pa-dec-h">What you decided</h2>
+<p class="pa-hint">Every approval this agent asked for, and what you answered: once, always, or no.</p>
+${decisions.length ? html`<ul class="pa-notes">${decisions.map((d) => html`<li><p class="pa-note-text"><a href="/me/approvals/${d.id}">${d.summary}</a></p><p class="pa-note-meta">${kinds.label(d.kind)} · ${d.state === 'approved' ? (d.decision_scope === 'always' ? 'You approved it and allowed it always' : 'You approved it once') : d.state === 'declined' ? 'You declined it' : d.state === 'expired' ? 'It expired, nobody answered' : 'Waiting for you'} · ${time(d.decided_at || d.created_at)}</p></li>`)}</ul>` : html`<p class="muted">This agent has not asked for anything yet.</p>`}</section>
 ${pendingSuggestions.length || applied.length ? html`<section class="pa-panel" aria-labelledby="pa-sugg-h"><h2 id="pa-sugg-h">Suggestions from your agent</h2>
 <p class="pa-hint">After a run that passed its check, the agent may suggest a line for its instructions. Nothing changes until you add it, and you can undo it.</p>
 ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Suggested ${time(p.created_at)}${p.from_task ? html` after <a href="/tasks/${p.from_task}">this run</a>` : ''}</p>
@@ -264,6 +291,15 @@ ${notes.length ? html`<p><a href="/memory">See all your memory</a> · <a href="/
     r.post('/me/agents/:id/memory/:mem/delete', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; await s.db.query('DELETE FROM actor_agent_memory WHERE id = $1 AND agent_id = $2 AND owner = $3', [req.params.mem, a.id, a.owner]); res.redirect(303, `/me/agents/${a.id}`); });
     r.get('/me/agents/:id/forget', async (req, res) => { if (!signed(req)) return login(req, res); const a = await find(req, res); if (!a) return; page(req, res, 'Forget memory', html`<h1>Forget all memory for ${a.name}?</h1><form method="post" action="/me/agents/${a.id}/forget"><button type="submit">Forget everything</button></form><p><a href="/me/agents/${a.id}">Cancel</a></p>`); });
     r.post('/me/agents/:id/forget', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; await s.db.query('DELETE FROM actor_agent_memory WHERE agent_id = $1 AND owner = $2', [a.id, a.owner]); res.redirect(303, `/me/agents/${a.id}`); });
+    // Take back a standing permission (plan HO1): the next identical step asks again.
+    r.post('/me/agents/:id/allows/:allowId/revoke', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const rule = await allows.get(s, a.owner, req.params.allowId);
+        if (!rule || rule.agent_id !== a.id) return page(req, res, 'Not found', html`<h1>Not found</h1><p><a href="/me/agents/${a.id}">Back to the agent</a></p>`, 404);
+        await allows.revoke(s, a.owner, req.params.allowId);
+        res.redirect(303, `/me/agents/${a.id}#always`);
+    });
     return r;
 }
 
