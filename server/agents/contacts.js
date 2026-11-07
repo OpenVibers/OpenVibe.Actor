@@ -115,7 +115,11 @@ async function list(s, config, owner) {
 
 const get = (s, owner, id) => (ID.test(String(id || '')) ? s.db.maybe('SELECT * FROM actor_agents WHERE id = $1 AND owner = $2', [id, owner]) : null);
 
-async function create(s, config, owner, input) {
+/**
+ * `extra` carries the voice parts of an agent (its bio, its rules and where its voice came from). They are not
+ * part of the public create body (actor.agent-manage-request@1 does not know them): only the voice import sets them.
+ */
+async function create(s, config, owner, input, extra = null) {
     const body = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
     if (Object.keys(body).some((k) => !ALLOWED.includes(k))) return { error: 'Unknown agent setting.' };
     const p = body.preset != null ? preset(body.preset) : null;
@@ -146,11 +150,16 @@ async function create(s, config, owner, input) {
     const now = s.iso();
     const row = await s.db.maybe(`INSERT INTO actor_agents
         (id, owner, name, instructions, mode, budget_per_run_usd, daily_runs_max, schedule, status, created_at, updated_at,
-         face, voice, model_engine, model_id, computer, apps, memory_scope, level, is_vibe, preset)
-        VALUES ($1,$2,$3,$4,'balanced',$5,1,'off','active',$6,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,false,$15) RETURNING *`,
+         face, voice, model_engine, model_id, computer, apps, memory_scope, level, is_vibe, preset, bio, rules, voice_author, voice_author_name, voice_author_checked, voice_source, voice_suggested_apps)
+        VALUES ($1,$2,$3,$4,'balanced',$5,1,'off','active',$6,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,false,$15,$16,$17::jsonb,$18,$19,$20,$21,$22::jsonb) RETURNING *`,
     [s.newId('agt'), owner, next.name, instructions, Math.max(0.000001, Number(config.allowance.perTaskUsd) || 0.05), now,
         next.face, next.voice, next.model.engine, next.model.model, next.computer ? JSON.stringify(next.computer) : null,
-        JSON.stringify(next.apps), next.memory, next.level, p ? p.id : null]);
+        JSON.stringify(next.apps), next.memory, next.level, p ? p.id : null,
+        extra && extra.bio ? extra.bio : null, JSON.stringify((extra && extra.rules) || []),
+        extra && extra.voice_author ? extra.voice_author : null, extra && extra.voice_author_name ? extra.voice_author_name : null,
+        extra && extra.voice_author_checked ? true : false,
+        extra && extra.voice_source ? extra.voice_source : null,
+        JSON.stringify((extra && Array.isArray(extra.suggested_apps) ? extra.suggested_apps : []).slice(0, 50))]);
     return { row };
 }
 

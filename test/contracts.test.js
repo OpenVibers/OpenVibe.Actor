@@ -38,6 +38,11 @@ const ROUTE_EXTENSIONS = new Map([
     ['POST /api/v1/triggers/:id/resume', 'actor.task.create'],
     ['POST /api/v1/triggers/:id/run', 'actor.task.create'],
     ['DELETE /api/v1/triggers/:id', 'actor.task.create'],
+    // An agent's voice as a file (actor.voice@1): the person's own agent and the voice they import into a new
+    // one. The routes exist before Contracts lists a voice capability; the agent capability they already hold
+    // guards them.
+    ['GET /api/v1/me/agents/:id/voice', 'actor.agent.manage'],
+    ['POST /api/v1/me/agents/import', 'actor.agent.manage'],
 ]);
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 // The A2A surface (stage V2-11): POST /a2a/v1/tasks and GET /a2a/v1/tasks/:id, guarded by actor.a2a.task.
