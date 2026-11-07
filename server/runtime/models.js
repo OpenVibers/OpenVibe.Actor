@@ -487,9 +487,9 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                     ...(subject ? { onBehalfOf: { type: 'user', id: String(subject) } } : {}),
                     ...(target ? { target } : {}),
                     // A routine's run may wait (plan BA/HO): the class the caller asked for, so AI's router may pick a
-                    // Flex tier, off-peak or the host's own idle model. BA1 has not merged yet, so the released
-                    // ai run-request@1 refuses an option it does not know: only send it when this server is told
-                    // ACTOR_AI_LATENCY_CLASSES=on, after AI's contract carries it.
+                    // Flex tier, off-peak or the host's own idle model. Contracts 0.336.0 carries options.latency
+                    // (plan BA3); the flag stays until the AI service is deployed with it, because a server still on
+                    // the older contract refuses an option it does not know.
                     options: { cache: false, ...(latency && ai.latencyClasses ? { latency } : {}) },
                     signal: sig,
                 });

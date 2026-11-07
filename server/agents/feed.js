@@ -26,7 +26,9 @@ async function lately(s, requester, { approvals = [], agents = [], limit = 10 } 
     for (const a of approvals) {
         events.push({ at: a.created_at, kind: 'asked', state: 'pending', text: `Asked for your approval: ${a.summary}`, href: `/me/approvals/${a.id}` });
         if (a.decided_at && DECIDED[a.state]) {
-            events.push({ at: a.decided_at, kind: 'decided', state: a.state, text: `${DECIDED[a.state]}: ${a.summary}`, href: `/me/approvals/${a.id}` });
+            // Once or always: the person can see which they chose (plan HO1).
+            const how = a.state === 'approved' ? (a.decision_scope === 'always' ? ' (and allowed it always for this agent)' : ' (once)') : '';
+            events.push({ at: a.decided_at, kind: 'decided', state: a.state, text: `${DECIDED[a.state]}${how}: ${a.summary}`, href: `/me/approvals/${a.id}` });
         }
     }
     return events.sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0)).slice(0, limit);

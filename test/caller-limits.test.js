@@ -31,6 +31,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             'actor.approval.decide': { minute: 30, hour: 600 },
             'actor.resource.control': { minute: 30, hour: 600 },
             'actor.assignment.cancel': { minute: 30, hour: 600 },
+            'actor.voice.borrow': { minute: 6, hour: 60 },
         });
     });
 

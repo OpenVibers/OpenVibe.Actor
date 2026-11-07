@@ -39,6 +39,8 @@ const BUDGETS = {
     'actor.assignment.cancel': { minute: 30, hour: 600 },
     // The kill switch and the other controls of the agent (design 2026-11-07).
     'actor.resource.control': { minute: 30, hour: 600 },
+    // Borrowing a shared voice: a person may take a few voices an hour, not a few a minute.
+    'actor.voice.borrow': { minute: 6, hour: 60 },
 };
 
 function createCallerLimits({ config, now = () => Date.now(), registry = null, log = console, enabled = true, valkey = null }) {

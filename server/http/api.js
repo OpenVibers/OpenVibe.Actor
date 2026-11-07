@@ -37,6 +37,7 @@ const { findArtifact, sendArtifact } = require('../runtime/artifacts');
 const trace = require('../runtime/trace');
 const personal = require('../agents/personal');
 const contacts = require('../agents/contacts');
+const voice = require('../agents/voice');
 const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
 const items = require('../actions/items');
@@ -95,9 +96,20 @@ function createApi(ctx) {
             lastEvent: store.parseJson(row.last_event), steps: Number(row.tool_steps),
             wait: waitFor.get(row.id) || null, now: s.now,
         }));
-        const asks = (await approvals.list(s, requester))
-            .filter((a) => a.state === 'pending')
-            .map(items.approvalItem);
+        // A waiting approval reaches the Action Center as an item a person can read: the kind in plain words, the
+        // agent's own name (never its id) and the thread it came from (plan HO1).
+        const pending = (await approvals.list(s, requester)).filter((a) => a.state === 'pending');
+        const agents = await s.db.many('SELECT id, name FROM actor_agents WHERE owner = $1', [requester]);
+        const agentName = new Map(agents.map((a) => [a.id, a.name]));
+        const threadIds = pending.map((a) => a.task_id).filter(Boolean);
+        const threads = threadIds.length
+            ? await s.db.many('SELECT id, task FROM tasks WHERE id = ANY($1)', [threadIds])
+            : [];
+        const threadTitle = new Map(threads.map((t) => [t.id, items.plain(t.task, 160)]));
+        const asks = pending.map((a) => items.approvalItem(a, {
+            agentName: a.agent_id ? agentName.get(a.agent_id) || null : null,
+            thread: a.task_id ? threadTitle.get(a.task_id) || null : null,
+        }));
         const scheduled = (await personal.list(s, requester))
             .filter((a) => a.status === 'active' && a.schedule !== 'off' && a.next_run_at)
             .map(items.scheduledItem);
@@ -115,7 +127,8 @@ function createApi(ctx) {
         if (!['approve', 'decline'].includes(decision)) return problem(req, res, 422, 'actor.approval.invalid', 'decision must be approve or decline');
         const out = await approvals.decide(ctx, `user:${subject}`, req.params.id, decision, { idempotent: true });
         if (out.error) return problem(req, res, out.status, out.status === 404 ? 'actor.approval.not_found' : 'actor.approval.invalid', out.error);
-        res.json(items.approvalItem(out.row));
+        const named = out.row && out.row.agent_id ? await s.db.maybe('SELECT name FROM actor_agents WHERE id = $1', [out.row.agent_id]) : null;
+        res.json(items.approvalItem(out.row, { agentName: named ? named.name : null }));
     });
 
     // ── The catalog, the contacts and the dry run ────────────
@@ -265,6 +278,29 @@ function createApi(ctx) {
     });
     r.get('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (row) res.json(row);
+    });
+    // The agent's voice as a file (actor.voice@1). Another person's agent is the same 404 as one that does not exist.
+    r.get('/me/agents/:id/voice', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
+        const row = await loadAgent(req, res); if (!row) return;
+        const subject = (req.principal && req.principal.subject) || String((req.principal && req.principal.requester) || '').replace(/^user:/, '');
+        const doc = voice.build(row, { subject });
+        res.set('Content-Disposition', 'attachment; filename="voice.json"');
+        res.json(doc);
+    });
+    // Import a voice: an actor.voice@1 document becomes a new agent, at level ask whatever the file says.
+    r.post('/me/agents/import', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
+        const body = req.body || {};
+        const read = voice.read(body.voice || body.document || null);
+        if (read.error) return problem(req, res, 422, 'actor.voice.invalid', read.error);
+        const fields = voice.toContact(read.doc, { source: 'file' });
+        const out = await contacts.create(s, config, req.principal.requester, {
+            name: fields.name, face: fields.face, model: fields.model, apps: fields.apps, memory: null,
+            level: fields.level, instructions: fields.instructions,
+        }, { bio: fields.bio, rules: fields.rules, suggested_apps: fields.suggested_apps, voice_author: fields.voice_author, voice_author_name: fields.voice_author_name,
+            voice_author_checked: fields.voice_author_checked, voice_source: fields.voice_source });
+        if (!out.row) return failed(req, res, out);
+        res.set('Location', `/api/v1/me/agents/${out.row.id}`);
+        res.status(201).json(out.row);
     });
     r.patch('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
         const out = await personal.update(s, config, req.principal.requester, req.params.id, req.body);

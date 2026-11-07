@@ -29,6 +29,7 @@ const { route, whyNone } = require('../agents/router');
 const { check } = require('../agents/check');
 const { check: checkClaims } = require('../runtime/check');
 const approvals = require('../agents/approvals');
+const allows = require('../agents/allows');
 const contacts = require('../agents/contacts');
 const assignments = require('../agents/assignments');
 const runTokens = require('../triggers/tokens');
@@ -64,7 +65,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
      * event or a goal — may wait, so it asks for "background": AI then picks the cheapest tier that can wait (a
      * Flex service tier, off-peak, or the host's own idle model). An interactive task asks for nothing and keeps
      * the router's normal choice. server/runtime/models.js sends the class only when ACTOR_AI_LATENCY_CLASSES is
-     * on, because AI's released run-request contract does not carry it until BA1 merges.
+     * on, so a server pointed at an AI still on the older contract (before options.latency) is never refused.
      */
     async function latencyClass(taskId) {
         const root = await s.db.maybe('SELECT origin FROM actor_assignments WHERE task_id = $1 AND depth = 0', [taskId]).catch(() => null);
@@ -350,11 +351,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         let closeAssignment = null;
         // One place every approval gate asks through: the level, then the always-ask floor, then (for approve-for-me)
         // a reviewer model of another family. Returns { asked: false } when the step may go ahead.
-        const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT }) => {
+        // A standing permission the person gave for this exact kind and target (plan HO1) is read here: it lets the
+        // step go on, and it never covers the floor.
+        const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT, target = null }) => {
             const categories = levels.classify({ category, summary, payload, recipientKnown });
-            const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal });
+            const rules = taskAgent ? await allows.list(s, row.requester, taskAgent.id) : [];
+            const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal, allow: { kind, target, rules } });
             if (!decision.ask) return { asked: false, decision };
-            const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary, payload });
+            const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary, payload, target, categories });
             const url = `${config.baseUrl}/me/approvals/${ask.id}`;
             await emit(id, { kind: 'output', step: 'text', agent, text: `Your agent wants to ${String(summary).toLowerCase()} Nothing runs until you approve it: ${url}` });
             await tellPerson(row, 'needs_you', { what: `approve: ${summary}`, url });
@@ -443,8 +447,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // A task that would start coding work on the person's machine asks through the same gate (levels.js):
                 // the level first, then the always-ask floor. Full access or auto-edits may let an edit through; a
                 // payment, password, deletion or a new recipient never does.
-                requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null }) => {
-                    const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown });
+                requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, target = null }) => {
+                    const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown, target });
                     if (!out.asked) return null;
                     return { pending: true, id: out.ask.id, url: out.url };
                 } : null;
@@ -673,7 +677,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (agentId === 'codes' && taskAgent && codesRepoIn(row.task)) {
                     const asked = await askForApproval({
                         kind: 'codes.task', summary: `Start a coding task on your machine in ${codesRepoIn(row.task)}`,
-                        payload: { task: row.task }, act: 'edit', agent: agentId,
+                        payload: { task: row.task }, act: 'edit', agent: agentId, target: require('../agents/actions').repoTarget(codesRepoIn(row.task)),
                     });
                     if (asked.asked) {
                         const result = {

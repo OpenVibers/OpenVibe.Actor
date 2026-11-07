@@ -123,6 +123,26 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.match(deleteResult.answer, /Nothing has run: approve or decline it at https:\/\/openvibe\.actor\/me\/approvals\/apr_/);
             assert.strictEqual(codesCalls.length, before, 'a deletion never runs without its owner, even at full access');
         });
+        await check('an approval page says the floor first, the command as one line and the agent by its name', async () => {
+            const contacts = require('../server/agents/contacts');
+            const owner = `user:${ada.subject}`;
+            const helper = (await contacts.create(t.ctx.s, t.config, owner, { name: 'Tidy helper', level: 'ask' })).row;
+            const ask = await approvals.request(t.ctx.s, { owner, agentId: helper.id, kind: 'actor.action',
+                summary: 'Run "rm -rf /tmp/old build" on your computer', payload: { argv: ['rm', '-rf', '/tmp/old build'], machine: 'dev_x', cwd: '/home/ada' } });
+            const one = await t.get(`/me/approvals/${ask.id}`, { as: ada });
+            assert.strictEqual(one.status, 200, one.text);
+            assert.match(one.text, /class="pa-caution"[^>]*>This deletes something\. It cannot be undone\./, 'the floor first, in words');
+            assert.match(one.text, /On <b>dev_x<\/b>, it runs:/);
+            assert.ok(one.text.includes('rm -rf &#39;/tmp/old build&#39;'), 'the command as one line, the spaced path quoted (escaped in the page)');
+            assert.match(one.text, />Tidy helper<\/a>/, 'the agent by its name');
+            const asked = (one.text.match(/Asked [\s\S]{0,240}/) || [''])[0];
+            assert.match(asked, /title="[^"]+ UTC">(just now|[^<]* ago)</, `a time a person reads, the exact one in its title: ${asked}`);
+            assert.match(one.text, /expires <time[^>]*>in [67] days</);
+            const later = await approvals.request(t.ctx.s, { owner, agentId: helper.id, kind: 'actor.action', summary: 'Run "ls" on your computer', payload: { argv: ['ls'], machine: 'dev_x' } });
+            await t.ctx.s.db.query("UPDATE actor_approvals SET expires_at = $2 WHERE id = $1", [later.id, new Date(Date.parse(t.ctx.s.iso()) + 6.75 * 86400000).toISOString()]);
+            assert.match((await t.get(`/me/approvals/${later.id}`, { as: ada })).text, /expires <time[^>]*>in 6 days</, 'never more time than there is');
+            assert.ok(one.text.includes('The exact request'), 'the details stay, after the plain words');
+        });
     } finally {
         await t.close();
     }
