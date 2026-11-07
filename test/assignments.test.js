@@ -20,6 +20,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
     const state = { hang: false };
     const t = await boot({
         loop: {
+            close: async () => {},
             run: async (args) => {
                 if (state.hang) {
                     return new Promise((resolve, reject) => {

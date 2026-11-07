@@ -126,6 +126,7 @@ function gate(level, asked) {
     const seen = [];
     const t = await boot({
         loop: {
+            close: async () => {},
             run: async (args) => {
                 seen.push(args);
                 if (args.task.includes('delete')) {
