@@ -95,9 +95,20 @@ function createApi(ctx) {
             lastEvent: store.parseJson(row.last_event), steps: Number(row.tool_steps),
             wait: waitFor.get(row.id) || null, now: s.now,
         }));
-        const asks = (await approvals.list(s, requester))
-            .filter((a) => a.state === 'pending')
-            .map(items.approvalItem);
+        // A waiting approval reaches the Action Center as an item a person can read: the kind in plain words, the
+        // agent's own name (never its id) and the thread it came from (plan HO1).
+        const pending = (await approvals.list(s, requester)).filter((a) => a.state === 'pending');
+        const agents = await s.db.many('SELECT id, name FROM actor_agents WHERE owner = $1', [requester]);
+        const agentName = new Map(agents.map((a) => [a.id, a.name]));
+        const threadIds = pending.map((a) => a.task_id).filter(Boolean);
+        const threads = threadIds.length
+            ? await s.db.many('SELECT id, task FROM tasks WHERE id = ANY($1)', [threadIds])
+            : [];
+        const threadTitle = new Map(threads.map((t) => [t.id, items.plain(t.task, 160)]));
+        const asks = pending.map((a) => items.approvalItem(a, {
+            agentName: a.agent_id ? agentName.get(a.agent_id) || null : null,
+            thread: a.task_id ? threadTitle.get(a.task_id) || null : null,
+        }));
         const scheduled = (await personal.list(s, requester))
             .filter((a) => a.status === 'active' && a.schedule !== 'off' && a.next_run_at)
             .map(items.scheduledItem);
@@ -115,7 +126,8 @@ function createApi(ctx) {
         if (!['approve', 'decline'].includes(decision)) return problem(req, res, 422, 'actor.approval.invalid', 'decision must be approve or decline');
         const out = await approvals.decide(ctx, `user:${subject}`, req.params.id, decision, { idempotent: true });
         if (out.error) return problem(req, res, out.status, out.status === 404 ? 'actor.approval.not_found' : 'actor.approval.invalid', out.error);
-        res.json(items.approvalItem(out.row));
+        const named = out.row && out.row.agent_id ? await s.db.maybe('SELECT name FROM actor_agents WHERE id = $1', [out.row.agent_id]) : null;
+        res.json(items.approvalItem(out.row, { agentName: named ? named.name : null }));
     });
 
     // ── The catalog, the contacts and the dry run ────────────

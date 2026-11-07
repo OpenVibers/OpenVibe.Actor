@@ -162,7 +162,8 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
             if (step) {
                 let ask;
                 try {
-                    ask = await ctx.requestApproval({ kind: 'actor.action', ...step });
+                    // The step says which kind of act it is (plan HO1); an unknown tool is an action of a connected tool.
+                    ask = await ctx.requestApproval({ ...step, kind: step.kind || 'actor.action' });
                 } catch (err) {
                     return normalize({ text: JSON.stringify({ error: `the approval gate could not be asked, so nothing ran: ${(err && err.message) || err}`.slice(0, 300) }), isError: true });
                 }

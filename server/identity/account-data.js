@@ -82,6 +82,8 @@ const TABLES = [
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_chat_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'chat-app-approvals.json' },
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
+    // The standing permissions the person gave their agents (agents/allows.js): what they always allow, and when.
+    { table: 'actor_approval_allows', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approval-allows.json' },
     // The agent's timeline (design 2026-11-07): the steps the agent took for this person, and whether they paused
     // it. Titles, outcomes and links only: there is no column for a prompt or a diff, so none can be exported.
     { table: 'agent_timeline', subject: 'subject', value: (usr) => `user:${usr}`, file: 'timeline.json',

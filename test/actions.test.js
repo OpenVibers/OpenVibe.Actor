@@ -72,6 +72,7 @@ const DAY = 86_400_000;
         const declined = `apr_${ids.ulid()}`;
         const oldApproval = `apr_${ids.ulid()}`;
         const theirsApproval = `apr_${ids.ulid()}`;
+        const thread = ids.newId('task');
         const agent = ids.newId('agent');
         const paused = ids.newId('agent');
         const off = ids.newId('agent');
@@ -84,9 +85,11 @@ const DAY = 86_400_000;
             await addTask({ id: cancelled, state: 'cancelled', text: 'Stopped task', created: now - 5 * DAY, finished: now - 4 * DAY });
             await addTask({ id: old, state: 'succeeded', text: 'Ancient', created: now - 45 * DAY, finished: now - 40 * DAY });
             await addTask({ id: theirs, requester: `user:${bo.subject}`, state: 'running', text: 'Bo\'s task' });
+            // The thread the approval came from (plan HO1): its own words are what the hub shows.
+            await addTask({ id: thread, state: 'running', text: 'Fix the failing test in the repository' });
 
-            await db.query(`INSERT INTO actor_approvals (id, owner, agent_id, kind, summary, payload, state, created_at, expires_at, decided_at)
-                VALUES ($1,$2,$3,'codes.task','Approve the fix', $4::jsonb,'pending',$5,$6,NULL)`, [approval, `user:${ada.subject}`, agent, JSON.stringify({ task: 'Fix the **bug** in the repository' }), iso(now - 3600_000), iso(now + 6 * DAY)]);
+            await db.query(`INSERT INTO actor_approvals (id, owner, agent_id, task_id, kind, summary, payload, state, created_at, expires_at, decided_at)
+                VALUES ($1,$2,$3,$4,'codes.task','Approve the fix', $5::jsonb,'pending',$6,$7,NULL)`, [approval, `user:${ada.subject}`, agent, thread, JSON.stringify({ task: 'Fix the **bug** in the repository' }), iso(now - 3600_000), iso(now + 6 * DAY)]);
             await db.query(`INSERT INTO actor_approvals (id, owner, agent_id, kind, summary, payload, state, created_at, expires_at, decided_at)
                 VALUES ($1,$2,$3,'codes.task','Already declined', '{}'::jsonb,'declined',$4,$5,$4)`, [declined, `user:${ada.subject}`, agent, iso(now - 2 * DAY), iso(now + 5 * DAY)]);
             await db.query(`INSERT INTO actor_approvals (id, owner, agent_id, kind, summary, payload, state, created_at, expires_at, decided_at)
@@ -116,7 +119,10 @@ const DAY = 86_400_000;
             assert.deepStrictEqual([byId.get(cancelled).bucket, byId.get(cancelled).actions], ['failed', ['open']]);
             assert.ok(byId.has(approval) && byId.get(approval).bucket === 'waiting', 'the pending approval waits');
             assert.deepStrictEqual(byId.get(approval).actions, ['approve', 'decline', 'open']);
-            assert.strictEqual(byId.get(approval).summary, 'Fix the bug in the repository');
+            // The kind in plain words, and the agent by its name (never its raw id).
+            assert.strictEqual(byId.get(approval).title, 'Approve the fix');
+            assert.strictEqual(byId.get(approval).summary, 'a coding task on your machine · Fix the failing test in the repository');
+            assert.strictEqual(byId.get(approval).agent, 'Morning report');
             assert.ok(!byId.has(declined), 'a decided approval is no longer an action waiting on the person');
             assert.deepStrictEqual([byId.get(agent).bucket, byId.get(agent).state, byId.get(agent).next_run_at], ['scheduled', 'scheduled', iso(now + 5 * 3600_000)]);
             assert.ok(!byId.has(paused) && !byId.has(off), 'paused and off agents are not scheduled');
