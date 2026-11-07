@@ -139,6 +139,8 @@ async function create(s, config, owner, input) {
     if (invalid) return { error: invalid };
     const instructions = body.instructions != null ? body.instructions : (base.instructions || `You are ${next.name}, one of this person's agents.`);
     if (typeof instructions !== 'string' || !instructions.trim() || instructions.length > 4000) return { error: 'instructions must be 1–4000 characters.' };
+    // Vibe comes first even when the first thing a person does is create another contact.
+    await ensureVibe(s, config, owner);
     const count = Number(await s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1', [owner]));
     if (count >= config.agents.maxPerOwner) return { limit: true, error: 'Agent limit reached.' };
     const now = s.iso();
