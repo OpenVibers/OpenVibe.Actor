@@ -1,7 +1,28 @@
 'use strict';
 
 const { serviceFor, json, personOf } = require('./_openvibe');
-const { prepareDesk, deskKind, placementOrder, AGENT_PROFILE } = require('./_person');
+const { prepareDesk, deskKind, placementOrder, AGENT_PROFILE, machineWord } = require('./_person');
+
+/**
+ * The Computer this task opened, as platform.task@1 carries it (plan 2026-11-07): the one id every surface reads.
+ * A desk on a desk host through an OpenVibe.Run session names that session (ses_…); a desk on the person's own
+ * machine has no Run session and says so with session_id null. where is whose it is: yours (their machine), home (a
+ * desk host someone offers at home) or network (an OpenVibe desk host).
+ */
+function computerOf({ run, machine, ses = null }) {
+    const session = ses && ses.session ? ses.session : null;
+    if (session) {
+        const trust = session.placement && session.placement.trust;
+        const where = trust === 'user-owned' ? 'yours' : trust === 'community' ? 'home' : 'network';
+        return {
+            session_id: session.id,
+            machine: where === 'yours' ? machineWord(run, session.placement && session.placement.machine) : where === 'home' ? 'a shared desk host' : 'an OpenVibe desk host',
+            where,
+            cost_hint: where === 'yours' ? 'free on your computer' : 'a desk host, metered by the minute',
+        };
+    }
+    return { session_id: null, machine: machineWord(run, machine), where: 'yours', cost_hint: 'free on your own computer' };
+}
 
 /**
  * A task's own desk (Desks plan D1). The model only ever says desk "private"; on a machine that runs several desks
@@ -41,13 +62,14 @@ module.exports = {
         if (a.machine === 'any') {
             if (desks && desks.placed) a = { ...a, machine: desks.placed };
             else if (a.action === 'start') {
-                const order = await placementOrder(person, { core, signal: ctx.signal });
+                const order = await placementOrder(person, { core, signal: ctx.signal, run: desks });
                 let out = null;
                 for (const id of order.slice(0, 4)) {
                     out = await startDesk({ ...a, machine: id }, person, core, ctx);
                     if (!(out && out.error && /limit|max_desks|already runs/i.test(out.error))) {
                         if (out && !out.error && desks && !desks.placed) desks.placed = id;
-                        return { text: json(out && !out.error ? { machine: id, ...out } : out), data: out };
+                        const computer = out && !out.error ? computerOf({ run: desks, machine: id }) : undefined;
+                        return { text: json(out && !out.error ? { machine: id, ...out } : out), data: out, ...(computer ? { computer } : {}) };
                     }
                 }
                 // None of the person's own machines has room (or none runs desks): a browser desk on a desk host,
@@ -56,7 +78,7 @@ module.exports = {
                     const ses = await core.pcs.openSession(person, { taskId: desks && desks.taskId, width: a.width, height: a.height, signal: ctx.signal });
                     if (!ses.error) {
                         if (desks) desks.placed = ses.machine;
-                        return { text: json({ machine: ses.machine, running: true, kind: 'browser', where: 'a desk host (none of your own computers had a desk free)', note: 'A browser alone, on a machine that is not the person\'s: computer_browser, computer_screen and computer_input work there with machine "any"; no programs or files. It ends with the task.' }), data: ses };
+                        return { text: json({ machine: ses.machine, running: true, kind: 'browser', where: 'a desk host (none of your own computers had a desk free)', note: 'A browser alone, on a machine that is not the person\'s: computer_browser, computer_screen and computer_input work there with machine "any"; no programs or files. It ends with the task.' }), data: ses, computer: computerOf({ run: desks, machine: ses.machine, ses }) };
                     }
                     if (!order.length) return { text: json({ error: `none of the person's computers runs desks for you now, and ${ses.error}` }), isError: true };
                 }
@@ -71,12 +93,14 @@ module.exports = {
         if (a.action === 'start') {
             const out = await startDesk(a, person, core, ctx);
             if (out && !out.error && desks && !desks.placed) desks.placed = a.machine;
-            return { text: json(out && out.running && !(core.pcs.isSession && core.pcs.isSession(a.machine)) ? { watch: core.pcs.watchUrl(a.machine, a.desk), ...out } : out), data: out };
+            const computer = out && !out.error ? computerOf({ run: desks, machine: a.machine }) : undefined;
+            return { text: json(out && out.running && !(core.pcs.isSession && core.pcs.isSession(a.machine)) ? { watch: core.pcs.watchUrl(a.machine, a.desk), ...out } : out), data: out, ...(computer ? { computer } : {}) };
         }
         const out = await core.pcs.desk(person, a.machine, a, { signal: ctx.signal });
         if (desks && out && !out.error) {
             if (a.action === 'stop' && desks.placed === a.machine) desks.placed = null;
         }
-        return { text: json(out && out.running && a.action !== 'stop' && !(core.pcs.isSession && core.pcs.isSession(a.machine)) ? { watch: core.pcs.watchUrl(a.machine, a.desk), ...out } : out), data: out };
+        // A stop clears the Computer: the task no longer holds one.
+        return { text: json(out && out.running && a.action !== 'stop' && !(core.pcs.isSession && core.pcs.isSession(a.machine)) ? { watch: core.pcs.watchUrl(a.machine, a.desk), ...out } : out), data: out, ...(a.action === 'stop' && out && !out.error ? { computer: null } : {}) };
     },
 };

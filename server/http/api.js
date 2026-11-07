@@ -40,6 +40,7 @@ const approvals = require('../agents/approvals');
 const items = require('../actions/items');
 const timeline = require('../agents/timeline');
 const modelPrefs = require('../runtime/model-prefs');
+const driving = require('../agents/driving');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_ID = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -426,7 +427,71 @@ function createApi(ctx) {
         // The desk it works on now, to watch live and take over (Desks plan).
         const desk = await store.taskDesk(s, row);
         if (desk) out.desk = desk;
+        // The Computer it opened (plan 2026-11-07: one id across Surf, the Dock and Actor), read from its own steps.
+        const computer = await store.taskComputer(s, row);
+        if (computer) out.computer = { ...computer, driving: driving.is(row.id, s.now()) };
         res.json(out);
+    });
+
+    // Take over / Give it back (plan 2026-11-07), built on the hand_to_person machinery: the person drives the desk
+    // they were handed, the agent's input is refused while they do, and the task's timeline gets one hand-off step.
+    // Only the task's own people (load()), and only while it runs on a Computer.
+    async function handoff(req, res, { take }) {
+        const row = await load(req, res);
+        if (!row) return;
+        if (!store.OPEN.includes(row.state)) return problem(req, res, 409, 'actor.task.ended', 'This task has ended: its Computer is gone.');
+        const computer = await store.taskComputer(s, row);
+        const desk = await store.taskDesk(s, row);
+        if (!computer && !desk) return problem(req, res, 409, 'actor.task.no_computer', 'This task has no Computer to hand over.');
+        if (!String(row.requester).startsWith('user:')) return problem(req, res, 409, 'actor.task.no_person', 'A Computer is a person\'s: sign in as the task\'s own person to take it.');
+        const at = s.iso();
+        const now = take ? (driving.take(row.id, s.now()), true) : (driving.give(row.id), false);
+        // The step in the task's own timeline (the same events /events streams), carrying the Computer.
+        const event = await store.appendEvent(s, row.id, {
+            at, kind: 'output', step: 'handoff',
+            text: now ? 'You took over the desk. The agent waits until you give it back.' : 'You gave the desk back. The agent goes on.',
+            ...(computer ? { computer } : {}),
+        });
+        stream.publish(row.id, event);
+        // And one step in the one timeline behind the Dock (agent.timeline-entry@1), the same Computer.
+        try {
+            await timeline.upsert(s, row.requester, {
+                step_id: `${row.id}:takeover`, mode: 'browse', product: 'actor', ref: row.id,
+                title: now ? 'You took over the desk' : 'You gave the desk back',
+                status: now ? 'running' : 'done', started_at: now ? at : undefined, ended_at: now ? null : at,
+                placement: computer ? { where: computer.machine, why: now ? 'you are driving the desk' : 'the agent goes on' } : null,
+                link: `${config.baseUrl}/tasks/${row.id}`, ...(computer ? { computer } : {}),
+            });
+        } catch (err) { /* the task's own timeline above is the source of truth */ }
+        const out = await wireTask(row);
+        if (computer) out.computer = { ...computer, driving: Boolean(now) };
+        if (desk) out.desk = desk;
+        res.json(out);
+    }
+    r.post('/tasks/:id/takeover', principal.requireCapability('actor.task.create'), async (req, res) => handoff(req, res, { take: true }));
+    r.post('/tasks/:id/giveback', principal.requireCapability('actor.task.create'), async (req, res) => handoff(req, res, { take: false }));
+
+    // The Computer's newest frame, fetched from the session's own service (Run) as Actor, acting for the task's
+    // person: the person's own token would have to cross an origin, and the picture is theirs. Owner/project only
+    // (load()); a task with no Run session has no picture, and neither has anyone asking for another person's task.
+    // A still is its task's person's, and nobody else's: a signed-out visitor and an app token get the same 404 as a
+    // task that does not exist (never a 401 that would confirm one).
+    const stillPerson = (req, res, next) => ((req.principal && req.principal.kind === 'user') ? next() : problem(req, res, 404, 'actor.task.not_found', 'No such task.'));
+    r.get('/tasks/:id/still', stillPerson, principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        const computer = await store.taskComputer(s, row);
+        if (!computer || !computer.session_id) return problem(req, res, 404, 'actor.task.no_still', 'This task has no Computer picture.');
+        if (!String(row.requester).startsWith('user:')) return problem(req, res, 404, 'actor.task.no_still', 'This task has no Computer picture.');
+        const shot = await ctx.computers.still(row.requester.slice(5), computer.session_id);
+        if (!shot || shot.error) return problem(req, res, shot && shot.status === 404 ? 404 : 502, (shot && shot.code) || 'actor.task.no_still', (shot && shot.error) || 'No picture.');
+        // Only a picture: a broken or hostile upstream can never serve HTML from openvibe.actor.
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(shot.type)) return problem(req, res, 502, 'still.bad_type', 'The session sent something that is not an image.');
+        res.set('Cache-Control', 'private, no-store');
+        res.set('X-Content-Type-Options', 'nosniff');
+        res.set('Content-Type', shot.type);
+        res.set('Content-Length', String(shot.bytes.length));
+        return res.status(200).end(shot.bytes);
     });
 
     // The task's trace (stage V2-10): the numbers and names of its model, tool, check and delegate calls, to its own
