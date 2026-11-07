@@ -31,6 +31,7 @@ const { check: checkClaims } = require('../runtime/check');
 const approvals = require('../agents/approvals');
 const contacts = require('../agents/contacts');
 const assignments = require('../agents/assignments');
+const runTokens = require('../triggers/tokens');
 const levels = require('../agents/levels');
 const { repoIn: codesRepoIn } = require('../agents/codes');
 const memory = require('../memory');
@@ -45,7 +46,7 @@ const LOOP_AGENT = 'openvibe-runtime';
 // What a task asked in a public chat may be (chat/asks.js): nothing that uses the person's own computers, robots or code.
 const PUBLIC_CLASSES = ['answer', 'lookup', 'research', 'web'];
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null }) {
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
     // A question the loop asked before any tool ran (stage V2-8): the task waits in needs_you, the page shows the
@@ -55,6 +56,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     // resumes. One per task: the task is queued again and the payload is taken when it starts.
     const wakes = new Map();
     let waits = waitsArg;
+    // Triggers are created after the engine (they need it to run now); the app sets them once.
+    let triggers = triggersArg;
+    const setTriggers = (t) => { triggers = t || null; };
     const controls = new Map();     // task id → the run's control object (live assumptions)
     let stopped = false;
 
@@ -148,6 +152,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         await emit(id, { kind: ended ? 'end' : 'state', state, ...(agentForEvent ? { agent: agentForEvent } : {}) });
         // The assignment tree follows the task it runs (plan §12 A-2), and its root's spend is written with it.
         if (row) await assignments.syncTaskState(s, row).catch((err) => log.warn && log.warn('[Actor] assignment state:', id, (err && err.message) || err));
+        // A trigger's card follows its run: a failure streak grows, five in a row pause it, a success clears it.
+        if (row && triggers) await triggers.taskState(row).catch((err) => log.warn && log.warn('[Actor] trigger state:', id, (err && err.message) || err));
+        if (ended) runTokens.drop(id);
         if (ended) stream.end(id);
         // "Tell me when it's done" (stage V2-6): done or failed, once per task. Cancelled is the person's own action.
         if (ended && row && (state === 'succeeded' || state === 'failed')) await tellPerson(row, state);
@@ -827,7 +834,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
 
     const status = () => ({ running: running.size, waiting: waiting.length });
 
-    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, MAX_ATTEMPTS };
+    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, setTriggers, MAX_ATTEMPTS };
 }
 
 module.exports = { createEngine, MAX_ATTEMPTS };

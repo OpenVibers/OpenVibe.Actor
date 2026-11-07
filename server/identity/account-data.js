@@ -42,6 +42,10 @@ const TABLES = [
     // shows. Before the tasks, so the rows are counted before the task's cascade would take them.
     { table: 'actor_waits', subject: 'requester', value: (usr) => `user:${usr}`, file: 'waits.json',
         columns: ['id', 'task_id', 'requester', 'step', 'kind', 'until', 'filter', 'deadline_at', 'on_timeout', 'line', 'status', 'created_at', 'updated_at', 'finished_at'] },
+    // The triggers they made in a conversation (plan §12 A-4): the schedule or event source, the agent and task,
+    // and the card's last result. owner is the bare usr_… subject. Their runs hang on it and go with a cascade.
+    { table: 'actor_triggers', subject: 'owner', value: (usr) => usr, file: 'triggers.json',
+        columns: ['id', 'owner', 'agent_id', 'task', 'kind', 'schedule', 'event', 'timezone', 'words', 'level', 'state', 'paused_reason', 'failures', 'watch_id', 'turn_task_id', 'last_task_id', 'last_state', 'last_run_at', 'created_at', 'updated_at'] },
     // The tree of delegated work (plan §12 A-2): one row per hand-off, with the agent, task, level and budget
     // state. Before tasks, so the rows are counted before a task's cascade could take them.
     { table: 'actor_assignments', subject: 'owner', value: (usr) => `user:${usr}`, file: 'assignments.json',

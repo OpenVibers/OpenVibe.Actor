@@ -32,6 +32,18 @@ function maxLevel(...levels) {
     return out;
 }
 
+/** The lower of the named levels: a routine may never run above the level of the person who made it. */
+function minLevel(...levels) {
+    let out = 'full';
+    let found = false;
+    for (const level of levels) {
+        if (!LEVELS.includes(level)) continue;
+        if (!found || RANK[level] < RANK[out]) out = level;
+        found = true;
+    }
+    return found ? out : 'ask';
+}
+
 function textOf(value, depth = 0) {
     if (value == null || depth > 4) return '';
     if (typeof value === 'string') return value;
@@ -104,4 +116,4 @@ async function review({ models = null, summary = '', payload = null, signal = nu
     }
 }
 
-module.exports = { LEVELS, RANK, ALWAYS_ASK, maxLevel, classify, floorFor, decide, review, REVIEW_TIMEOUT_MS };
+module.exports = { LEVELS, RANK, ALWAYS_ASK, maxLevel, minLevel, classify, floorFor, decide, review, REVIEW_TIMEOUT_MS };

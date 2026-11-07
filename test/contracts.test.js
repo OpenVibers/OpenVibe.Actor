@@ -28,6 +28,16 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/agent/timeline/:id', 'actor.timeline.read'],
     ['POST /api/v1/agent/approvals/:product/:id/decide', 'actor.approval.decide'],
     ['POST /api/v1/agent/kill-switch', 'actor.resource.control'],
+    // Triggers made in a conversation (plan §12 A-4). The routes exist before Contracts lists actor.trigger.*; a
+    // trigger is the person's own work record, so the task capabilities the person already holds guard it.
+    ['GET /api/v1/triggers', 'actor.task.read'],
+    ['GET /api/v1/triggers/:id', 'actor.task.read'],
+    ['POST /api/v1/triggers', 'actor.task.create'],
+    ['PATCH /api/v1/triggers/:id', 'actor.task.create'],
+    ['POST /api/v1/triggers/:id/pause', 'actor.task.create'],
+    ['POST /api/v1/triggers/:id/resume', 'actor.task.create'],
+    ['POST /api/v1/triggers/:id/run', 'actor.task.create'],
+    ['DELETE /api/v1/triggers/:id', 'actor.task.create'],
 ]);
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 // The A2A surface (stage V2-11): POST /a2a/v1/tasks and GET /a2a/v1/tasks/:id, guarded by actor.a2a.task.

@@ -29,6 +29,7 @@ const { createRegistry } = require('./runtime/tools');
 const { createLoop } = require('./runtime/loop');
 const { createStats } = require('./runtime/stats');
 const { createEngine } = require('./tasks/engine');
+const { createTriggers } = require('./triggers/service');
 const { createWebhooks } = require('./tasks/webhooks');
 const { createChatClient } = require('./chat/client');
 const { createLocalSignIn } = require('./auth/local');
@@ -128,6 +129,10 @@ async function createApp(opts = {}) {
     // Network notifications ("tell me when it's done"): off without a client secret, never able to fail a task.
     const notifier = opts.notifier || createNotifier({ config, fetchImpl, log });
     const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier, registry, checkpoints });
+    // Triggers (plan §12 A-4): a Watch subscription the person owns, its card in the thread, and the run back as an
+    // assignment root at the trigger's level. The engine reports every task state so the card's streak stays true.
+    const triggers = opts.triggers || createTriggers({ s, config, engine, webhooks, stream, now: s.now, log, fetchImpl: providerFetch });
+    engine.setTriggers(triggers);
     // Waits (plan A2): a wait is a record, not a running loop. The module owns the rows, the matcher, the loop
     // guard and the deadline; the engine parks a run and resumes it when the wait ends.
     const waits = opts.waits || require('./waits').createWaits({
@@ -149,7 +154,7 @@ async function createApp(opts = {}) {
     // The person's computers (agents/computers.js): one adapter for the task's still proxy, made here so a test can
     // stand Bot/Run in (opts.bot.computers) exactly as the Console pages do.
     const computers = (opts.bot && opts.bot.computers) || require('./agents/computers').createComputers({ config, fetchImpl: providerFetch, log });
-    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers };
+    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers };
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;
