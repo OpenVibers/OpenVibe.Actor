@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * An agent answers the mail sent to its own address (track HO6, channels, step 2 — Actor's half).
+ * An agent answers mail sent to an address bound to it (HO6 and HO14).
  *
  * Mail publishes mail.agent_inbox.received for an inbox whose answering switch the person turned on. This module
  * takes that event and, for one letter:
  *
  *   1. decides whether to start anything at all: the person's switch (off by default), the two hourly windows the
  *      brief names (20 letters per inbox, 5 per sender), and that the agent still exists and is theirs;
- *   2. runs THAT agent for its owner, with the letter as INPUT DATA under the data note (server/mail/prompt.js): the
+ *   2. runs the bound agent for its owner, with the letter as INPUT DATA under the data note (server/mail/prompt.js): the
  *      agent's own instructions and level apply, and nothing the letter says can change either;
  *   3. turns the answer into a reply. A reply to one of the owner's own openvibe.email addresses is sent directly
  *      (Mail delivers it locally). A reply to anyone else is an HO1 approval of kind "send", with the draft shown:

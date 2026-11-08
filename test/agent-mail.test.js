@@ -381,6 +381,11 @@ async function runOf(t, messageId) {
                 assert.ok(mail.calls.some(c => c.method === 'POST' && c.url === '/internal/mail/agents/helper/reply' && c.body?.message_id === 'm-moved'),
                     'the reply uses the source address after the move');
                 assert.strictEqual((await bindings.list(t.ctx.s, owner)).filter(b => b.kind === 'mail' && b.account_id === inbox.id).length, 1);
+                const familyPage = await t.get(`/me/agents/${family.id}`, { as: dana });
+                assert.ok(familyPage.text.includes('Where it listens') && familyPage.text.includes(inbox.address)
+                    && familyPage.text.includes('Unbind'), 'the receiving agent lists the moved address');
+                const sourcePage = await t.get(`/me/agents/${agent.id}`, { as: dana });
+                assert.ok(sourcePage.text.includes('Currently on Family'), 'the source agent shows where its address moved');
             });
             await bindings.unbind(t.ctx.s, { kind: 'mail', accountId: inbox.id, owner, agentId: family.id });
             const unbound = await t.ctx.agentMail.onEvent(letterEvent({ inbox, owner: dana.subject, messageId: 'm-unbound' }));
