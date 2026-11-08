@@ -116,6 +116,13 @@ async function decide(ctx, owner, id, decision, { idempotent = false } = {}) {
         if (always && !allow.row) return { error: allow.error || 'This step could not be allowed.', status: 422 };
         const done = await s.db.one("UPDATE actor_approvals SET state = 'approved', decided_at = $2, decided_by = $3, decision_scope = $4, allow_id = $5 WHERE id = $1 AND state = 'pending' RETURNING *",
         [id, s.iso(), owner, always ? 'always' : 'once', allow.row ? allow.row.id : null]);
+        // A mail reply (track HO6) is the one non-coding send whose arguments are all still here: the draft is in the
+        // request, so a yes sends it now instead of asking the person to run something again.
+        const reply = ctx.agentMail ? await ctx.agentMail.sendApproved(owner, done).catch((err) => ({ sent: false, reason: String((err && err.message) || err) })) : null;
+        if (reply && reply.waiting) {
+            return { row: done, note: 'Approved. OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.', waiting: true, allow: allow.row ? allow.row.id : null };
+        }
+        if (reply && reply.sent) return { row: done, note: 'Approved and sent.', allow: allow.row ? allow.row.id : null, mail: true };
         return { row: done, note: 'Approved. The run that asked had already stopped; run it again to let the agent go on.', allow: allow.row ? allow.row.id : null };
     }
     const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
