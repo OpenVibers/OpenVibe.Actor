@@ -242,11 +242,11 @@ function runOf(fetchImpl, { waitMs = 1000, clock = { t: 0 } } = {}) {
         await check('the card and install page say it runs code in a sandbox, with each tool\'s net and the scan findings per tool', async () => {
             const page = await t.get('/skills/slugify-a-title', { as: alice });
             assert.strictEqual(page.status, 200, page.text);
-            assert.ok(page.text.includes('Runs code in a sandbox on your machine or OpenVibe\'s'), 'the sandbox words');
+            assert.ok(page.text.includes('<h2>Its code</h2>') && page.text.includes('It runs in a sandbox on a machine of yours'), 'the sandbox words, once');
             assert.ok(page.text.includes('no internet'), 'the net in plain words');
             assert.ok(page.text.includes('slugify'), 'the tool is listed');
             const list = await t.get('/skills');
-            assert.ok(list.text.includes('Runs code in a sandbox on your machine or OpenVibe\'s'), 'the card says it too');
+            assert.ok(list.text.includes('Runs code in a sandbox'), 'the card says it too, as a chip');
         });
 
         await check('a flagged code skill asks first and a failed one never installs', async () => {

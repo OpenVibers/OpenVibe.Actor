@@ -21,7 +21,14 @@
 .sk-panel { max-width: 46rem; margin: 0 0 1rem; }
 .sk-panel h2 { margin: 0 0 .35rem; font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .sk-findings { margin: .4rem 0 0; padding-left: 1.1rem; }
-.sk-findings li { margin: .3rem 0; line-height: 1.45; }
+.sk-findings li { margin: .3rem 0; line-height: 1.5; font-size: .9rem; color: var(--text-secondary); }
+/* Body text in a panel: one size and colour for every sentence (11-08: findings and "what it may ask for" ran large). */
+.sk-text { margin: 0; font-size: .9rem; line-height: 1.5; color: var(--text-secondary); }
+/* A catalogue card's chips: the scan in two words, and a sandbox skill says so. */
+.sk-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .3rem; }
+.sk-chip { padding: .1rem .5rem; border-radius: 999px; border: 1px solid var(--border-light); color: var(--text-secondary); font-size: .72rem; font-weight: 650; line-height: 1.5; white-space: nowrap; }
+.sk-chip--passed { color: var(--success, var(--text-secondary)); border-color: color-mix(in srgb, var(--success, #22c55e) 40%, var(--border-light)); }
+.sk-chip--failed { color: var(--text-primary); border-color: color-mix(in srgb, var(--danger, #ef4444) 50%, var(--border-light)); }
 .sk-sev { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .sk-sev--block { color: var(--text-primary); }
 .sk-sev--warn { color: var(--text-secondary); }
