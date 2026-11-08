@@ -146,7 +146,7 @@ const RULES = [
         await check('a skill\'s page shows its instructions, what it may ask for in plain words, and the scan\'s words', async () => {
             const list = await t.get('/skills');
             assert.strictEqual(list.status, 200, list.text);
-            assert.ok(list.text.includes('The scan found nothing to worry about.'), 'the scan state is in words');
+            assert.ok(list.text.includes('Scanned: clear'), 'the scan state is a chip on the card (its sentence is on the skill\'s page)');
             const one = await t.get('/skills/research-brief');
             assert.strictEqual(one.status, 200, one.text);
             assert.ok(one.text.includes('Research one question'), 'the instructions are on the page');

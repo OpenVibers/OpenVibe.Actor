@@ -587,6 +587,7 @@ ${modelChip(model)}
         const turnHtmls = await Promise.all(turns.map((t) => turnHtml(t, { files: fileMap.get(t.id) || [], readOnly: shared })));
         const title = first ? clip(first.task, 60) : 'New chat';
         const actions = row ? String(shareButton(row, !shared)) : '';
+        // Our own markup (its values escaped by html``): drawn with raw(), never printed as text (11-08: it was).
         const defaults = !shared && !row ? String(await defaultsHtml(requester)) : '';
         return send(res, status, {
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
@@ -603,7 +604,7 @@ ${modelChip(model)}
                 composer: shared ? '' : String(html`${canvasDoc ? canvasPhone(canvasDoc) : ''}${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model, allowance: leftLine(config.allowance, today) })}`),
                 panel: canvasDoc ? String(canvasWide(canvasDoc)) : '',
                 label: first ? 'Conversation' : 'New chat',
-            }))}${defaults}${shared ? html`<p class="ct-shared-note">This run was shared with you. Only its owner can carry it on.</p>` : ''}</div>`,
+            }))}${raw(defaults)}${shared ? html`<p class="ct-shared-note">This run was shared with you. Only its owner can carry it on.</p>` : ''}</div>`,
         });
     }
 

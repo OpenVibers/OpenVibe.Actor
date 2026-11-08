@@ -53,6 +53,9 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             const r = await t.get('/chat', { as: kim });
             assert.strictEqual(r.status, 200);
             assert.match(r.text, /<h2>What should Actor do\?<\/h2>/);
+            // The new runs' share default is a form on the page, never its markup printed as text (11-08, the owner's screenshot).
+            assert.match(r.text, /<form class="ct-share-defaults" method="post" action="\/chat\/defaults">/);
+            assert.ok(!/&lt;form class=&quot;ct-share-defaults/.test(r.text), 'the share-defaults form is not escaped into text');
             assert.strictEqual((r.text.match(/data-ovt-starter="/g) || []).length, 8, 'the starters fill the kit\'s composer');
             ['Find a flight', 'Is this true?', 'Best deal', 'Watch for it', 'Plan a trip', 'Make a list'].forEach((k) => assert.ok(r.text.includes(`<b>${k}</b>`), k));
             assert.ok(!/Who handles the mail/.test(r.text), 'not the old DNS example (the owner: "people aren\'t gonna use it for that")');

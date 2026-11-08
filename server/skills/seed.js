@@ -4,8 +4,9 @@
  * OpenVibe's own skills (plan HO2): the documents in skills/ are the registry's first catalogue.
  *
  * They are files in the repository, not rows somebody typed in: a skill is a document, and OpenVibe publishes its
- * own as documents. Each one is read, checked against actor.skill@1 (its own integrity hash included) and scanned
+ * own as documents. Each one is read, checked against actor.skill@1 or @2 (its own integrity hash included) and scanned
  * (server/skills/scan.js) before it is listed, so a document that was edited after it was written is not published.
+ * A sandbox document's code is stored in Media by the registry's publish path, with its pins on the listing.
  *
  * The publisher is OpenVibe itself: the registry vouches for it (actor.skill-listing@1), which is the only place a
  * publisher is vouched for at all. Nobody may upload a skill in this wave: the scan comes first.
@@ -13,8 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const document = require('./document');
-const scan = require('./scan');
-const store = require('./store');
+const skills = require('./index');
 
 const DIR = path.join(__dirname, '..', '..', 'skills');
 
@@ -42,14 +42,20 @@ function load({ dir = DIR, log = console } = {}) {
     return out;
 }
 
-/** Publish OpenVibe's own skills: one listing each, scanned, as publisher kind 'openvibe'. */
-async function seed(s, { dir = DIR, log = console, at = null } = {}) {
+/**
+ * Publish OpenVibe's own skills: one listing each, read, scanned, and — for a sandbox skill — with its code bytes in
+ * Media, as publisher kind 'openvibe'. A sandbox document whose code cannot be stored is not listed.
+ */
+async function seed(s, { dir = DIR, log = console, at = null, media = null } = {}) {
     const docs = load({ dir, log });
     const rows = [];
     for (const doc of docs) {
-        const report = scan.report(doc, at || s.iso());
-        const row = await store.insert(s, { slug: doc.slug, skill: doc, publisher: { kind: 'openvibe', name: 'OpenVibe' }, scan: report, at });
-        if (row) rows.push(row);
+        const out = await skills.publish(s, { doc, publisher: { kind: 'openvibe', name: 'OpenVibe' }, media, at: at || s.iso() });
+        if (out.error) {
+            if (log && log.warn) log.warn(`[Actor] the skill ${doc.slug} was not published: ${out.error}`);
+            continue;
+        }
+        rows.push(out.row);
     }
     return rows;
 }

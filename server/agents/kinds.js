@@ -26,6 +26,7 @@ const KINDS = [
     'install',         // install a skill or connect a connector
     'routine',         // set up a task that keeps running
     'money',           // spend the person's money
+    'skill.run',       // run a skill's code in a sandbox on a Node (ADR-060)
 ];
 
 // The plain words a person reads for each kind. Never an id, never a code: this is the sentence on the card.
@@ -45,6 +46,7 @@ const LABELS = {
     'install': 'installing a skill or connecting a connector',
     'routine': 'setting up a task that keeps running',
     'money': 'spending your money',
+    'skill.run': 'running a skill\'s code in a sandbox',
 };
 
 // Kinds a person can never "always allow", whatever the target: spending money is the floor itself; typing reaches

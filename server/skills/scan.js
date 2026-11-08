@@ -75,7 +75,7 @@ const SCRIPT = [
     /\bconsole\.log\s*\(|\bfunction\s+\w+\s*\(/,
 ];
 
-const SCANNER = 'actor-skill-scan/1';
+const SCANNER = 'actor-skill-scan/2';
 const SEVERITY = { block: 'failed', warn: 'flagged' };
 
 /** The sentences of a text: a rule reads a sentence, never the whole document at once. */
@@ -110,6 +110,141 @@ function declared(host, hosts) {
 }
 
 const finding = (rule, severity, where, note) => ({ rule, severity, where, note: String(note).slice(0, 280) });
+
+// ── Code rules (ADR-060) ─────────────────────────────────────────────────────────────────────────────────
+// A sandbox tool's code is read, never run. A block finding fails the skill; a warn flags it, and a flagged code
+// skill installs only after the person reads the findings. Every code finding names the tool it is about.
+const CODE_RULES = ['code.env', 'code.process', 'code.dynamic', 'code.vm', 'code.worker', 'code.fs_write',
+    'code.network', 'code.encoded', 'code.minified', 'code.require', 'code.timer', 'code.loop'];
+
+// The only modules a v1 tool may require: Node's own, with no process, no child, no worker and no raw socket. `fs`
+// is here because reading the job directory is allowed by the Node sandbox; the scan blocks every write below.
+const SAFE_REQUIRE = new Set(['assert', 'buffer', 'crypto', 'events', 'fs', 'path', 'punycode', 'querystring', 'stream', 'string_decoder', 'url', 'util', 'zlib']);
+const REQUIRE = /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+const REQUIRE_COMPUTED = /\brequire\s*\(\s*(?!['"])|\bmodule\s*\.\s*require\s*\(|\bcreateRequire\s*\(/;
+const CHILD_PROCESS = /\brequire\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\b(?:spawn|spawnSync|execFile|execFileSync|fork)\s*\(|\bprocess\s*\.\s*(?:binding|dlopen|kill|getBuiltinModule)\s*\(/;
+const DYNAMIC_CODE = /\beval\s*\(|\bnew\s+Function\s*\(|\bFunction\s*\(\s*['"`]|\bimport\s*\(/;
+const VM = /\brequire\s*\(\s*['"](?:node:)?vm['"]\s*\)|\b(?:runInContext|runInNewContext|runInThisContext|createContext)\s*\(/;
+const WORKER = /\brequire\s*\(\s*['"](?:node:)?worker_threads['"]\s*\)|\bnew\s+Worker\s*\(/;
+const FS_WRITE = /\bfs\s*\.\s*(?:promises\s*\.\s*)?(?:writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdir|mkdirSync|mkdtemp|mkdtempSync|rm|rmSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|truncate|truncateSync|chmod|chmodSync|chown|chownSync|symlink|symlinkSync|link|linkSync|open|openSync|write|writeSync|writev|writevSync)\s*\(|\b(?:writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdirSync|mkdtempSync|rmSync|unlinkSync|renameSync|copyFileSync|truncateSync|chmodSync)\s*\(/;
+const NETWORK_USE = /\bfetch\s*\(|\bXMLHttpRequest\b|\bWebSocket\b|\bnavigator\s*\.\s*sendBeacon\b|\brequire\s*\(\s*['"](?:node:)?(?:http|https|net|tls|dns|dgram)['"]\s*\)|\bhttps?\s*\.\s*(?:get|request)\s*\(/;
+const TIMER = /\bset(?:Timeout|Interval)\s*\([^,]+,\s*([0-9][0-9_]*)\s*[,)]/g;
+const LOOP_OVER_INPUT = /\b(?:for|while)\s*\([^)]*\b(?:input|args|raw)\b[^)]*\)|\.(?:forEach|map|filter|reduce)\s*\(\s*(?:input|args|raw)\b/;
+const OPENVIBE_HOST = /^([a-z0-9-]+\.)*openvibe\.[a-z]{2,}$/;
+const CODE_MARKERS = /\b(?:eval|Function|require|process\s*\.|child_process|import\s|atob|fromCharCode)\b|#!|<script/i;
+
+/** Is this host one of OpenVibe's own? A tool that says openvibe-only may reach only these. */
+const openvibeHost = (host) => OPENVIBE_HOST.test(String(host || '').toLowerCase());
+
+/** Every host a piece of code names: a literal URL, or a host/hostname option. */
+function hostsIn(code) {
+    const hosts = new Set();
+    for (const m of String(code).matchAll(/https?:\/\/([^/\s'"`)\\]{1,253})/g)) {
+        const host = String(m[1] || '').split('@').pop().split(':')[0].split(/[?#]/)[0].replace(/[.,;]+$/, '').toLowerCase();
+        if (host) hosts.add(host);
+    }
+    for (const m of String(code).matchAll(/\bhost(?:name)?\s*:\s*['"]([^'"]{1,253})['"]/g)) {
+        const host = String(m[1] || '').split(':')[0].toLowerCase();
+        if (host) hosts.add(host);
+    }
+    return [...hosts];
+}
+
+/** A long base64 or hex blob, and whether it decodes to something that looks like code. */
+function encodedBlob(code) {
+    const text = String(code || '');
+    for (const m of text.matchAll(/['"`]([A-Za-z0-9+/=]{200,})['"`]/g)) {
+        const blob = m[1];
+        let decoded = '';
+        try { decoded = Buffer.from(blob, 'base64').toString('utf8'); } catch { decoded = ''; }
+        return { kind: CODE_MARKERS.test(decoded) ? 'code' : 'blob', encoding: 'base64', length: blob.length };
+    }
+    for (const m of text.matchAll(/\b[0-9a-fA-F]{200,}\b/g)) {
+        const blob = m[0];
+        let decoded = '';
+        try { decoded = Buffer.from(blob, 'hex').toString('utf8'); } catch { decoded = ''; }
+        return { kind: CODE_MARKERS.test(decoded) ? 'code' : 'blob', encoding: 'hex', length: blob.length };
+    }
+    return null;
+}
+
+/** The findings for one code resource, as the tool that runs it. */
+function scanCode(resource, tool) {
+    const code = String((resource && resource.text) || '');
+    const where = String((resource && resource.path) || 'a resource');
+    const toolName = tool && tool.name ? String(tool.name) : null;
+    const net = (tool && tool.net) || 'deny';
+    const out = [];
+    const add = (rule, severity, note) => out.push({ rule, severity, ...(where ? { where } : {}), ...(toolName ? { tool: toolName } : {}), note: String(note).slice(0, 280) });
+
+    if (/process\s*\.\s*env\b/.test(code) || /process\s*\[\s*['"]env['"]\s*\]/.test(code)) {
+        add('code.env', 'block', 'It reads process.env. A skill tool never sees a secret or the environment it runs in.');
+    }
+    if (CHILD_PROCESS.test(code)) {
+        add('code.process', 'block', 'It starts another process (child_process). A tool runs one process in its sandbox, never a child.');
+    }
+    if (DYNAMIC_CODE.test(code)) {
+        add('code.dynamic', 'block', 'It builds code at run time (eval, Function or a dynamic import). The sandbox forbids it, and the registry will not list it.');
+    }
+    if (VM.test(code)) {
+        add('code.vm', 'block', 'It loads Node\'s vm module, which runs code outside the permission model.');
+    }
+    if (WORKER.test(code)) {
+        add('code.worker', 'block', 'It starts a worker thread. A tool gets one process and no worker.');
+    }
+    if (FS_WRITE.test(code)) {
+        add('code.fs_write', 'block', 'It writes a file. A skill\'s code never writes to the machine: it takes JSON in and answers JSON out.');
+    }
+    const badModules = new Set();
+    for (const m of code.matchAll(REQUIRE)) {
+        const name = String(m[2] || '').replace(/^node:/, '');
+        if (!SAFE_REQUIRE.has(name)) badModules.add(name);
+    }
+    if (badModules.size) {
+        add('code.require', 'block', `It requires ${[...badModules].slice(0, 3).map((x) => JSON.stringify(x)).join(', ')}, which is not one of Node's safe modules (${[...SAFE_REQUIRE].join(', ')}).`);
+    } else if (REQUIRE_COMPUTED.test(code)) {
+        add('code.require', 'block', 'It requires a module whose name is computed, so the registry cannot tell what it loads.');
+    }
+    const blob = encodedBlob(code);
+    if (blob) {
+        add('code.encoded', 'block', blob.kind === 'code'
+            ? `It carries a long ${blob.encoding} blob (${blob.length} characters) that decodes to code.`
+            : `It carries a long ${blob.encoding} blob (${blob.length} characters). Code must be readable: the scan reads it, never runs it.`);
+    }
+    if (code.split(/\r?\n/).some((line) => line.length > 2048)) {
+        add('code.minified', 'block', 'It has a line longer than 2 KB (minified code). The registry cannot read and scan minified code, so it will not list it.');
+    }
+    const network = NETWORK_USE.test(code);
+    if (network) {
+        const hosts = hostsIn(code);
+        if (net === 'deny') {
+            add('code.network', 'block', 'It uses the network, but its tool declares no internet access (net: deny).');
+        } else if (net === 'openvibe-only') {
+            const foreign = hosts.filter((h) => !openvibeHost(h));
+            if (foreign.length) {
+                add('code.network', 'block', `It reaches ${foreign.slice(0, 3).join(', ')}, which is not an OpenVibe site, but its tool says OpenVibe sites only.`);
+            } else if (!hosts.length) {
+                add('code.network', 'block', 'It uses the network but names no OpenVibe host, so the registry cannot tell where it goes; its tool says OpenVibe sites only.');
+            } else {
+                add('code.network', 'warn', `It uses the network (${hosts.slice(0, 3).join(', ')}); its tool says OpenVibe sites only. Read this before you install it.`);
+            }
+        } else if (net === 'public') {
+            add('code.network', 'warn', 'It asks for the internet. Read this before you install it: its tool runs with the network its document declares.');
+        }
+    }
+    for (const m of code.matchAll(TIMER)) {
+        const ms = Number(String(m[1] || '').replace(/_/g, ''));
+        if (Number.isFinite(ms) && ms > 5000) {
+            add('code.timer', 'warn', `It sets a timer for ${ms} ms, longer than 5 s; a tool should not hold its sandbox that long.`);
+            break;
+        }
+    }
+    if (LOOP_OVER_INPUT.test(code)) {
+        add('code.loop', 'warn', 'It loops over its input, which a caller can make large. Read this before you install it.');
+    }
+    return out;
+}
+
 
 /**
  * The scan of one document: its state and its findings. The findings are what the listing carries to every site
@@ -160,16 +295,34 @@ function scan(doc) {
     }
 
     // ── resource.code ─────────────────────────────────────────────────────────────────────────────────────
+    // A sandbox skill's .js resource is code on purpose: the code rules below read it. Every other resource is text,
+    // and an @1 document carries no code at all.
+    const sandbox = skill.runs === 'sandbox';
     for (const resource of resources) {
+        if (sandbox && resource && resource.media_type === 'text/javascript') continue;
         const text = String((resource && resource.text) || '');
         if (!SCRIPT.some((re) => re.test(text))) continue;
         findings.push(finding('resource.code', 'block', String(resource.path || 'a resource'),
-            'This resource reads as a script. A v1 skill is instructions and text only: it runs nothing.'));
+            'This resource reads as a script. A prompt skill is instructions and text only: it runs nothing.'));
+    }
+
+    // ── code.* ────────────────────────────────────────────────────────────────────────────────────────────
+    // The registry reads the code, never runs it. Each finding names the tool whose entry runs that resource.
+    if (sandbox) {
+        const tools = Array.isArray(skill.tools) ? skill.tools : [];
+        for (const resource of resources) {
+            if (!resource || resource.media_type !== 'text/javascript') continue;
+            const owners = tools.filter((t) => t && t.entry === resource.path);
+            for (const tool of owners) findings.push(...scanCode(resource, tool));
+        }
     }
 
     // ── hosts.undeclared ───────────────────────────────────────────────────────────────────────────────────
+    // A sandbox skill declares its network per tool, so its code's hosts are the code.network rule's business. A
+    // markdown resource is still read as words, and an @1 skill is all words.
     const seen = new Set();
-    for (const [where, text] of [...texts, ...resources.map((r) => [String(r.path || 'a resource'), String(r.text || '')])]) {
+    const wordResources = sandbox ? resources.filter((r) => !r || r.media_type !== 'text/javascript') : resources;
+    for (const [where, text] of [...texts, ...wordResources.map((r) => [String(r.path || 'a resource'), String(r.text || '')])]) {
         for (const sentence of sentences(text)) {
             for (const match of sentence.matchAll(URL)) {
                 // A host named to keep away from it ("never open https://x", "instead of https://x") is not reached.
@@ -201,4 +354,4 @@ const report = (doc, at) => {
     return { state: out.state, scanner: out.scanner, scanned_at: at || new Date().toISOString(), findings: out.findings };
 };
 
-module.exports = { ACTS, RULES: ['asks.undeclared_kind', 'text.secret_request', 'text.exfil', 'resource.code', 'hosts.undeclared'], SCANNER, scan, report, declared, sentences };
+module.exports = { ACTS, RULES: ['asks.undeclared_kind', 'text.secret_request', 'text.exfil', 'resource.code', 'hosts.undeclared', ...CODE_RULES], CODE_RULES, SAFE_REQUIRE, SCANNER, scan, report, declared, sentences, scanCode, hostsIn, openvibeHost };
