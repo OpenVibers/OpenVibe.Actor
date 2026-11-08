@@ -31,6 +31,19 @@ const SCAN_WORDS = {
     pending: 'This skill has not been scanned yet.',
 };
 const SEVERITY_WORDS = { block: 'Stops it', warn: 'Worth reading', info: 'For information' };
+// The scan on a catalogue card, as a chip: one or two words (the sentence is on the skill's own page).
+const SCAN_CHIP = { passed: 'Scanned: clear', flagged: 'Scanned: read first', failed: 'Scanned: refused', pending: 'Not scanned yet' };
+// A tool's network, in plain words (ADR-060): what the person reads before they install code.
+const NET_WORDS = { deny: 'no internet', 'openvibe-only': 'OpenVibe sites only', public: 'the internet' };
+const netWords = (net) => NET_WORDS[net] || NET_WORDS.deny;
+const sandboxTools = (skill) => (skill && skill.runs === 'sandbox' && Array.isArray(skill.tools) ? skill.tools : []);
+/** The tool's declared limits, in plain words, at or under the contract's caps. */
+function limitsWords(tool) {
+    const l = (tool && tool.limits) || {};
+    const wall = Math.min(30000, Number(l.wall_ms) || 10000);
+    const mem = Math.min(268435456, Number(l.mem_bytes) || 134217728);
+    return `up to ${Math.max(1, Math.round(wall / 1000))} s and ${Math.max(1, Math.round(mem / (1024 * 1024)))} MB`;
+}
 
 /** What the skill may ask an agent to do, in the plain words of HO1's kinds (agents/kinds.js). */
 function asksOf(skill) {
@@ -63,7 +76,7 @@ function createSkillPages(ctx) {
         return html`<li class="ovk-row ovk-row--static sk-card">
 <span class="ovk-row-main"><span class="ovk-row-top"><a class="sk-name" href="/skills/${skill.slug}">${skill.name}</a></span>
 <span class="ovk-row-sub"><span class="sk-desc">${skill.description}</span></span>
-<span class="sk-state sk-state--${state}">${SCAN_WORDS[state] || SCAN_WORDS.pending}</span></span>
+<span class="sk-chips"><span class="sk-chip sk-chip--${state || 'pending'}">${SCAN_CHIP[state] || SCAN_CHIP.pending}</span>${skill.runs === 'sandbox' ? html`<span class="sk-chip">Runs code in a sandbox</span>` : ''}</span></span>
 </li>`;
     };
 
@@ -72,8 +85,8 @@ function createSkillPages(ctx) {
         const text = typeof req.query.problem === 'string' ? req.query.problem.slice(0, 300) : null;
         page(req, res, html`<header class="sk-head">
 <h1>Skills</h1>
-<p class="sk-lede">A skill is a small document an agent reads to do one kind of job well: a name, a line saying when to use it, and instructions. It is not a program and it grants nothing — installing one gives your agent guidance, and every step it takes still goes through your approvals.</p>
-<p class="sk-hint">Every skill here was scanned before it was listed. The scan's words are on each card, and the findings are on the skill's own page.</p>
+<p class="sk-lede">Small documents your agents read to do one kind of job well. A skill grants nothing: every step still asks you, the way it does without one.</p>
+<p class="sk-hint">Each one was scanned before it was listed; the findings are on its page.</p>
 </header>
 ${text ? notice(text, 'warn') : ''}
 ${raw(kit.list(listings.map(card), { empty: 'No skills are offered right now.' }))}
@@ -93,6 +106,7 @@ ${raw(kit.list(listings.map(card), { empty: 'No skills are offered right now.' }
         const skill = listing.skill || {};
         const state = listing.scan && listing.scan.state;
         const findings = (listing.scan && listing.scan.findings) || [];
+        const tools = sandboxTools(skill);
         const may = skills.installability(listing);
         // The person may install it on one of their agents; the form is a plain one, and a flagged skill asks first.
         const agents = signed(req) ? await contacts.list(s, config, owner(req)) : [];
@@ -111,11 +125,17 @@ ${raw(kit.list(listings.map(card), { empty: 'No skills are offered right now.' }
                     : html`<p class="sk-hint">${may.why}</p>`;
         page(req, res, html`<p class="sk-crumbs"><a href="/skills">Skills</a></p>
 <header class="sk-head"><h1>${skill.name}</h1><p class="sk-lede">${skill.description}</p>
-<p class="sk-meta">Published by ${listing.publisher.kind === 'openvibe' ? 'OpenVibe' : (listing.publisher.name || 'a person')} · version ${skill.version} · ${listing.installs} ${listing.installs === 1 ? 'person has' : 'people have'} it</p></header>
+<p class="sk-meta">Published by ${listing.publisher.kind === 'openvibe' ? 'OpenVibe' : (listing.publisher.name || 'a person')} · version ${skill.version} · ${listing.installs} ${listing.installs === 1 ? 'person has' : 'people have'} it</p>
+</header>
+${tools.length ? html`<section class="sk-panel sk-sandbox"><h2>Its code</h2>
+<p class="sk-text">It runs in a sandbox on a machine of yours that turned the skill runner on, or in OpenVibe's pool, never on an OpenVibe server: with the network each tool declares, and the exact bytes the registry scanned.</p>
+<ul class="sk-tools">${tools.map((t) => html`<li class="sk-tool"><p class="sk-tool-head"><strong>${t.name}</strong> <span class="sk-net sk-net--${t.net || 'deny'}">${netWords(t.net)}</span> <span class="sk-limits">${limitsWords(t)}</span></p>
+<p class="sk-tool-desc">${t.description}</p></li>`)}</ul></section>` : ''}
 <section class="sk-panel"><h2>The scan</h2><p class="sk-state sk-state--${state}">${SCAN_WORDS[state] || SCAN_WORDS.pending}</p>
-${findings.length ? html`<ul class="sk-findings">${findings.map((f) => html`<li><span class="sk-sev sk-sev--${f.severity}">${SEVERITY_WORDS[f.severity] || f.severity}</span> ${f.note} <span class="sk-where">(${f.where})</span></li>`)}</ul>` : state === 'passed' ? '' : html`<p class="sk-hint">The scan found nothing to report.</p>`}
+${findings.length ? html`<ul class="sk-findings">${findings.map((f) => html`<li>${f.tool ? html`<span class="sk-toolname">${f.tool}</span> ` : ''}<span class="sk-sev sk-sev--${f.severity}">${SEVERITY_WORDS[f.severity] || f.severity}</span> ${f.note} <span class="sk-where">(${f.where})</span></li>`)}</ul>` : state === 'passed' ? '' : html`<p class="sk-hint">The scan found nothing to report.</p>`}
+${findings.some((f) => f.tool) ? html`<p class="sk-hint">A finding with a tool's name is about that tool's code.</p>` : ''}
 ${listing.scan && listing.scan.scanned_at ? html`<p class="sk-hint">Scanned ${time(listing.scan.scanned_at)}.</p>` : ''}</section>
-<section class="sk-panel"><h2>What it may ask for</h2><p>${asksOf(skill)}</p>
+<section class="sk-panel"><h2>What it may ask for</h2><p class="sk-text">${asksOf(skill)}</p>
 ${skill.requires && skill.requires.hosts && skill.requires.hosts.length ? html`<p class="sk-hint">It reaches ${skill.requires.hosts.join(', ')}.</p>` : ''}</section>
 <section class="sk-panel"><h2>Its instructions</h2><pre class="sk-instructions">${skill.instructions}</pre></section>
 <section class="sk-panel"><h2>Install it</h2>${installForm}</section>`);
@@ -138,4 +158,4 @@ ${skill.requires && skill.requires.hosts && skill.requires.hosts.length ? html`<
     return r;
 }
 
-module.exports = { createSkillPages, SCAN_WORDS, asksOf };
+module.exports = { createSkillPages, SCAN_WORDS, NET_WORDS, asksOf, netWords, limitsWords, sandboxTools };

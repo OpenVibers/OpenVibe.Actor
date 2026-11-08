@@ -165,8 +165,13 @@ function load(env = process.env) {
             codesUrl: trim(env.ACTOR_CODES_URL != null ? env.ACTOR_CODES_URL : (selfHosted ? '' : 'http://127.0.0.1:4900')),
             codesPublicUrl: trim(env.ACTOR_CODES_PUBLIC_URL || 'https://openvibe.codes'),
             // OpenVibe.Run: a browser session on a desk host when none of the person's own machines has a desk for the
-            // task (Desks plan D6). Empty turns it off.
+            // task (Desks plan D6). It is also where a skill's code runs (ADR-060). Empty turns it off.
             runUrl: trim(env.ACTOR_RUN_URL != null ? env.ACTOR_RUN_URL : (selfHosted ? '' : 'http://127.0.0.1:4920')),
+            // OpenVibe.Media: where a sandbox skill's code bytes are stored, private to Actor's tenant (ADR-060).
+            // Empty means a sandbox skill cannot be published (a prompt skill is unaffected).
+            mediaUrl: trim(env.ACTOR_MEDIA_URL != null ? env.ACTOR_MEDIA_URL : (selfHosted ? '' : 'http://127.0.0.1:4100')),
+            // Where "Run it on my machine" goes: Link's setup, which turns the skill runner on a person's Node.
+            linkUrl: trim(env.ACTOR_LINK_URL || 'https://openvibe.bot/link'),
             // OpenVibe.Space: the person's own spaces, which their agent builds (plan 2026-10-22 §Z stage Z1).
             // Empty turns the space tools off.
             spaceUrl: trim(env.ACTOR_SPACE_URL != null ? env.ACTOR_SPACE_URL : (selfHosted ? '' : 'http://127.0.0.1:4940')),
@@ -177,6 +182,15 @@ function load(env = process.env) {
             // full text and sends the reply from the agent's inbox, over loopback under its own service token. Empty
             // turns the mail consumer off.
             mailUrl: trim(env.ACTOR_MAIL_URL != null ? env.ACTOR_MAIL_URL : (selfHosted ? '' : 'http://127.0.0.1:5250')),
+        },
+
+        // Skills that run code in a sandbox (plan HO8, ADR-060). A tool's code is stored in Media under Actor's
+        // tenant; a run is one OpenVibe.Run function job (openvibe-skill-runner@1.0.0) with a 120 s lifetime. The
+        // placement wait is how long the step waits for a Node before it says, plainly, that none offered to run it.
+        skills: {
+            mediaTenant: trim(env.ACTOR_MEDIA_TENANT || env.OV_OAUTH_CLIENT_ID || 'actor'),
+            placementWaitMs: Math.max(1000, int(env.ACTOR_SKILL_PLACEMENT_WAIT_MS, 12000)),
+            ttlMs: 120000,
         },
 
         // Artifacts (Actor v2, stage V2-4): what one task may make. The bytes live in Actor's own PostgreSQL,

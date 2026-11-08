@@ -40,6 +40,7 @@ const { createEscalations } = require('./brain/escalate');
 const { snapshot: snapshotState, restore: restoreState } = require('./checkpoint-state');
 const { stripSecrets, redactText } = require('./checkpoints');
 const learn = require('./brain/learn');
+const skillTools = require('../skills/tools');
 
 const MAX_ANSWER_TOKENS = 5000;
 const MAX_SUB_AGENTS = 4;
@@ -201,7 +202,7 @@ async function spanCall(trace, { kind, name, tier = null, family = null, started
     });
 }
 
-function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null, connectors = null }) {
+function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null, connectors = null, skillRun = null }) {
     /** The connector tools of this person (stage V2-11): empty when there are none or no person. */
     async function connectorTools({ requester, mode }) {
         const empty = { definitions: [], byAlias: new Map() };
@@ -212,6 +213,17 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             return { definitions: (out && out.definitions) || [], byAlias: (out && out.byAlias) || new Map() };
         } catch (err) {
             if (log && log.warn) log.warn('[Actor] connector tools unavailable:', (err && err.message) || err);
+            return empty;
+        }
+    }
+    /** The sandbox tools of the skills installed on this agent (plan HO8, ADR-060): none in private mode or for no agent. */
+    async function installedSkillTools({ requester, agentId, mode }) {
+        const empty = { definitions: [], byAlias: new Map() };
+        if (!store || !agentId || mode === 'private') return empty;
+        try {
+            return await skillTools.toolsFor(store, { owner: requester, agentId, run: skillRun, config });
+        } catch (err) {
+            if (log && log.warn) log.warn('[Actor] skill tools unavailable:', (err && err.message) || err);
             return empty;
         }
     }
@@ -727,7 +739,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     /** The name a person reads: a connector tool shows its module name (mcp:<connection>:<tool>), not its alias. */
     function displayName(name, ctx = null) {
         const dynamic = ctx && ctx.dynamicTools ? ctx.dynamicTools.get(name) : null;
-        return dynamic ? dynamic.name : name;
+        return dynamic ? (dynamic.display || dynamic.name) : name;
     }
 
     function isActing(name, ctx = null) {
@@ -904,8 +916,10 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     const offered = registry.definitions({ requester, mode, chatPolicy, config, models, signal, artifacts, store, agentId, taskId, now, waits });
         // The connector tools of this person (stage V2-11), at most the checkpoint's allow-list.
         const dynamic = await connectorTools({ requester, mode });
-        ctx.dynamicTools = dynamic.byAlias;
-        const offeredAll = offered.concat(dynamic.definitions.filter(d => require('../chat-apps/policy').allowed(dynamic.byAlias.get(d.function.name), chatPolicy)));
+        const installed = await installedSkillTools({ requester, agentId, mode });
+        ctx.dynamicTools = new Map([...dynamic.byAlias, ...installed.byAlias]);
+        const offeredAll = offered.concat(dynamic.definitions.filter(d => require('../chat-apps/policy').allowed(dynamic.byAlias.get(d.function.name), chatPolicy)),
+            installed.definitions.filter(d => require('../chat-apps/policy').allowed(installed.byAlias.get(d.function.name), chatPolicy)));
         const byName = new Map(offeredAll.map((d) => [d.function.name, d]));
         const allowedNames = state.allow instanceof Set ? state.allow : new Set(Array.isArray(state.allow) ? state.allow : []);
         const savedNames = Array.isArray(state.tools) && state.tools.length ? state.tools : [...allowedNames];
@@ -1097,8 +1111,10 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     const offered = registry.definitions({ requester, mode, chatPolicy, config, models, signal, artifacts, store, agentId, taskId, now, waits });
             // The connections of this person (stage V2-11): the MCP tools they turned on and ask_agent for their agents.
             const dynamic = await connectorTools({ requester, mode });
-            ctx.dynamicTools = dynamic.byAlias;
-            const offeredAll = offered.concat(dynamic.definitions.filter(d => require('../chat-apps/policy').allowed(dynamic.byAlias.get(d.function.name), chatPolicy)));
+            const installed = await installedSkillTools({ requester, agentId, mode });
+            ctx.dynamicTools = new Map([...dynamic.byAlias, ...installed.byAlias]);
+            const offeredAll = offered.concat(dynamic.definitions.filter(d => require('../chat-apps/policy').allowed(dynamic.byAlias.get(d.function.name), chatPolicy)),
+                installed.definitions.filter(d => require('../chat-apps/policy').allowed(installed.byAlias.get(d.function.name), chatPolicy)));
             let statsRows = [];
             if (stats) { try { statsRows = await stats.tools(); } catch { statsRows = []; } }
             const ordered = orderTools(offeredAll, statsRows);
