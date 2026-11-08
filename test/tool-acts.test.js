@@ -11,6 +11,7 @@ const { check, done } = require('./helpers/boot');
 const EXPECTED = {
     // Read-only: they only read what is already there, so a resume may run them again.
     calculate: false,
+    canvas_set: false,
     convert_time: false,
     currency_convert: false,
     computer_list: false,

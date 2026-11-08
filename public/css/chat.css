@@ -174,3 +174,24 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 @keyframes ct-breathe { 0%, 100% { opacity: .55; transform: scale(.94); } 50% { opacity: 1; transform: scale(1); } }
 @keyframes ct-shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
 @media (prefers-reduced-motion: reduce) { .ct-hello-mark, .ct-live::before { animation: none !important; } }
+
+/* ── The canvas (plan HO9, actor.canvas@1) ───────────────────────────────────────────────────────────────────────
+   The same data document in two places: the thread's third column on a wide screen (thread.css's own panel, which is
+   sticky from 1180 px), and a fold above the composer on a phone. Only one is shown; the two hold the same document
+   and js/chat.js paints both, so a tick redraws instantly. */
+.cc-canvas { min-width: 0; }
+.cc-canvas-count { flex: none; font-size: 12.5px; color: var(--text-muted, #7386a3); white-space: nowrap; }
+.cc-canvas-body, .cc-canvas-host { min-width: 0; }
+.cc-canvas-fallback { display: grid; gap: 2px; margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--bg-card, #131c2e); border: 1px solid var(--line); }
+.cc-canvas-fallback b { font-size: 14px; overflow-wrap: anywhere; }
+.cc-canvas-fallback span { font-size: 12.5px; color: var(--text-secondary, #a8b3c4); }
+.cc-canvas-phone { max-width: 780px; margin: 0 auto 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-card, #131c2e); overflow: hidden; contain: layout paint; }
+.cc-canvas-phone > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; cursor: pointer; font-size: 14px; font-weight: 650; list-style: none; color: var(--text-primary, #e6edf7); }
+.cc-canvas-phone > summary::-webkit-details-marker { display: none; }
+.cc-canvas-phone > summary::marker { content: ''; }
+.cc-canvas-phone .cc-canvas-updated { flex: none; font-size: 12.5px; font-weight: 650; color: var(--accent, #4f7cff); }
+.cc-canvas-phone .cc-canvas-chev { margin-left: auto; color: var(--text-muted, #7386a3); transition: transform .2s; }
+.cc-canvas-phone[open] .cc-canvas-chev { transform: rotate(180deg); }
+.cc-canvas-phone .cc-canvas-body { max-height: min(45vh, 420px); overflow: auto; overscroll-behavior: contain; padding: 0 10px 10px; }
+@media (min-width: 1180px) { .cc-canvas-phone { display: none !important; } }
+@media (max-width: 1179px) { .cc-canvas-wide { display: none !important; } }
