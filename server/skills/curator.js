@@ -13,6 +13,7 @@
 const store = require('./store');
 
 const STALE_DAYS = 30;
+const PRIVATE_STALE_DAYS = 60;
 const ARCHIVE_DAYS = 90;
 const DAY = 86_400_000;
 
@@ -35,22 +36,38 @@ function due(row, now) {
 async function run(s, { at = null, log = console } = {}) {
     const now = at ? Date.parse(at) : Date.now();
     const rows = await store.all(s);
+    const own = rows.filter((r) => r.visibility === 'private');
     const counts = { stale: 0, archived: 0, active: 0 };
     for (const row of rows) {
         if (row.retired_at) continue;
         const { days, state } = due(row, now);
-        if (days >= ARCHIVE_DAYS) {
+        if (row.visibility !== 'private' && days >= ARCHIVE_DAYS) {
             if (state !== 'archived') { await store.setCurator(s, row.id, 'archived', {}, new Date(now).toISOString()); counts.archived += 1; }
             continue;
         }
-        if (days >= STALE_DAYS) {
+        if (days >= (row.visibility === 'private' ? PRIVATE_STALE_DAYS : STALE_DAYS)) {
             if (state === 'active') { await store.setCurator(s, row.id, 'stale', {}, new Date(now).toISOString()); counts.stale += 1; }
             continue;
         }
         if (state === 'stale') { await store.setCurator(s, row.id, 'active', {}, new Date(now).toISOString()); counts.active += 1; }
     }
+    // Only suggest a merge to the owner. A high overlap of distinctive words avoids pairing generic short skills.
+    const words = (r) => new Set(String((parse(r.skill) || {}).instructions || '').toLowerCase().match(/[a-z0-9]{4,}/g) || []);
+    for (const row of own) {
+        const a = words(row);
+        if (a.size < 8) continue;
+        const match = own.find((other) => {
+            if (other.id === row.id || other.publisher_subject !== row.publisher_subject) return false;
+            const b = words(other);
+            if (b.size < 8) return false;
+            const overlap = [...a].filter((w) => b.has(w)).length;
+            return overlap / new Set([...a, ...b]).size >= 0.8;
+        });
+        const curator = parse(row.curator) || {};
+        if (match && curator.near_duplicate_of !== match.id) await store.setCurator(s, row.id, row.curator_state, { near_duplicate_of: match.id }, new Date(now).toISOString());
+    }
     if (counts.stale || counts.archived) log.log(`[Actor] the curator: ${counts.stale} stale, ${counts.archived} archived`);
     return counts;
 }
 
-module.exports = { STALE_DAYS, ARCHIVE_DAYS, run, due };
+module.exports = { STALE_DAYS, PRIVATE_STALE_DAYS, ARCHIVE_DAYS, run, due };

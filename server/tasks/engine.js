@@ -121,17 +121,25 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
      * note, so it is always a suggestion now: a run that read a page can put words in the agent's mouth, and only the
      * person's own words may make an active memory (stage V2-6).
      */
-    async function absorbClosingLines(answer, row, taskId) {
+    async function absorbClosingLines(answer, row, taskId, out) {
         let text = answer;
         const personal = require('../agents/personal');
-        for (let i = 0; i < 2; i++) {
-            const match = text.match(/(?:^|\n)(REMEMBER|IMPROVE): ([^\n]*)[ \t]*$/);
+        const closing = [];
+        for (let i = 0; i < 3; i++) {
+            const match = text.match(/(?:^|\n)(REMEMBER|IMPROVE|SKILL_DRAFT): ([^\n]*)[ \t]*$/);
             if (!match) break;
             text = text.slice(0, match.index).trimEnd();
-            const line = match[2].trim();
-            if (!line || line.length > 300) continue;
-            if (match[1] === 'REMEMBER') await memory.add(s, { owner: row.requester, agentId: row.via.slice(6), text: line, source: 'agent', status: 'suggested', sourceTask: taskId });
-            else await personal.addProposal(s, row.requester, row.via.slice(6), line, taskId);
+            closing.push({ kind: match[1], line: match[2].trim() });
+        }
+        const skill = closing.find((c) => c.kind === 'SKILL_DRAFT');
+        const steps = out && out.brain && Array.isArray(out.brain.steps) ? out.brain.steps.filter((step) => step.step_kind === 'work' && step.ok).length : 0;
+        if (skill && steps >= 3 && skill.line.length <= 5000) {
+            try { await personal.addSkillProposal(s, row.requester, row.via.slice(6), JSON.parse(skill.line), taskId); } catch (err) { log.warn && log.warn('[Actor] skill draft refused:', err && err.message); }
+        }
+        for (const c of closing) {
+            if (!c.line || c.line.length > 300) continue;
+            if (c.kind === 'REMEMBER') await memory.add(s, { owner: row.requester, agentId: row.via.slice(6), text: c.line, source: 'agent', status: 'suggested', sourceTask: taskId });
+            else if (c.kind === 'IMPROVE' && !(skill && steps >= 3)) await personal.addProposal(s, row.requester, row.via.slice(6), c.line, taskId);
         }
         return text;
     }
@@ -648,7 +656,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         }
                         await learn.recordCheck({ store: s, kind: brain.kind || 'answer', tiers: brain.tiers || [], tools: brain.tools || [], ok: true, log, now: () => now() }).catch(() => {});
                         let answer = out.text;
-                        if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id);
+                        if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id, out);
                         const claims = review ? review.claims : (Array.isArray(verdict.claims) ? verdict.claims : []);
                         const confidenceCounts = claims.reduce((out2, c) => {
                             const k = c && c.confidence ? c.confidence : 'unverified';
@@ -760,7 +768,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
                 if (verdict.ok) {
                     let answer = out.text;
-                    if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id);
+                    if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id, out);
                     const result = { answer, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, artifacts: Array.isArray(out.artifacts) ? out.artifacts : [], checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };
                     return await setState(id, 'succeeded', { result, finished_at: iso() });
                 }

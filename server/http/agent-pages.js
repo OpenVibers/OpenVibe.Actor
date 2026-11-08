@@ -17,6 +17,7 @@ const allows = require('../agents/allows');
 const kinds = require('../agents/kinds');
 const spend = require('../agents/spend');
 const skills = require('../skills');
+const skillDraftCard = require('./skill-draft-card');
 
 /** "22 minutes ago", "in 6 days": a person reads this, the exact UTC instant stays in the <time> element's title. */
 function ago(iso, now = Date.now()) {
@@ -59,7 +60,7 @@ function createAgentPages(ctx) {
     r.use(express.urlencoded({ extended: false, limit: '64kb' }));
     const signed = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const owner = (req) => `user:${req.viewer.subject}`;
-    const page = (req, res, title, body, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, title, body, css: ['css/agents.css'] });
+    const page = (req, res, title, body, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, title, body, css: ['css/agents.css', 'css/skill-draft.css'] });
     const login = (req, res) => res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
     const write = (req, res) => {
         if (!signed(req)) { login(req, res); return false; }
@@ -422,8 +423,9 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
         const a = await find(req, res); if (!a) return;
         const notes = await personal.memory(s, a.owner, a.id);
         const suggestions = await personal.proposals(s, a.owner, a.id);
-        const pendingSuggestions = suggestions.filter((p) => p.state === 'pending');
-        const applied = suggestions.filter((p) => p.state === 'applied').slice(0, 5);
+        const pendingSuggestions = suggestions.filter((p) => p.state === 'pending' && p.kind !== 'skill');
+        const skillDrafts = suggestions.filter((p) => p.state === 'pending' && p.kind === 'skill');
+        const applied = suggestions.filter((p) => p.state === 'applied' && p.kind !== 'skill').slice(0, 5);
         const runs = await s.db.many('SELECT id, state, created_at, result, cost_usd, error_detail FROM tasks WHERE requester = $1 AND via = $2 ORDER BY id DESC LIMIT 20', [a.owner, `agent:${a.id}`]);
         // The night's tidy (HO5): this agent's own diary and the changes it made, with the undo.
         const diaries = await tidy.diary(s, a.owner, { agentId: a.id, limit: 3 });
@@ -498,6 +500,7 @@ ${payments.length ? html`<ul class="pa-notes">${payments.map((p2) => html`<li><p
 <p class="pa-note-meta">${p2.reason ? html`${p2.reason} · ` : ''}${p2.state === 'paid' ? 'Paid' : html`Refused: ${p2.error || 'Tips did not pay it'}`} · ${time(p2.created_at)}</p></li>`)}</ul>` : html`<p class="muted">It has not spent anything yet.</p>`}
 </section>
 
+${skillDrafts.map((p) => skillDraftCard.card(a.id, p))}
 ${pendingSuggestions.length || applied.length ? html`<section class="pa-panel" aria-labelledby="pa-sugg-h"><h2 id="pa-sugg-h">Suggestions from your agent</h2>
 <p class="pa-hint">After a run that passed its check, the agent may suggest a line for its instructions. Nothing changes until you add it, and you can undo it.</p>
 ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Suggested ${time(p.created_at)}${p.from_task ? html` after <a href="/tasks/${p.from_task}">this run</a>` : ''}</p>
@@ -547,9 +550,19 @@ ${c.undoable ? html`<form method="post" action="/me/agents/${a.id}/changes/${c.i
     });
     r.post('/me/agents/:id/suggestions/:pid', async (req, res) => {
         if (!write(req, res)) return;
-        const out = await personal.decide(s, owner(req), req.params.id, req.params.pid, String((req.body || {}).decision || ''));
-        if (out.error) return page(req, res, 'Not done', html`<h1>Not done</h1><p>${out.error}</p><p><a href="/me/agents/${req.params.id}">Back to the agent</a></p>`, out.status);
-        res.redirect(303, `/me/agents/${req.params.id}`);
+        const body = req.body || {};
+        const decision = String(body.decision || '');
+        const out = decision === 'keep'
+            ? await personal.keepSkillProposal(s, owner(req), req.params.id, req.params.pid, body, { readFindings: body.read_findings === '1' })
+            : await personal.decide(s, owner(req), req.params.id, req.params.pid, decision);
+        if (out.error) {
+            if (decision === 'keep') {
+                const proposal = await s.db.maybe("SELECT * FROM actor_agent_proposals WHERE id = $1 AND agent_id = $2 AND owner = $3 AND kind = 'skill' AND state = 'pending'", [req.params.pid, req.params.id, owner(req)]);
+                if (proposal) return page(req, res, 'Skill not kept', html`<h1>Skill not kept</h1><p role="alert">${out.error}</p>${skillDraftCard.card(req.params.id, { ...proposal, draft: body }, { findings: out.scan && out.scan.state === 'flagged' ? out.scan.findings : [] })}`, out.status);
+            }
+            return page(req, res, 'Not done', html`<h1>Not done</h1><p>${out.error}</p><p><a href="/me/agents/${req.params.id}">Back to the agent</a></p>`, out.status);
+        }
+        res.redirect(303, `/me/agents/${req.params.id}${decision === 'keep' ? '#skills' : ''}`);
     });
     r.post('/me/agents/:id/delete', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; if (a.is_vibe) return res.status(409).type('text/plain').send('Vibe is your first agent and cannot be deleted.'); await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [a.id, a.owner]); res.redirect(303, '/me/agents'); });
     r.post('/me/agents/:id/run', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; const out = await personal.run(ctx, a, req.body.input || ''); if (out.code) return page(req, res, 'Run refused', html`<h1>Run refused</h1><p>${out.detail}</p><p><a href="/me/agents/${a.id}">Back to agent</a></p>`, out.status); res.redirect(303, `/tasks/${out.task.id}`); });

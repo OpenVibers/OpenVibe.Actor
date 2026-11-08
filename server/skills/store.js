@@ -26,12 +26,13 @@ function wire(row) {
     const curator = parse(row.curator) || {};
     const skill = parse(row.skill_text != null ? row.skill_text : row.skill);
     const code = parse(row.code);
-    const sandbox = !!skill && (skill.skill === 'actor.skill@2' || skill.runs === 'sandbox');
+    const sandbox = !!skill && skill.runs === 'sandbox';
     return {
-        listing: sandbox ? 'actor.skill-listing@2' : 'actor.skill-listing@1',
+        listing: skill && skill.skill === 'actor.skill@2' ? 'actor.skill-listing@2' : 'actor.skill-listing@1',
         id: row.id,
         skill,
         ...(sandbox && Array.isArray(code) && code.length ? { code } : {}),
+        ...(row.visibility === 'private' ? { visibility: 'private' } : {}),
         publisher: {
             kind: row.publisher_kind,
             ...(row.publisher_subject ? { subject: row.publisher_subject } : {}),
@@ -50,7 +51,11 @@ const bySlug = (s, slug) => (SLUG.test(String(slug || '')) ? s.db.maybe('SELECT 
 
 /** Every listing that may be offered: not retired, and not stale or archived by the curator. */
 const offered = (s) => s.db.many(`SELECT * FROM actor_skill_listings
-    WHERE retired_at IS NULL AND curator_state = 'active' ORDER BY listed_at DESC, id`);
+    WHERE visibility = 'public' AND retired_at IS NULL AND curator_state = 'active' ORDER BY listed_at DESC, id`);
+
+const owned = (s, subject) => s.db.many(`SELECT * FROM actor_skill_listings
+    WHERE publisher_kind = 'person' AND publisher_subject = $1
+    ORDER BY listed_at DESC, id`, [subject]);
 
 /** Every listing, retired ones included: what the curator works on and what an id may still answer. */
 const all = (s) => s.db.many('SELECT * FROM actor_skill_listings ORDER BY listed_at DESC, id');
@@ -65,10 +70,22 @@ async function insert(s, { slug, skill, code = null, publisher, scan, at = null 
         (id, slug, skill, skill_text, code, publisher_kind, publisher_subject, publisher_name, scan_state, scan, curator_state, curator, installs, listed_at, created_at, updated_at)
         VALUES ($1,$2,$3::jsonb,$4,$5::jsonb,$6,$7,$8,$9,$10::jsonb,'active','{}'::jsonb,0,$11,$11,$11)
         ON CONFLICT (slug) DO UPDATE SET skill = EXCLUDED.skill, skill_text = EXCLUDED.skill_text, code = EXCLUDED.code, scan_state = EXCLUDED.scan_state, scan = EXCLUDED.scan, updated_at = EXCLUDED.updated_at
+        WHERE actor_skill_listings.visibility = 'public' AND actor_skill_listings.publisher_kind = EXCLUDED.publisher_kind
+          AND actor_skill_listings.publisher_subject IS NOT DISTINCT FROM EXCLUDED.publisher_subject
         RETURNING *`, [
         s.newId('skl'), String(slug), JSON.stringify(skill), text, code ? JSON.stringify(code) : null, publisher.kind, publisher.subject || null, publisher.name || null,
         (scan && scan.state) || 'pending', JSON.stringify(scan || {}), now,
     ]);
+}
+
+async function insertPrivate(s, { skill, subject, scan, at = null }) {
+    const now = at || s.iso();
+    return s.db.maybe(`INSERT INTO actor_skill_listings
+        (id, slug, skill, skill_text, publisher_kind, publisher_subject, visibility, scan_state, scan,
+         curator_state, curator, installs, listed_at, created_at, updated_at)
+        VALUES ($1,$2,$3::jsonb,$4,'person',$5,'private',$6,$7::jsonb,'active','{}'::jsonb,0,$8,$8,$8)
+        ON CONFLICT (slug) DO NOTHING RETURNING *`, [s.newId('skl'), skill.slug, JSON.stringify(skill), JSON.stringify(skill),
+            subject, scan.state, JSON.stringify(scan), now]);
 }
 
 /** The scan of a listing, kept with it: the state and the findings travel to every site. */
@@ -140,4 +157,4 @@ async function touch(s, { owner, agentId, listingId, at = null }) {
     await s.db.query(`UPDATE actor_skill_listings SET curator = jsonb_set(curator, '{last_used_at}', to_jsonb($2::text), true), updated_at = $2 WHERE id = $1`, [listingId, now]);
 }
 
-module.exports = { LISTING_ID, INSTALL_ID, SLUG, wire, byId, bySlug, offered, all, insert, setScan, setCurator, retire, installsOf, installsOfOwner, installOf, install, remove, touch };
+module.exports = { LISTING_ID, INSTALL_ID, SLUG, wire, byId, bySlug, offered, owned, all, insert, insertPrivate, setScan, setCurator, retire, installsOf, installsOfOwner, installOf, install, remove, touch };

@@ -482,6 +482,10 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
         // A routine the turn made is its card, after whatever the turn said (plan §12 A-4).
         const routines = await triggerBlocks(row, evs, readOnly);
         if (routines) reply = html`${reply}${routines}`;
+        if (!readOnly && row.state === 'succeeded' && /^agent:agt_/.test(String(row.via || ''))) {
+            const draft = await s.db.maybe("SELECT * FROM actor_agent_proposals WHERE owner = $1 AND agent_id = $2 AND from_task = $3 AND kind = 'skill' AND state = 'pending'", [row.requester, row.via.slice(6), row.id]);
+            if (draft) reply = html`${reply}${require('./skill-draft-card').card(row.via.slice(6), draft)}`;
+        }
         // data-task and data-last are Actor's (js/chat.js follows the task's event stream from data-last).
         return raw(thread.turn({ id: row.id, state: row.state, open, you: { text: row.task, files: filesOf(row, attached) }, reply: String(reply), attrs: { 'data-task': row.id, 'data-last': row.last_seq } }));
     }
@@ -608,7 +612,7 @@ ${modelChip(model)}
         return send(res, status, {
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
             // The network's sidebar (kit.css, kit-web.js) and its conversation UI (thread.css, ov-thread.js).
-            css: ['css/chat.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css'],
+            css: ['css/chat.css', 'css/skill-draft.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css'],
             sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-share.js', 'ov-canvas.js'],
             body: html`${busy && !shared ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
 <div class="chat" data-chat="${first ? first.id : ''}">${raw(thread.page({

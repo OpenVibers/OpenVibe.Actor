@@ -76,12 +76,15 @@ function createSkillPages(ctx) {
         return html`<li class="ovk-row ovk-row--static sk-card">
 <span class="ovk-row-main"><span class="ovk-row-top"><a class="sk-name" href="/skills/${skill.slug}">${skill.name}</a></span>
 <span class="ovk-row-sub"><span class="sk-desc">${skill.description}</span></span>
-<span class="sk-chips"><span class="sk-chip sk-chip--${state || 'pending'}">${SCAN_CHIP[state] || SCAN_CHIP.pending}</span>${skill.runs === 'sandbox' ? html`<span class="sk-chip">Runs code in a sandbox</span>` : ''}</span></span>
+<span class="sk-chips"><span class="sk-chip sk-chip--${state || 'pending'}">${SCAN_CHIP[state] || SCAN_CHIP.pending}</span>${listing.visibility === 'private' ? html`<span class="sk-chip">Private</span>` : ''}${skill.runs === 'sandbox' ? html`<span class="sk-chip">Runs code in a sandbox</span>` : ''}</span></span>
 </li>`;
     };
 
     r.get('/skills', async (req, res) => {
-        const listings = await skills.catalogue(s);
+        if (signed(req)) res.set('Cache-Control', 'private, no-store');
+        const yourSkills = signed(req) ? await skills.owned(s, owner(req)) : [];
+        const ownIds = new Set(yourSkills.map((listing) => listing.id));
+        const listings = (await skills.catalogue(s)).filter((listing) => !ownIds.has(listing.id));
         const text = typeof req.query.problem === 'string' ? req.query.problem.slice(0, 300) : null;
         page(req, res, html`<header class="sk-head">
 <h1>Skills</h1>
@@ -89,20 +92,22 @@ function createSkillPages(ctx) {
 <p class="sk-hint">Each one was scanned before it was listed; the findings are on its page.</p>
 </header>
 ${text ? notice(text, 'warn') : ''}
+${yourSkills.length ? html`<section class="sk-panel"><h2>Your skills</h2>${raw(kit.list(yourSkills.map(card)))}</section>` : ''}
 ${raw(kit.list(listings.map(card), { empty: 'No skills are offered right now.' }))}
 <p class="sk-foot"><a href="/me/agents">Your agents</a> · <a href="/docs">The API</a></p>`);
     });
 
     r.get('/skills/:slug.json', async (req, res) => {
-        const listing = await skills.get(s, req.params.slug);
+        const listing = await skills.get(s, req.params.slug, signed(req) ? owner(req) : null);
         if (!listing) return res.status(404).json({ error: 'No such skill.' });
-        res.set('Cache-Control', 'public, max-age=300');
+        res.set('Cache-Control', listing.visibility === 'private' ? 'private, no-store' : 'public, max-age=300');
         res.json(listing);
     });
 
     r.get('/skills/:slug', async (req, res) => {
-        const listing = await skills.get(s, req.params.slug);
+        const listing = await skills.get(s, req.params.slug, signed(req) ? owner(req) : null);
         if (!listing) return page(req, res, html`<h1>Skill not found</h1><p>That skill is not in the registry.</p><p><a href="/skills">Skills</a></p>`, { status: 404, title: 'Skill not found' });
+        if (listing.visibility === 'private') res.set('Cache-Control', 'private, no-store');
         const skill = listing.skill || {};
         const state = listing.scan && listing.scan.state;
         const findings = (listing.scan && listing.scan.findings) || [];
@@ -125,7 +130,7 @@ ${raw(kit.list(listings.map(card), { empty: 'No skills are offered right now.' }
                     : html`<p class="sk-hint">${may.why}</p>`;
         page(req, res, html`<p class="sk-crumbs"><a href="/skills">Skills</a></p>
 <header class="sk-head"><h1>${skill.name}</h1><p class="sk-lede">${skill.description}</p>
-<p class="sk-meta">Published by ${listing.publisher.kind === 'openvibe' ? 'OpenVibe' : (listing.publisher.name || 'a person')} · version ${skill.version} · ${listing.installs} ${listing.installs === 1 ? 'person has' : 'people have'} it</p>
+<p class="sk-meta">Published by ${listing.publisher.kind === 'openvibe' ? 'OpenVibe' : (listing.publisher.name || 'a person')} · version ${skill.version}${listing.visibility === 'private' ? html` · <span class="sk-chip">Private</span>` : ''} · ${listing.installs} ${listing.installs === 1 ? 'person has' : 'people have'} it</p>
 </header>
 ${tools.length ? html`<section class="sk-panel sk-sandbox"><h2>Its code</h2>
 <p class="sk-text">It runs in a sandbox on a machine of yours that turned the skill runner on, or in OpenVibe's pool, never on an OpenVibe server: with the network each tool declares, and the exact bytes the registry scanned.</p>
@@ -138,13 +143,17 @@ ${listing.scan && listing.scan.scanned_at ? html`<p class="sk-hint">Scanned ${ti
 <section class="sk-panel"><h2>What it may ask for</h2><p class="sk-text">${asksOf(skill)}</p>
 ${skill.requires && skill.requires.hosts && skill.requires.hosts.length ? html`<p class="sk-hint">It reaches ${skill.requires.hosts.join(', ')}.</p>` : ''}</section>
 <section class="sk-panel"><h2>Its instructions</h2><pre class="sk-instructions">${skill.instructions}</pre></section>
-<section class="sk-panel"><h2>Install it</h2>${installForm}</section>`);
+<section class="sk-panel"><h2>Install it</h2>${installForm}</section>
+${listing.visibility === 'private' ? html`<section class="sk-panel"><h2>Sharing</h2><p>This skill is visible only to you. Publishing makes its instructions public after a fresh scan.</p>
+${listing.curator.near_duplicate_of ? html`<p>Merge suggestion: this skill looks similar to <a href="/api/v1/skills/${listing.curator.near_duplicate_of}">another of your skills</a>. Review both and edit or remove one if you wish.</p>` : ''}
+${listing.curator.state !== 'active' ? html`<form method="post" action="/skills/${skill.slug}/restore"><button class="sk-btn" type="submit">Restore</button></form>` : ''}
+<form method="post" action="/skills/${skill.slug}/publish"><button class="sk-btn" type="submit">Publish this skill</button></form></section>` : ''}`);
     });
 
     // Install a skill on one of the person's agents. A flagged skill needs the person to say they read the findings.
     r.post('/skills/:slug/install', async (req, res) => {
         if (!write(req, res)) return;
-        const listing = await skills.rowOf(s, req.params.slug);
+        const listing = await skills.rowOf(s, req.params.slug, owner(req));
         if (!listing) return res.redirect(303, problem('That skill is not in the registry.'));
         const body = req.body || {};
         const agentId = String(body.agent_id || '');
@@ -153,6 +162,19 @@ ${skill.requires && skill.requires.hosts && skill.requires.hosts.length ? html`<
         const out = await skills.install(s, { owner: owner(req), agentId: agent.id, listing, readFindings: body.read_findings === '1' || body.read_findings === 'true' });
         if (out.error) return res.redirect(303, problem(out.error));
         res.redirect(303, `/me/agents/${agent.id}#skills`);
+    });
+
+    r.post('/skills/:slug/publish', async (req, res) => {
+        if (!write(req, res)) return;
+        const out = await skills.publishOwned(s, owner(req), req.params.slug);
+        if (out.error) return res.redirect(303, problem(out.error));
+        res.redirect(303, `/skills/${out.listing.skill.slug}`);
+    });
+    r.post('/skills/:slug/restore', async (req, res) => {
+        if (!write(req, res)) return;
+        const out = await skills.restoreOwned(s, owner(req), req.params.slug);
+        if (out.error) return res.redirect(303, problem(out.error));
+        res.redirect(303, `/skills/${out.listing.skill.slug}`);
     });
 
     return r;

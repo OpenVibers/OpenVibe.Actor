@@ -209,7 +209,7 @@ function createApi(ctx) {
         res.json({ listings: await skills.catalogue(s) });
     });
     r.get('/skills/:id', async (req, res) => {
-        const listing = await skills.get(s, req.params.id);
+        const listing = await skills.get(s, req.params.id, req.principal && req.principal.kind === 'user' ? req.principal.requester : null);
         if (!listing) return problem(req, res, 404, 'actor.skill.not_found', 'No such skill.');
         res.json(listing);
     });
@@ -378,7 +378,7 @@ function createApi(ctx) {
     r.post('/me/agents/:id/skills', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (!row) return;
         const body = req.body || {};
-        const listing = await skills.rowOf(s, String(body.listing_id || body.slug || ''));
+        const listing = await skills.rowOf(s, String(body.listing_id || body.slug || ''), req.principal.requester);
         if (!listing) return problem(req, res, 404, 'actor.skill.not_found', 'No such skill.');
         const read = body.read_findings === true || body.read_findings === '1' || body.read_findings === 'true';
         const out = await skills.install(s, { owner: req.principal.requester, agentId: row.id, listing, readFindings: read });
@@ -428,9 +428,11 @@ function createApi(ctx) {
         res.json({ suggestions: await personal.proposals(s, row.owner, row.id) });
     });
     r.post('/me/agents/:id/suggestions/:pid/:action', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
-        const out = await personal.decide(s, req.principal.requester, req.params.id, req.params.pid, req.params.action);
+        const out = req.params.action === 'keep'
+            ? await personal.keepSkillProposal(s, req.principal.requester, req.params.id, req.params.pid, req.body || {}, { readFindings: (req.body || {}).read_findings === true })
+            : await personal.decide(s, req.principal.requester, req.params.id, req.params.pid, req.params.action);
         if (out.error) return problem(req, res, out.status, out.status === 404 ? 'actor.agent.not_found' : 'actor.agent.invalid', out.error);
-        res.json({ suggestion: out.row, agent: out.agent });
+        res.json({ suggestion: out.row, agent: out.agent, ...(out.listing ? { listing: out.listing } : {}) });
     });
     r.get('/me/agents/:id/memory', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (row) res.json({ memory: await personal.memory(s, row.owner, row.id) });
