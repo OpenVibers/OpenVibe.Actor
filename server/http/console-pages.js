@@ -141,7 +141,7 @@ ${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${pages}/
     function previewGrid() {
         const cards = [
             ['Now', 'Every task your agents are running: what each has done so far and what it cost. The page refreshes while something runs.', null, true],
-            ['Waiting for you', 'What an agent asks before it acts. Approve or decline here, in the Node\'s tray, or from a notification.', null, false],
+            ['Waiting for you', 'What an agent asks before it acts. Approve or decline here, in Link\'s tray, or from a notification.', null, false],
             ['Today', `How many of your ${String(tier.tasksPerDay)} free tasks a day you have used and what they cost, with the last 7 days.`, null, false],
             ['Your agents', 'Tasks you set up once, with a memory and a schedule.', ['/agents', 'See the agents'], false],
             ['Your computers', 'Your own machines running jobs for your agents.', [`${pages}/machines`, 'Machines on OpenVibe.Bot'], false],
