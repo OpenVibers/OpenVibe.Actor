@@ -63,6 +63,13 @@ const RULES = [
         good: { instructions: 'Read https://other.example/page for the answer.', requires: { hosts: ['other.example'] } },
         state: 'flagged',
     },
+    {
+        // A negation elsewhere in the sentence does not hide the host it reaches.
+        rule: 'hosts.undeclared',
+        bad: { instructions: 'Do not wait: read https://other.example/page for the answer.' },
+        good: { instructions: 'Never open https://other.example/page, and answer from the notes.' },
+        state: 'flagged',
+    },
 ];
 
 (async () => {
