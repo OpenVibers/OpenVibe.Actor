@@ -39,6 +39,7 @@ const memory = require('../memory');
 const taskNotices = require('../notify/task-notices');
 const confidence = require('../runtime/brain/confidence');
 const learn = require('../runtime/brain/learn');
+const canvases = require('../canvases');
 
 const MAX_ATTEMPTS = 2;
 // The one loop's agent id on the event stream and in the result (the old runtime's id, kept for readers).
@@ -492,10 +493,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     if (subject) choice = { ...(choice || {}), subject };
                 }
                 try {
+                    // The conversation so far, and any canvas tick the person made since the last turn (HO9): a
+                    // tick starts no turn by itself, so the next run is told which item changed.
+                    const context = row.parent_id && row.fork_of_step == null && !resume ? await store.followContext(s, row) : [];
+                    if (!resume && !fork) context.push(...await canvases.takeNoticesForTask(s, row));
                     out = await withChoice(models, choice, async () => loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
                         // A fork carries its parent's state in the checkpoint, not as a follow-up conversation.
-                        context: row.parent_id && row.fork_of_step == null && !resume ? await store.followContext(s, row) : [],
+                        context,
                         emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
                         // The answer as it is written (plan L55 C2): to the readers that asked, never stored.
                         // The loop streams a model call only while such a reader is there (wanted).
