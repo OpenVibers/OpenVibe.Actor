@@ -130,7 +130,10 @@ function approvalItem(row, { agentName = null, thread = null } = {}) {
     // so the agent's own name is used, and the kind reads as a phrase. A request with no thread of its own
     // (an old row) keeps its own words.
     const detail = (thread ? plain(thread, 200) : null) || (payload.task ? plain(payload.task, 200) : null);
-    const about = money || [kinds.label(row.kind), detail].filter(Boolean).join(' · ');
+    const device = row.kind === 'device.camera' ? `device.camera · ${plain(payload.why || row.summary, 250)}`
+        : row.kind === 'device.location' ? `device.location${payload.precise ? '.precise' : ''} · ${plain(payload.why || row.summary, 250)}` : null;
+    const about = device || money || [kinds.label(row.kind), detail].filter(Boolean).join(' · ');
+    const deviceAnswer = row.kind === 'device.camera' || row.kind === 'device.location';
     return {
         service: 'actor',
         id: row.id,
@@ -146,7 +149,17 @@ function approvalItem(row, { agentName = null, thread = null } = {}) {
         created_at: row.created_at,
         updated_at: row.decided_at || row.created_at,
         href: `${PUBLIC_ORIGIN}/me/approvals/${row.id}`,
-        actions: actionsFor(bucket, { approval: true }),
+        actions: deviceAnswer && bucket === 'waiting' ? ['open', 'decline'] : actionsFor(bucket, { approval: true }),
+    };
+}
+
+function deviceNotice(row, agentName = null) {
+    return {
+        service: 'actor', id: row.id, kind: 'agent_task', title: plain(row.title, 160),
+        summary: `notify · ${plain(row.body, 380)}`, bucket: 'done', state: 'done',
+        agent: agentName ? plain(agentName, 80) : null, cost_usd: null, steps: null, error: null,
+        created_at: row.created_at, updated_at: row.created_at,
+        href: `${PUBLIC_ORIGIN}/tasks/${row.task_id}`, actions: ['open'],
     };
 }
 
@@ -171,4 +184,4 @@ function scheduledItem(agent) {
     };
 }
 
-module.exports = { PUBLIC_ORIGIN, OPEN, bucketFor, actionsFor, plain, needsYou, waitLineOf, taskItem, approvalItem, scheduledItem };
+module.exports = { PUBLIC_ORIGIN, OPEN, bucketFor, actionsFor, plain, needsYou, waitLineOf, taskItem, approvalItem, deviceNotice, scheduledItem };

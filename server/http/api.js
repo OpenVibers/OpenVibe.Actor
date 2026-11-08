@@ -159,7 +159,9 @@ function createApi(ctx) {
         const scheduled = (await personal.list(s, requester))
             .filter((a) => a.status === 'active' && a.schedule !== 'off' && a.next_run_at)
             .map(items.scheduledItem);
-        const all = [...tasks, ...asks, ...paidAsks, ...scheduled].sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : a.id < b.id ? 1 : -1));
+        const noticeRows = await s.db.many('SELECT * FROM actor_device_notices WHERE owner = $1 ORDER BY created_at DESC LIMIT 50', [requester]);
+        const notices = noticeRows.map((n) => items.deviceNotice(n, agentName.get(n.agent_id) || null));
+        const all = [...tasks, ...asks, ...paidAsks, ...scheduled, ...notices].sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : a.id < b.id ? 1 : -1));
         res.json({ items: all.slice(0, 50) });
     });
 
@@ -226,6 +228,50 @@ function createApi(ctx) {
         }
         return next();
     };
+    r.post('/me/devices/presence', principal.requireCapability('actor.approval.decide'), personOnly, async (req, res) => {
+        const device = String((req.body || {}).device_id || '');
+        if (!/^dev_[0-9A-HJKMNP-TV-Z]{26}$/.test(device)) return problem(req, res, 422, 'actor.device.invalid', 'A paired device id is required.');
+        await s.db.query(`INSERT INTO actor_device_presence (owner, device_id, seen_at) VALUES ($1, $2, $3)
+            ON CONFLICT (owner, device_id) DO UPDATE SET seen_at = EXCLUDED.seen_at`, [req.principal.requester, device, s.iso()]);
+        res.status(204).end();
+    });
+
+    // HO12: only the person's own token or same-origin session can supply a device answer.
+    // The uploaded photo is bound to this still-pending approval before its media id can be answered.
+    r.get('/me/approvals/:id', principal.requireCapability('actor.approval.decide'), personOnly, async (req, res) => {
+        const row = await approvals.get(s, req.principal.requester, req.params.id);
+        if (!row) return problem(req, res, 404, 'actor.approval.not_found', 'No such request of yours.');
+        const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
+        const agent = row.agent_id ? await s.db.maybe('SELECT name FROM actor_agents WHERE id = $1 AND owner = $2', [row.agent_id, req.principal.requester]) : null;
+        res.json({ id: row.id, kind: row.kind, state: row.state, summary: row.summary, why: payload && payload.why || null,
+            precise: Boolean(payload && payload.precise), agent: agent && agent.name || null });
+    });
+    r.post('/me/approvals/:id/photo', principal.requireCapability('actor.approval.decide'), personOnly,
+        express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '10mb' }), async (req, res) => {
+            const row = await approvals.get(s, req.principal.requester, req.params.id);
+            if (!row || row.kind !== 'device.camera') return problem(req, res, 404, 'actor.approval.not_found', 'No photo request of yours.');
+            if (row.state !== 'pending') return problem(req, res, 409, 'actor.approval.decided', 'This request is no longer waiting.');
+            if (!Buffer.isBuffer(req.body)) return problem(req, res, 422, 'actor.photo.invalid', 'Choose one JPEG, PNG or WebP photo.');
+            const out = await ctx.media.putPhoto(req.body, { mimeType: String(req.get('content-type') || '').split(';')[0].trim() });
+            if (out.error) return problem(req, res, 422, 'actor.photo.invalid', out.error);
+            const saved = await s.db.maybe(`INSERT INTO actor_device_photos (approval_id, owner, media_id, created_at)
+                SELECT id, owner, $2, $3 FROM actor_approvals WHERE id = $1 AND owner = $4 AND state = 'pending'
+                ON CONFLICT (approval_id) DO NOTHING RETURNING media_id`, [row.id, out.id, s.iso(), req.principal.requester]);
+            if (!saved) return problem(req, res, 409, 'actor.photo.already_uploaded', 'This request already has a photo or was answered.');
+            res.status(201).json({ media_id: saved.media_id });
+        });
+    r.post('/me/approvals/:id/answer', principal.requireCapability('actor.approval.decide'), personOnly, async (req, res) => {
+        const body = req.body || {};
+        if (body.decision === 'decline') {
+            const out = await approvals.decide(ctx, req.principal.requester, req.params.id, 'decline');
+            if (out.error) return problem(req, res, out.status, 'actor.approval.invalid', out.error);
+            return res.json({ id: out.row.id, state: out.row.state });
+        }
+        if (body.decision !== 'answer') return problem(req, res, 422, 'actor.approval.invalid', 'Answer or decline this request.');
+        const out = await approvals.answer(ctx, req.principal.requester, req.params.id, body);
+        if (out.error) return problem(req, res, out.status, 'actor.approval.invalid', out.error);
+        res.json({ id: out.row.id, state: out.row.state });
+    });
 
     // ── Agents as contacts (A-1) ─────────────────────────────
     // The person's own agents: list (Vibe first, created on this first read), read, create (optionally from a preset),

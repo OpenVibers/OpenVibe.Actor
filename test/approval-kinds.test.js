@@ -25,6 +25,8 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
 
 // Every acting tool and the kind it is. `null` means Actor's own working state: it never asks.
 const EXPECTED = {
+    ask_location: null,
+    ask_photo: null,
     codes_task: 'codes.task',
     computer_browser: 'computer.browser',
     computer_desk: 'computer.desk',
@@ -34,6 +36,7 @@ const EXPECTED = {
     hand_to_person: null,
     make_chart: null,
     make_file: null,
+    notify_phone: 'device.notify',
     remember: null,
     robot_steps: 'robot.move',
     run_tool: 'by-tool',
@@ -45,6 +48,8 @@ const EXPECTED = {
 };
 
 const SAMPLE = {
+    ask_location: { why: 'Find a nearby shelter' },
+    ask_photo: { why: 'Read the sign' },
     codes_task: { repo: 'ada/site', instruction: 'fix the bug' },
     computer_browser: { machine: 'dev_x', action: 'click', text: 'Send' },
     computer_desk: { machine: 'dev_x', action: 'start' },
@@ -52,6 +57,7 @@ const SAMPLE = {
     computer_run: { machine: 'dev_x', argv: ['git', 'status'] },
     computer_write: { machine: 'dev_x', path: '/tmp/a.txt', text: 'hi' },
     hand_to_person: { text: 'look at this' },
+    notify_phone: { title: 'Ready', text: 'Your report is ready' },
     make_chart: { name: 'c' },
     make_file: { name: 'n.md', text: 'hi' },
     remember: { text: 'note' },

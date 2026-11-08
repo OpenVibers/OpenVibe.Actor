@@ -27,6 +27,9 @@ const KINDS = [
     'routine',         // set up a task that keeps running
     'money',           // spend the person's money
     'skill.run',       // run a skill's code in a sandbox on a Node (ADR-060)
+    'device.camera',   // ask the person to take one photo
+    'device.location', // ask the person to share one location
+    'device.notify',   // tell the person something on their phone
 ];
 
 // The plain words a person reads for each kind. Never an id, never a code: this is the sentence on the card.
@@ -47,12 +50,15 @@ const LABELS = {
     'routine': 'setting up a task that keeps running',
     'money': 'spending your money',
     'skill.run': 'running a skill\'s code in a sandbox',
+    'device.camera': 'taking one photo yourself',
+    'device.location': 'sharing your location once',
+    'device.notify': 'notifying your phone',
 };
 
 // Kinds a person can never "always allow", whatever the target: spending money is the floor itself; typing reaches
 // anything a terminal can run (so one rule would cover every command); a send's recipient and an install's code are
 // not in the step's name, so no target can say exactly what was allowed.
-const NEVER_ALWAYS = ['money', 'computer.input', 'send', 'install'];
+const NEVER_ALWAYS = ['money', 'computer.input', 'send', 'install', 'device.camera', 'device.location'];
 
 const isKind = (kind) => KINDS.includes(String(kind || ''));
 const allowable = (kind) => isKind(kind) && !NEVER_ALWAYS.includes(String(kind));

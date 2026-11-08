@@ -202,7 +202,7 @@ async function spanCall(trace, { kind, name, tier = null, family = null, started
     });
 }
 
-function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null, connectors = null, skillRun = null }) {
+function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null, connectors = null, skillRun = null, media = null }) {
     /** The connector tools of this person (stage V2-11): empty when there are none or no person. */
     async function connectorTools({ requester, mode }) {
         const empty = { definitions: [], byAlias: new Map() };
@@ -892,7 +892,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (fork) state.answered = false;
         const ctx = {
             config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, artifacts, personToken, timezone, triggers, level, latency, spend,
-            store, now, agentId, personText: personText == null ? String(task) : String(personText),
+            store, media, now, agentId, personText: personText == null ? String(task) : String(personText),
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),
@@ -1057,7 +1057,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         };
         const ctx = {
             config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, artifacts, personToken, timezone, triggers, level, latency, spend,
-            store, now, agentId, personText: personText == null ? String(task) : String(personText),
+            store, media, now, agentId, personText: personText == null ? String(task) : String(personText),
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),

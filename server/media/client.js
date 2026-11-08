@@ -13,10 +13,25 @@
  *   createMedia({ config, fetchImpl, tokens? }) → { enabled, tenant, put(text, { name, mimeType? }) }
  */
 const crypto = require('crypto');
+const sharp = require('sharp');
 const { serviceAuth } = require('openvibe-contracts');
 const { createObjectsClient } = require('openvibe-sdk/media');
 
 const MEDIA_ID = /^med_[0-9A-HJKMNP-TV-Z]{26}$/;
+
+/** Validate real image bytes and strip metadata while respecting orientation. */
+async function sanitizePhoto(input, mimeType) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType) || !Buffer.isBuffer(input) || !input.length || input.length > 10 * 1024 * 1024) {
+        return { error: 'Choose one JPEG, PNG or WebP photo of at most 10 MB.' };
+    }
+    try {
+        const meta = await sharp(input, { limitInputPixels: 50_000_000 }).metadata();
+        if (!['jpeg', 'png', 'webp'].includes(meta.format) || `image/${meta.format}` !== mimeType) return { error: 'The file is not the image type it claims.' };
+        const bytes = await sharp(input, { limitInputPixels: 50_000_000 }).rotate().jpeg({ quality: 85 }).toBuffer();
+        if (bytes.length > 10 * 1024 * 1024) return { error: 'The photo is too large after processing.' };
+        return { bytes };
+    } catch { return { error: 'The photo could not be processed or stored.' }; }
+}
 
 function createMedia({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null } = {}) {
     const services = (config && config.services) || {};
@@ -54,7 +69,31 @@ function createMedia({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         }
     }
 
-    return { enabled, tenant, put };
+    /** Re-encode a person's one photo so EXIF and other metadata never leave Actor. */
+    async function putPhoto(input, { mimeType = '' } = {}) {
+        if (!enabled) return { error: 'OpenVibe.Media is unavailable, so the photo was not stored.' };
+        const cleaned = await sanitizePhoto(input, mimeType);
+        if (cleaned.error) return cleaned;
+        try {
+            const bytes = cleaned.bytes;
+            const object = await objects.upload(bytes, { kind: 'file', visibility: 'private', mimeType: 'image/jpeg',
+                contentHash: crypto.createHash('sha256').update(bytes).digest('hex'), filename: 'photo.jpg' });
+            if (!MEDIA_ID.test(String(object && object.id || ''))) return { error: 'Media did not return a photo id.' };
+            return { id: object.id };
+        } catch {
+            return { error: 'The photo could not be processed or stored.' };
+        }
+    }
+
+    async function photoUrl(id) {
+        if (!enabled || !MEDIA_ID.test(String(id || ''))) return null;
+        try {
+            const signed = await objects.signedUrl(id, { ttl: 300 });
+            return signed && /^https:\/\//.test(String(signed.url || '')) ? signed.url : null;
+        } catch { return null; }
+    }
+
+    return { enabled, tenant, put, putPhoto, photoUrl };
 }
 
-module.exports = { createMedia, MEDIA_ID };
+module.exports = { createMedia, sanitizePhoto, MEDIA_ID };

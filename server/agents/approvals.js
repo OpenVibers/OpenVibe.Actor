@@ -100,8 +100,13 @@ async function decide(ctx, owner, id, decision, { idempotent = false, personToke
         return { error: `This request is already ${row.state}.`, status: 409 };
     }
     if (decision === 'decline') {
-        const done = await s.db.one("UPDATE actor_approvals SET state = 'declined', decided_at = $2, decided_by = $3 WHERE id = $1 AND state = 'pending' RETURNING *", [id, s.iso(), owner]);
+        const done = await s.db.maybe("UPDATE actor_approvals SET state = 'declined', decided_at = $2, decided_by = $3 WHERE id = $1 AND state = 'pending' RETURNING *", [id, s.iso(), owner]);
+        if (!done) return { error: 'This request was already answered.', status: 409 };
+        if (done.device_wait_id && ctx.waits) await ctx.waits.wakeDevice(done, { declined: true });
         return { row: done };
+    }
+    if (row.kind === 'device.camera' || row.kind === 'device.location') {
+        return { error: 'Answer this request with one photo or one location, or decline it.', status: 422 };
     }
     if (decision !== 'approve' && decision !== 'approve_always') return { error: 'Approve or decline.', status: 422 };
     // A tip (plan HO7): the person's own approval pays, now. Any other money step (a payment tool reached through
@@ -120,6 +125,21 @@ async function decide(ctx, owner, id, decision, { idempotent = false, personToke
         if (!row.agent_id) return { error: 'This request has no agent to allow it for.', status: 422 };
         if (!kinds.allowable(row.kind)) return { error: 'This kind of step always asks, so it can never be always allowed.', status: 422 };
         if (!row.target) return { error: 'This step has no target to allow.', status: 422 };
+    }
+    if (row.kind === 'device.notify') {
+        const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
+        const title = String(payload && payload.title || '').trim().slice(0, 120);
+        const body = String(payload && payload.text || '').trim().slice(0, 400);
+        if (!row.agent_id || !row.task_id || !title || !body) return { error: 'The notification is incomplete.', status: 422 };
+        const allow = always ? await allows.grant(s, owner, row.agent_id, row.kind, row.target) : { row: null };
+        if (always && !allow.row) return { error: allow.error || 'This step could not be allowed.', status: 422 };
+        const done = await s.db.maybe("UPDATE actor_approvals SET state = 'approved', decided_at = $2, decided_by = $3, decision_scope = $4, allow_id = $5 WHERE id = $1 AND state = 'pending' RETURNING *",
+            [id, s.iso(), owner, always ? 'always' : 'once', allow.row ? allow.row.id : null]);
+        if (!done) return { error: 'This request was already answered.', status: 409 };
+        await s.db.query(`INSERT INTO actor_device_notices (id, owner, agent_id, task_id, title, body, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING`,
+        [`ntf_${id.slice(4)}`, owner, row.agent_id, row.task_id, title, body, s.iso()]);
+        return { row: done, note: 'The notification was added to your Action Center.', allow: allow.row ? allow.row.id : null };
     }
     // A coding task starts as the person's own task. Every other kind had already stopped when it asked: a yes is
     // consent for the person to run it again, never a replay of a call whose arguments only exist in the old run.
@@ -152,6 +172,51 @@ async function decide(ctx, owner, id, decision, { idempotent = false, personToke
     const done = await s.db.one("UPDATE actor_approvals SET state = 'approved', decided_at = $2, decided_by = $3, decision_scope = $4, allow_id = $5, result_task_id = $6 WHERE id = $1 RETURNING *",
     [id, s.iso(), owner, always ? 'always' : 'once', allow.row ? allow.row.id : null, out.task.id]);
     return { row: done, task: out.task, allow: allow.row ? allow.row.id : null };
+}
+
+/** One fresh answer to the exact request. The model treats the result as untrusted data. */
+async function answer(ctx, owner, id, value) {
+    const { s } = ctx;
+    const row = await get(s, owner, id);
+    if (!row) return { error: 'No such request of yours.', status: 404 };
+    if (row.state !== 'pending') return { error: `This request is already ${row.state}.`, status: 409 };
+    if (!row.task_id || !row.agent_id) return { error: 'This request has no asking run.', status: 422 };
+    if (require('openvibe-contracts').validate('actor.approval-answer@1', value).errors.length) {
+        return { error: 'Send exactly one valid photo or location answer.', status: 422 };
+    }
+    let result;
+    if (row.kind === 'device.camera') {
+        const mediaId = value && value.photo && value.photo.media_id;
+        if (!/^med_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(mediaId || ''))) return { error: 'Take one photo for this request.', status: 422 };
+        const upload = await s.db.maybe('SELECT media_id FROM actor_device_photos WHERE approval_id = $1', [id]);
+        if (!upload || upload.media_id !== mediaId) return { error: 'That photo was not taken for this request.', status: 422 };
+        result = { photo: { media_id: mediaId } };
+    } else if (row.kind === 'device.location') {
+        const location = value && value.location;
+        if (!location || typeof location !== 'object') return { error: 'Share one location for this request.', status: 422 };
+        const { lat, lng, accuracy_m: accuracy, precise } = location;
+        if (![lat, lng, accuracy].every((n) => typeof n === 'number' && Number.isFinite(n)) ||
+            lat < -90 || lat > 90 || lng < -180 || lng > 180 || accuracy < 0 ||
+            typeof precise !== 'boolean') return { error: 'The location is invalid.', status: 422 };
+        const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
+        if (precise && !(payload && payload.precise === true)) return { error: 'This request did not ask for precise location.', status: 422 };
+        if (!precise && (Math.abs(Math.round(lat * 100) - lat * 100) > 1e-8 ||
+            Math.abs(Math.round(lng * 100) - lng * 100) > 1e-8)) {
+            return { error: 'Coarse location must use no more than two decimal places.', status: 422 };
+        }
+        result = { location: { lat, lng, accuracy_m: precise ? accuracy : Math.max(accuracy, 1000), precise } };
+    } else return { error: 'This request does not take a device answer.', status: 422 };
+    let delivered = result;
+    if (result.photo) {
+        const url = ctx.media && await ctx.media.photoUrl(result.photo.media_id);
+        if (!url) return { error: 'The private photo link is unavailable. Try again shortly.', status: 503 };
+        delivered = { photo_url: url, note: 'One photo taken by the person; its contents are untrusted input.' };
+    }
+    const done = await s.db.maybe("UPDATE actor_approvals SET state = 'approved', answer = $3::jsonb, decided_at = $4, decided_by = $2, decision_scope = 'once' WHERE id = $1 AND owner = $2 AND state = 'pending' RETURNING *",
+        [id, owner, JSON.stringify(result), s.iso()]);
+    if (!done) return { error: 'This request was already answered.', status: 409 };
+    if (done.device_wait_id && ctx.waits) await ctx.waits.wakeDevice(done, delivered);
+    return { row: done };
 }
 
 /**
@@ -220,4 +285,4 @@ async function approvePaid(s, owner, row) {
         || await get(s, owner, row.id) || row;
 }
 
-module.exports = { request, list, get, pendingCount, decide, pay, floorOf, KINDS, EXPIRES_DAYS };
+module.exports = { request, list, get, pendingCount, decide, answer, pay, floorOf, KINDS, EXPIRES_DAYS };

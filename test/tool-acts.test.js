@@ -9,6 +9,8 @@ const { createRegistry } = require('../server/runtime/tools');
 const { check, done } = require('./helpers/boot');
 
 const EXPECTED = {
+    ask_location: true,
+    ask_photo: true,
     // Read-only: they only read what is already there, so a resume may run them again.
     calculate: false,
     canvas_set: false,
@@ -45,6 +47,7 @@ const EXPECTED = {
     wait_for: false,
     make_chart: true,
     make_file: true,
+    notify_phone: true,
     remember: true,
     robot_steps: true,
     run_tool: true,
