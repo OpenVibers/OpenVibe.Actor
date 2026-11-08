@@ -23,15 +23,15 @@ const nowIso = (s) => s.iso();
  * else the root of the sender's chain, else the letter's own Message-ID. Two people replying to each other stay on
  * one key because every reply repeats the chain.
  */
-async function threadKeyFor({ s, owner, inboxId, chain = [], messageId = null, inReplyTo = null }) {
+async function threadKeyFor({ s, owner, inboxId, agentId, chain = [], messageId = null, inReplyTo = null }) {
     // A letter that answers something we hold continues THAT thread, whatever its own headers claim about the chain.
     for (const id of [inReplyTo, ...[...chain].reverse()]) {
         if (!id) continue;
-        const known = await s.db.maybe('SELECT thread_key FROM actor_mail_runs WHERE owner = $1 AND inbox_id = $2 AND message_rfc_id = $3', [owner, inboxId, id]);
+        const known = await s.db.maybe('SELECT thread_key FROM actor_mail_runs WHERE owner = $1 AND inbox_id = $2 AND agent_id = $3 AND message_rfc_id = $4', [owner, inboxId, agentId, id]);
         if (known) return known.thread_key;
     }
     // Otherwise the oldest id we have (the root), else the letter's own id, else a note that it is unknown.
-    return chain[0] || messageId || `unknown:${inboxId}`;
+    return `${agentId}:${inboxId}:${chain[0] || messageId || 'unknown'}`;
 }
 
 /** The thread's row, made on first use. */
@@ -73,13 +73,13 @@ const enabledInboxes = (s, owner) => s.db.many('SELECT * FROM actor_mail_inboxes
 // ---- one row per letter ------------------------------------------------------------------------
 
 /** Claim a letter. False when it was already taken: the insert is the test, so a redelivery is a no-op. */
-async function claimRun({ s, owner, inboxId, agentId, messageId, messageRfcId = null, threadKey, peer, subject }) {
+async function claimRun({ s, owner, inboxId, agentId, mailAgentName = null, messageId, messageRfcId = null, threadKey, peer, subject }) {
     const at = nowIso(s);
     const row = await s.db.maybe(`INSERT INTO actor_mail_runs
-        (message_id, owner, inbox_id, agent_id, thread_key, peer, subject, created_at, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
+        (message_id, owner, inbox_id, agent_id, mail_agent_name, thread_key, peer, subject, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
         ON CONFLICT (message_id) DO NOTHING
-        RETURNING *`, [messageId, owner, inboxId, agentId, threadKey, peer, subject || null, at]);
+        RETURNING *`, [messageId, owner, inboxId, agentId, mailAgentName, threadKey, peer, subject || null, at]);
     if (!row) return null;
     if (messageRfcId) await s.db.query('UPDATE actor_mail_runs SET message_rfc_id = $2 WHERE message_id = $1', [messageId, messageRfcId]);
     return row;
@@ -101,10 +101,10 @@ async function countLastHour({ s, owner, inboxId, peer = null, now = Date.now() 
     return row ? Number(row.n) : 0;
 }
 
-/** The last `limit` letters this agent answered, newest first: what its page lists. */
-async function answeredByAgent({ s, owner, inboxId, limit = 10 }) {
+/** The last `limit` letters this agent answered, across its bound addresses. */
+async function answeredByAgent({ s, owner, agentId, limit = 10 }) {
     return s.db.many(`SELECT message_id, thread_key, peer, subject, task_id, reply_state, reply_to, approval_id, reason, created_at
-        FROM actor_mail_runs WHERE owner = $1 AND inbox_id = $2 ORDER BY created_at DESC LIMIT $3`, [owner, inboxId, limit]);
+        FROM actor_mail_runs WHERE owner = $1 AND agent_id = $2 ORDER BY created_at DESC LIMIT $3`, [owner, agentId, limit]);
 }
 
 /** What the thread's previous run was, so the next continues from it. */

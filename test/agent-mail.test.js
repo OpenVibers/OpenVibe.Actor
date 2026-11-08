@@ -22,6 +22,8 @@ const { boot } = require('./helpers/boot');
 const store = require('../server/mail/store');
 const { parseEvent, isOwnAddress, plainAnswer, PER_INBOX_PER_HOUR, PER_SENDER_PER_HOUR } = require('../server/mail/service');
 const approvals = require('../server/agents/approvals');
+const bindings = require('../server/agents/channel-bindings');
+const personal = require('../server/agents/personal');
 
 const OUTBOUND_CLOSED = 'OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.';
 let failures = 0;
@@ -358,6 +360,40 @@ async function runOf(t, messageId) {
                 assert.strictEqual(page.status, 200);
                 assert.ok(page.text.includes(inbox.address), 'the address');
                 assert.ok(page.text.includes('Its mail address'), 'the panel');
+            });
+            const family = (await personal.create(t.ctx.s, t.config, owner, { name: 'Family', instructions: 'Family letters only.',
+                mode: 'balanced', budget_per_run_usd: 0.02, daily_runs_max: 5, schedule: 'off', status: 'active' })).row;
+            await bindings.bind(t.ctx.s, { kind: 'mail', accountId: inbox.id, owner, agentId: family.id });
+            mail.state.letters.set('m-moved', { ...letter(dana, { inbox, messageId: 'm-moved', from: 'dana@openvibe.email' }),
+                in_reply_to: 'm-own', references: ['m-own'] });
+            const moved = await t.ctx.agentMail.onEvent(letterEvent({ inbox, owner: dana.subject, messageId: 'm-moved', from: 'dana@openvibe.email' }));
+            await ok('a moved mail account routes only to its new agent, through the original inbox', async () => {
+                assert.strictEqual(moved, 'task');
+                const run = await runOf(t, 'm-moved');
+                assert.strictEqual(run.agent_id, family.id);
+                assert.strictEqual(run.mail_agent_name, 'helper');
+                assert.notStrictEqual(run.thread_key, (await runOf(t, 'm-own')).thread_key,
+                    'a moved address must not continue the previous agent\'s task thread');
+                assert.strictEqual((await t.ctx.s.db.maybe('SELECT parent_id FROM tasks WHERE id = $1', [run.task_id])).parent_id, null);
+                const task = await t.waitFor(run.task_id, ['succeeded', 'failed']);
+                assert.strictEqual(task.state, 'succeeded', task.error_detail || '');
+                assert.ok(task.task.includes('Family letters only.'));
+                assert.ok(mail.calls.some(c => c.method === 'POST' && c.url === '/internal/mail/agents/helper/reply' && c.body?.message_id === 'm-moved'),
+                    'the reply uses the source address after the move');
+                assert.strictEqual((await bindings.list(t.ctx.s, owner)).filter(b => b.kind === 'mail' && b.account_id === inbox.id).length, 1);
+                const familyPage = await t.get(`/me/agents/${family.id}`, { as: dana });
+                assert.ok(familyPage.text.includes('Where it listens') && familyPage.text.includes(inbox.address)
+                    && familyPage.text.includes('Unbind'), 'the receiving agent lists the moved address');
+                const sourcePage = await t.get(`/me/agents/${agent.id}`, { as: dana });
+                assert.ok(sourcePage.text.includes('Currently on Family'), 'the source agent shows where its address moved');
+            });
+            await bindings.unbind(t.ctx.s, { kind: 'mail', accountId: inbox.id, owner, agentId: family.id });
+            const unbound = await t.ctx.agentMail.onEvent(letterEvent({ inbox, owner: dana.subject, messageId: 'm-unbound' }));
+            await ok('an unbound mail account starts no run', async () => {
+                assert.strictEqual(unbound, 'ignored:unbound');
+                assert.strictEqual(await runOf(t, 'm-unbound'), null);
+                const page = await t.get(`/me/agents/${agent.id}`, { as: dana });
+                assert.ok(page.text.includes('no agent is bound to answer these letters'));
             });
         }
     } finally {

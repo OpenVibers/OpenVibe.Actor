@@ -63,7 +63,11 @@ const TABLES = [
     { table: 'actor_mail_inboxes', subject: 'owner', value: (usr) => `user:${usr}`, file: 'mail-inboxes.json',
         columns: ['owner', 'inbox_id', 'agent_id', 'address', 'enabled', 'changed_at'] },
     { table: 'actor_mail_runs', subject: 'owner', value: (usr) => `user:${usr}`, file: 'mail-runs.json',
-        columns: ['message_id', 'message_rfc_id', 'owner', 'inbox_id', 'agent_id', 'thread_key', 'peer', 'subject', 'task_id', 'reply_state', 'reply_to', 'approval_id', 'reason', 'created_at', 'updated_at'] },
+        columns: ['message_id', 'message_rfc_id', 'owner', 'inbox_id', 'agent_id', 'mail_agent_name', 'thread_key', 'peer', 'subject', 'task_id', 'reply_state', 'reply_to', 'approval_id', 'reason', 'created_at', 'updated_at'] },
+    // HO14: each connected channel account's receiving agent, including an explicit unbind.
+    // Its label can identify the person's address or chat handle, so it belongs in their export and deletion.
+    { table: 'actor_channel_bindings', subject: 'owner', value: (usr) => `user:${usr}`, file: 'channel-bindings.json',
+        columns: ['kind', 'account_id', 'owner', 'label', 'agent_id', 'changed_at'] },
     // Every column but webhook_secret (a task's signing secret is a credential, not the person's data).
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',
