@@ -1,0 +1,30 @@
+{
+  "skill": "actor.skill@1",
+  "slug": "changelog-draft",
+  "name": "The last seven days, as a changelog draft",
+  "description": "Turn what shipped on OpenVibe in the last seven days into a draft post.",
+  "version": "1.0.0",
+  "instructions": "Gather what shipped on OpenVibe in the last seven days and write it up as a draft the person can read before anything goes out.\n\nWork in this order:\n\n1. Find what shipped. OpenVibe's changelog is the source: read openvibe.blog/changelog and take the entries whose date falls in the last seven days. If a day has no entry, leave that day out; do not fill it in.\n\n2. Group them. One line per entry: what it is, in a few words, in plain language — no marketing words, no \"exciting\", no \"revolutionary\". Group the entries under the kind of change they are (something new, something fixed, something faster) and say which group each line belongs to.\n\n3. Write the draft. A headline of ten words at most, then the groups in order, then one line per entry under each group. Keep each entry's own words where you can.\n\n4. Hand it back as a file called changelog-draft.md, and say in one line how many entries it holds.\n\nOnly what the changelog says. If you cannot confirm an entry, leave it out and say which one you left out.",
+  "resources": [
+    {
+      "path": "changelog-template.md",
+      "media_type": "text/markdown",
+      "text": "# <headline, ten words at most>\n\n## Something new\n\n- <what it is>\n\n## Something fixed\n\n- <what it is>\n\n## Something faster\n\n- <what it is>\n\n<N> entries, from <the first date> to <the last date>.\n"
+    }
+  ],
+  "requires": {
+    "kinds": [
+      "post"
+    ],
+    "hosts": [
+      "openvibe.blog"
+    ]
+  },
+  "runs": "prompt",
+  "license": "CC-BY-4.0",
+  "created_at": "2026-11-07T00:00:00.000Z",
+  "integrity": {
+    "alg": "sha256",
+    "hash": "147afd67ca70beff582b765745522f68455c3226deeb005829904027b9f2f0a9"
+  }
+}

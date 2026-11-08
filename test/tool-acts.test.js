@@ -19,6 +19,7 @@ const EXPECTED = {
     computer_screen: false,
     find_tools: false,
     geocode: false,
+    load_skill: false,
     list_my_computers: false,
     list_my_robots: false,
     market_quote: false,

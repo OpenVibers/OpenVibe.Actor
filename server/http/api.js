@@ -46,6 +46,7 @@ const assignments = require('../agents/assignments');
 const modelPrefs = require('../runtime/model-prefs');
 const driving = require('../agents/driving');
 const canvases = require('../canvases');
+const skills = require('../skills');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_ID = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -155,6 +156,18 @@ function createApi(ctx) {
     // A person's own agents live under /me: /agents stays the public catalog of agent systems (actor.agent.read).
     r.get('/me/agents', principal.requireCapability('actor.agent.manage'), (req, res, next) => owner(req, res, next), limits.reads('actor.agent.manage'), async (req, res) => {
         res.json({ agents: await personal.list(s, req.principal.requester) });
+    });
+
+    // ── The skills registry (plan HO2, ADR-058) ───────────────────────────────────────────────────────────
+    // The catalogue is public: a skill is a document anybody may read, and the listing says who published it, what
+    // the scan found and whether the curator still offers it (actor.skill-listing@1).
+    r.get('/skills', async (req, res) => {
+        res.json({ listings: await skills.catalogue(s) });
+    });
+    r.get('/skills/:id', async (req, res) => {
+        const listing = await skills.get(s, req.params.id);
+        if (!listing) return problem(req, res, 404, 'actor.skill.not_found', 'No such skill.');
+        res.json(listing);
     });
 
     const owner = (req, res, next) => {
@@ -313,6 +326,26 @@ function createApi(ctx) {
         const row = await loadAgent(req, res); if (!row) return;
         if (row.is_vibe) return problem(req, res, 409, 'actor.agent.vibe', 'Vibe is your first agent and cannot be deleted.');
         await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [row.id, row.owner]);
+        res.status(204).end();
+    });
+    // The skills of one agent (plan HO2): install a skill on it, or take it back. Installing grants nothing — the
+    // agent's level and its approvals still decide every step. A flagged skill needs the person to say they read
+    // the findings; a failed one never installs.
+    r.post('/me/agents/:id/skills', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
+        const row = await loadAgent(req, res); if (!row) return;
+        const body = req.body || {};
+        const listing = await skills.rowOf(s, String(body.listing_id || body.slug || ''));
+        if (!listing) return problem(req, res, 404, 'actor.skill.not_found', 'No such skill.');
+        const read = body.read_findings === true || body.read_findings === '1' || body.read_findings === 'true';
+        const out = await skills.install(s, { owner: req.principal.requester, agentId: row.id, listing, readFindings: read });
+        if (out.error) return problem(req, res, out.status || 422, out.code === 'failed' ? 'actor.skill.failed' : 'actor.skill.invalid', out.error);
+        res.set('Location', `/api/v1/me/agents/${row.id}/skills/${out.listing.id}`);
+        res.status(201).json({ install: out.row, listing: out.listing });
+    });
+    r.delete('/me/agents/:id/skills/:listingId', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
+        const row = await loadAgent(req, res); if (!row) return;
+        const out = await skills.remove(s, { owner: req.principal.requester, agentId: row.id, listingId: req.params.listingId });
+        if (out.error) return problem(req, res, out.status || 404, 'actor.skill.not_found', out.error);
         res.status(204).end();
     });
     r.post('/me/agents/:id/run', principal.requireCapability('actor.agent.run'), owner, limits.budget('actor.agent.run'), async (req, res) => {
