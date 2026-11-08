@@ -505,7 +505,7 @@ ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map
 ${applied.length ? html`<details><summary>Added lately</summary><ul class="pa-notes">${applied.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Added ${time(p.decided_at)}</p>
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}"><button type="submit" name="decision" value="undo" class="pa-danger-link">Undo</button></form></li>`)}</ul></details>` : ''}</section>` : ''}
 ${mailPanel(a, mailInbox, mailAnswered)}${voicePanel(a, doc, shared)}<section class="pa-panel" id="skills" aria-labelledby="pa-skills-h"><h2 id="pa-skills-h">Its skills</h2>
-<p class="pa-hint">Small how-to documents it reads for one kind of job. A skill grants nothing: every step still goes through its level and your approvals.</p>
+<p class="pa-hint">Small how-to documents it reads for one kind of job. It grants nothing: every step still goes through its level and your approvals.</p>
 ${installed.length ? html`<ul class="pa-notes">${installed.map((k) => html`<li><p class="pa-note-text">${k.name}</p><p class="pa-note-meta">${k.description}</p>
 ${k.withdrawn ? html`<p class="pa-note-meta">${k.withdrawn}</p>` : ''}
 <form method="post" action="/me/agents/${a.id}/skills/${k.listing_id}/remove" class="pa-actions"><button type="submit" class="pa-danger-link">Remove</button></form></li>`)}</ul>` : html`<p class="muted">No skills on this agent yet.</p>`}
