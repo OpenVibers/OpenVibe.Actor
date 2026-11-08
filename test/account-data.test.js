@@ -12,6 +12,7 @@ const { createNetworkSender, uncovered } = require('openvibe-sdk/account-data');
 const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const taskStore = require('../server/tasks/store');
 const personal = require('../server/agents/personal');
+const bindings = require('../server/agents/channel-bindings');
 const { TABLES, EXEMPT } = require('../server/identity/account-data');
 const { testDb } = require('./helpers/db');
 
@@ -154,6 +155,8 @@ async function makeSkillInstall(t, subject, agentId) {
             await personal.addMemory(t.ctx.s, `user:${A}`, ownAgent.id, 'A private note.');
             const otherAgent = (await personal.create(t.ctx.s, t.config, `user:${B}`, { name: 'B helper', instructions: 'Help B.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
             await personal.addMemory(t.ctx.s, `user:${B}`, otherAgent.id, 'B private note.');
+            await bindings.ensure(t.ctx.s, { kind: 'telegram', accountId: '1001', owner: `user:${A}`, label: '@person-a', agentId: ownAgent.id });
+            await bindings.ensure(t.ctx.s, { kind: 'telegram', accountId: '1002', owner: `user:${B}`, label: '@person-b', agentId: otherAgent.id });
             // A skill each of them installed on their own agent (plan HO2): the install is the person's own row.
             await makeSkillInstall(t, A, ownAgent.id);
             await makeSkillInstall(t, B, otherAgent.id);
@@ -166,7 +169,11 @@ async function makeSkillInstall(t, subject, agentId) {
             assert.ok(part, 'the part was pushed to Network');
             assert.strictEqual(part.auth, 'Bearer tok_actor', 'with this service\'s own token');
             assert.strictEqual(part.body.subject, A);
-            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['agent-memory.json', 'agents.json', 'artifacts-content.json', 'artifacts.json', 'bench-offers.json', 'skill-installs.json', 'spans.json', 'spend.json', 'tasks.json', 'waits.json']);
+            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['agent-memory.json', 'agents.json', 'artifacts-content.json', 'artifacts.json', 'bench-offers.json', 'channel-bindings.json', 'skill-installs.json', 'spans.json', 'spend.json', 'tasks.json', 'waits.json']);
+            const channels = part.body.files.find((f) => f.name === 'channel-bindings.json').content;
+            assert.strictEqual(channels.length, 1, 'only A\'s channel account');
+            assert.strictEqual(channels[0].agent_id, ownAgent.id);
+            assert.strictEqual(channels[0].label, '@person-a');
             const installs = part.body.files.find((f) => f.name === 'skill-installs.json').content;
             assert.strictEqual(installs.length, 1, 'only A\'s skill install');
             assert.strictEqual(installs[0].owner, `user:${A}`);
@@ -233,6 +240,8 @@ async function makeSkillInstall(t, subject, agentId) {
             await makeSkillInstall(t, A, agent.id);
             const otherAgent = (await personal.create(t.ctx.s, t.config, `user:${B}`, { name: 'B keeps theirs', instructions: 'Help B.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
             await makeSkillInstall(t, B, otherAgent.id);
+            await bindings.ensure(t.ctx.s, { kind: 'telegram', accountId: '2001', owner: `user:${A}`, label: '@erase-me', agentId: agent.id });
+            await bindings.ensure(t.ctx.s, { kind: 'telegram', accountId: '2002', owner: `user:${B}`, label: '@keep-me', agentId: otherAgent.id });
             const db = t.ctx.s.db;
             const count = async (sql, args = []) => await db.value(sql, args);
 
@@ -255,11 +264,13 @@ async function makeSkillInstall(t, subject, agentId) {
             assert.strictEqual(await count("SELECT count(*)::int FROM spend_daily WHERE requester = '*'"), 1, 'the operator\'s `*` ceiling row is kept');
             assert.strictEqual(await count('SELECT count(*)::int FROM actor_skill_installs WHERE owner = $1', [`user:${A}`]), 0, 'their skill install is gone');
             assert.strictEqual(await count('SELECT count(*)::int FROM actor_skill_installs WHERE owner = $1', [`user:${B}`]), 1, 'someone else\'s skill install stays');
+            assert.strictEqual(await count('SELECT count(*)::int FROM actor_channel_bindings WHERE owner = $1', [`user:${A}`]), 0, 'their channel account is gone');
+            assert.strictEqual(await count('SELECT count(*)::int FROM actor_channel_bindings WHERE owner = $1', [`user:${B}`]), 1, 'someone else\'s channel account stays');
             assert.strictEqual(await count('SELECT count(*)::int FROM actor_skill_listings WHERE publisher_subject = $1', [A]), 0, 'a listing they published is gone');
 
             const confirmation = stub.calls.find((c) => c.url === `/internal/account-deletions/${DEL}/confirmations`);
             assert.ok(confirmation, 'the confirmation was sent');
-            assert.deepStrictEqual(confirmation.body.erased, { actor_bench_offers: 1, actor_artifacts: 1, tasks: 1, spend_daily: 1, actor_agent_memory: 1, actor_agents: 1, actor_waits: 1, actor_skill_installs: 1 });
+            assert.deepStrictEqual(confirmation.body.erased, { actor_bench_offers: 1, actor_artifacts: 1, tasks: 1, spend_daily: 1, actor_agent_memory: 1, actor_agents: 1, actor_waits: 1, actor_skill_installs: 1, actor_channel_bindings: 1 });
             assert.deepStrictEqual(confirmation.body.retained, {});
             assert.ok(!Number.isNaN(Date.parse(confirmation.body.completed_at)));
 
