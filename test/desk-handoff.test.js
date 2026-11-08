@@ -82,7 +82,7 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         const spent = await t.handToPerson(ME, { machine: PC, what: 'Solve the CAPTCHA.' }, { desks: run, emit: async () => {}, waitForPerson: () => 0 });
         assert.deepStrictEqual([spent.done, /already waited/.test(spent.note)], [false, true]);
         assert.match((await t.handToPerson(ME, { machine: PC, what: '  ' }, { desks: run })).error, /what is the step/);
-        // A machine with one private desk (an older Node): the hand-off is to that desk.
+        // A machine with one private desk (an older Link): the hand-off is to that desk.
         const old = await t.handToPerson(ME, { machine: PC, what: 'Sign in.' }, { desks: t.deskRun(), emit: async () => {}, waitForPerson: () => 20, pollMs: 5 });
         assert.match(old.watch, /\?desk=private$/);
     });

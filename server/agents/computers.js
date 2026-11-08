@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * The person's own computers on OpenVibe.Bot, as runtime tools (plan T14/T17): OpenVibe.Node's computer plugin, reached
+ * The person's own computers on OpenVibe.Bot, as runtime tools (plan T14/T17): OpenVibe Link's computer plugin, reached
  * only through Bot. Actor calls Bot's public API with its own service token (audience openvibe.bot,
  * bot.computer.control) and X-OV-Subject naming the person the task is for. Bot answers only for the machine's owner,
  * and only where that owner turned on "Let my agent use this computer"; the level the owner set on the machine itself
@@ -16,8 +16,8 @@
  *     screen → { format, width, height, content_b64 }                    (the screen now, scaled to max_width)
  *     input → { done, action, x?, y? }                                  (mouse, scroll, typing or a key, as the person)
  *     desk  → { running, kind?, display?, width?, height? }             (a desk: start, stop, status; kind browser|desktop)
- *   screen, input and browser take desk: "private" to act on the private desk (contracts 0.214.0, Node v0.15.0 on Linux),
- *   or a named desk "desk-<name>" (contracts 0.215.0, Node v0.19.0: several desks per machine; agents/tools.js gives each
+ *   screen, input and browser take desk: "private" to act on the private desk (contracts 0.214.0, Link v0.15.0 on Linux),
+ *   or a named desk "desk-<name>" (contracts 0.215.0, Link v0.19.0: several desks per machine; agents/tools.js gives each
  *   task one, the model only ever says "private"),
  *   a screen of its own where the agent works without touching the person's; Bot refuses it on a machine without one.
  *
@@ -42,7 +42,7 @@ const POINT_ACTIONS = new Set(['move', 'click', 'double_click', 'right_click']);
 const BROWSER_ACTIONS = new Set(['open', 'click', 'fill', 'press', 'back', 'read', 'close']);
 const PAGE_TEXT = 3500;
 const PAGE_LINKS = 25;
-// With the page's elements as refs (Node v0.21.0) the links are among them, so the text gets less room and the links
+// With the page's elements as refs (Link v0.21.0) the links are among them, so the text gets less room and the links
 // none: one tool result stays whole (tools.js clips results at 6000 characters).
 const PAGE_TEXT_WITH_ELEMENTS = 2200;
 const PAGE_ELEMENTS = 60;
@@ -186,14 +186,14 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const machines = ((r.data && r.data.machines) || []).filter((m) => m.computer).map((m) => ({
             id: m.id, name: m.name, online: m.online, level: m.computer.level,
             can: ['terminal', 'files', 'screen', 'input', 'browser', 'desk'].filter((k) => m.computer[k]),
-            // Several desks at once (Node v0.19.0): each task then works on a desk of its own there.
+            // Several desks at once (Link v0.19.0): each task then works on a desk of its own there.
             ...(m.computer.desk && m.computer.desk.named === true ? { desks_at_once: Number(m.computer.desk.max_desks) || 1 } : {}),
             ...(Number.isInteger(m.computer.desks_running) ? { desks_running: m.computer.desks_running } : {}),
-            // The kinds of desk it runs (Node v0.23.0, Desks plan D2): browser (a browser alone) and desktop (a whole screen).
+            // The kinds of desk it runs (Link v0.23.0, Desks plan D2): browser (a browser alone) and desktop (a whole screen).
             ...(m.computer.desk && Array.isArray(m.computer.desk.kinds) ? { desk_kinds: m.computer.desk.kinds.filter((k) => DESK_KINDS.has(k)) } : {}),
-            // It keeps the person's browser profile from desk to desk (Node v0.24.0): sign in once.
+            // It keeps the person's browser profile from desk to desk (Link v0.24.0): sign in once.
             ...(m.computer.desk && m.computer.desk.profiles === true ? { keeps_sign_ins: true } : {}),
-            // It runs programs on a desk (Node v0.26.0): computer_run with desk "private", and detach for an app.
+            // It runs programs on a desk (Link v0.26.0): computer_run with desk "private", and detach for an app.
             ...(m.computer.terminal && m.computer.terminal.desks === true ? { apps_on_desk: true } : {}),
             folders: (m.computer.files && m.computer.files.roots) || [],
             ...(m.computer.waiting ? { waiting_for_approval: m.computer.waiting } : {}),
@@ -232,7 +232,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const value = { argv };
         if (cwd) value.cwd = String(cwd);
         if (Number.isInteger(timeoutS) && timeoutS > 0) value.timeout_s = Math.min(timeoutS, 600);
-        // On a desk (Node v0.26.0): its session, so a program's windows open there; detach keeps an app running there.
+        // On a desk (Link v0.26.0): its session, so a program's windows open there; detach keeps an app running there.
         if (desk && desk !== 'main') value.desk = desk;
         if (detach) {
             if (!value.desk) return { error: 'detach is for your own desk only (desk "private"): an app is never left running on the person\'s screen' };
@@ -320,7 +320,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             if (typeof a.url !== 'string' || !/^https?:\/\//i.test(a.url) || a.url.length > 2048) return { error: 'open needs url: an http or https address' };
             value.url = a.url;
         }
-        // A ref (e7) from the page's elements names exactly that element: Node keeps it on the element as data-ov-ref.
+        // A ref (e7) from the page's elements names exactly that element: Link keeps it on the element as data-ov-ref.
         if (a.ref != null) {
             if (!['click', 'fill'].includes(a.action) || !REF.test(String(a.ref))) return { error: 'ref is an element\'s ref from the page (for example e7), for click or fill' };
             a.selector = `[data-ov-ref="${a.ref}"]`;
@@ -345,7 +345,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (a.action === 'fill') return { done: !!d.done, chars: d.chars };
         if (a.action === 'close') return { done: true };
         // Sized to fit one tool result whole (tools.js clips results at 6000 characters): what the action changed (its
-        // receipt), the page's elements as refs to act on (Node v0.21.0), then its text; links when there are no refs.
+        // receipt), the page's elements as refs to act on (Link v0.21.0), then its text; links when there are no refs.
         const elements = Array.isArray(d.elements) ? d.elements.slice(0, PAGE_ELEMENTS).map((e) => String(e).slice(0, 110)) : null;
         const room = elements ? PAGE_TEXT_WITH_ELEMENTS : PAGE_TEXT;
         const text = typeof d.text === 'string' ? d.text : '';

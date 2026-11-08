@@ -16,7 +16,7 @@ const { personOf } = require('./_openvibe');
 const PERSON_WAIT_MS = 10 * 60_000;
 const PERSON_POLL_MS = 3000;
 const PERSON_QUIET_MS = 20_000;
-// The browser profile kept for the person's agent on each of their machines (Node v0.24.0: sign in once).
+// The browser profile kept for the person's agent on each of their machines (Link v0.24.0: sign in once).
 const AGENT_PROFILE = 'agent';
 
 function deskRun(taskId = null) {
