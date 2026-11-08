@@ -1,0 +1,27 @@
+{
+  "skill": "actor.skill@1",
+  "slug": "price-watch-goal",
+  "name": "A price watch, as a goal",
+  "description": "Keep an eye on one price and say when it moves.",
+  "version": "1.0.0",
+  "instructions": "Keep an eye on the price of one thing and tell the person when it moves. This is a standing goal: it comes round again and again, so each turn stands on its own and says where it got to.\n\nWork in this order:\n\n1. Find the price. Open the page the person gave you and read the price it shows now, with the currency. If the page shows several prices, take the one that is in stock.\n\n2. Compare it with the last price. The last price is in the person's memory; if it is not there, this is the first turn: say what the price is now, and that you will watch it from here.\n\n3. Say what changed, in one line, and only when it moved: the old price, the new price, and by how much. If it did not move, say nothing about the price and end there.\n\n4. Keep the price. Save the price you just read in the person's memory, with the date and the page it came from, so the next turn has something to compare with.\n\nOne price, one page, one line. Do not guess a price you could not read, and do not compare prices from two different pages.",
+  "resources": [
+    {
+      "path": "price-line-template.md",
+      "media_type": "text/markdown",
+      "text": "<the price> was <the old price> on <the date> and is <the new price> now (<how much it moved>).\n"
+    }
+  ],
+  "requires": {
+    "kinds": [
+      "routine"
+    ]
+  },
+  "runs": "prompt",
+  "license": "CC-BY-4.0",
+  "created_at": "2026-11-07T00:00:00.000Z",
+  "integrity": {
+    "alg": "sha256",
+    "hash": "c603632983110de318faee753ee4cc79d05ceb95ef5a5c63c4325c9d1b04913b"
+  }
+}

@@ -14,6 +14,7 @@ const shares = require('../agents/voice-shares');
 const levels = require('../agents/levels');
 const allows = require('../agents/allows');
 const kinds = require('../agents/kinds');
+const skills = require('../skills');
 
 /** "22 minutes ago", "in 6 days": a person reads this, the exact UTC instant stays in the <time> element's title. */
 function ago(iso, now = Date.now()) {
@@ -122,7 +123,7 @@ function createAgentPages(ctx) {
         const chosen = TEMPLATES.find((x) => x.id === req.query.template) || null;
         page(req, res, 'Your agents', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · your agents · alpha</p><h1>Your agents</h1>
 <p class="pa-lede">Each agent is a contact: a face, a model, a computer to work on, the apps it may use, its memory, and how much it may do without asking. Every run is an ordinary Actor task, with the same checks, costs and limits.</p>
-<p class="ac-links"><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> <a href="/memory">Memory</a></p></header>
+<p class="ac-links"><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> <a href="/memory">Memory</a> <a href="/skills">Skills</a></p></header>
 ${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when })}
 <section class="pa-panel" aria-labelledby="ac-add-h"><h2 id="ac-add-h">Add an agent</h2><p class="pa-hint">Each comes ready with its instructions; change anything after.</p>${ui.presetCards(contacts.presets().presets)}</section>
 <section class="pa-panel" aria-labelledby="pa-templates-h"><h2 id="pa-templates-h">Or set up a standing job</h2><p class="pa-hint">An agent with a schedule: it runs on its own and keeps notes between runs.</p>
@@ -386,6 +387,9 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
         const doc = voice.build(a, { subject: req.viewer.subject, name: req.viewer.username || null });
         // The voice's public link, when the person shares it.
         const shared = await shares.current(s, a.owner, a.id);
+        // The skills this agent has installed (plan HO2): the name and the line, never the instructions (the agent
+        // loads a skill itself, when one of them fits the job).
+        const installed = await skills.forAgent(s, a.owner, a.id);
         page(req, res, a.name, html`<p class="crumbs"><a href="/me/agents">Your agents</a></p>
 <header class="pa-head ac-sheet-head">${ui.face(contact, 64)}<div><h1>${a.name}</h1><p class="ac-sheet-uses">${ui.usesLine(contact)}</p>
 <p class="pa-lede">${ui.levelChip(contact.level)} <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></div></header>
@@ -410,7 +414,11 @@ ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}" class="pa-actions"><button type="submit" name="decision" value="apply" class="pa-btn pa-primary">Add to its instructions</button> <button type="submit" name="decision" value="dismiss" class="pa-btn">Dismiss</button></form></li>`)}</ul>` : ''}
 ${applied.length ? html`<details><summary>Added lately</summary><ul class="pa-notes">${applied.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Added ${time(p.decided_at)}</p>
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}"><button type="submit" name="decision" value="undo" class="pa-danger-link">Undo</button></form></li>`)}</ul></details>` : ''}</section>` : ''}
-${voicePanel(a, doc, shared)}<section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Only active notes go into a run. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check; its note is a suggestion until you accept it on <a href="/memory">Memory</a>.</p>
+${voicePanel(a, doc, shared)}<section class="pa-panel" id="skills" aria-labelledby="pa-skills-h"><h2 id="pa-skills-h">Its skills</h2>
+<p class="pa-hint">A skill is a small document this agent reads to do one kind of job well. It grants nothing: every step the skill helps with still goes through this agent's level and your approvals, exactly as before.</p>
+${installed.length ? html`<ul class="pa-notes">${installed.map((k) => html`<li><p class="pa-note-text">${k.name}</p><p class="pa-note-meta">${k.description}</p>
+<form method="post" action="/me/agents/${a.id}/skills/${k.listing_id}/remove" class="pa-actions"><button type="submit" class="pa-danger-link">Remove</button></form></li>`)}</ul>` : html`<p class="muted">No skills on this agent yet.</p>`}
+<p class="pa-hint"><a href="/skills">The skills registry</a></p></section><section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Only active notes go into a run. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check; its note is a suggestion until you accept it on <a href="/memory">Memory</a>.</p>
 ${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta"><span class="pill ${n.status === 'suggested' ? 'pill-running' : n.status === 'archived' ? 'pill-failed' : 'pill-succeeded'}">${n.status === 'suggested' ? 'Suggested' : n.status === 'archived' ? 'Archived' : 'Active'}</span> ${n.source === 'agent' ? 'Written by the agent' : 'Written by you'} · ${n.kind} · ${time(n.created_at)}${n.last_used_at ? html` · last used ${time(n.last_used_at)}` : ''}</p>
 ${n.status === 'suggested' ? html`<form method="post" action="/memory/${n.id}/accept" class="pa-actions"><button type="submit" class="pa-btn pa-primary">Accept</button> <button type="submit" class="pa-btn" formaction="/memory/${n.id}/decline">Decline</button></form>` : ''}
 <details><summary>Edit or delete</summary><form method="post" action="/me/agents/${a.id}/memory/${n.id}/edit"><label>Note <input name="text" maxlength="${require('../memory').MAX_TEXT}" value="${n.text}"></label><button type="submit" class="pa-btn">Save</button></form>
@@ -421,6 +429,14 @@ ${notes.length ? html`<p><a href="/memory">See all your memory</a> · <a href="/
 <form method="post" action="/me/agents/${a.id}/delete" class="pa-delete"><button type="submit" class="pa-danger-link">Delete this agent</button> <span class="pa-hint">Its memory goes with it; its past runs stay on your task list.</span></form></section>`);
     });
     r.post('/me/agents/:id/edit', async (req, res) => { if (!write(req, res)) return; const out = await personal.update(s, config, owner(req), req.params.id, fields(req.body)); if (!out) return page(req, res, 'Agent not found', html`<h1>Agent not found</h1>`, 404); if (!out.row) return page(req, res, 'Invalid agent', html`<h1>Invalid agent</h1><p>${out.error}</p>`, 422); res.redirect(303, `/me/agents/${req.params.id}`); });
+    // Take a skill back from one of the person's agents (plan HO2).
+    r.post('/me/agents/:id/skills/:listingId/remove', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const out = await skills.remove(s, { owner: a.owner, agentId: a.id, listingId: req.params.listingId });
+        if (out.error) return page(req, res, 'Not found', html`<h1>Not found</h1><p>${out.error}</p><p><a href="/me/agents/${a.id}">Back to the agent</a></p>`, 404);
+        res.redirect(303, `/me/agents/${a.id}#skills`);
+    });
     r.post('/me/agents/:id/suggestions/:pid', async (req, res) => {
         if (!write(req, res)) return;
         const out = await personal.decide(s, owner(req), req.params.id, req.params.pid, String((req.body || {}).decision || ''));

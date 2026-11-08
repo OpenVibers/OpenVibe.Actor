@@ -2,6 +2,34 @@
 
 What changed in OpenVibe.Actor, newest first. Each site also publishes its patch notes at /updates.
 
+## Unreleased — the skills registry (plan HO2)
+
+- **A skill is a document, and the registry vouches for it** (plan HO2, ADR-058; contracts 0.337.0): `actor.skill@1`
+  is a slug, a name, a one-line description, a version, Markdown instructions, up to ten text resources and what it may
+  ask an agent to do. It runs as a prompt and nothing else — no code, no binary, no install recipe — and it grants
+  nothing: the agent's level and its approvals still decide every step. The document's integrity hash is not a
+  signature (as for an agent's voice): the author in a document is a claim, and the listing is the only place a
+  publisher is vouched for.
+- **The scan comes first** (`server/skills/scan.js`): deterministic, no model, five rules over the words of the
+  document — an act of a kind the skill did not declare, a request for a password, a key, a token or a seed phrase,
+  files or notes sent to an address or a URL, a resource that reads as a script, a URL outside the hosts it declared.
+  A block fails the skill (it never installs), a warning flags it (the person reads the findings and confirms), no
+  finding passes it (it installs in one tap).
+- **OpenVibe's own skills first** (`skills/`): four real documents — a stream recording's summary with its moments,
+  the last seven days as a changelog draft, a price watch as a goal, a research brief with its sources — published as
+  listings of publisher kind `openvibe`. Nobody may upload a skill in this wave.
+- **Progressive disclosure**: an agent's prompt carries each installed skill's name and description only; the tool
+  `load_skill(slug)` brings the instructions and the resources, framed as guidance from that skill. A skill changes no
+  level and no approval.
+- **The pages**: `/skills` (the catalogue, the scan's state in words) and `/skills/<slug>` (the instructions, what it
+  may ask for in plain words, the findings, and the install). The agent's page lists its own skills, with Remove.
+  `GET /api/v1/skills` and `GET /api/v1/skills/:id` answer the listing; `POST/DELETE /api/v1/me/agents/:id/skills`
+  install and remove.
+- **The curator ships with the catalogue**: a listing nobody has loaded for 30 days goes stale, for 90 days it is
+  archived, and a stale or archived listing is not offered. The job asks at night what is due; it is off in a drill.
+- Migration 0041 (`actor_skill_listings`, `actor_skill_installs`). Both tables go with the person: an account export
+  carries the installs, and an account deletion erases them. Test: `test/skills.test.js`.
+
 ## Unreleased — triggers in conversation
 
 - **The routine's card in the chat** (Opus): the turn that made a trigger shows it — when, in words (with its zone),

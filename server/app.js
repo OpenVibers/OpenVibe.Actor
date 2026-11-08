@@ -58,6 +58,7 @@ const { createChatPages } = require('./http/chat-pages');
 const { createAgentPages } = require('./http/agent-pages');
 const { createConsolePages } = require('./http/console-pages');
 const { createMemoryPages } = require('./http/memory-pages');
+const { createSkillPages } = require('./http/skills-pages');
 const { createConnectionsPages } = require('./http/connections-pages');
 const { createA2APages } = require('./http/a2a-pages');
 const { createConnectors } = require('./connections/service');
@@ -155,6 +156,10 @@ async function createApp(opts = {}) {
     // stand Bot/Run in (opts.bot.computers) exactly as the Console pages do.
     const computers = (opts.bot && opts.bot.computers) || require('./agents/computers').createComputers({ config, fetchImpl: providerFetch, log });
     const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers };
+    // The skills registry (plan HO2, ADR-058): OpenVibe's own skills are documents in the repository (skills/), and
+    // each one is scanned before it is offered. The seed publishes them as listings of publisher kind 'openvibe'.
+    ctx.skills = require('./skills');
+    await require('./skills/seed').seed(s, { log });
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;
@@ -304,6 +309,7 @@ async function createApp(opts = {}) {
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.ACTOR_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));
     app.use(createAgentPages(ctx));
     app.use(createMemoryPages(ctx));
+    app.use(createSkillPages(ctx));
     app.use(createConnectionsPages(ctx));
     app.use(createConsolePages(ctx, opts.bot || {}));
     app.use(createChatPages(ctx, opts.bot || {}));
