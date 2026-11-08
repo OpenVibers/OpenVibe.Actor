@@ -158,19 +158,25 @@ const CHECKLIST = [{ type: 'heading', text: 'Lisbon, 12–14 March' },
             assert.deepStrictEqual(typeof left === 'string' ? JSON.parse(left) : left, [], 'told once, then cleared');
         });
 
-        await check('the conversation page carries the canvas: a third column wide, an open fold above the composer', async () => {
+        await check('the conversation page carries the canvas: a third column wide, a closed fold above the composer', async () => {
             const page = await t.get(`/chat/${root.id}`, { as: alice });
             assert.strictEqual(page.status, 200, page.text.slice(0, 300));
             assert.match(page.text, /data-cc-canvas/);
             assert.match(page.text, /cc-canvas-wide/);
             assert.match(page.text, /cc-canvas-phone/);
-            assert.match(page.text, /<details class="cc-canvas cc-canvas-phone" open/);
+            assert.match(page.text, /<details class="cc-canvas cc-canvas-phone" data-cc-canvas/);
+            assert.ok(!/cc-canvas-phone" open/.test(page.text), 'the phone fold starts closed');
+            assert.match(page.text, /data-cc-canvas-updated[^>]*hidden/);
             assert.match(page.text, /Canvas[\s\S]{0,120}items/);
             assert.match(page.text, /shared\/ov-canvas\.js/);
             assert.match(page.text, /Lisbon, packed/);
             assert.match(page.text, /Passport in the bag/);
-            // The wide copy is a real panel beside the conversation (thread.css's third column).
+            // The wide copy is a real panel beside the conversation (thread.css's third column); the phone fold's
+            // body scrolls inside at most 45vh and its containment keeps that scroll out of the page's height.
             assert.match(page.text, /class="ovt-panel cc-canvas cc-canvas-wide"/);
+            const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'css', 'chat.css'), 'utf8');
+            assert.match(css, /min\(45vh, 420px\)/);
+            assert.match(css, /contain: layout paint/);
         });
 
         await check('account data names the canvas table (export and deletion cover it)', async () => {

@@ -17,10 +17,11 @@ What changed in OpenVibe.Actor, newest first. Each site also publishes its patch
   no turn; the next turn is told which item the person ticked, once, as its conversation context. Both go through the
   same-origin API (`GET /api/v1/me/canvases?thread=`, `GET /api/v1/me/canvases/:id`,
   `POST /api/v1/me/canvases/:id/events`) and another person's canvas is the same 404 as one that does not exist.
-- **Where it shows**: the thread page draws it in the third column on a wide screen and as an open fold above the
-  composer on a phone ("Canvas · N items"), with openvibe-shared v4.145.0's ov-canvas.js. The page redraws it from
-  the thread's live events when `canvas_set` runs. The document is in the account export and goes with the account.
-  Test: `test/canvas.test.js`; openvibe-contracts v0.341.0 names the routes.
+- **Where it shows**: the thread page draws it in the third column on a wide screen and as one closed "Canvas · N
+  items" bar above the composer on a phone (open on tap; the open body scrolls inside at 45vh), with openvibe-shared
+  v4.145.0's ov-canvas.js. The page redraws it from the thread's live events when `canvas_set` runs; a closed bar
+  still updates its count and says "updated" for a few seconds. The document is in the account export and goes with
+  the account. Test: `test/canvas.test.js`; openvibe-contracts v0.341.0 names the routes.
 
 ## Unreleased — the skills registry (plan HO2)
 

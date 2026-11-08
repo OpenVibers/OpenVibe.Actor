@@ -38,6 +38,8 @@
         // returned document. A canvas_set on the working turn's stream asks for the newest document.
         var canvasThread = chat.getAttribute('data-chat') || '';
         var canvasTimer = 0;
+        var canvasVersion = 0;
+        var canvasUpdatedTimer = 0;
         function canvasDocOf(box) {
             var tpl = box.querySelector('template[data-cc-canvas-doc]');
             if (!tpl) return null;
@@ -57,6 +59,15 @@
                 });
             });
             canvasCount(Array.isArray(doc.blocks) ? doc.blocks.length : 0);
+            canvasVersion = Number(doc.version) || canvasVersion;
+        }
+        // A closed fold still says something changed: "updated" beside the count for a few seconds, text only.
+        function canvasUpdated() {
+            var el = chat.querySelector('.cc-canvas-phone [data-cc-canvas-updated]');
+            if (!el) return;
+            el.hidden = false;
+            if (canvasUpdatedTimer) clearTimeout(canvasUpdatedTimer);
+            canvasUpdatedTimer = setTimeout(function () { el.hidden = true; canvasUpdatedTimer = 0; }, 4000);
         }
         function canvasPost(doc, body) {
             return fetch('/api/v1/me/canvases/' + encodeURIComponent(doc.id) + '/events', {
@@ -93,6 +104,7 @@
                     if (!doc) return;
                     // The first canvas was made while this page was open: the server renders the panel on a reload.
                     if (!chat.querySelector('[data-cc-canvas]')) { location.reload(); return; }
+                    if (canvasVersion && Number(doc.version) > canvasVersion) canvasUpdated();
                     paintCanvas(doc);
                 })
                 .catch(function () {});
@@ -105,12 +117,14 @@
             var first = null;
             chat.querySelectorAll('[data-cc-canvas]').forEach(function (box) { if (!first) first = canvasDocOf(box); });
             if (first) paintCanvas(first);
-            // Open the first time; the person's choice on this device is kept, like a fold anywhere else.
+            // Closed first (the bar is one 44 px line); the person's choice is kept per thread for this visit, so
+            // a reload does not reopen what they closed or close what they opened.
             var folds = chat.querySelectorAll('.cc-canvas-phone');
             folds.forEach(function (box) {
-                try { if (window.localStorage && localStorage.getItem('ov-canvas-open') === '0') box.open = false; } catch (e) { /* private mode */ }
+                var key = 'ov-canvas-open:' + (box.getAttribute('data-thread') || canvasThread);
+                try { if (window.sessionStorage && sessionStorage.getItem(key) === '1') box.open = true; } catch (e) { /* private mode */ }
                 box.addEventListener('toggle', function () {
-                    try { if (window.localStorage) localStorage.setItem('ov-canvas-open', box.open ? '1' : '0'); } catch (e) { /* private mode */ }
+                    try { if (window.sessionStorage) sessionStorage.setItem(key, box.open ? '1' : '0'); } catch (e) { /* private mode */ }
                 });
             });
         })();

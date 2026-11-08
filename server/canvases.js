@@ -163,26 +163,33 @@ const get = (s, owner, id) => (CNV_ID.test(String(id)) ? s.db.maybe('SELECT * FR
 /** A person's canvases, newest first (the API list and the account export). */
 const list = (s, owner, limit = 50) => s.db.many('SELECT * FROM actor_canvases WHERE owner = $1 ORDER BY updated_at DESC LIMIT $2', [owner, limit]);
 
-/** The first turn of the conversation a task belongs to (a fork starts its own). */
+/** The first turn of the conversation a task belongs to (a fork starts its own). One recursive query. */
 async function threadForTask(s, taskId) {
-    let cur = taskId ? await s.db.maybe('SELECT id, parent_id, fork_of_step FROM tasks WHERE id = $1', [String(taskId)]) : null;
-    const seen = new Set();
-    while (cur && cur.parent_id && cur.fork_of_step == null && seen.size < 200 && !seen.has(cur.id)) {
-        seen.add(cur.id);
-        cur = await s.db.maybe('SELECT id, parent_id, fork_of_step FROM tasks WHERE id = $1', [cur.parent_id]);
-    }
-    return cur ? cur.id : null;
+    if (!taskId) return null;
+    const row = await s.db.maybe(`WITH RECURSIVE up AS (
+            SELECT id, parent_id, fork_of_step, 0 AS depth FROM tasks WHERE id = $1
+            UNION ALL
+            SELECT t.id, t.parent_id, t.fork_of_step, up.depth + 1
+              FROM up JOIN tasks t ON t.id = up.parent_id
+             WHERE up.fork_of_step IS NULL AND up.depth < 200)
+        SELECT id FROM up ORDER BY depth DESC LIMIT 1`, [String(taskId)]);
+    return row ? row.id : null;
 }
 
-/** The newest turn of a conversation (the parent of a message typed into it today). */
+/** The newest turn of a conversation (the parent of a message typed into it today). One recursive query. */
 async function latestForThread(s, thread) {
-    let cur = thread ? await s.db.maybe('SELECT * FROM tasks WHERE id = $1', [String(thread)]) : null;
-    for (let i = 0; cur && i < 200; i++) {
-        const next = await s.db.maybe('SELECT * FROM tasks WHERE parent_id = $1 AND fork_of_step IS NULL ORDER BY id DESC LIMIT 1', [cur.id]);
-        if (!next) return cur;
-        cur = next;
-    }
-    return cur;
+    if (!thread) return null;
+    return s.db.maybe(`WITH RECURSIVE down AS (
+            SELECT id, parent_id, fork_of_step, 0 AS depth FROM tasks WHERE id = $1
+            UNION ALL
+            SELECT n.id, n.parent_id, n.fork_of_step, down.depth + 1
+              FROM down
+              CROSS JOIN LATERAL (
+                  SELECT t.id, t.parent_id, t.fork_of_step FROM tasks t
+                   WHERE t.parent_id = down.id AND t.fork_of_step IS NULL
+                   ORDER BY t.id DESC LIMIT 1) n
+             WHERE down.depth < 200)
+        SELECT * FROM down ORDER BY depth DESC LIMIT 1`, [String(thread)]);
 }
 
 /**

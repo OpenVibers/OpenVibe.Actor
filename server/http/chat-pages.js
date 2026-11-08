@@ -442,8 +442,8 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
     }
     function canvasPhone(doc) {
         const n = canvases.countOf(doc);
-        return html`<details class="cc-canvas cc-canvas-phone" open data-cc-canvas data-thread="${doc.thread}">
-<summary><span class="cc-canvas-label">Canvas</span><span class="cc-canvas-sep" aria-hidden="true">·</span><span class="cc-canvas-count" data-cc-canvas-count>${canvasItems(n)}</span><span class="cc-canvas-chev" aria-hidden="true">▾</span></summary>
+        return html`<details class="cc-canvas cc-canvas-phone" data-cc-canvas data-thread="${doc.thread}">
+<summary><span class="cc-canvas-label">Canvas</span><span class="cc-canvas-sep" aria-hidden="true">·</span><span class="cc-canvas-count" data-cc-canvas-count>${canvasItems(n)}</span><span class="cc-canvas-updated" data-cc-canvas-updated aria-live="polite" hidden>updated</span><span class="cc-canvas-chev" aria-hidden="true">▾</span></summary>
 <div class="cc-canvas-body"><div class="cc-canvas-host" data-cc-canvas-host>${canvasFallback(doc)}</div>
 <template data-cc-canvas-doc>${canvasJson(doc)}</template></div></details>`;
     }
