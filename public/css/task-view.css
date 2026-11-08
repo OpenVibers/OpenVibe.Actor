@@ -1,0 +1,9 @@
+:root { color-scheme: light dark; font: 15px/1.5 system-ui, sans-serif; }
+body { margin: 0; }
+main { padding: 16px; max-width: 70rem; margin: auto; overflow-wrap: anywhere; }
+h1 { font-size: 1.1rem; margin: 0; white-space: pre-wrap; }
+#state { opacity: .7; margin: 8px 0; }
+#desk { width: 100%; max-height: 60vh; object-fit: contain; border-radius: 8px; }
+ol { padding-left: 24px; }
+li { white-space: pre-wrap; margin-bottom: 8px; }
+a { display: inline-block; padding: 8px 12px; border: 1px solid currentColor; border-radius: 8px; color: inherit; }
