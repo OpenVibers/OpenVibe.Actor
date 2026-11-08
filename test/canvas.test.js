@@ -179,6 +179,61 @@ const CHECKLIST = [{ type: 'heading', text: 'Lisbon, 12–14 March' },
             assert.match(css, /contain: layout paint/);
         });
 
+        await check('only openvibe.chat reads a canvas cross-origin, only with the person\'s Bearer', async () => {
+            const CHAT = 'https://openvibe.chat';
+            const read = { origin: CHAT, accept: 'application/json' };
+            const bearer = t.network.userToken(alice);
+            const one = await t.get(`/api/v1/me/canvases?thread=${root.id}`, { bearer, headers: read });
+            assert.strictEqual(one.status, 200, one.text);
+            assert.strictEqual(one.headers.get('access-control-allow-origin'), CHAT);
+            assert.match(String(one.headers.get('vary') || ''), /Origin/i);
+            assert.strictEqual(one.headers.get('access-control-allow-credentials'), null, 'no credentials mode');
+            assert.strictEqual(one.json().canvases[0].id, canvasId);
+
+            const byId = await t.get(`/api/v1/me/canvases/${canvasId}`, { bearer, headers: read });
+            assert.strictEqual(byId.status, 200, byId.text);
+            assert.strictEqual(byId.headers.get('access-control-allow-origin'), CHAT);
+            assert.strictEqual(byId.json().id, canvasId);
+        });
+
+        await check('another origin gets no CORS headers, a cookie without Bearer is refused, and a canvas POST is refused', async () => {
+            const CHAT = 'https://openvibe.chat';
+            const bearer = t.network.userToken(alice);
+            const other = await t.get(`/api/v1/me/canvases?thread=${root.id}`, { bearer, headers: { origin: 'https://example.net' } });
+            assert.strictEqual(other.status, 403, other.text);
+            assert.strictEqual(other.headers.get('access-control-allow-origin'), null);
+
+            const cookieOnly = await t.get(`/api/v1/me/canvases?thread=${root.id}`, { as: alice, headers: { origin: CHAT } });
+            assert.strictEqual(cookieOnly.status, 401, cookieOnly.text);
+            assert.strictEqual(cookieOnly.headers.get('access-control-allow-credentials'), null);
+
+            const before = await s.db.maybe('SELECT version FROM actor_canvases WHERE id = $1', [canvasId]);
+            const post = await t.get(`/api/v1/me/canvases/${canvasId}/events`, {
+                bearer, json: { kind: 'check', block_id: 'packing', item_id: 'bags', done: true }, headers: { origin: CHAT },
+            });
+            assert.strictEqual(post.status, 403, post.text);
+            assert.strictEqual(post.headers.get('access-control-allow-origin'), null, 'a write is never a CORS route');
+            assert.strictEqual(Number((await s.db.maybe('SELECT version FROM actor_canvases WHERE id = $1', [canvasId])).version), Number(before.version), 'the refused POST changed nothing');
+        });
+
+        await check('the canvas preflight allows a GET with Authorization from openvibe.chat only', async () => {
+            const CHAT = 'https://openvibe.chat';
+            const pre = await t.get(`/api/v1/me/canvases?thread=${root.id}`, {
+                method: 'OPTIONS',
+                headers: { origin: CHAT, 'access-control-request-method': 'GET', 'access-control-request-headers': 'authorization' },
+            });
+            assert.strictEqual(pre.status, 204, pre.text);
+            assert.strictEqual(pre.headers.get('access-control-allow-origin'), CHAT);
+            assert.match(String(pre.headers.get('access-control-allow-methods') || ''), /GET/);
+            assert.match(String(pre.headers.get('access-control-allow-headers') || ''), /authorization/i);
+            assert.strictEqual(pre.headers.get('access-control-allow-credentials'), null);
+            const evil = await t.get(`/api/v1/me/canvases?thread=${root.id}`, {
+                method: 'OPTIONS', headers: { origin: 'https://example.net', 'access-control-request-method': 'GET' },
+            });
+            assert.strictEqual(evil.status, 403);
+            assert.strictEqual(evil.headers.get('access-control-allow-origin'), null);
+        });
+
         await check('account data names the canvas table (export and deletion cover it)', async () => {
             const { TABLES } = require('../server/identity/account-data');
             const entry = TABLES.find((x) => x.table === 'actor_canvases');

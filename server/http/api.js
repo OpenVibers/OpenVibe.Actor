@@ -70,6 +70,40 @@ function createApi(ctx) {
 
     r.use(express.json({ limit: '64kb' }));
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+    // ── A canvas belongs to the person, and Chat may draw it beside a Vibe chat (plan HO9) ─────
+    // Only the two reads are cross-origin, only for openvibe.chat, and only with the person's own Bearer. A cookie
+    // (this site's session) is not a credential another site may spend, and every canvas write stays on this site:
+    // a cross-origin request that is not that read is refused before a route sees it. Vary: Origin keeps a shared
+    // cache from handing one origin's answer to another. No Access-Control-Allow-Credentials is ever sent.
+    const CANVAS_ORIGIN = 'https://openvibe.chat';
+    const CANVAS_READ = /^\/me\/canvases(?:\/cnv_[0-9A-HJKMNP-TV-Z]{26})?$/;
+    const CANVAS_PATH = /^\/me\/canvases(?:\/[^/]+(?:\/events)?)?$/;
+    r.use((req, res, next) => {
+        const path = String(req.originalUrl || req.url || '').split('?')[0].replace(/^\/api\/v1/, '');
+        if (!CANVAS_PATH.test(path)) return next();
+        const origin = String(req.get('origin') || '');
+        if (!origin) return next();                       // a same-site fetch, or a server-to-server call
+        const same = origin === config.baseUrl || origin === `${req.protocol}://${req.get('host')}`;
+        if (same) return next();
+        res.vary('Origin');
+        if (origin !== CANVAS_ORIGIN) return problem(req, res, 403, 'request.cross_site', 'A canvas can be read from openvibe.chat only.');
+        const method = String(req.method || '').toUpperCase();
+        const read = CANVAS_READ.test(path);
+        if (method === 'OPTIONS') {
+            if (!read || String(req.get('access-control-request-method') || 'GET').toUpperCase() !== 'GET') return res.status(403).end();
+            res.set('Access-Control-Allow-Origin', CANVAS_ORIGIN)
+                .set('Access-Control-Allow-Methods', 'GET')
+                .set('Access-Control-Allow-Headers', 'Authorization, Accept')
+                .set('Access-Control-Max-Age', '600');
+            return res.status(204).end();
+        }
+        if (!read || method !== 'GET') return problem(req, res, 403, 'request.cross_site', 'Only a canvas read may come from openvibe.chat; every canvas change is made on openvibe.actor itself.');
+        res.set('Access-Control-Allow-Origin', CANVAS_ORIGIN);
+        if (!/^Bearer\s+\S+/i.test(String(req.get('authorization') || ''))) {
+            return problem(req, res, 401, 'token.required', 'Send the person\'s own Network token as a Bearer; cookies are not read from another site.');
+        }
+        return next();
+    });
     r.use(principal.middleware);
     r.use('/chat-apps', require('../chat-apps/routes').router(ctx));
 
