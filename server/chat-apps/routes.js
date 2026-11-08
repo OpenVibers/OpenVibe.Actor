@@ -31,6 +31,10 @@ function router(ctx) {
                 const count = Number(await s.db.value("SELECT count(*) FROM tasks WHERE via = ANY($1) AND created_at >= $2", [[`agent:${agent.id}`, `chat-app:${agent.id}`], `${s.iso().slice(0, 10)}T00:00:00.000Z`]));
                 return !a || count >= a.daily_runs_max ? { status: 429, detail: 'Agent daily run limit reached' } : null;
             } });
+        if (b.policy === 'dm' && out.status === 201 && out.task && ctx.triggers && ctx.triggers.onMessage) {
+            await ctx.triggers.onMessage({ owner: owner.slice(5), agentId: agent.id, text: b.text,
+                conversation: `channel:${b.conversation}`, turnTaskId: out.task.id, place: b.conversation });
+        }
         res.status(out.status).json(out.task ? { id: out.task.id } : { error: out.detail });
     });
     r.get('/approvals', async (req, res) => {

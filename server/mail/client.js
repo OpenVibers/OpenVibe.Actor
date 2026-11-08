@@ -64,6 +64,8 @@ function createMailClient({ config, fetchImpl = globalThis.fetch, tokens: tokens
     return {
         enabled,
         getMessage: (args) => call('GET', `/internal/mail/agents/${encodeURIComponent(args.agentId)}/messages/${encodeURIComponent(args.messageId)}`, { person: args.person }),
+        /** Mail knows the owner's mailbox, masks, burners and agent addresses; Actor never guesses from a domain. */
+        ownsSender: (args) => call('GET', `/internal/mail/agents/${encodeURIComponent(args.agentId)}/own-sender?address=${encodeURIComponent(args.address)}`, { person: args.person }),
         reply: (args) => call('POST', `/internal/mail/agents/${encodeURIComponent(args.agentId)}/reply`, {
             person: args.person,
             body: { message_id: args.messageId, body: args.body, ...(args.to ? { to: args.to } : {}) },

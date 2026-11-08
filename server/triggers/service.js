@@ -18,6 +18,7 @@ const store = require('./store');
 const watchClient = require('./watch');
 const parse = require('./parse');
 const goalLib = require('./goal');
+const mentionLib = require('./mention');
 const contacts = require('../agents/contacts');
 const levels = require('../agents/levels');
 const personal = require('../agents/personal');
@@ -30,7 +31,7 @@ const EVENT_PATTERN = /^[a-z][a-z0-9_-]*(\.[a-z0-9_*]+){1,}$/;
 const MAX_ACTIVE = 20;
 const UNDO_MS = 10 * 60_000;
 const MAX_TASK = 8000;
-const KINDS = ['schedule', 'event', 'goal'];
+const KINDS = ['schedule', 'event', 'goal', 'mention'];
 const MAX_GOAL_TEXT = 500;
 const MAX_DONE_TEST = 300;
 const MAX_GOAL_RUNS = 200;
@@ -86,7 +87,10 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
                 cron: scheduled && row.schedule ? row.schedule.cron : null,
                 timezone: scheduled ? (row.timezone || (row.schedule && row.schedule.timezone) || null) : null,
                 event: row.kind === 'event' && row.event ? { pattern: row.event.pattern, filter: row.event.filter || null } : null,
+                mention: row.kind === 'mention' ? row.mention : null,
             },
+            ...(row.kind === 'mention' ? { fires: row.fires } : {}),
+            expires_at: row.kind === 'mention' ? iso(row.expires_at) : null,
             goal,
             answer_in_chat: row.answer_in_chat !== false,
             notify: row.notify === true,
@@ -136,12 +140,17 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
         }
     }
 
-    function validate({ owner, agentId, task, kind, cronExpr, timezone, event, goal }) {
+    function validate({ owner, agentId, task, kind, cronExpr, timezone, event, goal, mention, fires, expiresAt, createdAt, words }) {
         if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(owner || ''))) return problem(401, 'actor.trigger.sign_in', 'Sign in to make a trigger.');
         if (!agentId) return problem(422, 'actor.trigger.agent', 'Choose which of your agents should run it.');
         if (typeof task !== 'string' || !task.trim() || task.length > MAX_TASK) return problem(422, 'actor.trigger.task', 'Say what the agent should do each time, in a sentence.');
-        if (!KINDS.includes(kind)) return problem(422, 'actor.trigger.kind', 'A trigger is a schedule, a Watch event, or a goal.');
-        if (kind !== 'event') {
+        if (!KINDS.includes(kind)) return problem(422, 'actor.trigger.kind', 'A trigger is a schedule, a Watch event, a goal, or a mention.');
+        if (kind === 'mention') {
+            const why = mentionLib.validate(mention, fires, expiresAt, nowMs(), createdAt == null ? nowMs() : createdAt);
+            if (why) return problem(422, 'actor.trigger.mention', why);
+            if (words != null && (typeof words !== 'string' || !words.trim() || words.length > 300)) return problem(422, 'actor.trigger.words', 'Say what this waits for in one line of at most 300 characters.');
+        }
+        if (kind === 'schedule' || kind === 'goal') {
             if (!timezone || !cron.isZone(timezone)) return problem(422, 'actor.trigger.timezone', `Unknown time zone "${timezone}". Say the city or the IANA name.`);
             const verdict = cron.validate(cronExpr, timezone);
             if (!verdict.valid) return problem(422, 'actor.trigger.schedule', verdict.error);
@@ -182,27 +191,47 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
         };
     }
 
-    async function create({ owner, agentId, task, kind, cron: cronExpr = null, timezone = null, event = null, goal = null, level = null, turnTaskId = null, personToken = null, announce = true, answerInChat = true, notify = false }) {
-        const bad = validate({ owner, agentId, task, kind, cronExpr, timezone, event, goal });
+    async function create({ owner, agentId, task, kind, cron: cronExpr = null, timezone = null, event = null, goal = null, mention = null, words = null, fires = null, expiresAt = null, level = null, turnTaskId = null, personToken = null, announce = true, answerInChat = true, notify = false }) {
+        if (kind === 'mention') {
+            fires = fires || 'once_per_conversation';
+            expiresAt = expiresAt == null ? nowMs() + 30 * mentionLib.DAY : Date.parse(String(expiresAt));
+        }
+        const bad = validate({ owner, agentId, task, kind, cronExpr, timezone, event, goal, mention, fires, expiresAt, words });
         if (bad) return { error: bad };
         const agent = await agentOf(owner, agentId);
         if (!agent) return { error: problem(422, 'actor.agent.not_found', 'agent_id names one of your own agents (GET /api/v1/agents).') };
-        if (!client.enabled) return { error: problem(503, 'actor.trigger.watch_unavailable', 'OpenVibe.Watch is not configured on this Actor, so it cannot run a trigger.') };
-        if (!personToken) return { error: problem(401, 'actor.trigger.sign_in', 'Sign in again: creating a trigger needs your own OpenVibe session, not a service token.') };
-        const active = await store.countActive(s, owner);
-        if (active >= MAX_ACTIVE) return { error: problem(409, 'actor.trigger.limit', `You already have ${MAX_ACTIVE} active triggers. Pause one, or delete one, before making another.`) };
+        if (kind !== 'mention' && !client.enabled) return { error: problem(503, 'actor.trigger.watch_unavailable', 'OpenVibe.Watch is not configured on this Actor, so it cannot run a trigger.') };
+        if (kind !== 'mention' && !personToken) return { error: problem(401, 'actor.trigger.sign_in', 'Sign in again: creating a trigger needs your own OpenVibe session, not a service token.') };
+        if (kind !== 'mention' && await store.countActive(s, owner) >= MAX_ACTIVE) return { error: problem(409, 'actor.trigger.limit', `You already have ${MAX_ACTIVE} active triggers. Pause one, or delete one, before making another.`) };
         const at = nowMs();
-        const scheduled = kind !== 'event';
-        const row = await store.insert(s, {
+        const scheduled = kind === 'schedule' || kind === 'goal';
+        const rec = {
             id: s.newId('trg'), owner, agent_id: agent.id, task: String(task).trim(), kind,
             schedule: scheduled ? { cron: cronExpr, timezone } : null,
             event: kind === 'event' ? { pattern: event.pattern, filter: event.filter || null } : null,
             goal: kind === 'goal' ? goalRow(goal, at) : null,
+            mention: kind === 'mention' ? { phrases: mention.phrases, match: mention.match } : null,
+            fires: kind === 'mention' ? fires : null, expires_at: kind === 'mention' ? expiresAt : null,
             timezone: scheduled ? timezone : null,
-            words: scheduled ? parse.wordsFor(cronExpr, timezone) : (event.words || `When ${event.pattern}`),
+            words: scheduled ? parse.wordsFor(cronExpr, timezone) : kind === 'mention' ? (words ? words.trim() : mention.phrases.length === 1 ? `When you mention ${mention.phrases[0]}` : `When you mention ${mention.match === 'all' ? 'all' : 'any'} of these phrases`) : (event.words || `When ${event.pattern}`),
             level: levels.LEVELS.includes(level) ? level : 'ask',
-            state: 'paused', turn_task_id: turnTaskId, answer_in_chat: answerInChat !== false, notify: notify === true, created_at: at,
-        });
+            state: kind === 'mention' ? 'active' : 'paused', turn_task_id: turnTaskId, answer_in_chat: answerInChat !== false, notify: notify === true, created_at: at,
+        };
+        if (kind === 'mention') {
+            // Every owner has an agent row by this point; locking their first one serializes concurrent
+            // creations for different agents of the same person before the cap is counted.
+            const made = await s.tx(async () => {
+                await s.db.maybe('SELECT id FROM actor_agents WHERE owner = $1 ORDER BY id LIMIT 1 FOR UPDATE', [requesterOf(owner)]);
+                if (await store.countMention(s, owner, nowMs()) >= MAX_ACTIVE) return null;
+                return store.insert(s, rec);
+            });
+            if (!made) return { error: problem(409, 'actor.trigger.limit', `You already have ${MAX_ACTIVE} active mention triggers. Pause one, or delete one, before making another.`) };
+            const row = made;
+            const cardNow = await card(row);
+            if (announce) await emit(row, `Trigger created: ${cardNow.when.words}.`);
+            return { trigger: cardNow, row };
+        }
+        const row = await store.insert(s, rec);
         let made = null;
         try {
             const body = {
@@ -243,8 +272,10 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
      * not finish — the one line that says why. The routine's own switch decides (default on).
      */
     async function postRun(row, task, mapped) {
-        if (!row || !row.turn_task_id || row.answer_in_chat === false) return;
-        if (!TASK_ID.test(String(row.turn_task_id))) return;
+        if (!row || row.answer_in_chat === false) return;
+        const firing = row.kind === 'mention' ? await s.db.maybe('SELECT turn_task_id FROM actor_mention_firings WHERE task_id = $1 AND trigger_id = $2', [task.id, row.id]) : null;
+        const postTo = row.kind === 'mention' ? (firing && firing.turn_task_id) : row.turn_task_id;
+        if (!TASK_ID.test(String(postTo || ''))) return;
         const result = tasks.parseJson(task.result) || {};
         const at = iso(nowMs());
         const ok = mapped === 'ok';
@@ -264,8 +295,8 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
                 text,
                 ...(sources.length ? { sources } : {}),
             };
-            const saved = await tasks.appendEvent(s, row.turn_task_id, event);
-            if (stream && typeof stream.publish === 'function') stream.publish(row.turn_task_id, saved);
+            const saved = await tasks.appendEvent(s, postTo, event);
+            if (stream && typeof stream.publish === 'function') stream.publish(postTo, saved);
         } catch (err) {
             log.warn && log.warn('[Actor] routine run post:', row.id, (err && err.message) || err);
         }
@@ -291,6 +322,9 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
 
     /** A goal whose deadline has passed is over, even between runs. Read lazily wherever the card is. */
     async function expire(row, { token = null } = {}) {
+        if (row && row.kind === 'mention' && row.state === 'active' && Number(row.expires_at) <= nowMs()) {
+            return await store.update(s, row.owner, row.id, { state: 'done', paused_reason: 'deadline', ended_at: nowMs(), updated_at: nowMs() });
+        }
         if (!row || row.kind !== 'goal' || row.state !== 'active' || !row.goal) return row;
         const deadline = row.goal.deadline_at ? Date.parse(row.goal.deadline_at) : NaN;
         if (!Number.isFinite(deadline) || nowMs() < deadline) return row;
@@ -316,6 +350,20 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
     async function edit(owner, id, patch = {}, { token = null } = {}) {
         const row = ID.test(String(id || '')) ? await store.get(s, owner, id) : null;
         if (!row) return { error: problem(404, 'actor.trigger.not_found', 'No such trigger.') };
+        if (row.kind === 'mention') {
+            if (patch.kind !== undefined && patch.kind !== 'mention') return { error: problem(422, 'actor.trigger.kind', 'Make a separate trigger for a different kind.') };
+            const next = { task: patch.task === undefined ? row.task : patch.task, mention: patch.mention === undefined ? row.mention : patch.mention,
+                words: patch.words === undefined ? row.words : patch.words, fires: patch.fires === undefined ? row.fires : patch.fires,
+                expiresAt: patch.expires_at === undefined ? row.expires_at : Date.parse(String(patch.expires_at)) };
+            const bad = validate({ owner, agentId: row.agent_id, kind: 'mention', createdAt: row.created_at, ...next });
+            if (bad) return { error: bad };
+            if (typeof next.words !== 'string' || !next.words.trim() || next.words.length > 200) return { error: problem(422, 'actor.trigger.words', 'Say what this waits for in one line.') };
+            const updated = await store.update(s, owner, id, { task: next.task.trim(), mention: next.mention, words: next.words.trim(), expires_at: next.expiresAt,
+                ...(patch.answer_in_chat !== undefined ? { answer_in_chat: patch.answer_in_chat !== false } : {}),
+                ...(patch.notify !== undefined ? { notify: patch.notify === true } : {}), updated_at: nowMs() });
+            await emit(updated, `Trigger edited: ${updated.words}.`);
+            return { trigger: await card(updated) };
+        }
         // The routine's two switches (HO4) travel through the same PATCH: they are the person's own settings, so
         // they need no Watch subscription change and no person token.
         const switches = {};
@@ -388,7 +436,7 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
     async function pause(owner, id, { token = null } = {}) {
         const row = ID.test(String(id || '')) ? await store.get(s, owner, id) : null;
         if (!row) return { error: problem(404, 'actor.trigger.not_found', 'No such trigger.') };
-        if (!token) return { error: problem(401, 'actor.trigger.sign_in', 'Sign in again: pausing a trigger uses your own OpenVibe session.') };
+        if (!token && row.kind !== 'mention') return { error: problem(401, 'actor.trigger.sign_in', 'Sign in again: pausing a trigger uses your own OpenVibe session.') };
         if (row.running) return { error: problem(409, 'actor.trigger.busy', 'This trigger is running now; try again in a moment.') };
         if (row.watch_id) {
             const out = await client.pause(token, row.watch_id);
@@ -402,7 +450,19 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
     async function resume(owner, id, { token = null } = {}) {
         const row = ID.test(String(id || '')) ? await store.get(s, owner, id) : null;
         if (!row) return { error: problem(404, 'actor.trigger.not_found', 'No such trigger.') };
-        if (row.state === 'done') return { error: problem(409, 'actor.trigger.done', 'This goal reached its check and is finished. Make a new one if you want it to keep going.') };
+        if (row.state === 'done') return { error: problem(409, 'actor.trigger.done', row.kind === 'mention' ? 'This standing intent expired. Make a new one.' : 'This goal reached its check and is finished. Make a new one if you want it to keep going.') };
+        if (row.kind === 'mention' && Number(row.expires_at) <= nowMs()) return { error: problem(409, 'actor.trigger.expired', 'This standing intent expired. Make a new one.') };
+        if (row.kind === 'mention') {
+            if (row.state === 'active') return { trigger: await card(row) };
+            const updated = await s.tx(async () => {
+                await s.db.maybe('SELECT id FROM actor_agents WHERE owner = $1 ORDER BY id LIMIT 1 FOR UPDATE', [requesterOf(owner)]);
+                if (await store.countMention(s, owner, nowMs()) >= MAX_ACTIVE) return null;
+                return store.update(s, owner, row.id, { state: 'active', paused_reason: null, failures: 0, updated_at: nowMs() });
+            });
+            if (!updated) return { error: problem(409, 'actor.trigger.limit', `You already have ${MAX_ACTIVE} active mention triggers. Pause one before resuming another.`) };
+            await emit(updated, 'Trigger resumed.');
+            return { trigger: await card(updated) };
+        }
         if (!token) return { error: problem(401, 'actor.trigger.sign_in', 'Sign in again: resuming a trigger uses your own OpenVibe session.') };
         if (await store.countActive(s, owner) >= MAX_ACTIVE) return { error: problem(409, 'actor.trigger.limit', `You already have ${MAX_ACTIVE} active triggers. Pause one before resuming another.`) };
         if (row.watch_id) {
@@ -418,7 +478,7 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
         const row = ID.test(String(id || '')) ? await store.get(s, owner, id) : null;
         if (!row) return { error: problem(404, 'actor.trigger.not_found', 'No such trigger.') };
         if (nowMs() - Number(row.created_at) > UNDO_MS) return { error: problem(409, 'actor.trigger.undo_expired', 'The ten-minute undo window has passed. Delete the trigger instead.') };
-        if (!token) return { error: problem(401, 'actor.trigger.sign_in', 'Sign in again: undoing a trigger uses your own OpenVibe session.') };
+        if (!token && row.kind !== 'mention') return { error: problem(401, 'actor.trigger.sign_in', 'Sign in again: undoing a trigger uses your own OpenVibe session.') };
         if (row.watch_id) {
             const out = await client.remove(token, row.watch_id);
             if (!out.ok && out.status !== 404) return { error: problem(out.status || 502, out.code || 'actor.trigger.watch_failed', out.detail || 'OpenVibe.Watch did not remove the subscription.') };
@@ -431,7 +491,7 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
         const row = ID.test(String(id || '')) ? await store.get(s, owner, id) : null;
         if (!row) return { error: problem(404, 'actor.trigger.not_found', 'No such trigger.') };
         if (!confirm) return { error: problem(409, 'actor.trigger.confirm', 'Deleting a trigger is permanent. Ask for confirmation first.') };
-        if (!token) return { error: problem(401, 'actor.trigger.sign_in', 'Sign in again: deleting a trigger uses your own OpenVibe session.') };
+        if (!token && row.kind !== 'mention') return { error: problem(401, 'actor.trigger.sign_in', 'Sign in again: deleting a trigger uses your own OpenVibe session.') };
         if (row.watch_id) {
             const out = await client.remove(token, row.watch_id);
             if (!out.ok && out.status !== 404) return { error: problem(out.status || 502, out.code || 'actor.trigger.watch_failed', out.detail || 'OpenVibe.Watch did not remove the subscription.') };
@@ -444,6 +504,7 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
     async function runNow(owner, id) {
         const found = ID.test(String(id || '')) ? await store.get(s, owner, id) : null;
         if (!found) return { error: problem(404, 'actor.trigger.not_found', 'No such trigger.') };
+        if (found.kind === 'mention') return { error: problem(409, 'actor.trigger.mention', 'This standing intent runs when you mention its phrase in a conversation.') };
         const row = await expire(found);
         if (row.state === 'done') return { error: problem(409, 'actor.trigger.done', 'This goal is done. Make a new one if you want it to keep going.') };
         // A goal that stopped for its budget or its deadline does not run again by accident: Resume (after raising
@@ -456,6 +517,32 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
         if (out && out.code) return { error: problem(out.status || 422, out.code, out.detail || 'The run could not start.') };
         await emit(row, `Run now: ${row.task}.`);
         return { task: out.task, trigger: await card(await store.get(s, owner, row.id)) };
+    }
+
+    /** Called only at trusted entry points after the person's own message is stored. */
+    async function onMessage({ owner, agentId, text, conversation, turnTaskId = null, place = null }) {
+        if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(owner || '')) || !/^agt_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(agentId || '')) ||
+            typeof text !== 'string' || !text || typeof conversation !== 'string' || !conversation || conversation.length > 500) return [];
+        const rows = await store.activeMentions(s, owner, agentId, nowMs());
+        const fired = [];
+        for (const row of rows) {
+            if (!mentionLib.matches(text, row.mention)) continue;
+            if (!(await store.claimMention(s, row.id, conversation, turnTaskId, nowMs()))) continue;
+            try {
+                const agent = await agentOf(owner, agentId);
+                if (!agent) throw new Error('The agent is no longer available.');
+                const out = await personal.run({ s, config, engine, webhooks }, agent, row.task,
+                    { origin: 'routine', level: row.level, triggerId: row.id,
+                        afterInsert: (task) => store.linkMention(s, row.id, conversation, task.id) });
+                if (!out || !out.task) throw new Error((out && out.detail) || 'The run could not start.');
+                await store.update(s, owner, row.id, { last_fired_in: String(place || conversation).slice(0, 500), updated_at: nowMs() });
+                fired.push(out.task.id);
+            } catch (err) {
+                await store.releaseMention(s, row.id, conversation);
+                log.warn && log.warn('[Actor] mention trigger:', row.id, (err && err.message) || err);
+            }
+        }
+        return fired;
     }
 
     /** Resolve the trigger a Watch delivery is for, by its id or the subscription's id. */
@@ -541,7 +628,7 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
         return found ? found.notify === true : null;
     }
 
-    return { create, get, list, edit, pause, resume, undo, remove, runNow, forDelivery, taskState, tellsPerson, setSwitch, card, expire, endGoal, MAX_ACTIVE, UNDO_MS };
+    return { create, get, list, edit, pause, resume, undo, remove, runNow, onMessage, forDelivery, taskState, tellsPerson, setSwitch, card, expire, endGoal, MAX_ACTIVE, UNDO_MS };
 }
 
 module.exports = { createTriggers, MAX_ACTIVE, UNDO_MS };

@@ -31,7 +31,7 @@ async function namedAgent(s, config, owner, text) {
 
 module.exports = {
     name: 'schedule_trigger',
-    description: 'Make something run on a schedule, when an OpenVibe event happens, or keep working toward a goal until it is done: "every weekday at 9, summarise my inbox", "when a new issue lands in my repo, triage it", or "keep checking the price of the Framework 13 every 30 minutes until it drops under €120, then tell me". It parses the sentence, creates the Watch subscription as the person, and puts a live trigger card on this thread. If the request is ambiguous it creates nothing and tells you the one question to ask them first (the time, the timezone, what event, what to do, or — for a goal — the check that says it is done). A goal ends itself when its check passes, or when its runs, money or deadline is spent, and each run posts its answer in this chat. Money, passwords, deletions and new recipients still always ask when the trigger runs.',
+    description: 'Make a routine on a schedule, a Watch event, a goal, or when the person mentions a phrase in their own messages. For a mention such as "when the release comes up, remind me to check rollback", pass mention.phrases, mention.match, task, and words (the card line). A mention fires once per conversation and expires after 30 days by default. Ask before making a routine if the phrase or task is unclear. The creation is a routine approval, and each run keeps the agent level and approval gates.',
     scope: 'person',
     acts: true,
     costUsd: 0,
@@ -53,6 +53,12 @@ module.exports = {
                 },
                 required: ['pattern'],
             },
+            mention: { type: 'object', description: 'Words in the person\'s own messages that start this standing intent.', properties: {
+                phrases: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 5 },
+                match: { type: 'string', enum: ['any', 'all'] },
+            }, required: ['phrases', 'match'] },
+            words: { type: 'string', description: 'Plain card line, such as When you mention the release.' },
+            expires_at: { type: 'string', description: 'Optional expiry within 90 days. Defaults to 30 days.' },
             goal: {
                 type: 'object',
                 description: 'A goal to keep working toward, when the person asked for one ("until …"). Give it when the sentence did not parse into one after you asked, or to set its limits.',
@@ -76,15 +82,19 @@ module.exports = {
         const said = String(input.request || '').trim();
         const explicitCron = typeof input.cron === 'string' && input.cron.trim() ? input.cron.trim() : null;
         const explicitEvent = input.event && typeof input.event === 'object' && EVENT_PATTERN.test(String(input.event.pattern || '')) ? input.event : null;
+        const explicitMention = input.mention && typeof input.mention === 'object' ? input.mention : null;
         const explicitGoal = input.goal && typeof input.goal === 'object' && String(input.goal.text || '').trim() && String(input.goal.done_test || '').trim() ? input.goal : null;
         const timezone = String(input.timezone || ctx.timezone || '').trim();
 
         let parsed;
-        if (explicitCron || explicitEvent || explicitGoal) {
-            const kind = explicitGoal ? 'goal' : explicitCron ? 'schedule' : 'event';
+        if (explicitCron || explicitEvent || explicitGoal || explicitMention) {
+            const kind = explicitMention ? 'mention' : explicitGoal ? 'goal' : explicitCron ? 'schedule' : 'event';
             const task = String(input.task || said || '').trim();
             if (!task) return { text: 'Before I make it: what should I do each time?', data: { question: 'What should I do each time?' } };
-            if (kind !== 'event') {
+            if (kind === 'mention') {
+                parsed = { status: 'ok', kind, task, mention: explicitMention, words: String(input.words || '').trim() || null,
+                    expires_at: input.expires_at || null, tell: false };
+            } else if (kind !== 'event') {
                 if (!timezone || !cron.isZone(timezone)) return { text: 'Before I make it: which timezone should the schedule use? (For example Europe/Berlin.)', data: { question: 'Which timezone?' } };
                 const expr = explicitCron || '*/15 * * * *';
                 const verdict = cron.validate(expr, timezone);
@@ -125,6 +135,9 @@ module.exports = {
             timezone: parsed.timezone || null,
             event: parsed.event || null,
             goal: parsed.goal || null,
+            mention: parsed.mention || null,
+            words: parsed.words || null,
+            expiresAt: parsed.expires_at || null,
             level: ctx.level || 'ask',
             turnTaskId: ctx.taskId || null,
             personToken: ctx.personToken || null,

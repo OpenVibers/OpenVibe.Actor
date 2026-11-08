@@ -325,8 +325,14 @@ ${readOnly ? '' : html`<div class="ovt-card-acts"><button type="submit" class="o
                 runs.get(e.trigger_id).push(e);
             }
         }
-        if (!latest.size) return '';
         const owner = String(row.requester || '').replace(/^user:/, '');
+        if (!readOnly && ctx.triggers && typeof ctx.triggers.get === 'function') {
+            for (const id of runs.keys()) if (!latest.has(id)) {
+                const live = await ctx.triggers.get(owner, id).catch(() => null);
+                if (live && live.kind === 'mention') latest.set(id, live);
+            }
+        }
+        if (!latest.size) return '';
         const cards = [];
         for (const [id, made] of latest) {
             let card = made;
@@ -335,7 +341,9 @@ ${readOnly ? '' : html`<div class="ovt-card-acts"><button type="submit" class="o
                 const live = await ctx.triggers.get(owner, id).catch(() => null);
                 if (live) card = live; else gone = true;
             }
-            cards.push(triggerCard(row, card, { gone, readOnly, runs: runs.get(id) || [] }));
+            const firedIn = !readOnly && card.kind === 'mention' && !gone
+                ? await s.db.maybe('SELECT last_fired_in FROM actor_triggers WHERE id = $1 AND owner = $2', [id, owner]) : null;
+            cards.push(triggerCard(row, card, { gone, readOnly, runs: runs.get(id) || [], firedIn: firedIn && firedIn.last_fired_in }));
         }
         return html`${cards}`;
     }
@@ -363,24 +371,32 @@ ${sources.length ? html`<p class="ct-trig-sources">${sources.map((u, i) => html`
 </div>`;
     }
 
-    function triggerCard(row, card, { gone = false, readOnly = false, runs = [] } = {}) {
+    function triggerCard(row, card, { gone = false, readOnly = false, runs = [], firedIn = null } = {}) {
         const when = card.when || {};
         const goal = card.goal || null;
         const paused = !gone && card.state === 'paused';
         const done = !gone && card.state === 'done';
-        const state = gone ? 'Deleted' : done ? 'Done' : paused ? 'Paused' : 'On';
+        const state = gone ? 'Deleted' : done && card.kind === 'mention' ? 'Expired' : done ? 'Done' : paused ? 'Paused' : 'On';
         const last = card.last_run && LAST_RUN[card.last_run.state] ? card.last_run : null;
         const undoable = !gone && card.undo_until && Date.parse(card.undo_until) > now();
         const why = done
-            ? (card.paused_reason === 'done' && goal ? `The goal is reached: ${goal.done_test}.` : 'This goal is finished.')
+            ? (card.kind === 'mention' ? 'This standing intent expired.' : card.paused_reason === 'done' && goal ? `The goal is reached: ${goal.done_test}.` : 'This goal is finished.')
             : paused ? (card.paused_reason === 'failed' ? `Paused after ${Number(card.failures) || 5} failed runs in a row. Resume it once the cause is fixed.`
                 : card.paused_reason === 'budget' ? 'Stopped: its runs or its money ran out.'
                     : card.paused_reason === 'deadline' ? 'Stopped: its deadline passed.'
                         : 'Paused by you.') : '';
-        const icon = card.kind === 'event' ? 'zap' : card.kind === 'goal' ? 'target' : 'calendar';
-        const words = String(when.words || (card.kind === 'event' ? 'When it happens' : 'On a schedule'));
-        const zone = card.kind !== 'event' && when.timezone && !words.includes(when.timezone) ? ` (${when.timezone})` : '';
+        const icon = card.kind === 'event' || card.kind === 'mention' ? 'zap' : card.kind === 'goal' ? 'target' : 'calendar';
+        const words = String(when.words || (card.kind === 'event' ? 'When it happens' : card.kind === 'mention' ? 'When you mention it' : 'On a schedule'));
+        const zone = card.kind !== 'event' && card.kind !== 'mention' && when.timezone && !words.includes(when.timezone) ? ` (${when.timezone})` : '';
         const meta = [];
+        if (card.kind === 'mention') {
+            const phrases = when.mention && Array.isArray(when.mention.phrases) ? when.mention.phrases : [];
+            meta.push(html`Waiting for: ${phrases.join(when.mention && when.mention.match === 'all' ? ' and ' : ' or ')}`);
+            if (card.expires_at) meta.push(html`until <time datetime="${card.expires_at}" data-ct-local>${String(card.expires_at).slice(0, 10)}</time>`);
+            if (firedIn) meta.push(/^\/chat\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(firedIn)
+                ? html`Fired in <a href="${firedIn}">this conversation</a>`
+                : html`Fired in ${String(firedIn)}`);
+        }
         // A goal's progress in one line (plan HO3): "Run 4 of at most 12 · not yet: €134".
         if (goal) {
             const used = Number(goal.runs_used) || 0;
@@ -396,7 +412,7 @@ ${sources.length ? html`<p class="ct-trig-sources">${sources.map((u, i) => html`
         const moves = gone || readOnly ? '' : html`<div class="ovt-card-acts">
 ${paused ? html`<button type="submit" class="ovt-card-btn" name="do" value="resume">Resume</button>` : ''}
 ${!paused && !done ? html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="pause">Pause</button>` : ''}
-${done ? '' : html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="run">Run now</button>`}
+${done || card.kind === 'mention' ? '' : html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="run">Run now</button>`}
 ${undoable ? html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="undo">Undo</button>`
         : html`<details class="ct-trig-del"><summary class="ovt-card-btn is-quiet">Delete</summary><p>Delete it for good? No future run happens.</p><button type="submit" class="ovt-card-btn is-danger" name="do" value="delete">Delete it</button></details>`}
 </div>`;
@@ -863,6 +879,16 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
             afterInsert: checked.files.length ? (made) => inputs.save(s, made.id, requesterOf(req), checked.files) : null });
         if (out.code) return fail(out.status === 503 || out.status === 429 ? out.status : 422, PROBLEM[out.code] || out.detail || 'That could not start. Try again in a moment.', parent, text);
         const row = await store.getTask(s, out.task.id);
+        if (ctx.triggers && ctx.triggers.onMessage && row.agent_id) {
+            let root = parent || row;
+            for (let i = 0; i < CHAIN_MAX && isFollow(root); i++) {
+                const previous = await store.getTask(s, root.parent_id);
+                if (!previous || previous.requester !== row.requester) break;
+                root = previous;
+            }
+            await ctx.triggers.onMessage({ owner: req.viewer.subject, agentId: row.agent_id, text,
+                conversation: `chat:${root.id}`, turnTaskId: row.id, place: `/chat/${row.id}` });
+        }
         if (wantsJson) return res.status(201).json({ id: row.id, chat: parent ? undefined : row.id, url: `/chat/${row.id}`, turn: require('../render/html').render(await turnHtml(row, { events: [] })) });
         return res.redirect(303, `/chat/${row.id}#t-${row.id}`);
     });

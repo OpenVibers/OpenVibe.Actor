@@ -49,6 +49,7 @@ async function mailStub(opts = {}) {
         inboxes: new Map(),
         letters: new Map(),
         sent: [],
+        ownedSenders: new Set(),
         owner: null,
         replyStatus: opts.replyStatus || null,
     };
@@ -69,6 +70,9 @@ async function mailStub(opts = {}) {
         const slug = m[1];
         const rest = m[2] || '';
         let inbox = state.inboxes.get(slug);
+        if (req.method === 'GET' && rest.startsWith('own-sender?')) {
+            return send(200, { owned: state.ownedSenders.has(new URL(req.url, 'http://mail.local').searchParams.get('address')) });
+        }
         if (req.method === 'POST' && rest === 'inbox') {
             if (!inbox) {
                 inbox = { id: `agi_${ids.ulid()}`, agent_id: slug, address: `${slug}.dana@openvibe.email`, owner: state.owner, enabled: false, changed_at: null };
@@ -277,6 +281,26 @@ async function runOf(t, messageId) {
                 assert.ok(sent.body.includes('Tuesday at 10 works'));
                 const n = await t.ctx.s.db.value("SELECT count(*) FROM actor_approvals WHERE owner = $1 AND kind = 'send'", [owner]);
                 assert.strictEqual(Number(n), 1, 'only the earlier stranger');
+            });
+        }
+
+        // ---- standing intents only hear a sender Mail proved belongs to this person ---------------------------
+        {
+            mail.state.ownedSenders.add('dana@openvibe.email');
+            const made = await t.ctx.triggers.create({ owner: dana.subject, agentId: agent.id, task: 'Check rollback', kind: 'mention',
+                mention: { phrases: ['release'], match: 'any' } });
+            assert.ok(made.trigger, JSON.stringify(made.error));
+            mail.state.letters.set('m-mention-own', letter(dana, { inbox, messageId: 'm-mention-own', from: 'dana@openvibe.email', text: 'The release is ready.' }));
+            await t.ctx.agentMail.onEvent(letterEvent({ inbox, owner: dana.subject, messageId: 'm-mention-own', from: 'dana@openvibe.email' }));
+            await ok('the owner\'s own email fires the standing intent', async () => {
+                const n = await t.ctx.s.db.value('SELECT count(*) FROM actor_mention_firings WHERE trigger_id = $1', [made.trigger.id]);
+                assert.strictEqual(Number(n), 1);
+            });
+            mail.state.letters.set('m-mention-other', letter(dana, { inbox, messageId: 'm-mention-other', from: 'other@openvibe.email', text: 'The release is ready.' }));
+            await t.ctx.agentMail.onEvent(letterEvent({ inbox, owner: dana.subject, messageId: 'm-mention-other', from: 'other@openvibe.email' }));
+            await ok('a different sender on the same domain cannot fire it', async () => {
+                const n = await t.ctx.s.db.value('SELECT count(*) FROM actor_mention_firings WHERE trigger_id = $1', [made.trigger.id]);
+                assert.strictEqual(Number(n), 1);
             });
         }
 
