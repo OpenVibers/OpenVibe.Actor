@@ -219,13 +219,13 @@ async function run(ctx, agent, input = '', { origin = 'person', level = null, tr
     // The skills this agent has installed (plan HO2): their name and description go in the prompt, never their
     // instructions. The agent loads a skill itself when one of them fits the job; a withdrawn one is not offered.
     const installed = (await skillsStore.forAgent(s, agent.owner, agent.id)).filter((k) => !k.withdrawn);
-    const out = await createTask({ s, config, engine, webhooks, principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null }, body: { task: prompt(agent, notes, runInput, installed, { mailNote }), mode: agent.mode, budget: { per_task_usd: Number(agent.budget_per_run_usd) }, ...(level ? { level } : {}) }, assignmentOrigin: origin, assignmentLevel: level, triggerId, beforeInsert: async () => {
+    const out = await createTask({ s, config, engine, webhooks, principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null }, parentId, body: { task: prompt(agent, notes, runInput, installed, { mailNote }), mode: agent.mode, budget: { per_task_usd: Number(agent.budget_per_run_usd) }, ...(level ? { level } : {}) }, assignmentOrigin: origin, assignmentLevel: level, triggerId, beforeInsert: async () => {
         const current = await s.db.maybe('SELECT daily_runs_max FROM actor_agents WHERE id = $1 AND owner = $2 FOR UPDATE', [agent.id, agent.owner]);
         if (!current) return { status: 404, code: 'actor.agent.not_found', detail: 'No such agent.' };
         const count = Number(await s.db.value('SELECT count(*) FROM tasks WHERE via = $1 AND created_at >= $2', [`agent:${agent.id}`, `${s.iso().slice(0, 10)}T00:00:00.000Z`]));
         if (count >= current.daily_runs_max) return { status: 429, code: 'actor.agent.limit', detail: `This agent has reached ${current.daily_runs_max} runs today.` };
         return null;
-    }, parentId });
+    } });
     if (out.task && out.status === 201) await s.db.query('UPDATE actor_agents SET last_run_at = $1, last_skip_reason = NULL WHERE id = $2', [s.iso(), agent.id]);
     return out;
 }

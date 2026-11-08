@@ -260,7 +260,7 @@ ${provenance(a)}${suggestedApps(a)}</section>`;
         const on = Boolean(inbox && inbox.enabled);
         return html`<section class="pa-panel" id="mail" aria-labelledby="ac-mail-h"><h2 id="ac-mail-h">Its mail address</h2>
 ${address ? html`<p class="pa-mail-address"><code>${address}</code> <button type="button" class="pa-btn pa-copy" data-copy="${address}" aria-label="Copy the address">Copy</button></p>`
-        : html`<p class="muted">No address yet. OpenVibe.Mail makes one the first time this agent receives a letter.</p>`}
+        : html`<p class="muted">OpenVibe.Mail is not answering right now, so its address cannot be shown or turned on.</p>`}
 <p class="pa-hint">Mail sent to this address lands in your own mailbox, and this agent may answer it here. Answering is <strong>${on ? 'on' : 'off'}</strong>: ${on ? 'it reads the letters and replies.' : 'it never reads or answers them until you turn this on.'}</p>
 ${address ? html`<form method="post" action="/me/agents/${a.id}/mail"><label class="pa-check"><input type="checkbox" name="enabled" value="on" ${on ? 'checked' : ''}> Answer mail sent to this address</label><button type="submit" class="pa-btn pa-primary">${on ? 'Save' : 'Turn answering on'}</button></form>` : ''}
 <p class="pa-hint">A reply to one of your own addresses (your mailbox, a mask, a burner) is sent as it is. A reply to anyone else waits for your yes, in your approvals. OpenVibe Mail cannot send outside OpenVibe yet, so such a reply stays pending there until sending is turned on.</p>
@@ -425,8 +425,8 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
         const installed = await skills.forAgent(s, a.owner, a.id);
         // Its mail address (track HO6): what Mail gave it, whether it answers there, and the last ten letters it
         // answered with the thread each one stayed in.
-        const mail = ctx.agentMail ? await ctx.agentMail.statusFor(a.owner, a).catch(() => ({ address: null, enabled: false, available: false })) : { address: null, enabled: false, available: false };
-        const mailAnswered = await mailStore.answeredByAgent({ s, owner: a.owner, inboxId: mailStore.inboxIdFor(ctx.agentMail ? ctx.agentMail.slugOf(a.name) : '') , limit: 10 }).catch(() => []);
+        const mail = ctx.agentMail ? await ctx.agentMail.statusFor(a.owner, a).catch(() => ({ address: null, enabled: false, inboxId: null, available: false })) : { address: null, enabled: false, inboxId: null, available: false };
+        const mailAnswered = mail.inboxId ? await mailStore.answeredByAgent({ s, owner: a.owner, inboxId: mail.inboxId, limit: 10 }).catch(() => []) : [];
         const mailInbox = { address: mail.address, enabled: mail.enabled };
         page(req, res, a.name, html`<p class="crumbs"><a href="/me/agents">Your agents</a></p>
 <header class="pa-head ac-sheet-head">${ui.face(contact, 64)}<div><h1>${a.name}</h1><p class="ac-sheet-uses">${ui.usesLine(contact)}</p>

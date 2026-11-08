@@ -18,7 +18,6 @@
  * the thread's previous task, so a back-and-forth keeps its memory. The message id is the primary key of the run
  * row, so a redelivery never makes a second run.
  */
-const crypto = require('crypto');
 const { mailFor } = require('./client');
 const { mailInput, MAIL_NOTE } = require('./prompt');
 const store = require('./store');
@@ -31,23 +30,39 @@ const PER_SENDER_PER_HOUR = 5;
 const MAX_EXCERPT = 4000;
 const MAX_REPLY = 10000;
 
-/** Actor's own key for an agent's inbox: Mail's agent name in the address, prefixed so it cannot collide with an id. */
-const inboxIdFor = (slug) => `agi_by:${slug}`;
-
 /** "user:usr_…" ↔ "usr_…". */
 const subjectOf = (owner) => String(owner || '').replace(/^user:/, '');
 const requesterOf = (subject) => (String(subject || '').startsWith('user:') ? String(subject) : `user:${subject}`);
 const USA = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
+const AGENT = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 const ADDRESS = /^[^\s@<>,;:"]+@[^\s@<>,;:"]+$/;
+
+/** The agent's name as an address label: lowercased, letters, digits and hyphens, exactly as Mail cleans it. */
+const slugOf = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
+
+/** The answer as plain text a mail can carry: no markdown fences, no headings, no evidence markers. */
+function plainAnswer(text) {
+    return String(text || '')
+        .replace(/\s*\[E\d{1,3}(?:\s*,\s*E\d{1,3})*\]/g, '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/^#{1,6}\s*/gm, '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/^\s*Sources?\s*:?\s*$[\s\S]*$/im, '')
+        .replace(/\s+([.,!?;:])/g, '$1')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+        .slice(0, MAX_REPLY);
+}
 
 /** The letter as Mail's event gave it, or null when the event is not one Actor takes. */
 function parseEvent(ev) {
     if (!ev || ev.event_type !== 'mail.agent_inbox.received') return null;
     const p = ev.payload || {};
     if (!USA.test(String(p.owner || ''))) return null;
+    // Mail's own ids: the inbox is the row Mail made, the agent is the name in the address. Actor never trusts a
+    // sender-written address here, only the inbox the mail server stamped at delivery.
     if (!store.AGI.test(String(p.inbox_id || ''))) return null;
-    if (!store.AGT.test('')) return null; // (the agent is resolved from the inbox, never from the event)
-    if (typeof p.agent_id !== 'string' || !p.agent_id) return null;
+    if (typeof p.agent_id !== 'string' || !AGENT.test(p.agent_id)) return null;
     if (typeof p.message_id !== 'string' || !p.message_id) return null;
     const from = String(p.from || '').trim().toLowerCase();
     if (!ADDRESS.test(from)) return null;
@@ -86,7 +101,9 @@ function createAgentMail(ctx) {
     async function agentOf(owner, agentName) {
         const rows = await s.db.many('SELECT * FROM actor_agents WHERE owner = $1', [owner]);
         const wanted = String(agentName || '').toLowerCase();
-        const found = rows.find((row) => String(row.name || '').toLowerCase() === wanted);
+        // The event carries the agent's NAME IN THE ADDRESS (Mail cleaned it from the agent's name), not agt_…:
+        // compare the same way Mail made the address, so "Helper Bot" finds helper-bot.
+        const found = rows.find((row) => slugOf(row.name) === wanted);
         return found || null;
     }
 
@@ -94,19 +111,6 @@ function createAgentMail(ctx) {
     async function readLetter({ person, agentName, messageId }) {
         const out = await mail.getMessage({ person, agentId: agentName, messageId });
         return out.ok ? out.data : null;
-    }
-
-    /** The answer as plain text a mail can carry: no markdown fences, no headings, no evidence markers. */
-    function plainAnswer(text) {
-        return String(text || '')
-            .replace(/\s*\[E\d{1,3}(?:\s*,\s*E\d{1,3})*\]/g, '')
-            .replace(/```[\s\S]*?```/g, ' ')
-            .replace(/^#{1,6}\s*/gm, '')
-            .replace(/\*\*([^*]+)\*\*/g, '$1')
-            .replace(/^\s*Sources?:\s*$[\s\S]*$/im, '')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim()
-            .slice(0, MAX_REPLY);
     }
 
     /**
@@ -121,8 +125,7 @@ function createAgentMail(ctx) {
 
         // The switch: Actor answers only for an inbox the person turned on. Mail already decides this; Actor checks
         // its own copy, because the event can arrive after the person turned it off.
-        const row = await store.getInbox({ s, owner, inboxId: inboxIdFor(letter.agentName) })
-            || await store.getInbox({ s, owner, inboxId: letter.inboxId });
+        const row = await store.getInbox({ s, owner, inboxId: letter.inboxId });
         if (row && row.enabled === false) return 'ignored:switched_off';
 
         const agent = await agentOf(owner, letter.agentName);
@@ -171,7 +174,7 @@ function createAgentMail(ctx) {
 
         // Continue the thread: the previous run's answer is the context, and the task is its child, so the memory
         // and the level chain stay the thread's own.
-        const prior = await store.threadTask({ s, owner: owner, threadKey: thread }).catch(() => null);
+        const prior = await store.threadTask(s, owner, thread).catch(() => null);
         const parentId = prior && prior.task_id && prior.task_id !== null ? prior.task_id : null;
 
         // The letter is the run's INPUT DATA, under the data note. The agent's own instructions and level are what
@@ -214,7 +217,7 @@ function createAgentMail(ctx) {
         const owner = run.owner;
         const person = subjectOf(owner);
         const agentRow = await contacts.get(s, owner, run.agent_id);
-        const agentName = agentRow ? String(agentRow.name).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) : null;
+        const agentName = agentRow ? slugOf(agentRow.name) : null;
         if (!agentName) return store.settle({ s, messageId: run.message_id, state: 'failed', reason: 'the agent has no mail address' });
 
         // To one of the owner's own addresses: send it, no approval needed (it never leaves the host).
@@ -253,6 +256,15 @@ function createAgentMail(ctx) {
         return store.settle({ s, messageId: run.message_id, state: 'awaiting_person', approvalId: ask.id, replyTo: run.peer });
     }
 
+    /** Is this a mail reply whose sending Mail still refuses because outbound is off? Then nothing is sent, and the
+     * person's yes must leave the request pending rather than pretend it went out. */
+    async function replyWaits(row) {
+        const p = typeof row.payload === 'string' ? JSON.parse(row.payload || '{}') : (row.payload || {});
+        if (!p.inbox || !p.message_id || !p.draft || !p.agent) return false;
+        const canSend = await mail.canSendOutside().catch(() => ({ enabled: false }));
+        return !canSend.enabled;
+    }
+
     /**
      * The person approved a send of a mail reply: send it now. Called from agents/approvals.js decide(), for a row
      * whose payload names an inbox and a message (a mail reply, not a chat send). Answers what happened.
@@ -278,9 +290,6 @@ function createAgentMail(ctx) {
 
     const capital = (word) => (word ? word[0].toUpperCase() + word.slice(1) : word);
 
-    /** The agent's name as an address label: lowercased, letters, digits and hyphens, as Mail cleans it. */
-    const slugOf = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
-
     /**
      * What the agent's page shows: the address and the switch. Mail is the authority on both, so this reads Mail and
      * mirrors the answer in Actor's own row (which the consumer checks, so a letter that was already in flight when
@@ -289,28 +298,41 @@ function createAgentMail(ctx) {
     async function statusFor(owner, agentRow) {
         const person = subjectOf(owner);
         const slug = slugOf(agentRow.name);
+        // Mail makes the address if it is not there yet, so the page always shows the one address Mail will read for
+        // this agent. Making it is idempotent and does not turn answering on: the switch stays the person's.
+        const made = await mail.ensureInbox({ person, agentId: slug });
+        const inbox = made.ok && made.data ? (made.data.agent_inbox || made.data) : null;
+        if (!inbox || !inbox.id) return { address: null, enabled: false, changed_at: null, inboxId: null, available: false };
         const out = await mail.getAnswering({ person, agentId: slug });
-        if (!out.ok || !out.data) return { address: null, enabled: false, changed_at: null, available: false };
-        const data = out.data;
-        await store.setEnabled({ s, owner, inboxId: inboxIdFor(slug), agentId: agentRow.id, address: data.address || '', enabled: Boolean(data.enabled) }).catch(() => null);
-        return { address: data.address || null, enabled: Boolean(data.enabled), changed_at: data.changed_at || null, available: true };
+        const data = out.ok && out.data ? out.data : null;
+        await store.setEnabled({ s, owner, inboxId: inbox.id, agentId: agentRow.id, address: inbox.address || (data && data.address) || '', enabled: Boolean(data && data.enabled) }).catch(() => null);
+        return {
+            address: (data && data.address) || inbox.address || null,
+            enabled: Boolean(data && data.enabled),
+            changed_at: (data && data.changed_at) || null,
+            inboxId: inbox.id,
+            available: Boolean(data),
+        };
     }
 
     /** Turn the agent's answering on or off, in Mail first (the authority), then in Actor's copy. */
     async function setAnswering(owner, agentRow, enabled) {
         const person = subjectOf(owner);
         const slug = slugOf(agentRow.name);
+        const made = await mail.ensureInbox({ person, agentId: slug });
+        const inbox = made.ok && made.data ? (made.data.agent_inbox || made.data) : null;
+        if (!inbox || !inbox.id) return { error: String(made.error || 'Mail did not answer') };
         const out = await mail.setAnswering({ person, agentId: slug, enabled });
         if (!out.ok || !out.data) return { error: String(out.error || 'Mail did not answer') };
-        await store.setEnabled({ s, owner, inboxId: inboxIdFor(slug), agentId: agentRow.id, address: out.data.address || '', enabled: Boolean(out.data.enabled) }).catch(() => null);
+        await store.setEnabled({ s, owner, inboxId: inbox.id, agentId: agentRow.id, address: out.data.address || '', enabled: Boolean(out.data.enabled) }).catch(() => null);
         return { enabled: Boolean(out.data.enabled), address: out.data.address || null };
     }
 
     return {
-        onEvent, answered, sendApproved, statusFor, setAnswering, slugOf,
+        onEvent, answered, sendApproved, replyWaits, statusFor, setAnswering, slugOf,
         parseEvent, plainAnswer, isOwnAddress, agentOf, readLetter,
         LIMITS: { PER_INBOX_PER_HOUR, PER_SENDER_PER_HOUR },
     };
 }
 
-module.exports = { createAgentMail, parseEvent, isOwnAddress, inboxIdFor, PER_INBOX_PER_HOUR, PER_SENDER_PER_HOUR, MAIL_NOTE };
+module.exports = { createAgentMail, parseEvent, plainAnswer, isOwnAddress, slugOf, PER_INBOX_PER_HOUR, PER_SENDER_PER_HOUR, MAIL_NOTE };

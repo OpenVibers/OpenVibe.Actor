@@ -3,12 +3,15 @@
 /**
  * OpenVibe.Mail, from Actor: the two calls an agent's answer needs (track HO6).
  *
+ *   ensureInbox({ person, agentId })            → mail.agent-inbox@1, made if it is not there yet
+ *   getAnswering({ person, agentId })           → mail.inbox-answering@1 (the switch, off by default)
+ *   setAnswering({ person, agentId, enabled })  → mail.inbox-answering@1 after the person's decision
  *   getMessage({ person, agentId, messageId })  → mail.agent-inbox-message@1 | null
  *   reply({ person, agentId, messageId, body }) → mail.agent-reply-result@1 (+ a code on the closed case)
  *   canSendOutside()                            → whether Mail may send outside OpenVibe at all
  *
- * All three are loopback calls under Actor's own service token (audience openvibe.mail, the capabilities
- * mail.agent.read and mail.agent.reply), with the person in X-OV-Subject — the house pattern Watch, Chat and Space
+ * All are loopback calls under Actor's own service token (audience openvibe.mail, the capabilities
+ * mail.agent.read, mail.agent.reply and mail.agent.answering), with the person in X-OV-Subject — the house pattern Watch, Chat and Space
  * already use for "this service acts for that person". Mail checks that the inbox is one of that person's and that
  * the letter was delivered to that address; anything else is a 404 there.
  *
@@ -26,7 +29,7 @@ function createMailClient({ config, fetchImpl = globalThis.fetch, tokens: tokens
     const enabled = Boolean(base && (tokensOverride || clientSecret));
     const tokens = !enabled ? null : tokensOverride || serviceAuth.createTokenClient({
         tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret,
-        audience: 'openvibe.mail', scope: 'mail.agent.read mail.agent.reply', fetchImpl,
+        audience: 'openvibe.mail', scope: 'mail.agent.read mail.agent.reply mail.agent.answering', fetchImpl,
     });
 
     async function call(method, path, { person = null, body = undefined } = {}) {
@@ -65,6 +68,8 @@ function createMailClient({ config, fetchImpl = globalThis.fetch, tokens: tokens
             person: args.person,
             body: { message_id: args.messageId, body: args.body, ...(args.to ? { to: args.to } : {}) },
         }),
+        /** Make the agent's inbox (idempotent) and answer { agent_inbox } — the address the page shows. */
+        ensureInbox: (args) => call('POST', `/internal/mail/agents/${encodeURIComponent(args.agentId)}/inbox`, { person: args.person }),
         /** The switch for one agent's inbox: { enabled, address, changed_at } or null. */
         getAnswering: (args) => call('GET', `/internal/mail/agents/${encodeURIComponent(args.agentId)}/answering`, { person: args.person }),
         setAnswering: (args) => call('PUT', `/internal/mail/agents/${encodeURIComponent(args.agentId)}/answering`, { person: args.person, body: { enabled: Boolean(args.enabled) } }),
