@@ -493,26 +493,33 @@ function createTriggers({ s, config, engine = null, webhooks = null, stream = nu
         const cost = Number(task.cost_usd) || 0;
         await store.addRun(s, run.trigger_id, task.id, mapped, nowMs(), cost);
         if (mapped === 'running') return row;
-        let failures = Number(found.failures) || 0;
-        if (mapped === 'failed' && task.state !== 'cancelled') failures += 1;
-        if (mapped === 'ok') failures = 0;
-        const patch = {
-            last_task_id: task.id, last_state: mapped, last_run_at: nowMs(), failures, updated_at: nowMs(),
-            ...(failures >= 5 ? { state: 'paused', paused_reason: 'failed' } : {}),
-        };
 
         // The answer in the thread comes first, so a goal's closing line reads after the run it ends.
         await postRun(row, task, mapped);
 
+        // The counters move in one statement, and the row it returns is the truth: the card is read
+        // from it, and the ending is decided on the count that was really reached. A count read before
+        // this write (and then written back as an absolute number) loses a run when two settle at once.
+        const goal = row.kind === 'goal' && (mapped === 'ok' || mapped === 'failed');
+        const after = await store.bumpCounters(s, row.id, {
+            state: task.state, runs: goal ? 1 : 0, costUsd: goal ? cost : 0, at: nowMs(),
+        }) || row;
+        const failures = Number(after.failures) || 0;
+        const patch = {
+            last_task_id: task.id, last_state: mapped, last_run_at: nowMs(), updated_at: nowMs(),
+            ...(failures >= 5 ? { state: 'paused', paused_reason: 'failed' } : {}),
+        };
+
         let ended = null;
-        if (row.kind === 'goal' && (mapped === 'ok' || mapped === 'failed')) {
+        if (goal) {
             const result = tasks.parseJson(task.result) || {};
             const verdict = mapped === 'ok' ? goalLib.verdictOf(result.answer) : { done: null, reason: '' };
-            patch.runs_used = (Number(row.runs_used) || 0) + 1;
-            patch.spent_usd = usd((Number(row.spent_usd) || 0) + cost);
             if (verdict.done != null) patch.verdict = { done: verdict.done, reason: verdict.reason, at: iso(nowMs()) };
             if (row.state === 'active') {
-                ended = goalLib.endingOf({ goal: row.goal, verdict, runsUsed: patch.runs_used, spentUsd: patch.spent_usd, at: nowMs() });
+                ended = goalLib.endingOf({
+                    goal: row.goal, verdict,
+                    runsUsed: Number(after.runs_used) || 0, spentUsd: usd(after.spent_usd), at: nowMs(),
+                });
                 if (ended) Object.assign(patch, { state: ended.reason === 'done' ? 'done' : 'paused', paused_reason: ended.reason, ended_at: nowMs() });
             }
         }

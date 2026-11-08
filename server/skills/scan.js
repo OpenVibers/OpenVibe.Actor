@@ -52,11 +52,12 @@ const SEND = /\b(send|sends|sending|email|emails|forward|forwards|upload|uploads
 const PAYLOAD = /\b(file|files|note|notes|document|documents|record|records|recording|recordings|transcript|history|contacts|password|passwords|credentials|credential|secret|secrets|api key|api keys|token|tokens|seed phrase|data)\b/i;
 // Where it would go.
 const DESTINATION = /(https?:\/\/[^\s)]+)|(\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b)|\b(your email|your email address|your inbox|an email address|the recipient|a webhook|an external (site|server|service)|a third party|a paste site|somebody else|another server)\b/i;
-// A sentence that names a host to keep away from does not reach it.
-const NEGATION = /\b(never|not|none|without|refuse|refuses|refusing|do not|does not|don't|doesn't|cannot|can't|instead of|rather than)\b/i;
 // An act is negated only by a negation RIGHT BEFORE it: "never send", "do not post", "without publishing". The
 // negation may itself be two words ("do not"); another word between it and the act means the act is still asked for.
 const NEGATED_BEFORE = /\b(?:never|not|none|without|refuse|refuses|refusing|do not|does not|don'?t|cannot|can'?t|instead of|rather than)\s+$/i;
+// A URL is named to keep away from it only when a negation stands right before it, or one word before it ("never
+// open https://x").
+const NEGATED_NEAR = /\b(?:never|not|without|do not|does not|don'?t|cannot|can'?t|instead of|rather than)\s+(?:[a-z]+\s+)?$/i;
 
 // A URL in the text, and the host it points at.
 const URL = /https?:\/\/([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+)/gi;
@@ -170,9 +171,11 @@ function scan(doc) {
     const seen = new Set();
     for (const [where, text] of [...texts, ...resources.map((r) => [String(r.path || 'a resource'), String(r.text || '')])]) {
         for (const sentence of sentences(text)) {
-            // A sentence that says the opposite does not reach the host: it names it to keep away from it.
-            if (NEGATION.test(sentence)) continue;
             for (const match of sentence.matchAll(URL)) {
+                // A host named to keep away from it ("never open https://x", "instead of https://x") is not reached.
+                // Only a negation right before it counts, with at most one word between: "Do not wait: fetch
+                // https://x" still reaches x (a negation elsewhere in the sentence used to hide the host).
+                if (NEGATED_NEAR.test(sentence.slice(0, match.index))) continue;
                 const host = String(match[1] || '').toLowerCase();
                 if (!host || seen.has(host)) continue;
                 if (declared(host, declaredHosts)) continue;
