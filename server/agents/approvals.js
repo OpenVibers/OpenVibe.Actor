@@ -112,10 +112,22 @@ async function decide(ctx, owner, id, decision, { idempotent = false } = {}) {
     // A coding task starts as the person's own task. Every other kind had already stopped when it asked: a yes is
     // consent for the person to run it again, never a replay of a call whose arguments only exist in the old run.
     if (row.kind !== 'codes.task') {
+        // A mail reply (track HO6) while Mail cannot send outside OpenVibe: the person's yes changes nothing, so the
+        // request stays pending and says so plainly instead of pretending the reply left. The draft is still in it.
+        if (ctx.agentMail && await ctx.agentMail.replyWaits(row).catch(() => false)) {
+            return { row, note: 'OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.', waiting: true };
+        }
         const allow = always ? await allows.grant(s, owner, row.agent_id, row.kind, row.target) : { row: null };
         if (always && !allow.row) return { error: allow.error || 'This step could not be allowed.', status: 422 };
         const done = await s.db.one("UPDATE actor_approvals SET state = 'approved', decided_at = $2, decided_by = $3, decision_scope = $4, allow_id = $5 WHERE id = $1 AND state = 'pending' RETURNING *",
         [id, s.iso(), owner, always ? 'always' : 'once', allow.row ? allow.row.id : null]);
+        // A mail reply is the one non-coding send whose arguments are all still here: the draft is in the request, so
+        // a yes sends it now instead of asking the person to run something again.
+        const reply = ctx.agentMail ? await ctx.agentMail.sendApproved(owner, done).catch((err) => ({ sent: false, reason: String((err && err.message) || err) })) : null;
+        if (reply && reply.waiting) {
+            return { row: done, note: 'OpenVibe Mail cannot send outside OpenVibe yet: the reply waits here.', waiting: true, allow: allow.row ? allow.row.id : null };
+        }
+        if (reply && reply.sent) return { row: done, note: 'Approved and sent.', allow: allow.row ? allow.row.id : null, mail: true };
         return { row: done, note: 'Approved. The run that asked had already stopped; run it again to let the agent go on.', allow: allow.row ? allow.row.id : null };
     }
     const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;

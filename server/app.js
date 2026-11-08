@@ -61,6 +61,7 @@ const { createMemoryPages } = require('./http/memory-pages');
 const { createSkillPages } = require('./http/skills-pages');
 const { createConnectionsPages } = require('./http/connections-pages');
 const { createA2APages } = require('./http/a2a-pages');
+const { createAgentMail } = require('./mail/service');
 const { createConnectors } = require('./connections/service');
 const { createNotifier } = require('./notify/client');
 const { createActorReadiness } = require('./observability');
@@ -159,7 +160,11 @@ async function createApp(opts = {}) {
     // The person's computers (agents/computers.js): one adapter for the task's still proxy, made here so a test can
     // stand Bot/Run in (opts.bot.computers) exactly as the Console pages do.
     const computers = (opts.bot && opts.bot.computers) || require('./agents/computers').createComputers({ config, fetchImpl: providerFetch, log });
+    // An agent answers the mail sent to its own address (track HO6): the consumer below takes the event, the engine
+    // reports each run's end back here, and the approvals decide() asks it to send an approved draft.
     const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers, skillRun, media };
+    ctx.agentMail = opts.agentMail || createAgentMail({ config, s, engine, webhooks, notifier, log, mailFetch: opts.mailFetch || null, mailTokens: opts.mailTokens || null });
+    engine.setMailReplies((task) => ctx.agentMail.answered(task));
     // The skills registry (plan HO2, ADR-058): OpenVibe's own skills are documents in the repository (skills/), and
     // each one is scanned before it is offered. The seed publishes them as listings of publisher kind 'openvibe'.
     ctx.skills = require('./skills');
@@ -266,6 +271,8 @@ async function createApp(opts = {}) {
         onEvent: (ev) => (ev.event_type === 'chat.message.created' ? chatAsks.onEvent(ev)
             // The agent's steps (design 2026-11-07): every mode publishes agent.step.* with the person's subject.
             : String(ev.event_type || '').startsWith('agent.step.') ? timeline.onEvent(ctx.s, ev)
+            // A letter at an agent's own address (track HO6): that agent answers it, with the mail as data.
+            : ev.event_type === 'mail.agent_inbox.received' ? ctx.agentMail.onEvent(ev)
             : waits.onEvent(ev)) }));
 
     // ── Static assets (content-hashed ?v= → immutable) ──────
