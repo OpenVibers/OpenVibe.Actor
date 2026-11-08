@@ -160,9 +160,11 @@ async function createApp(opts = {}) {
     // The person's computers (agents/computers.js): one adapter for the task's still proxy, made here so a test can
     // stand Bot/Run in (opts.bot.computers) exactly as the Console pages do.
     const computers = (opts.bot && opts.bot.computers) || require('./agents/computers').createComputers({ config, fetchImpl: providerFetch, log });
+    // An agent's money (plan HO7): the client that pays a tip through OpenVibe.Tips with the person's own token.
+    const tips = require('./agents/spend').createTips({ config, fetchImpl });
     // An agent answers the mail sent to its own address (track HO6): the consumer below takes the event, the engine
     // reports each run's end back here, and the approvals decide() asks it to send an approved draft.
-    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers, skillRun, media };
+    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers, skillRun, media, tips };
     ctx.agentMail = opts.agentMail || createAgentMail({ config, s, engine, webhooks, notifier, log, mailFetch: opts.mailFetch || null, mailTokens: opts.mailTokens || null });
     engine.setMailReplies((task) => ctx.agentMail.answered(task));
     // The skills registry (plan HO2, ADR-058): OpenVibe's own skills are documents in the repository (skills/), and

@@ -249,6 +249,26 @@ function stepFor(name, input) {
             };
         }
 
+        // ── Money: a tip to a creator, with the person's own Vibes (plan HO7) ──
+        case 'spend_vibes': {
+            const to = text(a.to, 120);
+            const amount = Number(a.amount);
+            const reason = text(a.reason, 300);
+            const vibes = Number.isInteger(amount) && amount > 0 ? amount : 0;
+            return {
+                act: 'act',
+                kind: 'money',
+                // The floor: money always asks, at every level, and is never always allowed (agents/kinds.js).
+                category: 'money',
+                // The marker that says this money is a tip (plan HO7) and not some other money step: only a tip is
+                // prepared, capped and paid at the person's approval.
+                spend: true,
+                summary: `Tip ${vibes} Vibes to ${to || 'a creator'}${reason ? `: ${reason}` : ''}`,
+                target: to ? exactTarget(`tip ${vibes} Vibes to ${word(to)}`) : null,
+                payload: { to, amount: vibes, reason },
+            };
+        }
+
         // ── Actor's own working state: never asks ──
         case 'make_file':
         case 'make_chart':

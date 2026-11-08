@@ -112,10 +112,20 @@ function createApi(ctx) {
             agentName: a.agent_id ? agentName.get(a.agent_id) || null : null,
             thread: a.task_id ? threadTitle.get(a.task_id) || null : null,
         }));
+        // A payment that was made (plan HO7): the person sees it in their Action Center, with what it paid and who
+        // received it. Only a recorded payment becomes a done item; a refused one stays on its pending approval card.
+        const paidRows = await s.db.many("SELECT approval_id FROM actor_spends WHERE owner = $1 AND state = 'paid' AND approval_id IS NOT NULL", [requester]);
+        const paidIds = new Set(paidRows.map((r) => r.approval_id));
+        const paidAsks = (await approvals.list(s, requester))
+            .filter((a) => a.state === 'approved' && a.kind === 'money' && paidIds.has(a.id))
+            .map((a) => items.approvalItem(a, {
+                agentName: a.agent_id ? agentName.get(a.agent_id) || null : null,
+                thread: a.task_id ? threadTitle.get(a.task_id) || null : null,
+            }));
         const scheduled = (await personal.list(s, requester))
             .filter((a) => a.status === 'active' && a.schedule !== 'off' && a.next_run_at)
             .map(items.scheduledItem);
-        const all = [...tasks, ...asks, ...scheduled].sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : a.id < b.id ? 1 : -1));
+        const all = [...tasks, ...asks, ...paidAsks, ...scheduled].sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : a.id < b.id ? 1 : -1));
         res.json({ items: all.slice(0, 50) });
     });
 

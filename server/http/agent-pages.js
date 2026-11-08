@@ -15,6 +15,7 @@ const shares = require('../agents/voice-shares');
 const levels = require('../agents/levels');
 const allows = require('../agents/allows');
 const kinds = require('../agents/kinds');
+const spend = require('../agents/spend');
 const skills = require('../skills');
 
 /** "22 minutes ago", "in 6 days": a person reads this, the exact UTC instant stays in the <time> element's title. */
@@ -162,15 +163,17 @@ ${importPanel()}<section class="pa-panel" id="create"><h2>${chosen ? `Create: ${
         if (!signed(req)) return login(req, res);
         const rows = await approvals.list(s, owner(req));
         page(req, res, 'Approvals', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · approvals</p><h1>Approvals</h1>
-<p class="pa-lede">When one of your agents runs while you are away and its work would act for you outside Actor (a coding task on your own machine, a send, a purchase, a deletion, a password field, a Space publish), it asks here first. Nothing runs until you approve. An action's run had already stopped when it asked, so approving it is consent for you to run the task again. You may also say "always allow this for this agent": that covers this one kind of step, on this one target, until you revoke it. Spending money, a password, a deletion and a new recipient always ask. A request you leave expires after ${String(approvals.EXPIRES_DAYS)} days.</p></header>
+<p class="pa-lede">When one of your agents runs while you are away and its work would act for you outside Actor (a coding task on your own machine, a send, a purchase, a deletion, a password field, a Space publish), it asks here first. Nothing runs until you approve. An action's run had already stopped when it asked, so approving it is consent for you to run the task again. A tip your agent asks to send is different: approving it pays it at once, from your own Vibes, with your own session. You may also say "always allow this for this agent": that covers this one kind of step, on this one target, until you revoke it. Spending money, a password, a deletion and a new recipient always ask. A request you leave expires after ${String(approvals.EXPIRES_DAYS)} days.</p></header>
 ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-card"><a href="/me/approvals/${a.id}"><strong>${a.summary}</strong></a> ${approvalPill(a)}<span class="pa-when">${kinds.label(a.kind)} · Asked ${time(a.created_at)}</span></li>`)}</ul>`
         : html`<p class="pa-empty">Nothing to approve. Your agents have not asked for anything yet.</p>`}
 <p><a href="/me/agents">Your agents</a></p>`);
     });
-    r.get('/me/approvals/:id', async (req, res) => {
-        if (!signed(req)) return login(req, res);
-        const a = await approvals.get(s, owner(req), req.params.id);
-        if (!a) return page(req, res, 'Request not found', html`<h1>Request not found</h1><p><a href="/me/approvals">Approvals</a></p>`, 404);
+    /**
+     * The approval card. A payment (plan HO7) says more than the other kinds: how much, who receives it, why, and
+     * what is left of the agent's weekly allowance — the four things a person needs before they pay with their own
+     * Vibes.
+     */
+    const approvalCard = async (req, res, a, { notice = null, status = 200 } = {}) => {
         const p = typeof a.payload === 'string' ? JSON.parse(a.payload) : a.payload;
         // The agent by its name (a person's own agent: another person's is never looked up here).
         const agent = a.agent_id ? await contacts.get(s, owner(req), a.agent_id).catch(() => null) : null;
@@ -179,6 +182,8 @@ ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-c
         // say, and a raw command that deletes by its argv (rm, shred …), the same checks approvals.decide uses.
         const floor = approvals.floorOf(a).filter((c) => CAUTION[c]);
         const coding = a.kind === 'codes.task';
+        // A tip (plan HO7) is the only money step with a card of its own: what it pays, who receives it and why.
+        const money = a.kind === 'money' && p && p.spend === 'tip' ? p : null;
         const cmd = coding ? null : commandLine(p);
         const nowMs = Date.parse(s.iso()) || Date.now();   // the service's own clock (a test's clock in a test)
         const where = p && typeof p.machine === 'string' && p.machine ? p.machine : null;
@@ -191,27 +196,51 @@ ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-c
             : floor.length ? html`<p class="pa-hint">This always asks, so it can never be always allowed.</p>`
                 : canAllow ? html`<p class="pa-hint">Always allowing covers exactly this, and nothing else: ${kinds.phrase(a.kind, a.target)}. Anything different still asks. You can take it back on <a href="/me/agents/${a.agent_id}#always">${agentName}'s page</a>.</p>`
                     : '';
+        // What is left of this agent's allowance this week, and what the tip would take of it.
+        const left = money && a.agent_id ? await spend.allowance(s, owner(req), a.agent_id) : null;
+        const paid = money ? await spend.paidFor(s, owner(req), a.id) : null;
         const decided = a.state === 'approved'
-            ? (a.decision_scope === 'always' ? `You approved this and allowed it from now on for ${agentName}.` : 'You approved this once.')
+            ? (paid ? `You approved this once and paid ${paid.amount} Vibes to ${paid.to_label || paid.to_subject}.`
+                : (a.decision_scope === 'always' ? `You approved this and allowed it from now on for ${agentName}.` : 'You approved this once.'))
             : (a.state === 'declined' ? 'You declined this.' : 'Nobody answered this one in time.');
         const buttons = a.state === 'pending'
-            ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">${coding ? 'Approve and start it' : 'Approve for a retry'}</button> ${allowButton} <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>${allowHint}`
+            ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">${coding ? 'Approve and start it' : (money ? 'Approve and pay' : 'Approve for a retry')}</button> ${allowButton} <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>${allowHint}`
             : html`<p class="pa-hint">${decided}${a.decided_at ? html` Decided ${whenAt(a.decided_at, nowMs)}.` : ''}</p>${a.result_task_id ? html`<p>Started as <a href="/tasks/${a.result_task_id}">this task</a>.</p>` : ''}`;
+        const moneyCard = money ? html`<section class="pa-panel"><h2>What it would do</h2>
+<p>It would send <strong>${Number(money.amount) || 0} Vibes</strong> to ${money.to_label || money.to}.</p>
+${money.reason ? html`<p>Why: ${money.reason}</p>` : ''}
+${left ? html`<p>Left this week for ${agentName}: <strong>${left.left} of ${left.weekly} Vibes</strong> (${left.start} to ${left.end} UTC).</p>` : ''}
+<p class="pa-hint">The money moves when you approve, from your own Vibes and with your own session. It is never paid later and never by the agent itself.</p></section>` : '';
         page(req, res, 'Approval', html`<p class="pa-eyebrow"><a href="/me/approvals">Approvals</a></p><h1>${a.summary}</h1>
 <p>${approvalPill(a)} <span class="pa-when">${kinds.label(a.kind)} · Asked ${whenAt(a.created_at, nowMs)}${a.agent_id ? html` by <a href="/me/agents/${a.agent_id}">${agentName}</a>` : ''}${a.task_id ? html` in <a href="/tasks/${a.task_id}">this run</a>` : ''}${a.state === 'pending' && a.expires_at ? html` · expires ${whenAt(a.expires_at, nowMs)}` : ''}</span></p>
+${notice ? html`<p class="pa-caution" role="alert">${notice}</p>` : ''}
 ${floor.length ? html`<p class="pa-caution" role="note">${floor.map((c) => CAUTION[c]).join(' ')}</p>` : ''}
-${!coding
-            ? html`<section class="pa-panel"><h2>What it would do</h2><p>${a.summary}</p>
+${money ? moneyCard : (coding
+            ? html`<section class="pa-panel"><h2>What it would do</h2><p>Start a coding task on your own machine through <a href="https://openvibe.codes/run">OpenVibe.Codes</a> with this request. You get the summary, the changed files and the patch; it pushes nowhere unless the request asks for a branch and your machine holds a GitHub token.</p>
+<pre class="pa-pre">${String(p.task || '').slice(0, 8000)}</pre></section>`
+            : html`<section class="pa-panel"><h2>What it would do</h2><p>${a.summary}</p>
 ${cmd ? html`<p class="pa-cmd-where">${where ? html`On <b>${where}</b>, it runs:` : 'It runs:'}</p><pre class="pa-pre pa-cmd">${cmd}</pre>${p && p.cwd ? html`<p class="pa-hint">In ${String(p.cwd).slice(0, 300)}</p>` : ''}` : ''}
-<h3 class="pa-sub">The exact request</h3><pre class="pa-pre">${JSON.stringify(p, null, 2).slice(0, 8000)}</pre></section>`
-            : html`<section class="pa-panel"><h2>What it would do</h2><p>Start a coding task on your own machine through <a href="https://openvibe.codes/run">OpenVibe.Codes</a> with this request. You get the summary, the changed files and the patch; it pushes nowhere unless the request asks for a branch and your machine holds a GitHub token.</p>
-<pre class="pa-pre">${String(p.task || '').slice(0, 8000)}</pre></section>`}
-${buttons}`);
+<h3 class="pa-sub">The exact request</h3><pre class="pa-pre">${JSON.stringify(p, null, 2).slice(0, 8000)}</pre></section>`)}
+${buttons}`, status);
+    };
+    r.get('/me/approvals/:id', async (req, res) => {
+        if (!signed(req)) return login(req, res);
+        const a = await approvals.get(s, owner(req), req.params.id);
+        if (!a) return page(req, res, 'Request not found', html`<h1>Request not found</h1><p><a href="/me/approvals">Approvals</a></p>`, 404);
+        return approvalCard(req, res, a);
     });
     r.post('/me/approvals/:id', async (req, res) => {
         if (!write(req, res)) return;
-        const out = await approvals.decide(ctx, owner(req), req.params.id, String((req.body || {}).decision || ''));
-        if (out.error) return page(req, res, 'Not done', html`<h1>Not done</h1><p>${out.error}</p><p><a href="/me/approvals">Approvals</a></p>`, out.status);
+        // A payment is paid with the person's own token: the session they are sitting in (plan HO7). A service
+        // deciding for them never pays, and the request stays pending until they do it themselves.
+        const personToken = req.viewer && req.viewer.token ? req.viewer.token : null;
+        const out = await approvals.decide(ctx, owner(req), req.params.id, String((req.body || {}).decision || ''), { personToken });
+        if (out.error) {
+            // A refusal that leaves the request pending: the reason is shown on the card and the person may try again.
+            const row = await approvals.get(s, owner(req), req.params.id);
+            if (out.pending && row) return approvalCard(req, res, row, { notice: out.error });
+            return page(req, res, 'Not done', html`<h1>Not done</h1><p>${out.error}</p><p><a href="/me/approvals">Approvals</a></p>`, out.status);
+        }
         res.redirect(303, out.task ? `/tasks/${out.task.id}` : `/me/approvals/${req.params.id}`);
     });
 
@@ -401,6 +430,9 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
         const tidyChanges = await tidy.changes(s, a.owner, { agentId: a.id, limit: 10 });
         // What this agent may always do (plan HO1), and every decision the person made about its asks.
         const allowRules = await allows.list(s, a.owner, a.id);
+        // What it may spend this week (plan HO7), and what it has spent.
+        const allowance = await spend.allowance(s, a.owner, a.id);
+        const payments = await spend.listFor(s, a.owner, { agentId: a.id, limit: 20 });
         const decisions = await s.db.many(`SELECT id, kind, summary, state, decision_scope, decided_by, decided_at, created_at
             FROM actor_approvals WHERE owner = $1 AND agent_id = $2 ORDER BY created_at DESC LIMIT 20`, [a.owner, a.id]);
         // Its Vibe chat (agents/vibe-deliver.js), once a run has gone there.
@@ -443,6 +475,14 @@ ${a.last_skip_reason ? html`<p class="notice" role="status">The last scheduled r
 <p class="pa-hint">When you said "always allow this for this agent", the permission is here: one kind of step, on one target. Take any of them back and the next one asks again. Spending money, a password, a deletion and a new recipient always ask, whatever is allowed here.</p>
 ${allowRules.length ? html`<ul class="pa-notes">${allowRules.map((r) => html`<li><p class="pa-note-text">${kinds.phrase(r.kind, r.target)}</p><p class="pa-note-meta">Allowed ${time(r.created_at)}</p>
 <form method="post" action="/me/agents/${a.id}/allows/${r.id}/revoke" class="pa-actions"><button type="submit" class="pa-danger-link">Revoke</button></form></li>`)}</ul>` : html`<p class="muted">Nothing is always allowed for this agent.</p>`}</section>
+<section class="pa-panel" id="spend" aria-labelledby="ac-spend-h"><h2 id="ac-spend-h">What it may spend</h2>
+<p class="pa-hint">An agent may tip a creator on OpenVibe with your Vibes, but only after you approve each tip, and only up to what is left of its weekly allowance. Zero means it may not spend at all: the spending tool is then not offered to it at all.</p>
+<form method="post" action="/me/agents/${a.id}/spend"><label>Weekly allowance (Vibes) <input name="weekly_vibes" type="number" min="0" max="${spend.MAX_ALLOWANCE}" step="1" value="${allowance.weekly}"></label> <button type="submit" class="pa-btn">Save allowance</button></form>
+<p>Left this week: <strong>${allowance.left} of ${allowance.weekly} Vibes</strong> (${allowance.start} to ${allowance.end} UTC). The week starts on Monday.</p>
+<h3 class="pa-sub">What it spent</h3>
+${payments.length ? html`<ul class="pa-notes">${payments.map((p2) => html`<li><p class="pa-note-text">${p2.state === 'paid' ? html`${p2.amount} Vibes to ${p2.to_label || p2.to_subject}` : html`${p2.amount} Vibes to ${p2.to_label || p2.to_subject} — not paid`}</p>
+<p class="pa-note-meta">${p2.reason ? html`${p2.reason} · ` : ''}${p2.state === 'paid' ? 'Paid' : html`Refused: ${p2.error || 'Tips did not pay it'}`} · ${time(p2.created_at)}</p></li>`)}</ul>` : html`<p class="muted">It has not spent anything yet.</p>`}
+</section>
 <section class="pa-panel" id="decisions" aria-labelledby="pa-dec-h"><h2 id="pa-dec-h">What you decided</h2>
 <p class="pa-hint">Every approval this agent asked for, and what you answered: once, always, or no.</p>
 ${decisions.length ? html`<ul class="pa-notes">${decisions.map((d) => html`<li><p class="pa-note-text"><a href="/me/approvals/${d.id}">${d.summary}</a></p><p class="pa-note-meta">${kinds.label(d.kind)} · ${d.state === 'approved' ? (d.decision_scope === 'always' ? 'You approved it and allowed it always' : 'You approved it once') : d.state === 'declined' ? 'You declined it' : d.state === 'expired' ? 'It expired, nobody answered' : 'Waiting for you'} · ${time(d.decided_at || d.created_at)}</p></li>`)}</ul>` : html`<p class="muted">This agent has not asked for anything yet.</p>`}</section>
@@ -476,6 +516,15 @@ ${c.undoable ? html`<form method="post" action="/me/agents/${a.id}/changes/${c.i
 <form method="post" action="/me/agents/${a.id}/delete" class="pa-delete"><button type="submit" class="pa-danger-link">Delete this agent</button> <span class="pa-hint">Its memory goes with it; its past runs stay on your task list.</span></form></section>`);
     });
     r.post('/me/agents/:id/edit', async (req, res) => { if (!write(req, res)) return; const out = await personal.update(s, config, owner(req), req.params.id, fields(req.body)); if (!out) return page(req, res, 'Agent not found', html`<h1>Agent not found</h1>`, 404); if (!out.row) return page(req, res, 'Invalid agent', html`<h1>Invalid agent</h1><p>${out.error}</p>`, 422); res.redirect(303, `/me/agents/${req.params.id}`); });
+    // The weekly allowance (plan HO7): the person's own setting, on their agent's page. 0 turns the spending
+    // tool off for that agent.
+    r.post('/me/agents/:id/spend', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const out = await spend.setAllowance(s, a.owner, a.id, (req.body || {}).weekly_vibes);
+        if (out.error) return page(req, res, 'Not saved', html`<h1>Not saved</h1><p>${out.error}</p><p><a href="/me/agents/${a.id}">Back to the agent</a></p>`, 422);
+        res.redirect(303, `/me/agents/${a.id}#spend`);
+    });
     // Take a skill back from one of the person's agents (plan HO2).
     r.post('/me/agents/:id/skills/:listingId/remove', async (req, res) => {
         if (!write(req, res)) return;

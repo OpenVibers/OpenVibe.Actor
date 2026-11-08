@@ -34,6 +34,7 @@ const contacts = require('../agents/contacts');
 const assignments = require('../agents/assignments');
 const runTokens = require('../triggers/tokens');
 const levels = require('../agents/levels');
+const spend = require('../agents/spend');
 const { repoIn: codesRepoIn } = require('../agents/codes');
 const memory = require('../memory');
 const taskNotices = require('../notify/task-notices');
@@ -370,6 +371,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         } catch (err) {
             log.warn && log.warn('[Actor] task agent/level:', id, (err && err.message) || err);
         }
+        // HO7: what this agent may spend this week. The spending tool is offered only when the person set a
+        // weekly allowance on the agent's page (0 = off: the tool is not there at all).
+        const spendAllowance = taskAgent
+            ? await spend.allowance(s, row.requester, taskAgent.id).catch(() => null)
+            : null;
         // Both execution paths get the same gate and assignment callbacks: the one loop passes them into its
         // tools, and an adapter that starts a Codes task gets them too.
         let requestApproval = null;
@@ -379,15 +385,24 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         // a reviewer model of another family. Returns { asked: false } when the step may go ahead.
         // A standing permission the person gave for this exact kind and target (plan HO1) is read here: it lets the
         // step go on, and it never covers the floor.
-        const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT, target = null }) => {
+        const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT, target = null, spendStep = false }) => {
             const categories = levels.classify({ category, summary, payload, recipientKnown });
+            // HO7: money is the person's own. Before a tip reaches them, its recipient is resolved (a person
+            // usr_… or a creator's OpenVibe page) and the agent's weekly allowance is checked. An ask that
+            // cannot pay is refused here, with one plain line, and the person never sees a card for it.
+            let money = null;
+            if (kind === 'money' && spendStep) {
+                money = await spend.prepare({ config, s, owner: row.requester, agentId: taskAgent ? taskAgent.id : null, payload });
+                if (!money.ok) return { asked: false, decision: { ask: false }, refusal: money.message };
+            }
             const rules = taskAgent ? await allows.list(s, row.requester, taskAgent.id) : [];
             const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal, allow: { kind, target, rules } });
             if (!decision.ask) return { asked: false, decision };
-            const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary, payload, target, categories });
+            const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary: money ? money.summary : summary, payload: money ? money.payload : payload, target, categories });
             const url = `${config.baseUrl}/me/approvals/${ask.id}`;
-            await emit(id, { kind: 'output', step: 'text', agent, text: `Your agent wants to ${String(summary).toLowerCase()} Nothing runs until you approve it: ${url}` });
-            await tellPerson(row, 'needs_you', { what: `approve: ${summary}`, url });
+            const shown = money ? money.summary : summary;
+            await emit(id, { kind: 'output', step: 'text', agent, text: `Your agent wants to ${String(shown).toLowerCase()} Nothing runs until you approve it: ${url}` });
+            await tellPerson(row, 'needs_you', { what: `approve: ${shown}`, url });
             return { asked: true, decision, ask, url };
         };
         // A child hand-off (a sub-agent's consult, a Codes task, a Space action) is one node below this task's.
@@ -473,8 +488,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // A task that would start coding work on the person's machine asks through the same gate (levels.js):
                 // the level first, then the always-ask floor. Full access or auto-edits may let an edit through; a
                 // payment, password, deletion or a new recipient never does.
-                requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, target = null }) => {
-                    const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown, target });
+                requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, target = null, spend = false }) => {
+                    const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown, target, spendStep: spend });
+                    // A refusal (plan HO7): the step does not run and the model is told why.
+                    if (out.refusal) return { refused: out.refusal };
                     if (!out.asked) return null;
                     return { pending: true, id: out.ask.id, url: out.url };
                 } : null;
@@ -517,6 +534,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         personText, agentId: ownAgent, notifyTask,
                         askPerson, control, resume, fork, spent: () => spent,
                         waits, waitEvent: wakePayload, attachments,
+                        // What this agent may spend this week (plan HO7): the spending tool is offered only
+                        // when the person set a weekly allowance on the agent's page.
+                        spend: spendAllowance,
                         // A routine's or a goal's run may wait (plan BA/HO): the class it asks AI's router for.
                         latency: await latencyClass(id),
                     }));

@@ -178,6 +178,10 @@ function load(env = process.env) {
             // OpenVibe.Watch: where a trigger's subscription lives (plan §12 A-4). The person's own token is
             // always the authority; empty turns triggers off.
             watchUrl: trim(env.ACTOR_WATCH_URL != null ? env.ACTOR_WATCH_URL : (selfHosted ? '' : 'http://127.0.0.1:4730')),
+            // OpenVibe.Tips: where a tip is paid (its checkout makes the Billing transfer) and where a creator's
+            // page is looked up to resolve the person who receives it (plan HO7). The person's own token pays, at
+            // their own approval; empty turns the spending tool off.
+            tipsUrl: trim(env.ACTOR_TIPS_URL != null ? env.ACTOR_TIPS_URL : (selfHosted ? '' : 'http://127.0.0.1:4610')),
             // OpenVibe.Mail (track HO6): an agent answers the mail sent to its own address. Actor reads one letter in
             // full text and sends the reply from the agent's inbox, over loopback under its own service token. Empty
             // turns the mail consumer off.
