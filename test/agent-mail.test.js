@@ -302,6 +302,12 @@ async function runOf(t, messageId) {
                 const n = await t.ctx.s.db.value('SELECT count(*) FROM actor_mention_firings WHERE trigger_id = $1', [made.trigger.id]);
                 assert.strictEqual(Number(n), 1);
             });
+            mail.state.letters.set('m-mention-mismatch', letter(dana, { inbox, messageId: 'm-mention-mismatch', from: 'other@openvibe.email', text: 'The release is ready.' }));
+            await t.ctx.agentMail.onEvent(letterEvent({ inbox, owner: dana.subject, messageId: 'm-mention-mismatch', from: 'dana@openvibe.email' }));
+            await ok('an event whose sender differs from the fetched letter cannot fire it', async () => {
+                const n = await t.ctx.s.db.value('SELECT count(*) FROM actor_mention_firings WHERE trigger_id = $1', [made.trigger.id]);
+                assert.strictEqual(Number(n), 1);
+            });
         }
 
         // ---- an unknown agent starts nothing ------------------------------------------------------------------

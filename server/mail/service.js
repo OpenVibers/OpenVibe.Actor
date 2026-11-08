@@ -196,8 +196,9 @@ function createAgentMail(ctx) {
         await store.linkThread({ s, owner, threadKey: thread, taskId: out.task.id });
         // Mail is the authority for the owner's exact mailbox, mask, burner and agent addresses.
         // A shared domain alone would let somebody else's letter wake a standing intent.
-        const ownSender = ctx.triggers && ctx.triggers.onMessage
-            ? await mail.ownsSender({ person, agentId: letter.agentName, address: letter.from }) : null;
+        const sender = Array.isArray(full.from) && full.from.length === 1 ? String(full.from[0] || '').trim().toLowerCase() : null;
+        const ownSender = sender === letter.from && ctx.triggers && ctx.triggers.onMessage
+            ? await mail.ownsSender({ person, agentId: letter.agentName, address: sender }) : null;
         if (ownSender && ownSender.ok && ownSender.data && ownSender.data.owned === true) {
             await ctx.triggers.onMessage({ owner: subjectOf(owner), agentId, text: String(full.text || ''),
                 conversation: `mail:${thread}`, turnTaskId: out.task.id, place: `email to ${agent.name}` });
