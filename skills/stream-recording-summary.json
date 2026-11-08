@@ -1,0 +1,22 @@
+{
+  "skill": "actor.skill@1",
+  "slug": "stream-recording-summary",
+  "name": "Stream recording, with its moments",
+  "description": "Summarise a stream recording and the moments it was cut into.",
+  "version": "1.0.0",
+  "instructions": "Find the recording the person means (a stream on OpenVibe.Live, or one they name) and write it up: what it was, the moments in it, and a short account of what happened.\n\nWork in this order:\n\n1. Find it. Search OpenVibe for the title, the channel or the person, then read the recording's own page for its title, its length, when it was live and what it was about. If two recordings match, say which two you found and ask which one they mean; do not carry on until they answer.\n\n2. Take its moments. The recording's page carries the moments it was cut into, each with a time and a line. List every one of them, in order, with its time. If the page carries no moments, say so plainly instead of inventing them.\n\n3. Write the summary. Three parts: what the recording is (title, channel, length, when it was live), the moments as a list, and one paragraph of what happened in it. Keep the speaker's own words for anything a viewer would want to hear again.\n\n4. Hand it back as a file called recording-summary.md, with the moments as a table: the time, then the moment.\n\nNever invent a moment, a time or a quote. If a part of the recording is missing from the page, say which part is missing rather than filling the gap.",
+  "resources": [
+    {
+      "path": "summary-template.md",
+      "media_type": "text/markdown",
+      "text": "# <title>\n\n<channel> · <length> · live <when>\n\n## What it was about\n\n<one paragraph>\n\n## Moments\n\n| Time | Moment |\n| --- | --- |\n| 00:00 | <the moment> |\n\n## What happened\n\n<one paragraph>\n"
+    }
+  ],
+  "runs": "prompt",
+  "license": "CC-BY-4.0",
+  "created_at": "2026-11-07T00:00:00.000Z",
+  "integrity": {
+    "alg": "sha256",
+    "hash": "858d0d67c17e98b2db10ceb89fbdb1a34523790a3e03d9bc4fdb9e81a770af8d"
+  }
+}

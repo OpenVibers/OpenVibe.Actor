@@ -86,6 +86,17 @@ async function start() {
     const tidy = require('./memory/tidy');
     ctx.memoryJobs = tidy.startJobs(ctx, { log: console });
     if (ctx.memoryJobs.length) extra.push(() => { for (const stop of ctx.memoryJobs) stop(); });
+    // The curator of the skills registry (plan HO2): it asks at night what is DUE — a listing nobody has loaded for
+    // 30 days goes stale, for 90 days it is archived, and a stale or archived listing is not offered any more. It is
+    // a background loop, so it is off in a drill (ACTOR_DRILL=1) and in a test (the tests boot the app, not the
+    // process).
+    if (!config.drill) {
+        const jobs = require('./utils/jobs');
+        ctx.skillJobs = [
+            jobs.every('actor-skill-curator', 24 * 3600_000, () => require('./skills/curator').run(ctx.s, { log: console }), { initialDelayMs: 60_000, log: console }),
+        ];
+        extra.push(() => { for (const stop of ctx.skillJobs) stop(); });
+    }
     createLifecycle({ server, ctx, timers: [prune, agentTick], extra });
     return { server, ctx };
 }

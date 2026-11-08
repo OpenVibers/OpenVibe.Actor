@@ -43,6 +43,12 @@ const ROUTE_EXTENSIONS = new Map([
     // guards them.
     ['GET /api/v1/me/agents/:id/voice', 'actor.agent.manage'],
     ['POST /api/v1/me/agents/import', 'actor.agent.manage'],
+    // The skills registry (plan HO2, ADR-058): the catalogue is public (a skill is a document anybody may read),
+    // and the installs of one of the person's own agents are guarded by the agent capability they already hold.
+    ['GET /api/v1/skills', null],
+    ['GET /api/v1/skills/:id', null],
+    ['POST /api/v1/me/agents/:id/skills', 'actor.agent.manage'],
+    ['DELETE /api/v1/me/agents/:id/skills/:listingId', 'actor.agent.manage'],
 ]);
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 // The A2A surface (stage V2-11): POST /a2a/v1/tasks and GET /a2a/v1/tasks/:id, guarded by actor.a2a.task.
