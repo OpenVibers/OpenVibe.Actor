@@ -140,7 +140,12 @@ async function watchStub() {
             const task = await runIt(card.id);
             fail = null;
             assert.strictEqual(task.state, 'failed');
-            const posts = await runsOf(turn);
+            // The line is posted as the failed run settles, a beat after its state: wait for it (CI is slower).
+            let posts = [];
+            for (const end = Date.now() + 5000; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) {
+                posts = await runsOf(turn);
+                if (posts.length) break;
+            }
             assert.strictEqual(posts.length, 1);
             assert.strictEqual(posts[0].run.state, 'failed');
             assert.match(posts[0].text, /^That run did not finish: .*fell over/);
