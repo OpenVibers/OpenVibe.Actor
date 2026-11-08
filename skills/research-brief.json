@@ -1,0 +1,22 @@
+{
+  "skill": "actor.skill@1",
+  "slug": "research-brief",
+  "name": "A research brief, with its sources",
+  "description": "Research one question and write it up with the sources you used.",
+  "version": "1.0.0",
+  "instructions": "Research one question and write it up as a brief a person can read in five minutes and check.\n\nWork in this order:\n\n1. Fix the question. Take the question the person asked, in their own words. If it is too wide for one brief (three companies, five years, everything), ask which part they want first and wait for the answer.\n\n2. Find the sources. Search the web and OpenVibe for the question, in more than one wording. Read the pages that look like they answer it. Three good sources beat ten thin ones.\n\n3. Read them properly. For each source: what it says, where in it the thing is said, and when it was written. A page that does not answer the question is not a source: leave it out.\n\n4. Write the brief. The question in one line at the top, then what is known, then what is not known or could not be confirmed, then what to watch next. Every claim carries the source it came from, and every source carries its link.\n\n5. Hand it back as a file called research-brief.md.\n\nNever state a fact without the source it came from, and never give a link you did not read.",
+  "resources": [
+    {
+      "path": "brief-template.md",
+      "media_type": "text/markdown",
+      "text": "# <the question>\n\n## What is known\n\n- <the claim> (source: <the link>)\n\n## What is not known\n\n- <what could not be confirmed, and why>\n\n## What to watch next\n\n- <what would change the answer>\n"
+    }
+  ],
+  "runs": "prompt",
+  "license": "CC-BY-4.0",
+  "created_at": "2026-11-07T00:00:00.000Z",
+  "integrity": {
+    "alg": "sha256",
+    "hash": "64c7ce1e45b12bd73e201565f71d833c49c1b9c7d4d47d8332069a91f5c6f329"
+  }
+}

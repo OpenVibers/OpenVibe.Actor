@@ -107,6 +107,17 @@ async function makeWait(t, subject, taskId, line = 'waiting for your Codes task 
     return id;
 }
 
+/** One skill installed on one of the person's agents (plan HO2): the install row the account carries. */
+async function makeSkillInstall(t, subject, agentId) {
+    const s = t.ctx.s;
+    const listing = await s.db.maybe("SELECT id, skill FROM actor_skill_listings WHERE slug = 'research-brief' LIMIT 1");
+    if (!listing) throw new Error('the registry has no research-brief listing');
+    const id = s.newId('ski');
+    await s.db.query('INSERT INTO actor_skill_installs (id, owner, agent_id, listing_id, skill, version, installed_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)',
+        [id, `user:${subject}`, agentId, listing.id, JSON.stringify(listing.skill), '1.0.0', s.iso()]);
+    return id;
+}
+
 (async () => {
     await check('every table that names a person is covered or exempted with a reason', async () => {
         const d = await testDb();
@@ -143,6 +154,9 @@ async function makeWait(t, subject, taskId, line = 'waiting for your Codes task 
             await personal.addMemory(t.ctx.s, `user:${A}`, ownAgent.id, 'A private note.');
             const otherAgent = (await personal.create(t.ctx.s, t.config, `user:${B}`, { name: 'B helper', instructions: 'Help B.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
             await personal.addMemory(t.ctx.s, `user:${B}`, otherAgent.id, 'B private note.');
+            // A skill each of them installed on their own agent (plan HO2): the install is the person's own row.
+            await makeSkillInstall(t, A, ownAgent.id);
+            await makeSkillInstall(t, B, otherAgent.id);
 
             const res = await t.get('/internal/events', { method: 'POST', body: bodyOf(exportEvent), headers: { 'Content-Type': 'application/json', ...signDeliveryHeaders(bodyOf(exportEvent), SECRET) } });
             assert.strictEqual(res.status, 200);
@@ -152,7 +166,12 @@ async function makeWait(t, subject, taskId, line = 'waiting for your Codes task 
             assert.ok(part, 'the part was pushed to Network');
             assert.strictEqual(part.auth, 'Bearer tok_actor', 'with this service\'s own token');
             assert.strictEqual(part.body.subject, A);
-            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['agent-memory.json', 'agents.json', 'artifacts-content.json', 'artifacts.json', 'bench-offers.json', 'spans.json', 'spend.json', 'tasks.json', 'waits.json']);
+            assert.deepStrictEqual(part.body.files.map((f) => f.name).sort(), ['agent-memory.json', 'agents.json', 'artifacts-content.json', 'artifacts.json', 'bench-offers.json', 'skill-installs.json', 'spans.json', 'spend.json', 'tasks.json', 'waits.json']);
+            const installs = part.body.files.find((f) => f.name === 'skill-installs.json').content;
+            assert.strictEqual(installs.length, 1, 'only A\'s skill install');
+            assert.strictEqual(installs[0].owner, `user:${A}`);
+            assert.strictEqual(installs[0].version, '1.0.0');
+            assert.ok(installs[0].skill && installs[0].skill.skill === 'actor.skill@1', 'the document as it was installed');
             const waits = part.body.files.find((f) => f.name === 'waits.json').content;
             assert.strictEqual(waits.length, 1, 'only the wait of A');
             assert.strictEqual(waits[0].requester, `user:${A}`);
@@ -211,6 +230,9 @@ async function makeWait(t, subject, taskId, line = 'waiting for your Codes task 
             await makeWait(t, A, aTask);
             const agent = (await personal.create(t.ctx.s, t.config, `user:${A}`, { name: 'Erase me', instructions: 'Help A.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
             await personal.addMemory(t.ctx.s, `user:${A}`, agent.id, 'Erase this.');
+            await makeSkillInstall(t, A, agent.id);
+            const otherAgent = (await personal.create(t.ctx.s, t.config, `user:${B}`, { name: 'B keeps theirs', instructions: 'Help B.', mode: 'balanced', budget_per_run_usd: 0.01, daily_runs_max: 1, schedule: 'off', status: 'active' })).row;
+            await makeSkillInstall(t, B, otherAgent.id);
             const db = t.ctx.s.db;
             const count = async (sql, args = []) => await db.value(sql, args);
 
@@ -231,10 +253,13 @@ async function makeWait(t, subject, taskId, line = 'waiting for your Codes task 
             assert.strictEqual(await count('SELECT count(*)::int FROM tasks WHERE requester = $1', [`user:${B}`]), 1, 'someone else\'s task stays');
             assert.strictEqual(await count('SELECT count(*)::int FROM spend_daily WHERE requester = $1', [`user:${B}`]), 1, 'someone else\'s spend stays');
             assert.strictEqual(await count("SELECT count(*)::int FROM spend_daily WHERE requester = '*'"), 1, 'the operator\'s `*` ceiling row is kept');
+            assert.strictEqual(await count('SELECT count(*)::int FROM actor_skill_installs WHERE owner = $1', [`user:${A}`]), 0, 'their skill install is gone');
+            assert.strictEqual(await count('SELECT count(*)::int FROM actor_skill_installs WHERE owner = $1', [`user:${B}`]), 1, 'someone else\'s skill install stays');
+            assert.strictEqual(await count('SELECT count(*)::int FROM actor_skill_listings WHERE publisher_subject = $1', [A]), 0, 'a listing they published is gone');
 
             const confirmation = stub.calls.find((c) => c.url === `/internal/account-deletions/${DEL}/confirmations`);
             assert.ok(confirmation, 'the confirmation was sent');
-            assert.deepStrictEqual(confirmation.body.erased, { actor_bench_offers: 1, actor_artifacts: 1, tasks: 1, spend_daily: 1, actor_agent_memory: 1, actor_agents: 1, actor_waits: 1 });
+            assert.deepStrictEqual(confirmation.body.erased, { actor_bench_offers: 1, actor_artifacts: 1, tasks: 1, spend_daily: 1, actor_agent_memory: 1, actor_agents: 1, actor_waits: 1, actor_skill_installs: 1 });
             assert.deepStrictEqual(confirmation.body.retained, {});
             assert.ok(!Number.isNaN(Date.parse(confirmation.body.completed_at)));
 

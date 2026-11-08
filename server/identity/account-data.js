@@ -83,6 +83,15 @@ const TABLES = [
     // The document is their own text, and the link is theirs to stop sharing.
     { table: 'actor_shared_voices', subject: 'owner', value: (usr) => `user:${usr}`, file: 'shared-voices.json',
         columns: ['id', 'owner', 'owner_name', 'agent_id', 'voice', 'created_at', 'revoked_at'] },
+    // The skills they installed on their agents (plan HO2): the document as it was installed, its version, and when it
+    // was installed, taken back or last loaded. Before the listings, so the rows are counted first.
+    { table: 'actor_skill_installs', subject: 'owner', value: (usr) => `user:${usr}`, file: 'skill-installs.json',
+        columns: ['id', 'owner', 'agent_id', 'listing_id', 'skill', 'version', 'installed_at', 'removed_at', 'last_used_at'] },
+    // A skill they published (publisher kind person): the registry's own record of it, with its scan and its curator.
+    // OpenVibe's own listings have no publisher subject, so they stay: the catalogue is not the person's data. A
+    // listing that goes takes the installs of it with it (the document is the listing's).
+    { table: 'actor_skill_listings', subject: 'publisher_subject', value: (usr) => usr, file: 'skill-listings.json',
+        columns: ['id', 'slug', 'skill', 'publisher_kind', 'publisher_subject', 'publisher_name', 'scan_state', 'scan', 'curator_state', 'curator', 'installs', 'listed_at', 'retired_at', 'created_at', 'updated_at'] },
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_chat_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'chat-app-approvals.json' },
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
