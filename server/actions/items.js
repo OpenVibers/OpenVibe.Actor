@@ -121,11 +121,16 @@ function taskItem(row, { lastEvent = null, steps = null, wait = null, now = () =
 function approvalItem(row, { agentName = null, thread = null } = {}) {
     const bucket = bucketFor(row.state);
     const payload = parse(row.payload) || {};
+    // A payment (plan HO7): once approved, the item says what was paid and who received it, not what it would do.
+    // A pending tip keeps the ordinary words: nothing has been paid yet.
+    const money = row.kind === 'money' && row.state === 'approved' && payload && payload.spend === 'tip' && payload.amount
+        ? `Paid ${Number(payload.amount)} Vibes to ${payload.to_label || payload.to || 'a creator'}`
+        : null;
     // The kind in plain words and the thread it came from (plan HO1): a raw agent id says nothing to a person,
     // so the agent's own name is used, and the kind reads as a phrase. A request with no thread of its own
     // (an old row) keeps its own words.
     const detail = (thread ? plain(thread, 200) : null) || (payload.task ? plain(payload.task, 200) : null);
-    const about = [kinds.label(row.kind), detail].filter(Boolean).join(' · ');
+    const about = money || [kinds.label(row.kind), detail].filter(Boolean).join(' · ');
     return {
         service: 'actor',
         id: row.id,

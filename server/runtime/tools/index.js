@@ -173,6 +173,15 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
                         data: ask, isError: true,
                     });
                 }
+                // The gate refused the step outright (plan HO7: a tip over what is left of the agent's weekly
+                // allowance, or a creator that names nobody). The step does not run, and the model is told why in
+                // one plain line.
+                if (ask && ask.refused) {
+                    return normalize({
+                        text: JSON.stringify({ error: String(ask.refused).slice(0, 300) }),
+                        data: { refused: String(ask.refused).slice(0, 300) }, isError: true,
+                    });
+                }
             }
         }
         const signal = ctx.signal;

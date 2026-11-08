@@ -123,6 +123,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             'server/events-consumer.js': 'OpenVibe.Events: the configured events.url (ACTOR_EVENTS_URL), to create the two ADR-033 subscriptions at boot',
             'server/net/secret-signer.js': 'OpenVibe.Network: the configured networkInternalUrl (OV_NETWORK_INTERNAL_URL), POST /internal/secrets/use to sign a webhook delivery with a project secret (ADR-056); the body is the timestamp and the delivery, never a URL',
             'server/net/webhook-post.js': 'a task\'s webhook URL (plan T17), the one caller-chosen address: https on 443/8443 to public addresses only, checked at creation and at send time through openvibe-shared/egress safeLookup, never a redirect (test/webhooks.test.js)',
+            'server/agents/spend.js': 'the configured OpenVibe.Billing base (ACTOR_BILLING_URL, loopback) and the configured OpenVibe.Tips base (ACTOR_TIPS_URL, loopback): a tip is paid with the person\'s own token and the approval id as the Idempotency-Key, and a creator\'s page is looked up by a path-encoded handle; no URL from a task or from the model is ever fetched here (test/spend-vibes.test.js)',
             'server/net/guarded-request.js': 'the MCP servers and A2A agents a person added on /connections (stage V2-11): https on 443/8443 to public addresses only, refused for localhost, private ranges and metadata addresses through openvibe-shared/egress safeLookup, with a timeout and a 256 KB cap, never a redirect (test/connections.test.js)',
         };
         const root = path.join(__dirname, '..');

@@ -55,6 +55,8 @@ const EXPECTED = {
     space_files_write: true,
     space_preview: false,
     space_publish: true,
+    // Money (plan HO7): a tip asks the person, and the payment moves their Vibes when they approve it.
+    spend_vibes: true,
 };
 
 (async () => {

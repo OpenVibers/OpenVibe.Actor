@@ -41,6 +41,7 @@ const EXPECTED = {
     space_create: 'space',
     space_files_write: 'space',
     space_publish: 'publish',
+    spend_vibes: 'money',
 };
 
 const SAMPLE = {
@@ -60,6 +61,7 @@ const SAMPLE = {
     space_create: { name: 'My space' },
     space_files_write: { space_id: 'sp_1', files: [{ path: 'a.txt', content: 'x' }] },
     space_publish: { space_id: 'sp_1' },
+    spend_vibes: { to: 'bo', amount: 12, reason: 'thanks for the stream' },
 };
 
 (async () => {

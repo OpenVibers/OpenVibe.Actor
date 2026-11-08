@@ -86,6 +86,10 @@ const TABLES = [
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_chat_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'chat-app-approvals.json' },
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
+    // The tips their agents sent (plan HO7): who received them, how much, why, and what Billing said. The row of a
+    // payment that Billing refused is here too: it was their attempt, and it is their money either way.
+    { table: 'actor_spends', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-spends.json',
+        columns: ['id', 'owner', 'agent_id', 'approval_id', 'to_subject', 'to_label', 'amount', 'reason', 'target', 'state', 'txn_id', 'error', 'week_start', 'created_at'] },
     // The standing permissions the person gave their agents (agents/allows.js): what they always allow, and when.
     { table: 'actor_approval_allows', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approval-allows.json' },
     // The agent's timeline (design 2026-11-07): the steps the agent took for this person, and whether they paused
