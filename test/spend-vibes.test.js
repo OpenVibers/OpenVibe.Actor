@@ -91,6 +91,21 @@ const doneTurn = { content: 'The tip was sent.' };
             return row;
         };
 
+        await check('the person sets the weekly allowance on the agent\'s page, and 0 turns it off', async () => {
+            const page = await t.get(`/me/agents/${agent.id}`, { as: ada });
+            assert.ok(page.text.includes('What it may spend'), 'the agent page has the allowance panel');
+            const set = await t.get(`/me/agents/${agent.id}/spend`, { as: ada, form: { weekly_vibes: '25' }, headers: SAME });
+            assert.strictEqual(set.status, 303, set.text.slice(0, 200));
+            assert.strictEqual((await spend.allowance(t.ctx.s, owner, agent.id)).weekly, 25, 'the person\'s setting was saved');
+            // Only a whole, non-negative number of Vibes, at most the cap.
+            const bad = await t.get(`/me/agents/${agent.id}/spend`, { as: ada, form: { weekly_vibes: '-1' }, headers: SAME });
+            assert.strictEqual(bad.status, 422);
+            assert.strictEqual((await spend.allowance(t.ctx.s, owner, agent.id)).weekly, 25, 'a bad setting changed nothing');
+            const off = await t.get(`/me/agents/${agent.id}/spend`, { as: ada, form: { weekly_vibes: '0' }, headers: SAME });
+            assert.strictEqual(off.status, 303);
+            assert.strictEqual((await spend.allowance(t.ctx.s, owner, agent.id)).weekly, 0, '0 is off');
+        });
+
         await check('an agent with no weekly allowance is never offered the spending tool', async () => {
             const defs = t.ctx.registry.definitions({ requester: owner, mode: 'balanced', config: t.config, spend: { weekly: 0, agent_id: agent.id } });
             assert.ok(!defs.some((d) => d.function.name === 'spend_vibes'), 'no allowance, no tool');
