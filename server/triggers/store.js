@@ -72,6 +72,23 @@ async function update(s, owner, id, patch) {
     return await get(s, owner, id);
 }
 
+/**
+ * The card's counters, moved in one statement: the failure streak, and a goal's runs and money.
+ * The row that comes back (RETURNING) is the truth the card is read from: two runs that settle at
+ * once are counted once, and the ending is decided on the count that was really reached, not on a
+ * count read before the other run wrote its own.
+ */
+async function bumpCounters(s, id, { state = null, runs = 0, costUsd = 0, at = null } = {}) {
+    const row = await s.db.maybe(`UPDATE actor_triggers SET
+            failures = CASE WHEN $2 = 'succeeded' THEN 0 WHEN $2 = 'failed' THEN failures + 1 ELSE failures END,
+            runs_used = runs_used + $3,
+            spent_usd = spent_usd + $4,
+            updated_at = $5
+        WHERE id = $1 AND deleted_at IS NULL
+        RETURNING *`, [id, state, runs, costUsd, at == null ? Date.now() : at]);
+    return wire(row);
+}
+
 async function addRun(s, triggerId, taskId, state, at, costUsd = null) {
     await s.db.query(`INSERT INTO actor_trigger_runs (trigger_id, task_id, state, cost_usd, created_at, updated_at)
         VALUES ($1,$2,$3,$4,$5,$5) ON CONFLICT (task_id) DO UPDATE SET state = EXCLUDED.state, cost_usd = COALESCE(EXCLUDED.cost_usd, actor_trigger_runs.cost_usd), updated_at = EXCLUDED.updated_at`,
@@ -85,4 +102,4 @@ const remove = async (s, owner, id) => {
     await s.db.query('DELETE FROM actor_triggers WHERE id = $1 AND owner = $2', [id, owner]);
 };
 
-module.exports = { wire, get, byWatch, list, countActive, countForAgent, insert, update, addRun, runForTask, runs, removeRuns, remove };
+module.exports = { wire, get, byWatch, list, countActive, countForAgent, insert, update, bumpCounters, addRun, runForTask, runs, removeRuns, remove };
