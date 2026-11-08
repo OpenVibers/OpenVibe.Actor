@@ -32,6 +32,89 @@
         var fine = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
         var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+        // ── The canvas (plan HO9). The document rides in an inert template; openvibe-shared's ov-canvas.js draws it
+        // into the wide panel and the phone fold from the same data. A button's label goes to the agent as the
+        // person's own message (POST .../events, kind ask); a tick is theirs too (kind check), and the redraw is the
+        // returned document. A canvas_set on the working turn's stream asks for the newest document.
+        var canvasThread = chat.getAttribute('data-chat') || '';
+        var canvasTimer = 0;
+        function canvasDocOf(box) {
+            var tpl = box.querySelector('template[data-cc-canvas-doc]');
+            if (!tpl) return null;
+            try { return JSON.parse(tpl.content ? tpl.content.textContent : tpl.textContent); } catch (e) { return null; }
+        }
+        function canvasCount(n) {
+            var word = n + (n === 1 ? ' item' : ' items');
+            chat.querySelectorAll('[data-cc-canvas-count]').forEach(function (el) { el.textContent = word; });
+        }
+        function paintCanvas(doc) {
+            if (!doc || !window.OVCanvas) return;
+            chat.querySelectorAll('[data-cc-canvas]').forEach(function (box) {
+                var host = box.querySelector('[data-cc-canvas-host]');
+                if (host) window.OVCanvas.render(host, doc, {
+                    onAsk: function (label) { canvasAsk(doc, label); },
+                    onCheck: function (blockId, itemId, done) { canvasCheck(doc, blockId, itemId, done); },
+                });
+            });
+            canvasCount(Array.isArray(doc.blocks) ? doc.blocks.length : 0);
+        }
+        function canvasPost(doc, body) {
+            return fetch('/api/v1/me/canvases/' + encodeURIComponent(doc.id) + '/events', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { accept: 'application/json', 'content-type': 'application/json' },
+                body: JSON.stringify(body),
+            }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); });
+        }
+        function canvasAsk(doc, label) {
+            if (!doc || !doc.id) return;
+            canvasPost(doc, { kind: 'ask', label: String(label == null ? '' : label) })
+                .then(function (res) {
+                    if (!res.ok) { problem(res.j.detail || res.j.error || 'Actor could not take that just now.'); return; }
+                    var task = res.j.task || {};
+                    location.assign(task.url || ('/chat/' + (task.id || '')));
+                })
+                .catch(function () { problem('No connection. The message was not sent.'); });
+        }
+        function canvasCheck(doc, blockId, itemId, done) {
+            if (!doc || !doc.id) return;
+            canvasPost(doc, { kind: 'check', block_id: blockId, item_id: itemId, done: !!done })
+                .then(function (res) {
+                    if (!res.ok) { problem(res.j.detail || res.j.error || 'That tick did not save.'); paintCanvas(doc); return; }
+                    if (res.j.canvas) paintCanvas(res.j.canvas);
+                })
+                .catch(function () { problem('No connection. That tick did not save.'); paintCanvas(doc); });
+        }
+        function refreshCanvas() {
+            if (!canvasThread) return;
+            fetch('/api/v1/me/canvases?thread=' + encodeURIComponent(canvasThread), { credentials: 'same-origin', headers: { accept: 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (j) {
+                    var doc = j && Array.isArray(j.canvases) ? j.canvases[0] : null;
+                    if (!doc) return;
+                    // The first canvas was made while this page was open: the server renders the panel on a reload.
+                    if (!chat.querySelector('[data-cc-canvas]')) { location.reload(); return; }
+                    paintCanvas(doc);
+                })
+                .catch(function () {});
+        }
+        function canvasSoon() {
+            if (canvasTimer) return;
+            canvasTimer = setTimeout(function () { canvasTimer = 0; refreshCanvas(); }, 400);
+        }
+        (function () {
+            var first = null;
+            chat.querySelectorAll('[data-cc-canvas]').forEach(function (box) { if (!first) first = canvasDocOf(box); });
+            if (first) paintCanvas(first);
+            // Open the first time; the person's choice on this device is kept, like a fold anywhere else.
+            var folds = chat.querySelectorAll('.cc-canvas-phone');
+            folds.forEach(function (box) {
+                try { if (window.localStorage && localStorage.getItem('ov-canvas-open') === '0') box.open = false; } catch (e) { /* private mode */ }
+                box.addEventListener('toggle', function () {
+                    try { if (window.localStorage) localStorage.setItem('ov-canvas-open', box.open ? '1' : '0'); } catch (e) { /* private mode */ }
+                });
+            });
+        })();
+
         // ── The thread stays at the bottom while you are there.
         function nearBottom() { return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 220; }
         function toBottom(smooth) { window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth && !reduce ? 'smooth' : 'auto' }); }
@@ -422,6 +505,7 @@
                     var e = JSON.parse(m.data);
                     var line = turn.querySelector('[data-ovt-live]');
                     if (line && e.step === 'tool_call' && e.tool) line.textContent = 'Using ' + String(e.tool).replace(/_/g, ' ') + '…';
+                    if (e.tool === 'canvas_set') canvasSoon();
                     settleDraft(turn, e);
                 } catch (err) { /* a malformed event is skipped */ }
                 soon();
@@ -430,7 +514,7 @@
                 try { addDelta(turn, JSON.parse(m.data)); } catch (err) { /* a malformed piece is skipped */ }
             });
             src.addEventListener('state', soon);
-            src.addEventListener('end', function () { src.close(); clearTimeout(timer); timer = 0; refresh(turn); });
+            src.addEventListener('end', function () { src.close(); clearTimeout(timer); timer = 0; canvasSoon(); refresh(turn); });
             src.onerror = function () { if (src.readyState === 2) setTimeout(function () { refresh(turn); }, 3000); };
         }
         chat.querySelectorAll('.ovt-turn[data-open]').forEach(function (t) { follow(t); });

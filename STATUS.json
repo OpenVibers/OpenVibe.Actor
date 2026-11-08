@@ -7,13 +7,13 @@
   "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
   "port": 4950,
   "domain": "openvibe.actor",
-  "contracts": "openvibe-contracts v0.340.0",
+  "contracts": "openvibe-contracts v0.341.0",
   "sdk": "openvibe-sdk v0.96.0",
-  "shared": "openvibe-shared v4.142.0",
+  "shared": "openvibe-shared v4.145.0",
   "packages": [
-    "openvibe-contracts v0.340.0",
+    "openvibe-contracts v0.341.0",
     "openvibe-sdk v0.96.0",
-    "openvibe-shared v4.142.0"
+    "openvibe-shared v4.145.0"
   ],
   "summary": "Public at https://openvibe.actor (sudo ovhost deploy actor; unit openvibe-actor on 127.0.0.1:4950). A task in plain words is classified, routed by openvibe-sdk/placement to the agent system that can do it (the OpenVibe runtime acting through OpenVibe.Search and OpenVibe.Tools, OpenAI's web agent, an open model on OpenVibe's server for private mode), run with its steps streamed live, checked by a model of another family, and delivered as platform.task@1 with its cost to a fraction of a cent and the explanation; a failed agent or check hands it to the next agent. Free tier per person with an operator ceiling.",
   "works": [
@@ -34,7 +34,8 @@
     "Task webhooks on state changes: up to 8 https endpoints per task, signed with the task's own secret (or a project secret by reference), retried with backoff, with a delivery log on the task page and public addresses only",
     "Space's builder as a task of the person's one agent (plan 2026-10-22 §Z stage Z1): six space_* tools (create, list, read, write, preview, publish) work on the person's own spaces through OpenVibe.Space's builder API; another person's space is the same 404 as one that does not exist, and publishing waits for the person's answer in the Dock",
     "Agents are contacts (A-1): a signed-in person's GET /api/v1/agents is their own roster, Vibe created on first read and never deletable, with a face, voice, model engine, computer, connected apps, Memory scope and approval level; GET /api/v1/agents/presets gives four presets to copy, and GET /api/v1/agent-systems keeps the public catalog for every caller",
-    "Approval levels (A-1): ask (the default), auto-edits, approve-for-me (a reviewer model of another family) and full; money, passwords, deletions and sending to a new recipient ask at every level as a server-side floor. Tasks record agent_id (default Vibe) and their own level; the effective level is the higher of the agent's and the person's own parent chain"
+    "Approval levels (A-1): ask (the default), auto-edits, approve-for-me (a reviewer model of another family) and full; money, passwords, deletions and sending to a new recipient ask at every level as a server-side floor. Tasks record agent_id (default Vibe) and their own level; the effective level is the higher of the agent's and the person's own parent chain",
+    "An agent's live canvas (HO9; actor.canvas@1): canvas_set draws a data-only panel beside the thread, one row per conversation, validated and versioned; a button asks as the person, a tick flips an item and tells the next turn, and another person's canvas is 404 (migration 0043)"
   ],
   "notYet": [
     "Browser and desktop agents on OpenVibe's own servers (OpenVibe.Run workers), watchable and taken over",

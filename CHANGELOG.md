@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — an agent's live canvas (HO9)
+
+- **An agent's live panel beside the conversation** (plan track HO, wave 2; ADR-059, `actor.canvas@1`): the agent calls
+  `canvas_set({ title, blocks })` and the panel is drawn beside its thread — a trip board, a price table, a checklist, a
+  small chart — from data only (no HTML, no style, no script). The whole document is replaced and its version grows;
+  it is validated against the released contract, and a picture outside openvibe.media, a markup block or another
+  block the contract does not know is refused with the schema's plain reason and nothing is written. One run may call
+  it at most 20 times. The panel lives in `actor_canvases`: one row per conversation (the thread's first turn), with
+  the document, its version and the ticks waiting for the next turn (migration 0043).
+- **The person's moves, never the canvas's**: a button's label is posted by the API as the person's own message — a
+  normal turn from the newest turn of the conversation, at the agent's level and through its approvals, exactly as
+  typing it would (nothing else happens). A checklist tick flips that item in the document (version + 1) and starts
+  no turn; the next turn is told which item the person ticked, once, as its conversation context. Both go through the
+  same-origin API (`GET /api/v1/me/canvases?thread=`, `GET /api/v1/me/canvases/:id`,
+  `POST /api/v1/me/canvases/:id/events`) and another person's canvas is the same 404 as one that does not exist.
+- **Where it shows**: the thread page draws it in the third column on a wide screen and as an open fold above the
+  composer on a phone ("Canvas · N items"), with openvibe-shared v4.145.0's ov-canvas.js. The page redraws it from
+  the thread's live events when `canvas_set` runs. The document is in the account export and goes with the account.
+  Test: `test/canvas.test.js`; openvibe-contracts v0.341.0 names the routes.
+
 What changed in OpenVibe.Actor, newest first. Each site also publishes its patch notes at /updates.
 
 ## Unreleased — memory that tidies itself (HO5)

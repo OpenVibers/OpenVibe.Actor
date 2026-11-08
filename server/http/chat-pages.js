@@ -33,6 +33,7 @@ const looks = require('../agents/looks');
 const inputs = require('../tasks/inputs');
 const modelPrefs = require('../runtime/model-prefs');
 const aiCatalog = require('../runtime/ai-catalog');
+const canvases = require('../canvases');
 
 // The model a person's tasks run on (plan L55 C3; the owner, 11-01: "use your own API keys, or OpenVibe's"). Auto is
 // OpenVibe's own; "own:<provider>" is the person's key, sealed in OpenVibe.AI, which Actor never sees.
@@ -420,6 +421,33 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
         return (files || []).map((f) => ({ href: `/chat/file/${row.id}/${f.id}`, name: f.name, size: f.size, image: inputs.IMAGE.test(f.mime) }));
     }
 
+    /**
+     * The canvas (plan HO9): the data document actor.canvas@1, drawn by openvibe-shared's ov-canvas.js. The wide
+     * layout puts it in the thread's third column; a phone gets the same document as a fold directly above the
+     * composer. The document rides in a template (inert, never executed), so the page has it before the script runs,
+     * and the fallback says what it is before that. For somebody a run was shared with there is no canvas: it
+     * belongs to the conversation's owner, not to one shared turn.
+     */
+    const canvasItems = (n) => `${n} item${n === 1 ? '' : 's'}`;
+    const canvasJson = (doc) => raw(JSON.stringify(doc).replace(/</g, '\\u003c').replace(/&/g, '\\u0026'));
+    function canvasFallback(doc) {
+        return html`<p class="cc-canvas-fallback"><b>${doc.title}</b><span>${canvasItems(canvases.countOf(doc))}. This panel is drawn on the page.</span></p>`;
+    }
+    function canvasWide(doc) {
+        const n = canvases.countOf(doc);
+        return html`<aside class="ovt-panel cc-canvas cc-canvas-wide" aria-label="Canvas" data-cc-canvas data-thread="${doc.thread}">
+<div class="ovt-panel-head"><h2>Canvas</h2><span class="cc-canvas-count" data-cc-canvas-count>${canvasItems(n)}</span></div>
+<div class="cc-canvas-body"><div class="cc-canvas-host" data-cc-canvas-host>${canvasFallback(doc)}</div>
+<template data-cc-canvas-doc>${canvasJson(doc)}</template></div></aside>`;
+    }
+    function canvasPhone(doc) {
+        const n = canvases.countOf(doc);
+        return html`<details class="cc-canvas cc-canvas-phone" open data-cc-canvas data-thread="${doc.thread}">
+<summary><span class="cc-canvas-label">Canvas</span><span class="cc-canvas-sep" aria-hidden="true">·</span><span class="cc-canvas-count" data-cc-canvas-count>${canvasItems(n)}</span><span class="cc-canvas-chev" aria-hidden="true">▾</span></summary>
+<div class="cc-canvas-body"><div class="cc-canvas-host" data-cc-canvas-host>${canvasFallback(doc)}</div>
+<template data-cc-canvas-doc>${canvasJson(doc)}</template></div></details>`;
+    }
+
     async function turnHtml(row, { events = null, files = null, readOnly = false } = {}) {
         const attached = files || (await inputs.list(s, [row.id])).get(row.id) || [];
         const t = store.toWire(row, { baseUrl: config.baseUrl });
@@ -553,6 +581,8 @@ ${modelChip(model)}
         const lastTurn = turns[turns.length - 1] || null;
         const busy = Boolean(lastTurn && (OPEN.includes(lastTurn.state) || lastTurn.state === 'needs_you'));
         const fileMap = await inputs.list(s, turns.map((t) => t.id));
+        const canvasRow = row && !shared && first ? await canvases.forThread(s, first.id) : null;
+        const canvasDoc = canvasRow ? canvases.docOf(canvasRow) : null;
         const model = shared ? null : modelPrefs.wire(await modelPrefs.get(s, requester).catch(() => null));
         const turnHtmls = await Promise.all(turns.map((t) => turnHtml(t, { files: fileMap.get(t.id) || [], readOnly: shared })));
         const title = first ? clip(first.task, 60) : 'New chat';
@@ -562,7 +592,7 @@ ${modelChip(model)}
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
             // The network's sidebar (kit.css, kit-web.js) and its conversation UI (thread.css, ov-thread.js).
             css: ['css/chat.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css'],
-            sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-share.js'],
+            sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-share.js', 'ov-canvas.js'],
             body: html`${busy && !shared ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
 <div class="chat" data-chat="${first ? first.id : ''}">${raw(thread.page({
                 sidebar: shared ? '' : String(sidebar(chats, first ? first.id : null)),
@@ -570,7 +600,8 @@ ${modelChip(model)}
                 turns: turnHtmls.map(String),
                 empty: first ? '' : String(html`<div class="ct-hello"><span class="ct-hello-mark" aria-hidden="true"></span><h2>What should Actor do?</h2><p>It browses, clicks and types for you. Watch it work, steer it, or go do something else.</p>
 <ul class="ct-starters">${STARTERS.map(([icon, k, v]) => html`<li><button type="button" data-ovt-starter="${v}">${raw(glyphs.svg(icon, { size: 20 }))}<b>${k}</b><span>${v}</span></button></li>`)}</ul></div>`),
-                composer: shared ? '' : String(composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model, allowance: leftLine(config.allowance, today) })),
+                composer: shared ? '' : String(html`${canvasDoc ? canvasPhone(canvasDoc) : ''}${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model, allowance: leftLine(config.allowance, today) })}`),
+                panel: canvasDoc ? String(canvasWide(canvasDoc)) : '',
                 label: first ? 'Conversation' : 'New chat',
             }))}${defaults}${shared ? html`<p class="ct-shared-note">This run was shared with you. Only its owner can carry it on.</p>` : ''}</div>`,
         });
