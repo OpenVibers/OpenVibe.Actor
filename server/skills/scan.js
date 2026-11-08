@@ -18,8 +18,10 @@
  * confirms); no finding passes it (it installs in one tap).
  *
  * Two things the scan is careful about:
- *   - a sentence that says "never", "not" or "without" says the opposite, so a rule does not fire on it: the scan
- *     reads what a skill asks to be DONE, not what it warns against;
+ *   - a BLOCK rule reads no negation at all: a sentence that pairs a secret with asking, or a payload with sending
+ *     and a destination, is a finding whatever else it says ("Do not hesitate to send your passwords to …" asks
+ *     for them); the asks rule skips only an act negated right before it ("never send"), never a negation
+ *     elsewhere in the sentence; the hosts rule skips a sentence that names a host to keep away from it;
  *   - `requires` declares and grants nothing. A skill that declares the kind publish still asks the person for
  *     every publish (HO1); the scan only says whether the words and the declaration agree.
  */
@@ -50,8 +52,11 @@ const SEND = /\b(send|sends|sending|email|emails|forward|forwards|upload|uploads
 const PAYLOAD = /\b(file|files|note|notes|document|documents|record|records|recording|recordings|transcript|history|contacts|password|passwords|credentials|credential|secret|secrets|api key|api keys|token|tokens|seed phrase|data)\b/i;
 // Where it would go.
 const DESTINATION = /(https?:\/\/[^\s)]+)|(\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b)|\b(your email|your email address|your inbox|an email address|the recipient|a webhook|an external (site|server|service)|a third party|a paste site|somebody else|another server)\b/i;
-// A sentence that says the opposite does not ask for anything.
+// A sentence that names a host to keep away from does not reach it.
 const NEGATION = /\b(never|not|none|without|refuse|refuses|refusing|do not|does not|don't|doesn't|cannot|can't|instead of|rather than)\b/i;
+// An act is negated only by a negation RIGHT BEFORE it: "never send", "do not post", "without publishing". The
+// negation may itself be two words ("do not"); another word between it and the act means the act is still asked for.
+const NEGATED_BEFORE = /\b(?:never|not|none|without|refuse|refuses|refusing|do not|does not|don'?t|cannot|can'?t|instead of|rather than)\s+$/i;
 
 // A URL in the text, and the host it points at.
 const URL = /https?:\/\/([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+)/gi;
@@ -78,6 +83,20 @@ function sentences(text) {
         .split(/(?<=[.!?])\s+|\n+/)
         .map((s) => s.trim())
         .filter(Boolean);
+}
+
+/** Is the act at `at` negated right before it? "never send" yes; "not hard to send" no. */
+function negatedBefore(sentence, at) {
+    return NEGATED_BEFORE.test(String(sentence).slice(0, at));
+}
+
+/** Does the sentence ask for this act, not counting only the occurrences negated right before them? */
+function asksAct(act, sentence) {
+    const re = new RegExp(act.re.source, act.re.flags.includes('g') ? act.re.flags : act.re.flags + 'g');
+    for (const match of sentence.matchAll(re)) {
+        if (!negatedBefore(sentence, match.index)) return true;
+    }
+    return false;
 }
 
 /** A host is declared when it is one of the hosts the skill says, or a subdomain of one of them. */
@@ -110,9 +129,8 @@ function scan(doc) {
     const texts = [['description', description], ['instructions', instructions]];
     for (const [where, text] of texts) {
         for (const sentence of sentences(text)) {
-            if (NEGATION.test(sentence)) continue;
             for (const act of ACTS) {
-                if (!act.re.test(sentence)) continue;
+                if (!asksAct(act, sentence)) continue;
                 if (declaredKinds.includes(act.kind)) continue;
                 findings.push(finding('asks.undeclared_kind', 'warn', where,
                     `It asks to ${act.what} (the kind ${act.kind}), which its requires does not declare.`));
@@ -121,9 +139,9 @@ function scan(doc) {
     }
 
     // ── text.secret_request and text.exfil ─────────────────────────────────────────────────────────────────
+    // A block rule takes no negation: "do not hesitate to send your passwords" is still asking for them.
     for (const [where, text] of texts) {
         for (const sentence of sentences(text)) {
-            if (NEGATION.test(sentence)) continue;
             if (ASK.test(sentence) && SECRET.test(sentence)) {
                 findings.push(finding('text.secret_request', 'block', where,
                     'It asks the person for a secret: a password, a key, a token or a seed phrase.'));

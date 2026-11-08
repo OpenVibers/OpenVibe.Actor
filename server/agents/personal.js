@@ -214,8 +214,8 @@ async function run(ctx, agent, input = '', { origin = 'person', level = null, tr
     // The person's own active memory and this agent's active notes; a suggestion is not put in a run.
     const notes = await memoryStore.forRun(s, agent.owner, agent.id);
     // The skills this agent has installed (plan HO2): their name and description go in the prompt, never their
-    // instructions. The agent loads a skill itself when one of them fits the job.
-    const installed = await skillsStore.forAgent(s, agent.owner, agent.id);
+    // instructions. The agent loads a skill itself when one of them fits the job; a withdrawn one is not offered.
+    const installed = (await skillsStore.forAgent(s, agent.owner, agent.id)).filter((k) => !k.withdrawn);
     const out = await createTask({ s, config, engine, webhooks, principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null }, body: { task: prompt(agent, notes, runInput, installed), mode: agent.mode, budget: { per_task_usd: Number(agent.budget_per_run_usd) }, ...(level ? { level } : {}) }, assignmentOrigin: origin, assignmentLevel: level, triggerId, beforeInsert: async () => {
         const current = await s.db.maybe('SELECT daily_runs_max FROM actor_agents WHERE id = $1 AND owner = $2 FOR UPDATE', [agent.id, agent.owner]);
         if (!current) return { status: 404, code: 'actor.agent.not_found', detail: 'No such agent.' };

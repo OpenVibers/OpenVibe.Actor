@@ -86,7 +86,8 @@ async function retire(s, id, at = null) {
 
 /** The installs of one agent, newest first: what its page lists and what its prompt may name. */
 const installsOf = (s, owner, agentId) => s.db.many(`SELECT i.*, l.slug AS listing_slug, l.skill->>'name' AS listing_name, l.skill->>'description' AS listing_description,
-        l.scan_state AS listing_scan_state, l.curator_state AS listing_curator_state, l.publisher_kind AS listing_publisher_kind
+        l.scan_state AS listing_scan_state, l.scan AS listing_scan, l.retired_at AS listing_retired_at,
+        l.curator_state AS listing_curator_state, l.publisher_kind AS listing_publisher_kind
     FROM actor_skill_installs i JOIN actor_skill_listings l ON l.id = i.listing_id
     WHERE i.owner = $1 AND i.agent_id = $2 AND i.removed_at IS NULL ORDER BY i.installed_at DESC`, [owner, agentId]);
 
