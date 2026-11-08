@@ -63,6 +63,17 @@ const TABLES = [
     // the operator's total, a separate row.
     { table: 'spend_daily', subject: 'requester', value: (usr) => `user:${usr}`, file: 'spend.json' },
     { table: 'actor_agent_memory', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-memory.json' },
+    // The night's tidy (HO5): the diary their agents wrote, the changes the nights made (with the state each change
+    // replaced, so an undo can put it back) and the nights themselves. Before the agents, whose rows they hang on.
+    { table: 'actor_memory_diary', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-diary.json',
+        columns: ['id', 'owner', 'agent_id', 'text', 'created_at', 'edited_at', 'deleted_at'] },
+    { table: 'actor_memory_changes', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-memory-changes.json',
+        columns: ['id', 'owner', 'agent_id', 'tidy_run_id', 'kind', 'note_ids', 'result_id', 'detail', 'before_state', 'created_at', 'undone_at'] },
+    { table: 'actor_memory_tidy_runs', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-memory-nights.json',
+        columns: ['id', 'owner', 'agent_id', 'night_of', 'diary', 'changes', 'model', 'latency_class', 'cost_usd', 'created_at'] },
+    // The person's consent and the date of their next night.
+    { table: 'actor_memory_tidy', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-memory-tidy.json',
+        columns: ['owner', 'enabled', 'next_due_at', 'last_run_at', 'last_error', 'created_at', 'updated_at'] },
     // What their agents suggested adding to their instructions, and what they decided (agents/personal.js).
     { table: 'actor_agent_proposals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-suggestions.json' },
     // Which of their agents' runs went to their Vibe chats (agents/vibe-deliver.js).
