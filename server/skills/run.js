@@ -31,7 +31,9 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const MEDIA = /^med_[0-9A-HJKMNP-TV-Z]{26}$/;
 const HASH = /^[0-9a-f]{64}$/;
 // platform.workload-requirements@1 and the caps the contract gives a tool.
-const TRUST = ['user-owned', 'first-party', 'partner', 'community', 'external'];
+// Where a skill's code may run (ADR-060, Opus's review): the person's own machines, else OpenVibe's own pool. Never a
+// partner's, the community's or an outside provider's machine: the tool's input is the person's data.
+const TRUST = ['user-owned', 'first-party'];
 const WALL_MAX = 30_000;
 const MEM_MAX = 268_435_456;
 const WALL_DEFAULT = 10_000;

@@ -352,7 +352,8 @@ function runOf(fetchImpl, { waitMs = 1000, clock = { t: 0 } } = {}) {
             egress: 'none',
             requirements: {
                 kind: 'run.function', mobility: 'job', latency_class: 'background', objective: 'balanced',
-                trust: ['user-owned', 'first-party', 'partner', 'community', 'external'],
+                // Only the person's own machines or OpenVibe's pool: never a partner's, the community's or an outside one.
+                trust: ['user-owned', 'first-party'],
                 capabilities: ['worker:function'], resources: { egress: 'none', memory_mb: 128 },
             },
         });
