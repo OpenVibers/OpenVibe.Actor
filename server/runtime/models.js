@@ -3,8 +3,8 @@
 /**
  * The tiered model layer (Actor v2, stage V2-1). Every model call in the one loop goes through one interface:
  *
- *   chat({ tier, messages, tools, json, maxTokens, signal, avoidFamily })
- *     → { message, text, toolCalls, usage, cost_usd, model, provider, family, tier }
+ *   chat({ tier, messages, tools, json, maxTokens, signal, avoidFamily, latency, subject })
+ *     → { message, text, toolCalls, usage, cost_usd, model, provider, family, tier, latency_class }
  *
  * Tiers, never model names, in code:
  *   fast     classifying, the plan, small steps
@@ -27,6 +27,7 @@
  * createModels({ config, rates, fetchImpl, log, now }) → {
  *   warm(), chat(...), resolve(tier, { avoidFamily }), tierList(), modelList(), providerList(), tierConfig,
  *   aiCatalog()   OpenVibe.AI's aliases and exact ids (PLAN G-P9; ACTOR_AI_CATALOG, cached ~5 minutes)
+ *   latencyClass()  the class a call here may ask for: 'batch' on OpenVibe.AI's router, 'background' otherwise
  * }
  */
 
@@ -64,6 +65,9 @@ const SMALL = { test: (m) => !FULL.has(String(m)) && SMALL_RE.test(String(m)) };
 
 const TIERS = ['fast', 'smart', 'best', 'check', 'vision'];
 const PROVIDERS = ['openai', 'deepseek', 'runtime', 'compatible', 'local'];
+// The latency classes of a run (OpenVibe.AI, plan track BA): how long the caller may wait. A caller may ask for a
+// slower class than the route's own, never a faster one.
+const LATENCY_CLASSES = ['interactive', 'background', 'batch'];
 // OpenVibe.AI (plan L55 C3): the gateway, NOT one of the operator's providers. It holds no key of its own. With
 // ACTOR_AI_ROUTER on it IS the model layer (every tier is a run of ai.complete on AI's router); with it off, it is
 // still reached when a person chooses their own key (sealed in AI's vault).
@@ -455,6 +459,11 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
      *
      * The tier's name (openvibe/economy|balanced|fast|auto|private, or an exact id) is the policy. The answer's
      * model is whatever AI says ran, never the wish.
+     *
+     * `latency` asks for a class (OpenVibe.AI's classes, plan track BA): 'interactive' (today's default),
+     * 'background' (the answer may take minutes) or 'batch' (it may take hours). A caller may only ask for a SLOWER
+     * class than the route's own; AI clamps a faster one and says so. The classes live on AI's router, so a call that
+     * goes through the person's own key asks for none.
      */
     async function chatViaRouter({ tier, messages = [], tools = null, json = false, maxTokens = 4000, signal, onDelta = null, subject = null, target = null, latency = null }) {
         const c = routerClient();
@@ -472,9 +481,13 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             workflow: 'ai.complete', input,
             ...(subject ? { on_behalf_of: { type: 'user', id: String(subject) } } : {}),
             ...(target ? { target } : {}),
-            ...(latency && ai.latencyClasses ? { options: { latency } } : {}),
         };
-        const timeoutMs = Math.max(5000, Number(ai.timeoutMs) || 180_000);
+        // A slow class may take minutes (background) or hours (batch): the wait and the deadline are longer, and the
+        // answer is polled for until it is ready.
+        const slow = latency === 'background' || latency === 'batch';
+        const timeoutMs = slow ? Math.max(600_000, Number(ai.timeoutMs) || 180_000) : Math.max(5000, Number(ai.timeoutMs) || 180_000);
+        const options = { cache: false, ...(latency ? { latency } : {}) };
+        body.options = options;   // the streamed path posts this body itself
         const sig = typeof AbortSignal.any === 'function'
             ? AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)])
             : (signal || AbortSignal.timeout(timeoutMs));
@@ -485,13 +498,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                 const created = await c.ai.runs.create('ai.complete', input, {
                     wait: Math.max(1000, Number(ai.waitMs) || 120_000),
                     ...(subject ? { onBehalfOf: { type: 'user', id: String(subject) } } : {}),
-                    ...(target ? { target } : {}),
-                    // A routine's run may wait (plan BA/HO): the class the caller asked for, so AI's router may pick a
-                    // Flex tier, off-peak or the host's own idle model. Contracts 0.336.0 carries options.latency
-                    // (plan BA3); the flag stays until the AI service is deployed with it, because a server still on
-                    // the older contract refuses an option it does not know.
-                    options: { cache: false, ...(latency && ai.latencyClasses ? { latency } : {}) },
-                    signal: sig,
+                    ...(target ? { target } : {}), options, signal: sig,
                 });
                 run = created.run;
                 if (!['succeeded', 'cached', 'failed', 'cancelled'].includes(run.status)) run = await c.ai.runs.waitFor(run.id, { timeoutMs, signal: sig });
@@ -519,6 +526,8 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             model: run.output.model || (run.provenance && run.provenance.model) || input.model,
             usage: { input: u.tokens_in || 0, cached: u.tokens_cached || 0, output: u.tokens_out || 0 },
             cost_usd: Number(u.cost_usd) || 0,
+            // The class the run really took (AI says so; today's AI has no classes and says nothing).
+            latency_class: (run && run.latency_class) || null,
         };
     }
 
@@ -558,16 +567,17 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     /** One model call. The caller checks the budget first and meters cost_usd after; this layer only prices it. */
-    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null, latency = null } = {}) {
-        // The person's own key (plan L55 C3): every model call of this run goes to OpenVibe.AI with it.
+    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null, latency = null, subject = null } = {}) {
+        // The person's own key (plan L55 C3): every model call of this run goes to OpenVibe.AI with it. That path has
+        // no latency class: the classes live on AI's router.
         const choice = currentChoice();
         if (choice && choice.provider) {
             const r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta });
-            return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
+            return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER, latency_class: null };
         }
         // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
         if (routerOn()) {
-            const r = await chatViaRouter({ tier, messages, tools, json, maxTokens, signal, onDelta, subject: choice && choice.subject, target: choice && choice.target, latency });
+            const r = await chatViaRouter({ tier, messages, tools, json, maxTokens, signal, onDelta, subject: subject || (choice && choice.subject), target: choice && choice.target, latency });
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }
         await warm();
@@ -615,12 +625,21 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         return out;
     }
 
+    /**
+     * The latency class a call here may ask for (OpenVibe.AI's classes, plan track BA): 'batch' when the call goes
+     * through AI's router (the classes live there), 'background' when it does not — the client's own key answers
+     * with no class of its own.
+     */
+    function latencyClass() {
+        return routerOn() ? 'batch' : 'background';
+    }
+
     return {
-        warm, chat, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog,
+        warm, chat, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog, latencyClass,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },
         listErrors: () => ({ ...listErrors }),
     };
 }
 
-module.exports = { createModels, ModelError, parsePin, PREFERRED, PREFERRED_CHECKED, TIERS, PROVIDERS, AI_PROVIDER };
+module.exports = { createModels, ModelError, parsePin, PREFERRED, PREFERRED_CHECKED, TIERS, PROVIDERS, AI_PROVIDER, LATENCY_CLASSES };

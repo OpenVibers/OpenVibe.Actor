@@ -109,11 +109,15 @@ const fromRow = (r) => (r ? {
     id: r.id, owner: r.owner, agent_id: r.agent_id || null, text: r.text, kind: r.kind, source: r.origin, status: r.status,
     source_task: r.source_task || null, created_at: r.created_at, updated_at: r.updated_at,
     last_used_at: r.last_used_at || null, uses: Number(r.uses) || 0,
+    // HO5 (migrations/0041): what the night's tidy did to this note. A note with no merged_into and no retired_at is
+    // exactly the note it always was.
+    merged_into: r.merged_into || null, retired_at: r.retired_at || null,
+    pinned: Boolean(r.pinned), pinned_by: r.pinned_by || null,
 } : null);
 
 // The column keeps the name it had in 0005 (`origin`): an expand migration may not rename it while the old release
 // still runs. The code and the API call the same value `source` (fromRow maps it).
-const select = 'id, owner, agent_id, text, kind, origin, status, source_task, created_at, updated_at, last_used_at, uses';
+const select = 'id, owner, agent_id, text, kind, origin, status, source_task, created_at, updated_at, last_used_at, uses, merged_into, retired_at, pinned, pinned_by';
 
 /**
  * Write one memory. `source` says who it came from; an agent-written note is a suggestion unless the caller explicitly
@@ -171,9 +175,14 @@ const forAgent = async (s, owner, agentId) => (await s.db.many(
     `SELECT ${select} FROM actor_agent_memory WHERE owner = $1 AND agent_id = $2 ORDER BY created_order DESC`, [owner, agentId],
 )).map(fromRow);
 
-/** What one agent's run may remember: the person's own active notes and this agent's active notes, newest first. */
+/**
+ * What one agent's run may remember: the person's own active notes and this agent's active notes, newest first. A
+ * pinned note comes first (HO5): the person pinned it, or the night's tidy promoted it, so the agent reads it before
+ * the rest.
+ */
 const forRun = async (s, owner, agentId) => (await s.db.many(
-    `SELECT ${select} FROM actor_agent_memory WHERE owner = $1 AND status = 'active' AND (agent_id IS NULL OR agent_id = $2) ORDER BY created_order DESC LIMIT 200`,
+    `SELECT ${select} FROM actor_agent_memory WHERE owner = $1 AND status = 'active' AND (agent_id IS NULL OR agent_id = $2)
+     ORDER BY pinned DESC, created_order DESC LIMIT 200`,
     [owner, agentId],
 )).map(fromRow);
 
@@ -220,6 +229,26 @@ async function remove(s, owner, id) {
     return Boolean(row);
 }
 
+/**
+ * Pin a note: the agent reads a pinned note first (HO5). `by` says who pinned it — 'person' by hand, or 'agent' by the
+ * night's tidy. The tidy never touches a note the person pinned by hand, so the two are told apart here.
+ */
+async function pin(s, owner, id, { by = 'person' } = {}) {
+    if (!MEM_ID.test(String(id || ''))) return null;
+    const who = by === 'agent' ? 'agent' : 'person';
+    const row = await s.db.maybe(`UPDATE actor_agent_memory SET pinned = true, pinned_by = $1, updated_at = $2 WHERE id = $3 AND owner = $4 RETURNING ${select}`,
+        [who, s.iso(), id, owner]);
+    return fromRow(row);
+}
+
+/** Unpin a note (the person, or the undo of a promotion). */
+async function unpin(s, owner, id) {
+    if (!MEM_ID.test(String(id || ''))) return null;
+    const row = await s.db.maybe(`UPDATE actor_agent_memory SET pinned = false, pinned_by = NULL, updated_at = $1 WHERE id = $2 AND owner = $3 RETURNING ${select}`,
+        [s.iso(), id, owner]);
+    return fromRow(row);
+}
+
 // Words too common to say what a memory is about.
 const STOP = new Set('a an and are as at be been but by can could did do does for from had has have he her here him his how i if in into is it its just like me more most my no not of on one or our out over she so some than that the their them then there these they this to too up us was we were what when where which who why will with would you your'.split(' '));
 function scoreOf(memory, q, at) {
@@ -254,5 +283,5 @@ async function recall(s, owner, query, { limit = MAX_RECALL, now = Date.now() } 
 module.exports = {
     KINDS, STATUSES, SOURCES, MAX_TEXT, MAX_PER_AGENT, MAX_PER_PERSON, MAX_RECALL, MEM_ID,
     norm, looksLikeSecret, instructionWidens, whyRefused, luhn,
-    add, get, own, forAgent, forRun, list, edit, decide, remove, recall, MOVES,
+    add, get, own, forAgent, forRun, list, edit, decide, remove, recall, pin, unpin, MOVES,
 };

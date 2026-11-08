@@ -47,6 +47,8 @@ function commandLine(p) {
     return argv.map(quote).join(' ').slice(0, 2000);
 }
 const memoryStore = require('../memory');
+const tidy = require('../memory/tidy');
+const CHANGE_LABEL = { merge: 'Merged notes', retire: 'Retired a note', promote: 'Pinned a note' };
 
 function createAgentPages(ctx) {
     const { config, s, limits } = ctx;
@@ -365,6 +367,9 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
         const pendingSuggestions = suggestions.filter((p) => p.state === 'pending');
         const applied = suggestions.filter((p) => p.state === 'applied').slice(0, 5);
         const runs = await s.db.many('SELECT id, state, created_at, result, cost_usd, error_detail FROM tasks WHERE requester = $1 AND via = $2 ORDER BY id DESC LIMIT 20', [a.owner, `agent:${a.id}`]);
+        // The night's tidy (HO5): this agent's own diary and the changes it made, with the undo.
+        const diaries = await tidy.diary(s, a.owner, { agentId: a.id, limit: 3 });
+        const tidyChanges = await tidy.changes(s, a.owner, { agentId: a.id, limit: 10 });
         // What this agent may always do (plan HO1), and every decision the person made about its asks.
         const allowRules = await allows.list(s, a.owner, a.id);
         const decisions = await s.db.many(`SELECT id, kind, summary, state, decision_scope, decided_by, decided_at, created_at
@@ -411,12 +416,21 @@ ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map
 ${applied.length ? html`<details><summary>Added lately</summary><ul class="pa-notes">${applied.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Added ${time(p.decided_at)}</p>
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}"><button type="submit" name="decision" value="undo" class="pa-danger-link">Undo</button></form></li>`)}</ul></details>` : ''}</section>` : ''}
 ${voicePanel(a, doc, shared)}<section class="pa-panel"><h2>Memory</h2><p class="pa-hint">What this agent remembers, newest first. Only active notes go into a run. Notes you write are never dropped; when memory is full (50 notes) the oldest note the agent wrote goes first. An agent adds at most one note per run, and only when its answer passed the check; its note is a suggestion until you accept it on <a href="/memory">Memory</a>.</p>
-${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta"><span class="pill ${n.status === 'suggested' ? 'pill-running' : n.status === 'archived' ? 'pill-failed' : 'pill-succeeded'}">${n.status === 'suggested' ? 'Suggested' : n.status === 'archived' ? 'Archived' : 'Active'}</span> ${n.source === 'agent' ? 'Written by the agent' : 'Written by you'} · ${n.kind} · ${time(n.created_at)}${n.last_used_at ? html` · last used ${time(n.last_used_at)}` : ''}</p>
+${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta"><span class="pill ${n.status === 'suggested' ? 'pill-running' : n.status === 'archived' ? 'pill-failed' : 'pill-succeeded'}">${n.status === 'suggested' ? 'Suggested' : n.status === 'archived' ? 'Archived' : 'Active'}</span> ${n.source === 'agent' ? 'Written by the agent' : 'Written by you'} · ${n.kind} · ${time(n.created_at)}${n.last_used_at ? html` · last used ${time(n.last_used_at)}` : ''}${n.pinned ? ' · pinned' : ''}${n.merged_into ? ' · merged away' : ''}${n.retired_at ? ' · retired' : ''}</p>
 ${n.status === 'suggested' ? html`<form method="post" action="/memory/${n.id}/accept" class="pa-actions"><button type="submit" class="pa-btn pa-primary">Accept</button> <button type="submit" class="pa-btn" formaction="/memory/${n.id}/decline">Decline</button></form>` : ''}
+<form method="post" action="/me/agents/${a.id}/memory/${n.id}/${n.pinned ? 'unpin' : 'pin'}" class="pa-actions"><button type="submit" class="pa-btn">${n.pinned ? 'Unpin' : 'Pin'}</button></form>
 <details><summary>Edit or delete</summary><form method="post" action="/me/agents/${a.id}/memory/${n.id}/edit"><label>Note <input name="text" maxlength="${require('../memory').MAX_TEXT}" value="${n.text}"></label><button type="submit" class="pa-btn">Save</button></form>
 <form method="post" action="/me/agents/${a.id}/memory/${n.id}/delete"><button type="submit" class="pa-danger-link">Delete note</button></form></details></li>`)}</ul>` : html`<p class="muted">Nothing remembered yet.</p>`}
 <form method="post" action="/me/agents/${a.id}/memory"><label>Add a note <textarea name="text" maxlength="${require('../memory').MAX_TEXT}" required rows="2" placeholder="I prefer answers in bullet points."></textarea></label><button type="submit" class="pa-btn">Add note</button></form>
 ${notes.length ? html`<p><a href="/memory">See all your memory</a> · <a href="/me/agents/${a.id}/forget" class="pa-danger-link">Forget everything</a></p>` : html`<p class="pa-hint"><a href="/memory">Memory</a> · <a href="/me/agents/${a.id}/forget">Forget everything</a></p>`}</section>
+${diaries.length || tidyChanges.length ? html`<section class="pa-panel"><h2>Its diary</h2>
+<p class="pa-hint">Once a night, if you turned the tidy on in <a href="/memory">Memory</a>, this agent looks at its own notes: it merges the ones that say the same thing, retires the stale ones, pins the ones that keep coming up, and writes what it learned. You can correct the diary, and undo any change for ${tidy.UNDO_DAYS} days.</p>
+${diaries.length ? html`<ul class="pa-notes">${diaries.map((d) => html`<li><p class="pa-note-text">${d.text}</p><p class="pa-note-meta">${d.edited_at ? 'Edited' : 'Written'} ${time(d.created_at)}</p>
+<details><summary>Edit or delete</summary><form method="post" action="/me/agents/${a.id}/diary/${d.id}/edit"><label>Diary entry <textarea name="text" rows="3" required>${d.text}</textarea></label><button type="submit" class="pa-btn">Save</button></form>
+<form method="post" action="/me/agents/${a.id}/diary/${d.id}/delete"><button type="submit" class="pa-danger-link">Delete</button></form></details></li>`)}</ul>` : ''}
+${tidyChanges.length ? html`<h3 class="pa-sub">What its nights changed</h3><ul class="pa-notes">${tidyChanges.map((c) => html`<li><p class="pa-note-text">${CHANGE_LABEL[c.kind] || 'Changed a note'}</p><p class="pa-note-meta">${time(c.created_at)}${c.undone_at ? ' · undone' : ''}</p>
+${c.undoable ? html`<form method="post" action="/me/agents/${a.id}/changes/${c.id}/undo"><button type="submit" class="pa-danger-link">Undo</button></form>` : ''}</li>`)}</ul>` : ''}
+</section>` : ''}
 <section class="pa-panel"><h2>Settings</h2><form method="post" action="/me/agents/${a.id}/edit">${form(a)}<button type="submit" class="pa-btn pa-primary">Save settings</button></form>
 <form method="post" action="/me/agents/${a.id}/delete" class="pa-delete"><button type="submit" class="pa-danger-link">Delete this agent</button> <span class="pa-hint">Its memory goes with it; its past runs stay on your task list.</span></form></section>`);
     });
@@ -441,6 +455,46 @@ ${notes.length ? html`<p><a href="/memory">See all your memory</a> · <a href="/
         res.redirect(303, `/me/agents/${a.id}`);
     });
     r.post('/me/agents/:id/memory/:mem/delete', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; await s.db.query('DELETE FROM actor_agent_memory WHERE id = $1 AND agent_id = $2 AND owner = $3', [req.params.mem, a.id, a.owner]); res.redirect(303, `/me/agents/${a.id}`); });
+    // Pin and unpin a note by hand (HO5): a pinned note is read first, and the night's tidy never touches it.
+    r.post('/me/agents/:id/memory/:mem/pin', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const note = await s.db.maybe('SELECT id FROM actor_agent_memory WHERE id = $1 AND agent_id = $2 AND owner = $3', [req.params.mem, a.id, a.owner]);
+        if (!note) return page(req, res, 'Note not found', html`<h1>Note not found</h1>`, 404);
+        await memoryStore.pin(s, a.owner, note.id, { by: 'person' });
+        res.redirect(303, `/me/agents/${a.id}`);
+    });
+    r.post('/me/agents/:id/memory/:mem/unpin', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const note = await s.db.maybe('SELECT id FROM actor_agent_memory WHERE id = $1 AND agent_id = $2 AND owner = $3', [req.params.mem, a.id, a.owner]);
+        if (!note) return page(req, res, 'Note not found', html`<h1>Note not found</h1>`, 404);
+        await memoryStore.unpin(s, a.owner, note.id);
+        res.redirect(303, `/me/agents/${a.id}`);
+    });
+    // The agent's diary (HO5): the person's own words now, or gone.
+    r.post('/me/agents/:id/diary/:did/edit', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const out = await tidy.editDiary(s, a.owner, req.params.did, (req.body || {}).text);
+        if (out.error) return page(req, res, 'Not saved', html`<h1>Not saved</h1><p>${out.error}</p><p><a href="/me/agents/${a.id}">Back to the agent</a></p>`, 422);
+        res.redirect(303, `/me/agents/${a.id}`);
+    });
+    r.post('/me/agents/:id/diary/:did/delete', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const out = await tidy.deleteDiary(s, a.owner, req.params.did);
+        if (out.error) return page(req, res, 'Not deleted', html`<h1>Not deleted</h1><p>${out.error}</p><p><a href="/me/agents/${a.id}">Back to the agent</a></p>`, 404);
+        res.redirect(303, `/me/agents/${a.id}`);
+    });
+    // Undo one change of a night (HO5).
+    r.post('/me/agents/:id/changes/:cid/undo', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const out = await tidy.undo(s, a.owner, req.params.cid, { now: Date.now() });
+        if (out.error) return page(req, res, 'Not undone', html`<h1>Not undone</h1><p>${out.error}</p><p><a href="/me/agents/${a.id}">Back to the agent</a></p>`, out.status || 400);
+        res.redirect(303, `/me/agents/${a.id}`);
+    });
     r.get('/me/agents/:id/forget', async (req, res) => { if (!signed(req)) return login(req, res); const a = await find(req, res); if (!a) return; page(req, res, 'Forget memory', html`<h1>Forget all memory for ${a.name}?</h1><form method="post" action="/me/agents/${a.id}/forget"><button type="submit">Forget everything</button></form><p><a href="/me/agents/${a.id}">Cancel</a></p>`); });
     r.post('/me/agents/:id/forget', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; await s.db.query('DELETE FROM actor_agent_memory WHERE agent_id = $1 AND owner = $2', [a.id, a.owner]); res.redirect(303, `/me/agents/${a.id}`); });
     // Take back a standing permission (plan HO1): the next identical step asks again.
