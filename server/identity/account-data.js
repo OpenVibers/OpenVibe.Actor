@@ -112,6 +112,9 @@ const TABLES = [
         columns: ['id', 'slug', 'skill', 'skill_text', 'code', 'publisher_kind', 'publisher_subject', 'publisher_name', 'scan_state', 'scan', 'curator_state', 'curator', 'installs', 'listed_at', 'retired_at', 'created_at', 'updated_at'] },
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_chat_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'chat-app-approvals.json' },
+    { table: 'actor_device_photos', subject: 'owner', value: (usr) => `user:${usr}`, file: 'device-photos.json' },
+    { table: 'actor_device_notices', subject: 'owner', value: (usr) => `user:${usr}`, file: 'device-notices.json' },
+    { table: 'actor_device_presence', subject: 'owner', value: (usr) => `user:${usr}`, file: 'device-presence.json' },
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },
     // The tips their agents sent (plan HO7): who received them, how much, why, and what Billing said. The row of a
     // payment that Billing refused is here too: it was their attempt, and it is their money either way.

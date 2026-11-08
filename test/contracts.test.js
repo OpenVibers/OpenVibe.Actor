@@ -49,6 +49,12 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/skills/:id', null],
     ['POST /api/v1/me/agents/:id/skills', 'actor.agent.manage'],
     ['DELETE /api/v1/me/agents/:id/skills/:listingId', 'actor.agent.manage'],
+    // HO12: the person's own device answer and Link heartbeat use the existing approval grant. Contracts 0.345.0
+    // defines the answer shape; a later capability manifest can list these routes directly.
+    ['POST /api/v1/me/devices/presence', 'actor.approval.decide'],
+    ['GET /api/v1/me/approvals/:id', 'actor.approval.decide'],
+    ['POST /api/v1/me/approvals/:id/photo', 'actor.approval.decide'],
+    ['POST /api/v1/me/approvals/:id/answer', 'actor.approval.decide'],
 ]);
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 // The A2A surface (stage V2-11): POST /a2a/v1/tasks and GET /a2a/v1/tasks/:id, guarded by actor.a2a.task.

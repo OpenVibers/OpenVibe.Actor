@@ -97,6 +97,13 @@ function toolKind(tool) {
 function stepFor(name, input) {
     const a = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
     switch (name) {
+        // These tools create their own fresh answer request, regardless of the agent's action level.
+        case 'ask_photo':
+        case 'ask_location':
+            return null;
+        case 'notify_phone':
+            return { act: 'act', kind: 'device.notify', summary: `Notify your phone: ${text(a.title, 100)}`,
+                target: null, payload: safeInput({ title: a.title, text: a.text }) };
         // ── A person's computer (the old runtime and the modular tools share these names) ──
         case 'computer_run': {
             const argv = commandOf(a.argv);

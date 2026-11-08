@@ -404,9 +404,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (!money.ok) return { asked: false, decision: { ask: false }, refusal: money.message };
             }
             const rules = taskAgent ? await allows.list(s, row.requester, taskAgent.id) : [];
-            const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal, allow: { kind, target, rules } });
+            const scopedTarget = kind === 'device.notify' && taskAgent ? taskAgent.name : target;
+            const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal, allow: { kind, target: scopedTarget, rules } });
             if (!decision.ask) return { asked: false, decision };
-            const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary: money ? money.summary : summary, payload: money ? money.payload : payload, target, categories });
+            const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary: money ? money.summary : summary, payload: money ? money.payload : payload, target: scopedTarget, categories });
             const url = `${config.baseUrl}/me/approvals/${ask.id}`;
             const shown = money ? money.summary : summary;
             await emit(id, { kind: 'output', step: 'text', agent, text: `Your agent wants to ${String(shown).toLowerCase()} Nothing runs until you approve it: ${url}` });

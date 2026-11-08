@@ -208,6 +208,25 @@ function createWaits({ s, config, log = console, now = () => Date.now(), events 
         return row;
     }
 
+    /** Resume only the run that asked for this device answer. Its payload is untrusted input. */
+    async function wakeDevice(approval, result) {
+        if (!approval || !approval.device_wait_id || !approval.task_id) return null;
+        let w = await store.getWait(s, approval.device_wait_id);
+        if (!w || w.status !== 'waiting' || w.task_id !== approval.task_id || w.requester !== approval.owner) return null;
+        // A fast tap may arrive between writing the wait and the loop parking. The engine writes remaining_ms only
+        // after its checkpoint is saved; resume after that point so the answer cannot race the old run.
+        for (let i = 0; i < 50 && w.remaining_ms == null && w.status === 'waiting'; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            w = await store.getWait(s, approval.device_wait_id);
+            if (!w) return null;
+        }
+        return wake(w, { at: iso(now()), by: 'person', approval_id: approval.id }, {
+            notice: result && result.declined ? 'The person declined the device request.' : 'The person answered the device request.',
+            event: { event_id: approval.id, event_type: 'actor.device.answered', at: iso(now()),
+                payload: { approval_id: approval.id, kind: approval.kind, result } },
+        });
+    }
+
     /** The recovery path: the topics with open waits, read from the stored cursor. */
     async function sweep() {
         if (!events || !events.enabled) return 0;
@@ -286,7 +305,7 @@ function createWaits({ s, config, log = console, now = () => Date.now(), events 
 
     return {
         limits: L, create, get: (id) => store.getWait(s, id), listForTask: (taskId) => store.waitsForTask(s, taskId),
-        listOpen: () => store.openWaits(s), topics, ensureSubscription, onEvent, cancel, wakeByPerson, sweep, runDeadlines,
+        listOpen: () => store.openWaits(s), topics, ensureSubscription, onEvent, cancel, wakeByPerson, wakeDevice, sweep, runDeadlines,
         remaining, setRemaining, hasOpenWait,
     };
 }

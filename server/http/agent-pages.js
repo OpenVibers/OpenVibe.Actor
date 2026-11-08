@@ -186,6 +186,7 @@ ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-c
         const coding = a.kind === 'codes.task';
         // A tip (plan HO7) is the only money step with a card of its own: what it pays, who receives it and why.
         const money = a.kind === 'money' && p && p.spend === 'tip' ? p : null;
+        const device = a.kind === 'device.camera' || a.kind === 'device.location';
         const cmd = coding ? null : commandLine(p);
         const nowMs = Date.parse(s.iso()) || Date.now();   // the service's own clock (a test's clock in a test)
         const where = p && typeof p.machine === 'string' && p.machine ? p.machine : null;
@@ -206,7 +207,12 @@ ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-c
                 : (a.decision_scope === 'always' ? `You approved this and allowed it from now on for ${agentName}.` : 'You approved this once.'))
             : (a.state === 'declined' ? 'You declined this.' : 'Nobody answered this one in time.');
         const buttons = a.state === 'pending'
-            ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">${coding ? 'Approve and start it' : (money ? 'Approve and pay' : 'Approve for a retry')}</button> ${allowButton} <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>${allowHint}`
+            ? device ? html`<div class="pa-actions" data-device-approval="${a.id}" data-kind="${a.kind}" data-precise="${p && p.precise === true ? 'true' : 'false'}">
+${a.kind === 'device.camera' ? html`<label class="pa-btn pa-primary">Take a photo <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-photo hidden></label>`
+    : html`<button type="button" class="pa-btn pa-primary" data-location="coarse">Share where I am once</button>${p && p.precise === true ? html`<button type="button" class="pa-btn" data-location="precise">Share precise location once</button>` : ''}`}
+<button type="button" class="pa-btn" data-decline>Decline</button><span role="status" data-status></span></div>
+<p class="pa-hint">${a.kind === 'device.camera' ? 'The photo is taken only when you tap and choose it. It is stripped of metadata.' : 'Your location is read once when you tap. Approximate sharing rounds it to two decimal places.'} This request can never be always allowed.</p><script src="/js/device-approval.js" defer></script>`
+                : html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">${coding ? 'Approve and start it' : (money ? 'Approve and pay' : a.kind === 'device.notify' ? 'Notify me' : 'Approve for a retry')}</button> ${allowButton} <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>${allowHint}`
             : html`<p class="pa-hint">${decided}${a.decided_at ? html` Decided ${whenAt(a.decided_at, nowMs)}.` : ''}</p>${a.result_task_id ? html`<p>Started as <a href="/tasks/${a.result_task_id}">this task</a>.</p>` : ''}`;
         const moneyCard = money ? html`<section class="pa-panel"><h2>What it would do</h2>
 <p>It would send <strong>${Number(money.amount) || 0} Vibes</strong> to ${money.to_label || money.to}.</p>
@@ -220,7 +226,7 @@ ${floor.length ? html`<p class="pa-caution" role="note">${floor.map((c) => CAUTI
 ${money ? moneyCard : (coding
             ? html`<section class="pa-panel"><h2>What it would do</h2><p>Start a coding task on your own machine through <a href="https://openvibe.codes/run">OpenVibe.Codes</a> with this request. You get the summary, the changed files and the patch; it pushes nowhere unless the request asks for a branch and your machine holds a GitHub token.</p>
 <pre class="pa-pre">${String(p.task || '').slice(0, 8000)}</pre></section>`
-            : html`<section class="pa-panel"><h2>What it would do</h2><p>${a.summary}</p>
+            : html`<section class="pa-panel"><h2>${device ? 'Why your agent asks' : 'What it would do'}</h2><p>${device ? (p && p.why || a.summary) : a.summary}</p>
 ${cmd ? html`<p class="pa-cmd-where">${where ? html`On <b>${where}</b>, it runs:` : 'It runs:'}</p><pre class="pa-pre pa-cmd">${cmd}</pre>${p && p.cwd ? html`<p class="pa-hint">In ${String(p.cwd).slice(0, 300)}</p>` : ''}` : ''}
 <h3 class="pa-sub">The exact request</h3><pre class="pa-pre">${JSON.stringify(p, null, 2).slice(0, 8000)}</pre></section>`)}
 ${buttons}`, status);
