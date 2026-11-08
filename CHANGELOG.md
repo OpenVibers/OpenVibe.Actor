@@ -49,6 +49,9 @@ What changed in OpenVibe.Actor, newest first. Each site also publishes its patch
   v4.145.0's ov-canvas.js. The page redraws it from the thread's live events when `canvas_set` runs; a closed bar
   still updates its count and says "updated" for a few seconds. The document is in the account export and goes with
   the account. Test: `test/canvas.test.js`; openvibe-contracts v0.341.0 names the routes.
+- **Chat can draw it beside a Vibe chat** (HO9 step 2): the two reads answer a cross-origin request from
+  `https://openvibe.chat` only, with the person's own Network Bearer and no credentials mode (a cookie from another
+  site is refused), and carry `Vary: Origin`; every canvas write stays same-origin. Test: `test/canvas.test.js`.
 
 ## Unreleased — the skills registry (plan HO2)
 
