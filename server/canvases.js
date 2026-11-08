@@ -42,17 +42,18 @@ function cleanTitle(value) {
     return { title };
 }
 
-/**
- * The schema's first plain reason for a document we built. The oneOf over the block kinds makes a raw AJV error
- * list unreadable ("must match exactly one schema in oneOf" ten times); the block's own type is enough to say
- * what is wrong, so the messages are chosen from the error at or under that block.
- */
 // The fields each block kind really needs, so the oneOf's other branches ("a heading needs text" on an image
 // missing its alt) do not become the reason the agent reads.
 const REQUIRED = {
     heading: ['text'], text: ['text'], list: ['items'], checklist: ['items'], table: ['columns', 'rows'],
     metric: ['label', 'value'], chart: ['kind', 'series'], image: ['src', 'alt'], link: ['href', 'text'], button: ['label', 'action'],
 };
+
+/**
+ * The schema's first plain reason for a document we built. The oneOf over the block kinds makes a raw AJV error
+ * list unreadable ("must match exactly one schema in oneOf" ten times); the block's own type is enough to say
+ * what is wrong, so the messages are chosen from the error at or under that block.
+ */
 function reasonFor(errors, blocks) {
     const list = Array.isArray(errors) ? errors : [];
     const blockAt = (at) => {
