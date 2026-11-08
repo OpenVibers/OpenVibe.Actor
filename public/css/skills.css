@@ -64,3 +64,11 @@
     .sk-tool-head { align-items: flex-start; }
     .sk-net, .sk-limits { white-space: normal; }
 }
+
+/* One body size on a skill's page (11-08, Opus: the scan's verdict was 12 px, its date 13.6, the next panel 14.4):
+   every sentence in a panel .9rem, every date or footnote .8rem, the verdict with its mark. */
+.sk-panel .sk-state, .sk-panel .sk-text, .sk-panel .sk-findings li, .sk-instructions { font-size: .9rem; line-height: 1.5; }
+.sk-panel .sk-hint { font-size: .8rem; margin-top: .2rem; }
+.sk-state--passed::before { content: "\2713\00a0"; color: var(--success, #22c55e); font-weight: 800; }
+.sk-state--flagged::before { content: "!\00a0"; color: var(--warning, #f59e0b); font-weight: 800; }
+.sk-state { margin: 0; }
