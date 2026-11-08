@@ -694,7 +694,7 @@ ${raw(foldBlock({
             title: `Fork from step ${step}`,
             crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task', href: `/tasks/${row.id}` }, { label: 'Fork' }],
             styles: [showcase.STYLESHEET],
-            css: ['css/task.css'],
+            css: ['css/task.css', 'css/skill-draft.css'],
             noReferrer: true,
             body: html`${problem ? notice(problem, 'warn') : ''}${forkDialog(row, checkpoint, { tiers, tools, actingAfter })}`,
         });
@@ -1078,6 +1078,8 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
             ? await store.recentSucceeded(s, row.requester, row.id, 4) : [];
         const forkProblem = req.query.fork === 'gone' ? 'That saved step is no longer there, so it could not be forked. Pick another step below.' : null;
         const offer = !shared && t.state === 'succeeded' ? await benchOffers.get(s, row.id, requesterOf(req)) : null;
+        const skillDraft = !shared && t.state === 'succeeded' && /^agent:agt_/.test(String(row.via || ''))
+            ? await s.db.maybe("SELECT * FROM actor_agent_proposals WHERE owner = $1 AND agent_id = $2 AND from_task = $3 AND kind = 'skill' AND state = 'pending'", [row.requester, row.via.slice(6), row.id]) : null;
         const spans = await trace.spansFor(s, row.id);
         const followProblem = typeof req.query.follow === 'string' ? (FOLLOW_ERROR[req.query.follow] || 'That follow-up could not start. Try again in a moment.') : null;
         const planEvent = [...events].reverse().find((e) => e.kind === 'output' && e.step === 'plan' && taskEvents.plan(e.text));
@@ -1111,6 +1113,7 @@ ${assumeProblem ? notice(assumeProblem, 'warn') : ''}
 ${forkProblem ? notice(forkProblem, 'warn') : ''}
 ${question ? questionCard(row, question) : ''}
 ${outcome(t, row, { acting: actingCard })}
+${skillDraft ? require('./skill-draft-card').card(row.via.slice(6), skillDraft) : ''}
 ${!shared && t.state === 'succeeded' ? benchBlock(row, offer) : ''}
 ${!shared && t.state === 'succeeded' ? followBlock(row, follows, followProblem) : ''}
 ${!shared ? savedStepsBlock(row, saved, spans) : ''}

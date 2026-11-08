@@ -1,0 +1,11 @@
+.sk-draft { margin: 1.25rem 0; padding: 1.25rem; border: 1px solid var(--border, #8886); border-radius: 1rem; background: var(--surface, transparent); }
+.sk-draft h2 { margin: 0 0 .4rem; font-size: 1.15rem; }
+.sk-draft .pa-hint, .sk-draft .pa-note-meta { color: var(--muted, #777); font-size: .9rem; }
+.sk-draft form { display: grid; gap: .85rem; margin-top: 1rem; }
+.sk-draft label { display: grid; gap: .3rem; font-size: .92rem; }
+.sk-draft input:not([type="checkbox"]), .sk-draft textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border, #8888); border-radius: .55rem; padding: .55rem .7rem; background: var(--surface, transparent); color: inherit; font: inherit; }
+.sk-draft textarea { resize: vertical; line-height: 1.45; }
+.sk-draft label:has(input[type="checkbox"]) { display: flex; align-items: start; gap: .5rem; }
+.sk-draft .pa-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0; }
+.sk-draft button { border: 1px solid var(--border, #8888); border-radius: .55rem; padding: .5rem .85rem; background: var(--surface, transparent); color: inherit; cursor: pointer; font: inherit; }
+.sk-draft button.pa-primary { background: var(--accent, #3759c4); border-color: transparent; color: #fff; }
