@@ -63,7 +63,8 @@ function runTarget(a) {
 function routineTarget(a) {
     const what = raw(a.task) || raw(a.request);
     const when = raw(a.cron) ? `cron ${word(a.cron)}${raw(a.timezone) ? ` ${word(a.timezone)}` : ''}`
-        : (a.event && raw(a.event.pattern) ? `when ${word(a.event.pattern)}` : '');
+        : (a.event && raw(a.event.pattern) ? `when ${word(a.event.pattern)}`
+            : (a.mention && Array.isArray(a.mention.phrases) ? `mention ${JSON.stringify(a.mention.phrases)} ${word(a.mention.match || 'any')}` : ''));
     return what && when ? exactTarget(`${JSON.stringify(what)} ${when}`) : null;
 }
 /** The target of a coding task in one repository (the engine's own Codes gate uses it too). */
@@ -236,7 +237,8 @@ function stepFor(name, input) {
             const what = text(a.task || a.request, 160);
             const goal = a.goal && typeof a.goal === 'object' && a.goal.done_test ? text(a.goal.done_test, 200) : null;
             const when = a.cron ? `${text(a.cron, 40)}${a.timezone ? `, ${text(a.timezone, 40)}` : ''}`
-                : (a.event && a.event.pattern ? `when ${text(a.event.pattern, 80)} happens` : '');
+                : (a.event && a.event.pattern ? `when ${text(a.event.pattern, 80)} happens`
+                    : (a.mention && Array.isArray(a.mention.phrases) ? `when you mention ${a.mention.phrases.map((p) => text(p, 80)).join(a.mention.match === 'all' ? ' and ' : ' or ')}` : ''));
             return {
                 act: 'act',
                 kind: 'routine',
@@ -245,7 +247,7 @@ function stepFor(name, input) {
                     : `Set up a task that repeats${when ? ` (${when})` : ''}: ${quoted(what, 160) || 'the one you asked for'}`,
                 // What repeats and when, both: allowing a schedule must not allow whatever task rides on it.
                 target: routineTarget(a),
-                payload: safeInput({ request: a.request, task: a.task, cron: a.cron, timezone: a.timezone, event: a.event, agent_id: a.agent_id, goal: a.goal, notify: a.notify }),
+                payload: safeInput({ request: a.request, task: a.task, cron: a.cron, timezone: a.timezone, event: a.event, mention: a.mention, words: a.words, expires_at: a.expires_at, agent_id: a.agent_id, goal: a.goal, notify: a.notify }),
             };
         }
 

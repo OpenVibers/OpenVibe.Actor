@@ -45,7 +45,7 @@ const TABLES = [
     // The triggers they made in a conversation (plan §12 A-4): the schedule or event source, the agent and task,
     // and the card's last result. owner is the bare usr_… subject. Their runs hang on it and go with a cascade.
     { table: 'actor_triggers', subject: 'owner', value: (usr) => usr, file: 'triggers.json',
-        columns: ['id', 'owner', 'agent_id', 'task', 'kind', 'schedule', 'event', 'timezone', 'words', 'level', 'state', 'paused_reason', 'failures', 'watch_id', 'turn_task_id', 'last_task_id', 'last_state', 'last_run_at', 'created_at', 'updated_at'] },
+        columns: ['id', 'owner', 'agent_id', 'task', 'kind', 'schedule', 'event', 'mention', 'fires', 'expires_at', 'last_fired_in', 'timezone', 'words', 'level', 'state', 'paused_reason', 'failures', 'watch_id', 'turn_task_id', 'last_task_id', 'last_state', 'last_run_at', 'created_at', 'updated_at'] },
     // The tree of delegated work (plan §12 A-2): one row per hand-off, with the agent, task, level and budget
     // state. Before tasks, so the rows are counted before a task's cascade could take them.
     { table: 'actor_assignments', subject: 'owner', value: (usr) => `user:${usr}`, file: 'assignments.json',
@@ -212,7 +212,9 @@ async function exportConnectionTools(db, subject) {
 }
 
 async function exportExtra(db, subject) {
-    return [...(await exportFiles(db, subject)), ...(await exportSpans(db, subject)), ...(await exportCheckpoints(db, subject)), ...(await exportConnectionTools(db, subject))];
+    const mentionFirings = await db.many('SELECT f.trigger_id, f.conversation, f.turn_task_id, f.task_id, f.fired_at FROM actor_mention_firings f JOIN actor_triggers t ON t.id = f.trigger_id WHERE t.owner = $1 ORDER BY f.fired_at DESC', [subject]);
+    return [...(await exportFiles(db, subject)), ...(await exportSpans(db, subject)), ...(await exportCheckpoints(db, subject)), ...(await exportConnectionTools(db, subject)),
+        ...(mentionFirings.length ? [{ name: 'mention-firings.json', content: mentionFirings }] : [])];
 }
 
 /** The account-data handle for Actor's store (server/db.js createStore). */

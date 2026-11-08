@@ -552,6 +552,10 @@ function createApi(ctx) {
             return problem(req, res, out.status, out.code, out.detail);
         }
         if (out.status === 201) res.set('Location', `/api/v1/tasks/${out.task.id}`);
+        if (out.status === 201 && req.principal.kind === 'user' && !out.task.via && triggers && triggers.onMessage) {
+            await triggers.onMessage({ owner: triggerOwner(req), agentId: out.task.agent_id, text: out.task.task,
+                conversation: `chat:${out.task.id}`, turnTaskId: out.task.id, place: `/chat/${out.task.id}` });
+        }
         // The signing secret, to its creator only, in this answer (and an idempotent repeat of it) and never again.
         return res.status(out.status).json({ ...(await wireTask(out.task)), ...(out.task.webhook_secret ? { webhook_secret: out.task.webhook_secret } : {}) });
     });
@@ -786,10 +790,17 @@ function createApi(ctx) {
     });
     r.post('/triggers', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), personOnly, async (req, res) => {
         const b = req.body || {};
+        const turnTaskId = TASK_ID.test(String(b.turn_task_id || '')) ? b.turn_task_id : null;
+        if (turnTaskId) {
+            const turn = await store.getTask(s, turnTaskId);
+            if (!turn || turn.requester !== req.principal.requester) return problem(req, res, 404, 'actor.task.not_found', 'That conversation is not yours.');
+        }
         const out = await triggers.create({
             owner: triggerOwner(req), agentId: b.agent_id, task: b.task, kind: b.kind,
             cron: b.cron, timezone: b.timezone, event: b.event, goal: b.goal,
-            level: 'ask', turnTaskId: TASK_ID.test(String(b.turn_task_id || '')) ? b.turn_task_id : null,
+            mention: b.mention || (b.when && b.when.mention), words: b.words || (b.when && b.when.words),
+            fires: b.fires, expiresAt: b.expires_at,
+            level: 'ask', turnTaskId,
             personToken: watchToken(req),
             answerInChat: b.answer_in_chat !== false, notify: b.notify === true,
         });

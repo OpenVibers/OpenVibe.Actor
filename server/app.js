@@ -165,7 +165,7 @@ async function createApp(opts = {}) {
     // An agent answers the mail sent to its own address (track HO6): the consumer below takes the event, the engine
     // reports each run's end back here, and the approvals decide() asks it to send an approved draft.
     const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers, skillRun, media, tips };
-    ctx.agentMail = opts.agentMail || createAgentMail({ config, s, engine, webhooks, notifier, log, mailFetch: opts.mailFetch || null, mailTokens: opts.mailTokens || null });
+    ctx.agentMail = opts.agentMail || createAgentMail({ config, s, engine, webhooks, notifier, triggers, log, mailFetch: opts.mailFetch || null, mailTokens: opts.mailTokens || null });
     engine.setMailReplies((task) => ctx.agentMail.answered(task));
     // The skills registry (plan HO2, ADR-058): OpenVibe's own skills are documents in the repository (skills/), and
     // each one is scanned before it is offered. The seed publishes them as listings of publisher kind 'openvibe'.
