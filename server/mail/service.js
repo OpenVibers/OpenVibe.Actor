@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * An agent answers the mail sent to its own address (track HO6, channels, step 2 — Actor's half).
+ * An agent answers mail sent to an address bound to it (HO6 and HO14).
  *
  * Mail publishes mail.agent_inbox.received for an inbox whose answering switch the person turned on. This module
  * takes that event and, for one letter:
  *
  *   1. decides whether to start anything at all: the person's switch (off by default), the two hourly windows the
  *      brief names (20 letters per inbox, 5 per sender), and that the agent still exists and is theirs;
- *   2. runs THAT agent for its owner, with the letter as INPUT DATA under the data note (server/mail/prompt.js): the
+ *   2. runs the bound agent for its owner, with the letter as INPUT DATA under the data note (server/mail/prompt.js): the
  *      agent's own instructions and level apply, and nothing the letter says can change either;
  *   3. turns the answer into a reply. A reply to one of the owner's own openvibe.email addresses is sent directly
  *      (Mail delivers it locally). A reply to anyone else is an HO1 approval of kind "send", with the draft shown:
@@ -24,6 +24,7 @@ const store = require('./store');
 const approvals = require('../agents/approvals');
 const contacts = require('../agents/contacts');
 const personal = require('../agents/personal');
+const bindings = require('../agents/channel-bindings');
 
 const PER_INBOX_PER_HOUR = 20;
 const PER_SENDER_PER_HOUR = 5;
@@ -127,15 +128,23 @@ function createAgentMail(ctx) {
         // its own copy, because the event can arrive after the person turned it off.
         const row = await store.getInbox({ s, owner, inboxId: letter.inboxId });
         if (row && row.enabled === false) return 'ignored:switched_off';
+        if (row && row.address && !row.address.startsWith(`${letter.agentName}.`)) return 'ignored:no_agent';
 
-        const agent = await agentOf(owner, letter.agentName);
-        if (!agent) return 'ignored:no_agent';
+        // The address names Mail's inbox, not necessarily the agent now receiving it.
+        const existingBinding = await bindings.get(s, 'mail', letter.inboxId);
+        if (existingBinding && existingBinding.label && !existingBinding.label.startsWith(`${letter.agentName}.`)) return 'ignored:no_agent';
+        const original = await agentOf(owner, letter.agentName);
+        const binding = await bindings.ensure(s, { kind: 'mail', accountId: letter.inboxId, owner,
+            label: letter.inbox, agentId: original && original.id });
+        if (!binding || binding.owner !== owner || !binding.agent_id) return 'ignored:unbound';
+        const agent = await personal.get(s, owner, binding.agent_id);
+        if (!agent || agent.status !== 'active') return 'ignored:no_agent';
         const agentId = agent.id;
 
         // One row per letter: the insert is the test, so a redelivery makes no second run.
-        const threadKey = await store.threadKeyFor({ s, owner, inboxId: letter.inboxId, chain: [], messageId: letter.messageId });
+        const threadKey = await store.threadKeyFor({ s, owner, inboxId: letter.inboxId, agentId, chain: [], messageId: letter.messageId });
         const claimed = await store.claimRun({
-            s, owner, inboxId: letter.inboxId, agentId, messageId: letter.messageId,
+            s, owner, inboxId: letter.inboxId, agentId, mailAgentName: letter.agentName, messageId: letter.messageId,
             threadKey, peer: letter.from, subject: letter.subject,
         });
         if (!claimed) return 'duplicate';
@@ -165,7 +174,7 @@ function createAgentMail(ctx) {
         }
 
         const thread = await store.threadKeyFor({
-            s, owner, inboxId: letter.inboxId,
+            s, owner, inboxId: letter.inboxId, agentId,
             chain: Array.isArray(full.references) ? full.references : [],
             messageId: full.message_id, inReplyTo: full.in_reply_to || null,
         }).catch(() => threadKey);
@@ -226,7 +235,7 @@ function createAgentMail(ctx) {
         const owner = run.owner;
         const person = subjectOf(owner);
         const agentRow = await contacts.get(s, owner, run.agent_id);
-        const agentName = agentRow ? slugOf(agentRow.name) : null;
+        const agentName = run.mail_agent_name || (agentRow ? slugOf(agentRow.name) : null);
         if (!agentName) return store.settle({ s, messageId: run.message_id, state: 'failed', reason: 'the agent has no mail address' });
 
         // To one of the owner's own addresses: send it, no approval needed (it never leaves the host).
@@ -315,6 +324,7 @@ function createAgentMail(ctx) {
         const out = await mail.getAnswering({ person, agentId: slug });
         const data = out.ok && out.data ? out.data : null;
         await store.setEnabled({ s, owner, inboxId: inbox.id, agentId: agentRow.id, address: inbox.address || (data && data.address) || '', enabled: Boolean(data && data.enabled) }).catch(() => null);
+        await bindings.ensure(s, { kind: 'mail', accountId: inbox.id, owner, label: inbox.address || '', agentId: agentRow.id });
         return {
             address: (data && data.address) || inbox.address || null,
             enabled: Boolean(data && data.enabled),
@@ -334,6 +344,7 @@ function createAgentMail(ctx) {
         const out = await mail.setAnswering({ person, agentId: slug, enabled });
         if (!out.ok || !out.data) return { error: String(out.error || 'Mail did not answer') };
         await store.setEnabled({ s, owner, inboxId: inbox.id, agentId: agentRow.id, address: out.data.address || '', enabled: Boolean(out.data.enabled) }).catch(() => null);
+        await bindings.ensure(s, { kind: 'mail', accountId: inbox.id, owner, label: out.data.address || '', agentId: agentRow.id });
         return { enabled: Boolean(out.data.enabled), address: out.data.address || null };
     }
 

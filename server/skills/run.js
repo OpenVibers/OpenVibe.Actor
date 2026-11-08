@@ -5,7 +5,7 @@
  *
  * A skill's code never runs on Actor's server. This module submits one Run job AS THE PERSON — Actor's service token
  * (audience openvibe.run), `X-OV-Subject`, and the person's `X-OV-Project` (project delegation, ADR-003 amendment
- * 2026-10-12) — and, if a Node takes it, waits for the result:
+ * 2026-10-12) — and, if a Link takes it, waits for the result:
  *
  *   class: function, artifact openvibe-skill-runner@1.0.0,
  *   args: { tool, entry, input }, inputs: the listing's { media_id, sha256 } pins,

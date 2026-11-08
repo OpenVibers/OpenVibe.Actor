@@ -141,7 +141,7 @@ ${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${pages}/
     function previewGrid() {
         const cards = [
             ['Now', 'Every task your agents are running: what each has done so far and what it cost. The page refreshes while something runs.', null, true],
-            ['Waiting for you', 'What an agent asks before it acts. Approve or decline here, in the Node\'s tray, or from a notification.', null, false],
+            ['Waiting for you', 'What an agent asks before it acts. Approve or decline here, in Link\'s tray, or from a notification.', null, false],
             ['Today', `How many of your ${String(tier.tasksPerDay)} free tasks a day you have used and what they cost, with the last 7 days.`, null, false],
             ['Your agents', 'Tasks you set up once, with a memory and a schedule.', ['/agents', 'See the agents'], false],
             ['Your computers', 'Your own machines running jobs for your agents.', [`${pages}/machines`, 'Machines on OpenVibe.Bot'], false],
@@ -189,7 +189,7 @@ ${commandBox(prefill(req), today)}
 ${live.length ? html`<ul class="cn-tasks">${live.map(taskRow)}</ul><p class="cn-note">This page refreshes every 10 seconds while something runs.</p>` : html`<p class="cn-empty">Nothing is running.</p>`}</section>
 <section class="cn-card${nWaiting ? ' cn-attn' : ''}" aria-labelledby="cn-waiting"><h2 id="cn-waiting">Waiting for you${nWaiting ? html` <span class="cn-count">${String(nWaiting)}</span>` : ''}</h2>
 ${waiting.length ? html`<ul class="cn-list">${waiting.slice(0, 4).map((a) => html`<li><a href="/me/approvals/${a.id}"><b>${clip(a.summary, 80)}</b></a><span class="cn-meta">Asked ${time(a.created_at)}</span></li>`)}</ul>` : ''}
-${onMachines ? html`<p class="cn-note">${String(onMachines)} on your computers: answer them there, in the Node's tray, with a notification's Approve button, or with <code>openvibe-node approvals</code>.</p>` : ''}
+${onMachines ? html`<p class="cn-note">${String(onMachines)} on your computers: answer them there, in the Link's tray, with a notification's Approve button, or with <code>openvibe-node approvals</code>.</p>` : ''}
 ${nWaiting ? '' : html`<p class="cn-empty">Nothing waits for you.</p>`}
 <p class="cn-more"><a href="/me/approvals">All approvals</a></p></section>
 <section class="cn-card" aria-labelledby="cn-today"><h2 id="cn-today">Today</h2>

@@ -4,7 +4,7 @@
  * OpenVibe.Media for Actor (plan HO8, ADR-060): where a sandbox skill's code bytes live. Each code resource is one
  * PRIVATE object under Actor's own tenant (`config.skills.mediaTenant`, normally Actor's client id). The registry
  * hashes the exact bytes it scans and uploads those bytes with that hash; the listing then pins `{ media_id, sha256 }`,
- * so a Run job names the object and the digest and the Node refuses anything that changed.
+ * so a Run job names the object and the digest and the Link refuses anything that changed.
  *
  * There is no public URL here: a skill's code is not served to anybody. `put()` answers `{ id, sha256 }` or
  * `{ error }`; `enabled` is false without Media's URL or Actor's client secret, and publishing a sandbox skill then

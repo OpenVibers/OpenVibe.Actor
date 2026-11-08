@@ -9,7 +9,7 @@
  * one to five TOOLS, each naming the resource its `entry` runs, its `args` (a JSON Schema subset), the network it may
  * reach (`net`: deny by default, openvibe-only, public) and its limits (wall_ms at most 30 s; mem_bytes at most
  * 256 MiB). The code never runs on an OpenVibe server: Actor stores the scanned bytes in Media and submits a Run job
- * to a Node that declared the skill runner (ADR-060).
+ * to a Link that declared the skill runner (ADR-060).
  *
  * A skill GRANTS NOTHING in either major: `requires` DECLARES the HO1 kinds it may ask for, the apps and hosts it
  * touches, and the agent's level and approvals still decide every step.

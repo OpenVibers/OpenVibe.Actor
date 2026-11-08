@@ -7,7 +7,7 @@
  *   auto            Actor decides, as today (the operator's tiers and keys)
  *   openvibe        OpenVibe's own keys, through OpenVibe.AI (the gateway: its routing, quota and cost)
  *   own:<provider>  the person's OWN key for that provider, sealed in OpenVibe.AI's vault
- *   own:node        a model on the person's own computer (OpenVibe.AI's "Your computer": their OpenVibe Node, through
+ *   own:node        a model on the person's own computer (OpenVibe.AI's "Your computer": their OpenVibe Link, through
  *                   OpenVibe.Bot; no key, nothing billed), used only after they allow Actor there
  *
  * The provider is one of the six OpenVibe.AI knows a person's key for. The model id is optional: without one,

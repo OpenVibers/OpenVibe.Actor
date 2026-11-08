@@ -1,0 +1,79 @@
+{
+  "path": {
+    "post": {
+      "operationId": "post_api_v1_tasks_id_view_ticket",
+      "summary": "Mint a 15-minute reusable read-only task embed ticket.",
+      "description": "**actor.task.view_ticket** (public): Mint a 15-minute reusable read-only task embed ticket. Only the person's own Bearer token and their own task are accepted; session cookies, service and delegated tokens cannot mint. Another person's task returns 404. Tickets work only on /embed/task/:id and its events/still reads, never on a write route. Wrong-task or expired tickets return 403. Stored only as SHA-256 hashes, bound to task and requester.",
+      "tags": [
+        "actor.task"
+      ],
+      "x-openvibe-capabilities": [
+        "actor.task.view_ticket"
+      ],
+      "x-openvibe-visibility": [
+        "public"
+      ],
+      "x-openvibe-quota-class": "actor-read",
+      "security": [
+        {
+          "openvibeToken": [
+            "actor.task.view_ticket"
+          ]
+        }
+      ],
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "responses": {
+        "2XX": {
+          "description": "Success",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/actor.task-view-ticket.v1"
+              }
+            }
+          }
+        },
+        "default": {
+          "description": "An error (RFC 9457 problem details)",
+          "content": {
+            "application/problem+json": {
+              "schema": {
+                "$ref": "#/components/schemas/errors.problem.v1"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "schema": {
+    "title": "ActorTaskViewTicket",
+    "description": "actor.task-view-ticket@1: a reusable read-only view of one task for its owner, valid for 15 minutes. The URL contains a bearer credential; never log it or forward it in a referrer.",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "url",
+      "expires_at"
+    ],
+    "properties": {
+      "url": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^https?://[^/?#]+/embed/task/[^/?#]+\\?t=tvt_[A-Za-z0-9_-]{43}$"
+      },
+      "expires_at": {
+        "type": "string",
+        "format": "date-time"
+      }
+    }
+  }
+}
