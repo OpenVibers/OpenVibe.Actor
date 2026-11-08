@@ -39,6 +39,7 @@ const memory = require('../memory');
 const taskNotices = require('../notify/task-notices');
 const confidence = require('../runtime/brain/confidence');
 const learn = require('../runtime/brain/learn');
+const canvases = require('../canvases');
 
 const MAX_ATTEMPTS = 2;
 // The one loop's agent id on the event stream and in the result (the old runtime's id, kept for readers).
@@ -159,31 +160,46 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         stream.publish(id, saved);
         return saved;
     }
+    /**
+     * A task's state, and everything that hangs off it.
+     *
+     * The task's own row is the signal everyone waits for: the Dock, the chat, the person's notification.
+     * So everything a reader of that signal needs is written, and awaited, first — the event, the
+     * assignment tree, the trigger's card and its answer in the thread, the notification — and the row
+     * flips last. The PostgreSQL pool hands out its connections as they come, so a task that read
+     * "succeeded" while its trigger's card still said "0 runs" would be a state that never existed;
+     * PGlite, which keeps every statement in order, would never have shown it.
+     */
     async function setState(id, state, { agentForEvent, ...patch } = {}) {
-        const row = await store.updateTask(s, id, { state, ...patch });
         const ended = ['succeeded', 'failed', 'cancelled'].includes(state);
-        await emit(id, { kind: ended ? 'end' : 'state', state, ...(agentForEvent ? { agent: agentForEvent } : {}) });
-        // The assignment tree follows the task it runs (plan §12 A-2), and its root's spend is written with it.
-        if (row) await assignments.syncTaskState(s, row).catch((err) => log.warn && log.warn('[Actor] assignment state:', id, (err && err.message) || err));
-        // A trigger's card follows its run: a failure streak grows, five in a row pause it, a success clears it.
-        if (row && triggers) await triggers.taskState(row).catch((err) => log.warn && log.warn('[Actor] trigger state:', id, (err && err.message) || err));
+        // The row as it will be once this state is written: the trigger's card and the notification read it.
+        const before = await store.getTask(s, id);
+        const row = before ? { ...before, ...patch, state } : null;
+        if (row) {
+            await emit(id, { kind: ended ? 'end' : 'state', state, ...(agentForEvent ? { agent: agentForEvent } : {}) });
+            // The assignment tree follows the task it runs (plan §12 A-2), and its root's spend is written with it.
+            await assignments.syncTaskState(s, row).catch((err) => log.warn && log.warn('[Actor] assignment state:', id, (err && err.message) || err));
+            // A trigger's card follows its run: a failure streak grows, five in a row pause it, a success clears it.
+            if (triggers) await triggers.taskState(row).catch((err) => log.warn && log.warn('[Actor] trigger state:', id, (err && err.message) || err));
+            // "Tell me when it's done" (stage V2-6): done or failed, once per task. Cancelled is the person's own action.
+            // A routine's run is the exception (plan HO4): its answer already goes into the conversation that made the
+            // trigger, so the person is told through notifications only when the routine asked for it.
+            if (ended && (state === 'succeeded' || state === 'failed')) {
+                const routine = triggers && typeof triggers.tellsPerson === 'function' ? await triggers.tellsPerson(row).catch(() => null) : null;
+                if (routine !== false) await tellPerson(row, state);
+            }
+        }
+        const saved = await store.updateTask(s, id, { state, ...patch });
         if (ended) runTokens.drop(id);
         if (ended) stream.end(id);
-        // "Tell me when it's done" (stage V2-6): done or failed, once per task. Cancelled is the person's own action.
-        // A routine's run is the exception (plan HO4): its answer already goes into the conversation that made the
-        // trigger, so the person is told through notifications only when the routine asked for it.
-        if (ended && row && (state === 'succeeded' || state === 'failed')) {
-            const routine = triggers && typeof triggers.tellsPerson === 'function' ? await triggers.tellsPerson(row).catch(() => null) : null;
-            if (routine !== false) await tellPerson(row, state);
-        }
         // Webhooks that asked for this state hear it; a delivery never holds the task up or fails it.
-        if (webhooks && row && row.webhooks) {
+        if (webhooks && saved && saved.webhooks) {
             try {
                 await webhooks.enqueue(id, state);
                 if (ended) await webhooks.forgetSecretIfDone(id);
             } catch (err) { log.warn('[Actor] webhook enqueue failed:', id, err && err.message); }
         }
-        return row;
+        return saved;
     }
 
     /**
@@ -321,8 +337,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 kind: 'output', step: 'question', agent: LOOP_AGENT, text: clean, options: list,
                 ...(questionKind === 'acting' ? { question_kind: 'acting', tool: tool || null, input: input || null } : {}),
             });
-            await setState(id, 'needs_you');
+            // The person is told before the task says it needs them: a reader that sees the task waiting
+            // for an answer must find the notification already sent, the same way the run's own end is
+            // published last (see setState).
             await tellPerson(row, 'needs_you', { what: `${questionKind === 'acting' ? 'choose for an interrupted action' : 'answer'}: ${clean}`, url: `${config.baseUrl}/tasks/${id}` });
+            await setState(id, 'needs_you');
             waitForPerson(15 * 60_000);
             const answer = await waiting;
             asking.delete(id);
@@ -474,10 +493,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     if (subject) choice = { ...(choice || {}), subject };
                 }
                 try {
+                    // The conversation so far, and any canvas tick the person made since the last turn (HO9): a
+                    // tick starts no turn by itself, so the next run is told which item changed.
+                    const context = row.parent_id && row.fork_of_step == null && !resume ? await store.followContext(s, row) : [];
+                    if (!resume && !fork) context.push(...await canvases.takeNoticesForTask(s, row));
                     out = await withChoice(models, choice, async () => loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
                         // A fork carries its parent's state in the checkpoint, not as a follow-up conversation.
-                        context: row.parent_id && row.fork_of_step == null && !resume ? await store.followContext(s, row) : [],
+                        context,
                         emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
                         // The answer as it is written (plan L55 C2): to the readers that asked, never stored.
                         // The loop streams a model call only while such a reader is there (wanted).

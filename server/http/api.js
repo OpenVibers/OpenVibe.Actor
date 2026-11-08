@@ -45,6 +45,7 @@ const timeline = require('../agents/timeline');
 const assignments = require('../agents/assignments');
 const modelPrefs = require('../runtime/model-prefs');
 const driving = require('../agents/driving');
+const canvases = require('../canvases');
 const skills = require('../skills');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -661,6 +662,72 @@ function createApi(ctx) {
         for (const taskId of taskIds) await engine.cancel(taskId, p.requester);
         res.json(result);
     });
+
+    // ── An agent's live panel (plan HO9, actor.canvas@1) ─────
+    // The person's own canvas for one conversation. Reading is actor.task.read; drawing or ticking is the person's
+    // action in their thread, so it takes actor.task.create. Another person's canvas is the same 404 as one that does
+    // not exist. A page may post a plain form (same-origin); JSON callers get JSON.
+    const canvasWantsJson = (req) => String(req.get('accept') || '').includes('application/json') || String(req.get('content-type') || '').includes('application/json');
+    r.get('/me/canvases', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
+        const requester = req.principal.requester;
+        if (req.query.thread != null) {
+            const thread = String(req.query.thread);
+            if (!TASK_ID.test(thread)) return problem(req, res, 400, 'actor.canvas.invalid', 'thread must be a tsk_… conversation id.');
+            const row = await canvases.forThread(s, thread);
+            return res.json({ canvases: row && row.owner === requester ? [canvases.docOf(row)] : [] });
+        }
+        const rows = await canvases.list(s, requester);
+        res.json({ canvases: rows.map(canvases.docOf) });
+    });
+    r.get('/me/canvases/:id', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
+        const row = await canvases.get(s, req.principal.requester, req.params.id);
+        if (!row) return problem(req, res, 404, 'actor.canvas.not_found', 'No such canvas.');
+        res.json(canvases.docOf(row));
+    });
+    // A canvas never acts. "ask" is the button's label, posted as the person's own message: a normal turn from the
+    // newest turn of the conversation, with the agent's level and approvals exactly as typing it would. "check" is
+    // the person's own tick: the document's item flips, its version grows, and the next turn is told which item.
+    r.post('/me/canvases/:id/events', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), personOnly,
+        express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+            const wantsJson = canvasWantsJson(req);
+            const row = await canvases.get(s, req.principal.requester, req.params.id);
+            if (!row) return wantsJson ? problem(req, res, 404, 'actor.canvas.not_found', 'No such canvas.') : res.status(404).type('text/plain').send('No such canvas.');
+            const body = req.body || {};
+            const kind = String(body.kind || '');
+            if (kind === 'ask') {
+                const label = String(body.label == null ? '' : body.label).trim().slice(0, 2000);
+                if (!label) return wantsJson ? problem(req, res, 422, 'actor.canvas.invalid', 'A button needs a label to send.') : res.status(422).type('text/plain').send('A button needs a label to send.');
+                const latest = await canvases.latestForThread(s, row.thread);
+                if (!latest) return wantsJson ? problem(req, res, 409, 'actor.canvas.invalid', 'That conversation is not here any more.') : res.status(409).type('text/plain').send('That conversation is not here any more.');
+                if (store.OPEN.includes(latest.state) || latest.state === 'needs_you') {
+                    return wantsJson ? problem(req, res, 409, 'actor.canvas.invalid', 'Actor is still working on the last message. Wait for it, or stop it.') : res.status(409).type('text/plain').send('Actor is still working on the last message.');
+                }
+                const out = await createTask({
+                    s, config, engine, principal: { requester: req.principal.requester, project: null },
+                    body: { task: label, mode: latest.mode }, parentId: latest.id,
+                    personToken: watchToken(req), timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null,
+                });
+                if (out.code) {
+                    if (!wantsJson) return res.status(out.status === 503 || out.status === 429 ? out.status : 422).type('text/plain').send(out.detail || 'That could not start.');
+                    return problem(req, res, out.status === 503 || out.status === 429 ? out.status : 422, out.code, out.detail || 'That could not start.');
+                }
+                const made = await store.getTask(s, out.task.id);
+                if (!wantsJson) return res.redirect(303, `/chat/${made.id}#t-${made.id}`);
+                return res.status(201).json({ ok: true, task: { id: made.id, url: `/chat/${made.id}` } });
+            }
+            if (kind === 'check') {
+                const done = body.done === true || body.done === 'true' || body.done === '1' || body.done === 'on';
+                const out = await canvases.check(s, req.principal.requester, row.id, { blockId: body.block_id, itemId: body.item_id, done });
+                if (out.error) {
+                    return wantsJson ? problem(req, res, out.error.status || 422, 'actor.canvas.invalid', out.error.detail) : res.status(out.error.status || 422).type('text/plain').send(out.error.detail);
+                }
+                if (!wantsJson) return res.redirect(303, `/chat/${row.thread}`);
+                return res.json({ ok: true, canvas: out.doc });
+            }
+            return wantsJson
+                ? problem(req, res, 422, 'actor.canvas.invalid', 'kind must be "ask" (a button label) or "check" (block_id, item_id, done).')
+                : res.status(422).type('text/plain').send('kind must be "ask" or "check".');
+        });
 
     // ── Triggers made in a conversation (plan §12 A-4) ───────
     // The Watch subscription is the runner; these routes are the card's own moves. Everything is the person's:

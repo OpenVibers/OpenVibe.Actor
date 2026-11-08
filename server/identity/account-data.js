@@ -50,6 +50,9 @@ const TABLES = [
     // state. Before tasks, so the rows are counted before a task's cascade could take them.
     { table: 'actor_assignments', subject: 'owner', value: (usr) => `user:${usr}`, file: 'assignments.json',
         columns: ['id', 'owner', 'root', 'parent', 'depth', 'origin', 'mode', 'reply', 'agent_id', 'task_id', 'level', 'effective_level', 'budget_usd', 'budget_spent_usd', 'state', 'created_at', 'updated_at', 'started_at', 'ended_at'] },
+    // The agent's live panel beside a conversation (plan HO9): the document it drew, the version and the ticks
+    // waiting for the next turn. The thread is the person's own first turn; the canvas goes with them.
+    { table: 'actor_canvases', subject: 'owner', value: (usr) => `user:${usr}`, file: 'canvases.json', columns: ['id', 'owner', 'agent_id', 'thread', 'document', 'version', 'notices', 'updated_at'] },
     // Every column but webhook_secret (a task's signing secret is a credential, not the person's data).
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',
