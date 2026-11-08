@@ -128,3 +128,10 @@ img.ac-face { background: var(--bg-card, #131c2e); }
 .pa-jump a:hover, .pa-jump a:focus-visible { color: var(--text-primary, #e6edf7); background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent); }
 .pa-panel[id] { scroll-margin-top: calc(var(--ovnav-real-h, 56px) + 64px); }
 .pa-panel .pa-hint { max-width: 62ch; }
+
+/* The four levels two by two (a phone included): the radio beside the title, the line under both, smaller. */
+.pa-panel .ac-levels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pa-panel .ac-lv { grid-template-columns: auto minmax(0, 1fr); padding: .6rem .7rem; }
+.pa-panel .ac-lv input { grid-row: auto; margin: .15rem 0 0; }
+.pa-panel .ac-lv-line { grid-column: 1 / -1; font-size: 12.5px; line-height: 1.35; }
+@media (max-width: 22rem) { .pa-panel .ac-levels { grid-template-columns: 1fr; } }

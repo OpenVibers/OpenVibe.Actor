@@ -464,7 +464,7 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
 <header class="pa-head ac-sheet-head">${ui.face(contact, 64)}<div><h1>${a.name}</h1><p class="ac-sheet-uses">${ui.usesLine(contact)}</p>
 <p class="pa-lede">${ui.levelChip(contact.level)} <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></div></header>
 ${a.last_skip_reason ? html`<p class="notice" role="status">The last scheduled run was skipped: ${a.last_skip_reason}</p>` : ''}
-<form method="post" action="/me/agents/${a.id}/run" class="pa-runbar"><label class="pa-runbar-in"><span class="sr-only">Anything this run should also consider (optional)</span><textarea name="input" maxlength="8000" rows="1" placeholder="Anything this run should also consider (optional)"></textarea></label><button type="submit" class="pa-btn pa-primary">Run now</button></form>
+<form method="post" action="/me/agents/${a.id}/run" class="pa-runbar"><label class="pa-runbar-in"><span class="sr-only">Anything this run should also consider (optional)</span><textarea name="input" maxlength="8000" rows="1" placeholder="Anything to add? (optional)"></textarea></label><button type="submit" class="pa-btn pa-primary">Run now</button></form>
 <ul class="pa-glance" aria-label="At a glance">
 <li><a href="#runs"><b>${runs.length}${runs.length === 20 ? '+' : ''}</b><span>${runs.length === 1 ? 'run' : 'runs'}</span></a></li>
 <li><a href="#always"><b>${allowRules.length}</b><span>always allowed</span></a></li>
