@@ -289,10 +289,11 @@ ${provenance(a)}${suggestedApps(a)}</section>`;
     const mailPanel = (a, inbox, answered) => {
         const address = inbox ? inbox.address : null;
         const on = Boolean(inbox && inbox.enabled);
+        const bound = Boolean(inbox && inbox.boundTo);
         return html`<section class="pa-panel" id="mail" aria-labelledby="ac-mail-h"><h2 id="ac-mail-h">Its mail address</h2>
 ${address ? html`<p class="pa-mail-address"><code>${address}</code> <button type="button" class="pa-btn pa-copy" data-copy="${address}" aria-label="Copy the address">Copy</button></p>`
         : html`<p class="muted">OpenVibe.Mail is not answering right now, so its address cannot be shown or turned on.</p>`}
-<p class="pa-hint">Mail sent to this address lands in your own mailbox. The agent bound to this address under Where it listens may answer it. Answering is <strong>${on ? 'on' : 'off'}</strong>: ${on ? 'that agent reads the letters and replies.' : 'no agent reads or answers them until you turn this on.'}</p>
+<p class="pa-hint">Mail sent to this address lands in your own mailbox. The agent named under Where it listens may answer it. Answering is <strong>${on ? 'on' : 'off'}</strong>: ${on ? (bound ? 'the bound agent reads the letters and replies.' : 'no agent is bound to answer these letters.') : 'no agent reads or answers them until you turn this on.'}</p>
 ${address ? html`<form method="post" action="/me/agents/${a.id}/mail"><label class="pa-check"><input type="checkbox" name="enabled" value="on" ${on ? 'checked' : ''}> Answer mail sent to this address</label><button type="submit" class="pa-btn pa-primary">${on ? 'Save' : 'Turn answering on'}</button></form>` : ''}
 <p class="pa-hint">A reply to one of your own addresses (your mailbox, a mask, a burner) is sent as it is. A reply to anyone else waits for your yes, in your approvals. OpenVibe Mail cannot send outside OpenVibe yet, so such a reply stays pending there until sending is turned on.</p>
 ${answered.length ? html`<h3 class="pa-sub">The last letters it answered</h3><ul class="pa-notes">${answered.map((m) => html`<li><p class="pa-note-text">${m.subject || '(no subject)'}${m.peer ? html` <span class="muted">from ${m.peer}</span>` : ''}</p><p class="pa-note-meta">${m.reply_state === 'sent' ? 'Answered' : m.reply_state === 'awaiting_person' ? 'Waiting for your yes' : m.reply_state === 'refused' ? 'Not answered' : m.reply_state === 'failed' ? 'Could not answer' : 'Answering'} · ${time(m.created_at)}${m.task_id ? html` · <a href="/tasks/${m.task_id}">the thread</a>` : ''}${m.approval_id ? html` · <a href="/me/approvals/${m.approval_id}">your decision</a>` : ''}${m.reason ? html` · ${m.reason}` : ''}</p></li>`)}</ul>` : html`<p class="muted">No letter answered yet.</p>`}</section>`;
@@ -463,8 +464,9 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
         // answered with the thread each one stayed in.
         const mail = ctx.agentMail ? await ctx.agentMail.statusFor(a.owner, a).catch(() => ({ address: null, enabled: false, inboxId: null, available: false })) : { address: null, enabled: false, inboxId: null, available: false };
         const mailAnswered = await mailStore.answeredByAgent({ s, owner: a.owner, agentId: a.id, limit: 10 });
-        const mailInbox = { address: mail.address, enabled: mail.enabled };
         const channels = await channelSection.load({ s, agent: a, agentMail: ctx.agentMail });
+        const mailBinding = channels.accounts.find(row => row.kind === 'mail' && row.account_id === mail.inboxId);
+        const mailInbox = { address: mail.address, enabled: mail.enabled, boundTo: mailBinding?.agent_id || null };
         page(req, res, a.name, html`<p class="crumbs"><a href="/me/agents">Your agents</a></p>
 <header class="pa-head ac-sheet-head">${ui.face(contact, 64)}<div><h1>${a.name}</h1><p class="ac-sheet-uses">${ui.usesLine(contact)}</p>
 <p class="pa-lede">${ui.levelChip(contact.level)} <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></div></header>

@@ -392,6 +392,8 @@ async function runOf(t, messageId) {
             await ok('an unbound mail account starts no run', async () => {
                 assert.strictEqual(unbound, 'ignored:unbound');
                 assert.strictEqual(await runOf(t, 'm-unbound'), null);
+                const page = await t.get(`/me/agents/${agent.id}`, { as: dana });
+                assert.ok(page.text.includes('no agent is bound to answer these letters'));
             });
         }
     } finally {
