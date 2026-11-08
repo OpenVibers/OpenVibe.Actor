@@ -163,6 +163,56 @@ function scheduleIn(text) {
     return best;
 }
 
+/**
+ * A goal that keeps going (plan HO3): "keep checking the price of X every 30 minutes until it drops
+ * under €120, then tell me". The check that ends it is the clause after "until"; the interval is the
+ * schedule phrase when there is one and every fifteen minutes (Watch's floor) when there is not. A
+ * check that cannot be seen ("until it's done", "until I'm happy") is a question, never a guess.
+ */
+const GOAL_EVERY = '*/15 * * * *';
+/** A done-test must name something a run can see: a number, or a change of state. */
+const CHECKABLE = /\b(pass(?:es|ed)?|fail(?:s|ed)?|green|resolv(?:ed|es)?|fixed|below|above|under|over|less than|more than|at least|at most|cheaper|cheapest|drop(?:s|ped)?|fall(?:s|en)?|rose?|rises?|reach(?:es|ed)?|hit(?:s)?|in stock|sold out|available|publish(?:ed|es)?|approv(?:ed|es)?|repl(?:y|ies|ied)|answer(?:s|ed)?|arriv(?:es|ed)|exceed(?:s|ed)?|match(?:es|ed)?|merge(?:s|d)?|fix(?:ed|es)?|return(?:s|ed)?|starts?|ends?|opens?|closes?)\b/i;
+const TELLING = /[,;]?\s*(?:and\s+|then\s+|so\s+)?(?:please\s+)?(?:tell me|let me know|notify me|message me|text me|ping me|email me|remind me|call me)\b.*$/i;
+/** The sentence itself asks to be told, at its end: "… under €120, then tell me" (not "email me the summary"). */
+const WANTS_TELLING = /(?:^|[,;])\s*(?:and\s+|then\s+|so\s+)?(?:please\s+)?(?:tell me|let me know|notify me|message me|text me|ping me)\b[^.]{0,120}$/i;
+const VERB_FIX = [[/^checking\b/i, 'check'], [/^watching\b/i, 'watch'], [/^monitoring\b/i, 'monitor'], [/^tracking\b/i, 'track'], [/^following\b/i, 'follow'], [/^working on\b/i, 'work on'], [/^looking at\b/i, 'look at'], [/^keeping an eye on\b/i, 'check']];
+
+/** The thing the person keeps checking, when the sentence names it. */
+function objectOf(lead) {
+    const m = String(lead || '').match(/\b(?:check(?:ing)?|watch(?:ing)?|monitor(?:ing)?|track(?:ing)?|follow(?:ing)?|work(?:ing)?\s+on|look(?:ing)?\s+at|keep(?:ing)?\s+an\s+eye\s+on)\s+(.+?)(?:\s+every\b|\s+until\b|\s*$)/i);
+    return m ? clean(m[1]) : null;
+}
+
+/** The sentence's "until …" clause, the check it names and the work before it, or null. */
+function untilIn(text) {
+    const source = clean(text);
+    const m = source.match(/\buntil\b\s+(.+)$/i);
+    if (!m) return null;
+    const lead = clean(source.slice(0, m.index));
+    const clause = clean(m[1].replace(TELLING, '')).replace(/[.;]+$/, '').trim();
+    if (!clause) return { lead, clause: '', ambiguous: true, reason: 'the sentence says "until" but not what ends it' };
+    // "it" in the clause is the thing the sentence names: "check the price of X … until it drops under €120".
+    const object = objectOf(lead);
+    const pronoun = /^it['’]s\b/i.test(clause) ? (object ? `${object} is${clause.slice(4)}` : null)
+        : /^it\b/i.test(clause) ? (object ? `${object}${clause.slice(2)}` : null) : null;
+    const test = pronoun && (CHECKABLE.test(pronoun) || /\d/.test(pronoun)) ? pronoun : clause;
+    if (!(CHECKABLE.test(test) || /\d/.test(test))) {
+        return { lead, clause, ambiguous: true, reason: 'the "until" clause says how it should feel, not what a run can check' };
+    }
+    return { lead, clause: test, test };
+}
+
+/** The work each check does: the sentence's lead, without "keep", its schedule phrase or the goal. */
+function taskFrom(lead, schedule) {
+    let t = clean(lead).replace(/^(?:and|then|please)\s+/i, '').replace(/^keep\s+an\s+eye\s+on\s+/i, 'check ').replace(/^keep\s+/i, '');
+    for (const [re, to] of VERB_FIX) { if (re.test(t)) { t = t.replace(re, to); break; } }
+    if (schedule && schedule.phrase) {
+        const i = t.toLowerCase().indexOf(schedule.phrase.toLowerCase());
+        if (i >= 0) t = clean(`${t.slice(0, i)} ${t.slice(i + schedule.phrase.length)}`);
+    }
+    return t.replace(/\s+(?:every|until)\b.*$/i, '').replace(/[,;:.\s]+$/, '').trim();
+}
+
 /** A Watch event source from "when …", or null. */
 function eventIn(text) {
     const source = clean(text);
@@ -209,6 +259,28 @@ function parseRequest(text, { timezone: knownZone = null, task: givenTask = null
     if (AMBIGUOUS.test(source)) {
         return { status: 'ask', question: 'How often should this run, exactly? For example: every weekday at 9, or every hour.' };
     }
+    // "keep … until …" is a goal that keeps going (plan HO3), not a one-off routine. The check that
+    // ends it is the clause after "until"; a clause no run can see is the one question to ask.
+    const until = untilIn(source);
+    if (until) {
+        const when = scheduleIn(source);
+        const cronExpr = when ? when.cron : GOAL_EVERY;
+        const zone = knownZone || zoneFromText(source);
+        if (!zone) return { status: 'ask', question: `I will check ${when ? when.phrase.replace(/^every\s+/i, 'every ') : 'every 15 minutes'} in which timezone?` };
+        const verdict = cron.validate(cronExpr, zone);
+        if (!verdict.valid) return { status: 'ask', question: `That check interval cannot run: ${verdict.error}. How often should I check?` };
+        if (until.ambiguous) {
+            return { status: 'ask', question: 'How will I know it is done? Say the check in one line, for example "the price is under €120" or "the tests pass".' };
+        }
+        const work = taskFrom(until.lead, when);
+        if (!work) return { status: 'ask', question: 'What should I do on each check, before I test whether it is done?' };
+        return {
+            status: 'ok', kind: 'goal', cron: cronExpr, timezone: zone, task: clean(givenTask || work).slice(0, 8000),
+            goal: { text: clean(source.replace(TELLING, '').slice(0, 500)), done_test: until.test },
+            words: when ? wordsFor(cronExpr, zone) : wordsFor(GOAL_EVERY, zone),
+            tell: WANTS_TELLING.test(source),
+        };
+    }
     const schedule = scheduleIn(source);
     const event = eventIn(source);
     if (schedule && event) {
@@ -236,13 +308,15 @@ function parseRequest(text, { timezone: knownZone = null, task: givenTask = null
         return {
             status: 'ok', kind: 'schedule', cron: schedule.cron, timezone: zone, task,
             words: wordsFor(schedule.cron, zone),
+            tell: WANTS_TELLING.test(source),
         };
     }
     return {
         status: 'ok', kind: 'event', task,
         event: { pattern: event.pattern, filter: event.filter },
         words: event.words,
+        tell: WANTS_TELLING.test(source),
     };
 }
 
-module.exports = { parseRequest, scheduleIn, eventIn, zoneFromText, wordsFor, AMBIGUOUS };
+module.exports = { parseRequest, scheduleIn, eventIn, untilIn, zoneFromText, wordsFor, AMBIGUOUS, GOAL_EVERY, WANTS_TELLING };

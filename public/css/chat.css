@@ -71,6 +71,23 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 .ct-trig-del[open] > summary { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger-text, #f87171) 55%, var(--ovt-line)); }
 .ct-trig-del > p { flex-basis: 100%; margin: 2px 0 0; color: var(--text-secondary, #96a7c2); font-size: 13.5px; }
 .ovt-card-btn.is-danger { background: var(--danger-text, #f87171); color: #1a0505; }
+/* A goal (plan HO3): "Run 4 of at most 12 · not yet: €134", and the goal in the person's own words. */
+.ct-trig.is-done .ct-trig-state { background: color-mix(in srgb, var(--ovt-accent, #f97316) 18%, transparent); color: var(--ovt-accent, #f97316); }
+.ct-trig-goal { font-variant-numeric: tabular-nums; }
+.ct-trig-goal-text { color: var(--text-secondary, #96a7c2); font-size: 13.5px; font-style: italic; overflow-wrap: anywhere; }
+/* The routine's two switches (plan HO4): answer in this chat, and also tell me. */
+.ct-trig-switches { margin-top: 2px; }
+.ct-trig-switches .ovt-card-btn.is-on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ovt-accent, #f97316) 55%, transparent); }
+/* What a routine's run said, posted into its chat under the card (plan HO4). */
+.ct-trig-runs { display: grid; gap: 8px; margin-top: 8px; }
+.ct-trig-run { border-left: 2px solid var(--line, rgba(255,255,255,.12)); padding: 2px 0 2px 12px; display: grid; gap: 4px; }
+.ct-trig-run.is-bad { border-left-color: color-mix(in srgb, var(--warning-text, #fbbf24) 60%, transparent); }
+.ct-trig-run p { margin: 0; }
+.ct-trig-run-h { color: var(--text-secondary, #96a7c2); font-size: 13px; }
+.ct-trig-run-h a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.ct-trig-run-line { color: var(--warning-text, #fbbf24); font-size: 14px; }
+.ct-trig-sources { color: var(--text-secondary, #96a7c2); font-size: 12.5px; overflow-wrap: anywhere; }
+.ct-trig-sources a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 @media (max-width: 480px) { .ct-trig .ovt-card-btn { min-height: 44px; } }
 /* A parked turn (plan A2): what it waits for, until when, and Wake now / Stop waiting. */
 .ct-wait .ct-wait-until { margin: 6px 0 0; color: var(--text-secondary, #96a7c2); font-size: 14px; }
