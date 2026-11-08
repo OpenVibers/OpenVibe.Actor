@@ -8,7 +8,7 @@
   it is validated against the released contract, and a picture outside openvibe.media, a markup block or another
   block the contract does not know is refused with the schema's plain reason and nothing is written. One run may call
   it at most 20 times. The panel lives in `actor_canvases`: one row per conversation (the thread's first turn), with
-  the document, its version and the ticks waiting for the next turn (migration 0043).
+  the document, its version and the ticks waiting for the next turn (migration 0045).
 - **The person's moves, never the canvas's**: a button's label is posted by the API as the person's own message — a
   normal turn from the newest turn of the conversation, at the agent's level and through its approvals, exactly as
   typing it would (nothing else happens). A checklist tick flips that item in the document (version + 1) and starts

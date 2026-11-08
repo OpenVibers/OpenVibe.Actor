@@ -35,7 +35,7 @@
     "Space's builder as a task of the person's one agent (plan 2026-10-22 §Z stage Z1): six space_* tools (create, list, read, write, preview, publish) work on the person's own spaces through OpenVibe.Space's builder API; another person's space is the same 404 as one that does not exist, and publishing waits for the person's answer in the Dock",
     "Agents are contacts (A-1): a signed-in person's GET /api/v1/agents is their own roster, Vibe created on first read and never deletable, with a face, voice, model engine, computer, connected apps, Memory scope and approval level; GET /api/v1/agents/presets gives four presets to copy, and GET /api/v1/agent-systems keeps the public catalog for every caller",
     "Approval levels (A-1): ask (the default), auto-edits, approve-for-me (a reviewer model of another family) and full; money, passwords, deletions and sending to a new recipient ask at every level as a server-side floor. Tasks record agent_id (default Vibe) and their own level; the effective level is the higher of the agent's and the person's own parent chain",
-    "An agent's live canvas (HO9; actor.canvas@1): canvas_set draws a data-only panel beside the thread, one row per conversation, validated and versioned; a button asks as the person, a tick flips an item and tells the next turn, and another person's canvas is 404 (migration 0043)"
+    "An agent's live canvas (HO9; actor.canvas@1): canvas_set draws a data-only panel beside the thread, one row per conversation, validated and versioned; a button asks as the person, a tick flips an item and tells the next turn, and another person's canvas is 404 (migration 0045)"
   ],
   "notYet": [
     "Browser and desktop agents on OpenVibe's own servers (OpenVibe.Run workers), watchable and taken over",
