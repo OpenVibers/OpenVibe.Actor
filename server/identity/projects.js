@@ -8,6 +8,7 @@
  *
  *   const projects = createProjects({ config });
  *   await projects.isAdmin(projectId, subjectId)   → true | false; throws when Network cannot answer
+ *   await projects.forSubject(subjectId)           → the unarchived projects the person administers
  */
 const { serviceAuth } = require('openvibe-contracts');
 
@@ -31,7 +32,23 @@ function createProjects({ config, fetchImpl = globalThis.fetch, tokens: tokensOv
         return !!out && out.project_id === projectId && out.subject === subjectId && ADMIN_ROLES.has(out.role) && out.archived === false;
     }
 
-    return { isAdmin, enabled };
+    /**
+     * The projects one person may act in (GET /internal/projects?subject=usr_…, the same capability): the ones they
+     * own or administer and that are not archived. A service acting for them (a skill run, Billing) picks one to bill.
+     */
+    async function forSubject(subjectId) {
+        if (!tokens) throw new Error('Actor has no Network client secret: project roles cannot be read');
+        if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(subjectId || ''))) return [];
+        const res = await fetchImpl(`${config.networkInternalUrl}/internal/projects?subject=${encodeURIComponent(subjectId)}`, {
+            headers: { Accept: 'application/json', ...(await tokens.authHeaders()) }, signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) throw new Error(`Network answered ${res.status} for the person's projects`);
+        const out = await res.json().catch(() => null);
+        const list = out && Array.isArray(out.projects) ? out.projects : [];
+        return list.filter((p) => p && typeof p.project_id === 'string' && ADMIN_ROLES.has(p.role) && p.archived === false);
+    }
+
+    return { isAdmin, forSubject, enabled };
 }
 
 module.exports = { createProjects, ADMIN_ROLES };

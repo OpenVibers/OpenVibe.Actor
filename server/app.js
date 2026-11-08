@@ -118,7 +118,12 @@ async function createApp(opts = {}) {
     // The connections of a person (stage V2-11): MCP servers and A2A agents, and the tools a run may offer because
     // of them. Every request they make goes through the egress guard (server/net/guarded-request.js).
     const connectors = opts.connectors || createConnectors({ store: s, config, log, guard: opts.guard || {} });
-    const loop = opts.loop || createLoop({ config, models, registry, log, store: s, stats, checkpoints, connectors });
+    const projects = opts.projects || require('./identity/projects').createProjects({ config });
+    // Sandbox skills (plan HO8, ADR-060): their code bytes live in Media, private to Actor's tenant, and a tool run
+    // is one OpenVibe.Run function job as the person. Both are off without their service URL and Actor's secret.
+    const skillRun = opts.skillRun || require('./skills/run').createSkillRun({ config, projects, fetchImpl: providerFetch, log });
+    const media = opts.media || require('./media/client').createMedia({ config, fetchImpl: providerFetch, log });
+    const loop = opts.loop || createLoop({ config, models, registry, log, store: s, stats, checkpoints, connectors, skillRun });
     const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: providerFetch, log });
     // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.
     // A webhook naming a project secret (ADR-056) is signed by OpenVibe.Network (server/net/secret-signer.js).
@@ -142,7 +147,6 @@ async function createApp(opts = {}) {
     });
     engine.setWaits(waits);
     const principal = createPrincipal({ config, keys });
-    const projects = opts.projects || require('./identity/projects').createProjects({ config });
     // Ask Actor from chat (chat/asks.js): chat.message.created through the events consumer below, replies through Chat.
     const chatClient = opts.chatClient || createChatClient({ config, fetchImpl });
     const chatAsks = createChatAsks({ s, config, chat: chatClient, now: s.now, log,
@@ -155,11 +159,11 @@ async function createApp(opts = {}) {
     // The person's computers (agents/computers.js): one adapter for the task's still proxy, made here so a test can
     // stand Bot/Run in (opts.bot.computers) exactly as the Console pages do.
     const computers = (opts.bot && opts.bot.computers) || require('./agents/computers').createComputers({ config, fetchImpl: providerFetch, log });
-    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers };
+    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers, skillRun, media };
     // The skills registry (plan HO2, ADR-058): OpenVibe's own skills are documents in the repository (skills/), and
     // each one is scanned before it is offered. The seed publishes them as listings of publisher kind 'openvibe'.
     ctx.skills = require('./skills');
-    await require('./skills/seed').seed(s, { log });
+    await require('./skills/seed').seed(s, { log, media });
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;

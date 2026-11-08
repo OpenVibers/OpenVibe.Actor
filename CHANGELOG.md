@@ -2,6 +2,33 @@
 
 What changed in OpenVibe.Actor, newest first. Each site also publishes its patch notes at /updates.
 
+## Unreleased — skills that run code, sandboxed (HO8 step 3)
+
+- **`actor.skill@2`: code in a sandbox** (plan HO8, ADR-060; contracts 0.343.0): a sandbox skill carries one to five
+  tools and its code as ordinary `.js` text resources. The registry reads the code, never runs it, and fails a tool
+  that reads `process.env`, starts a process, worker or `vm`, writes a file, builds code at run time, requires anything
+  but Node's safe modules, carries an encoded blob or minified code, or reaches the network outside the `net` its tool
+  declares; it flags any network use, timers over 5 s and loops over input. Every finding names its tool. The
+  cross-field rules (a tool's entry is a resource, every code resource is a tool's entry, tool names are unique) are
+  checked before anything is listed.
+- **The bytes that run are the bytes that were scanned**: publishing a sandbox skill stores each code resource as a
+  private OpenVibe.Media object under Actor's tenant and pins `{ name, media_id, sha256 }` on the
+  `actor.skill-listing@2`; `server/skills/publish` is the registry's path (a prompt skill stays `actor.skill@1`).
+- **`skill.run`**: a new HO1 kind ("running a skill's code in a sandbox"), allowable, with the exact target
+  `<slug>@<version> <tool>` (plus ` · internet` when `net` is `public`), so "always allow" covers one version's tool.
+- **The tool the agent calls**: each installed sandbox tool becomes a runtime function whose description is the tool's
+  words plus its network in plain language and whose input is the tool's `args` schema; a bad input never becomes a
+  job. A run is one OpenVibe.Run function job as the person (`X-OV-Subject` + `X-OV-Project`), artifact
+  `openvibe-skill-runner@1.0.0`, the pinned inputs, the declared `net` and limits (never above the caps), `ttl_ms`
+  120000, and the person's own machines before OpenVibe's pool. No node: a plain message and Link's "Run it on my
+  machine" link, and nothing runs anywhere else. The tool's JSON comes back as untrusted data, cut to 64 KiB, with the
+  job id, wall time and exit; Run's per-second metering is the cost.
+- **The card and install page** say "Runs code in a sandbox on your machine or OpenVibe's", list each tool with its
+  network in plain words ("no internet", "OpenVibe sites only", "the internet") and its limits, and show the scan's
+  findings per tool. A flagged code skill installs only after the person reads them; a failed one never.
+- Migration 0047 (`actor_skill_listings.code`, the document's own text, the `skill.run` kind). Tests:
+  `test/skill-sandbox.test.js`.
+
 ## Unreleased — the skills registry (plan HO2)
 
 - **A skill is a document, and the registry vouches for it** (plan HO2, ADR-058; contracts 0.340.0): `actor.skill@1`

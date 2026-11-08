@@ -38,3 +38,22 @@
     color: var(--text-primary); background: transparent; border: 1px solid var(--border-light); text-decoration: none; }
 .sk-btn--primary { background: var(--accent); color: var(--bg-primary); border-color: var(--accent); }
 .sk-btn:hover { border-color: var(--accent); }
+
+/* A sandbox skill (plan HO8, ADR-060): the code it brings, and each tool's network in plain words. */
+.sk-code { display: inline-block; margin-top: .25rem; color: var(--text-secondary); font-size: .78rem; line-height: 1.4; }
+.sk-code--head { margin: .4rem 0 0; font-weight: 650; }
+.sk-tools { list-style: none; margin: .5rem 0 0; padding: 0; }
+.sk-tool { margin: 0 0 .6rem; padding: .55rem .65rem; border: 1px solid var(--border-light); border-radius: 10px; }
+.sk-tool:last-child { margin-bottom: 0; }
+.sk-tool-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem; margin: 0; font-size: .88rem; }
+.sk-net { padding: .05rem .4rem; border-radius: 999px; border: 1px solid var(--border-light); color: var(--text-secondary);
+    font-size: .72rem; line-height: 1.4; white-space: nowrap; }
+.sk-net--public { color: var(--text-primary); font-weight: 650; }
+.sk-limits { color: var(--text-muted); font-size: .74rem; }
+.sk-tool-desc { margin: .25rem 0 0; color: var(--text-secondary); font-size: .82rem; line-height: 1.45; overflow-wrap: anywhere; }
+.sk-toolname { display: inline-block; margin-right: .25rem; padding: 0 .35rem; border-radius: 5px; background: var(--bg-secondary);
+    color: var(--text-secondary); font-size: .74rem; font-weight: 650; }
+@media (max-width: 520px) {
+    .sk-tool-head { align-items: flex-start; }
+    .sk-net, .sk-limits { white-space: normal; }
+}

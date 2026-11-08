@@ -91,7 +91,7 @@ const TABLES = [
     // OpenVibe's own listings have no publisher subject, so they stay: the catalogue is not the person's data. A
     // listing that goes takes the installs of it with it (the document is the listing's).
     { table: 'actor_skill_listings', subject: 'publisher_subject', value: (usr) => usr, file: 'skill-listings.json',
-        columns: ['id', 'slug', 'skill', 'publisher_kind', 'publisher_subject', 'publisher_name', 'scan_state', 'scan', 'curator_state', 'curator', 'installs', 'listed_at', 'retired_at', 'created_at', 'updated_at'] },
+        columns: ['id', 'slug', 'skill', 'skill_text', 'code', 'publisher_kind', 'publisher_subject', 'publisher_name', 'scan_state', 'scan', 'curator_state', 'curator', 'installs', 'listed_at', 'retired_at', 'created_at', 'updated_at'] },
     // What the person's agents asked them to approve (agents/approvals.js), and what they decided.
     { table: 'actor_chat_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'chat-app-approvals.json' },
     { table: 'actor_approvals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'approvals.json' },

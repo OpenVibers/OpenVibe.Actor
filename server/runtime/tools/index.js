@@ -158,7 +158,9 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
         // always-ask category before it changes anything. A tool that only writes Actor's own working
         // state says null and goes on. A chat has its own consent card above, so it is not asked twice.
         if (!ctx.chatPolicy && tool.acts === true && typeof ctx.requestApproval === 'function') {
-            const step = stepFor(name, input);
+            // A dynamic tool may know a step the generic mapping cannot (a skill's code: kind skill.run, target
+            // "<slug>@<version> <tool>"); a module file says it in agents/actions.js.
+            const step = typeof tool.step === 'function' ? tool.step(input) : stepFor(name, input);
             if (step) {
                 let ask;
                 try {
