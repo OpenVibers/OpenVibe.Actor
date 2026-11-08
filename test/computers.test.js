@@ -272,14 +272,14 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'desk' && c.body.value.action === 'stop').length, 1, 'b keeps its desk');
         await t.closeDesks(a, as.requester);
         assert.strictEqual(bot.calls.filter((c) => c.body && c.body.kind === 'desk' && c.body.value.action === 'stop').length, 1, 'closing twice stops nothing more');
-        // A machine on an older Node: the run's desk is the machine's one private desk, as before.
+        // A machine on an older Link: the run's desk is the machine's one private desk, as before.
         const old = fakeBot({ machines: [{ id: PC, name: 'desk-pc', online: true, agent_computer: true, computer: { ...many, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true } } }] });
         const t2 = createOpenVibeTools({ config, fetchImpl: old.fetchImpl, robots: createRobots({ config, fetchImpl: old.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: old.fetchImpl, tokens }), vision });
         await t2.call('computer_desk', { machine: PC, action: 'start' }, { ...as, desks: t2.deskRun() });
         assert.deepStrictEqual(old.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1).body.value, { action: 'start' });
     });
 
-    await check('browser desks (Desks plan D2, Node v0.23.0): a task\'s desk is a browser alone where the machine runs them, a whole desk when the model asks or the machine has no browser desks; an older Node is sent no kind', async () => {
+    await check('browser desks (Desks plan D2, Link v0.23.0): a task\'s desk is a browser alone where the machine runs them, a whole desk when the model asks or the machine has no browser desks; an older Link is sent no kind', async () => {
         const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 2 };
         const machines = [
             { id: PC, name: 'desk-pc', online: true, agent_computer: true, computer: { level: 'trusted', browser: { level: 'trusted' }, desk: { ...desk, kinds: ['desktop', 'browser'] } } },
@@ -300,10 +300,10 @@ const as = { requester: `user:${ME}` };
         await t.call('computer_desk', { machine: MAC, action: 'start' }, { ...as, desks: t.deskRun() });
         assert.strictEqual(last().kind, 'browser');
         await t.call('computer_desk', { machine: OLD, action: 'start' }, { ...as, desks: t.deskRun() });
-        assert.strictEqual(last().kind, undefined, 'an older Node is sent no kind');
+        assert.strictEqual(last().kind, undefined, 'an older Link is sent no kind');
         await t.call('computer_desk', { machine: PC, action: 'stop' }, { ...as, desks: run });
         assert.deepStrictEqual(last(), { action: 'stop', desk: run.name }, 'stop takes no kind');
-        // Kept sign-ins (Node v0.24.0): a machine that keeps profiles starts every task's desk from the agent's profile.
+        // Kept sign-ins (Link v0.24.0): a machine that keeps profiles starts every task's desk from the agent's profile.
         const keeps = fakeBot({ machines: [{ ...machines[0], computer: { ...machines[0].computer, desk: { ...machines[0].computer.desk, profiles: true } } }] });
         const t3 = createOpenVibeTools({ config, fetchImpl: keeps.fetchImpl, robots: createRobots({ config, fetchImpl: keeps.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: keeps.fetchImpl, tokens }), vision: async () => ({ text: 'x', cost_usd: 0 }) });
         assert.strictEqual(JSON.parse(await t3.call('list_my_computers', {}, as)).computers[0].keeps_sign_ins, true);
@@ -311,7 +311,7 @@ const as = { requester: `user:${ME}` };
         await t3.call('computer_desk', { machine: PC, action: 'start', profile: 'someone-else' }, { ...as, desks: kept });
         assert.deepStrictEqual(keeps.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1).body.value, { action: 'start', desk: kept.name, kind: 'browser', profile: 'agent' }, 'the agent\'s kept profile, never the model\'s choice');
         assert.strictEqual(last().profile, undefined, 'a machine that keeps none is sent none');
-        // Apps on a desk (Node v0.26.0): computer_run on the task's own desk, detached; never detached on the person's screen.
+        // Apps on a desk (Link v0.26.0): computer_run on the task's own desk, detached; never detached on the person's screen.
         const apps = fakeBot({ machines: [{ ...machines[0], computer: { ...machines[0].computer, terminal: { level: 'trusted', desks: true }, desk: { ...machines[0].computer.desk } } }] });
         const t4 = createOpenVibeTools({ config, fetchImpl: apps.fetchImpl, robots: createRobots({ config, fetchImpl: apps.fetchImpl, tokens }), computers: createComputers({ config, fetchImpl: apps.fetchImpl, tokens }), vision: async () => ({ text: 'x', cost_usd: 0 }) });
         assert.strictEqual(JSON.parse(await t4.call('list_my_computers', {}, as)).computers[0].apps_on_desk, true);
@@ -358,7 +358,7 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(deskCommands(), before, 'a bad kind never reaches the machine');
     });
 
-    await check('computer_browser with element refs and receipts (Desks plan D3, Node v0.21.0): a ref clicks exactly that element; the result says what changed and lists the page\'s elements', async () => {
+    await check('computer_browser with element refs and receipts (Desks plan D3, Link v0.21.0): a ref clicks exactly that element; the result says what changed and lists the page\'s elements', async () => {
         const bot = fakeBot({ machines: [{ id: PC, name: 'desk-pc', online: true, agent_computer: true, computer: { level: 'trusted', browser: { level: 'trusted' } } }] });
         const inner = bot.fetchImpl;
         const elements = Array.from({ length: 90 }, (_, i) => `e${i + 1} button "Item ${i + 1}"`);

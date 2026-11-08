@@ -498,7 +498,7 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
 <p class="ccm-head">Your own key</p>
 <ul class="ccm-list">${modelPrefs.KEY_PROVIDERS.map((p) => html`<li class="ccm-own" data-ccm-provider="${p}">${item(`own:${p}`, PROVIDER_NAMES[p] || p, 'Your key, kept in OpenVibe.AI')}<a class="ccm-setup" href="${allowUrl(p)}" target="_blank" rel="noopener" data-ccm-setup>Set up</a></li>`)}</ul>
 <p class="ccm-head">Your computer</p>
-<ul class="ccm-list"><li class="ccm-own" data-ccm-provider="node">${item('own:node', 'Your computer', 'A model you run at home, through OpenVibe Node. Nothing billed.')}<a class="ccm-setup" href="${allowUrl('node')}" target="_blank" rel="noopener" data-ccm-setup>Set up</a></li></ul>
+<ul class="ccm-list"><li class="ccm-own" data-ccm-provider="node">${item('own:node', 'Your computer', 'A model you run at home, through OpenVibe Link. Nothing billed.')}<a class="ccm-setup" href="${allowUrl('node')}" target="_blank" rel="noopener" data-ccm-setup>Set up</a></li></ul>
 <p class="ccm-fine" data-ccm-fine>A key you add stays sealed in OpenVibe.AI: Actor never sees it, and only uses it once you allow Actor there. <a href="/chat/model">All settings</a></p>
 </div></details>`;
     }
@@ -646,7 +646,7 @@ ${radio('auto', 'Auto, OpenVibe\'s', 'Actor picks a model for each step, on Open
 <p class="cm-head">Your own key</p>
 ${modelPrefs.KEY_PROVIDERS.map((p) => radio(`own:${p}`, PROVIDER_NAMES[p] || p, 'Billed by the provider to you, not counted against Actor\'s allowance.', `<a class="cm-setup" href="${allowUrl(p).replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add or allow the key</a>`))}
 <p class="cm-head">Your computer</p>
-${radio('own:node', 'Your computer', 'A model you run at home (Ollama, LM Studio or llama.cpp) through OpenVibe Node v0.36.0 or newer: nothing is billed, and it answers only while that computer is on. Usually slower than a cloud model.', `<a class="cm-setup" href="${allowUrl('node').replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add your computer's model and allow Actor</a>`)}
+${radio('own:node', 'Your computer', 'A model you run at home (Ollama, LM Studio or llama.cpp) through OpenVibe Link v0.36.0 or newer: nothing is billed, and it answers only while that computer is on. Usually slower than a cloud model.', `<a class="cm-setup" href="${allowUrl('node').replace(/&/g, '&amp;')}" target="_blank" rel="noopener">Add your computer's model and allow Actor</a>`)}
 ${modelField(aiModels, model.model || '')}
 <button class="cm-save" type="submit">Save</button>
 </form>
@@ -655,7 +655,7 @@ ${modelField(aiModels, model.model || '')}
 ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on ${model.runs_on === 'computer' ? 'your computer' : 'OpenVibe'}.</p>` : ''}
 <form class="cm-form" method="post" action="/chat/runs-on">
 <label class="cm-opt"><input type="radio" name="runs_on" value="openvibe"${model.runs_on !== 'computer' ? raw(' checked') : ''}><span><b>OpenVibe</b><small>Quick, from anywhere, on the model you chose above.</small></span></label>
-<label class="cm-opt"><input type="radio" name="runs_on" value="computer"${model.runs_on === 'computer' ? raw(' checked') : ''}><span><b>My computer</b><small>Nothing is billed for the model, and it answers only while your computer is on. Needs OpenVibe Node v0.36.0 or newer with a local model (Ollama, LM Studio or llama.cpp). Usually slower.</small></span><span class="cm-setups"><a class="cm-setup" href="${allowUrl('node')}" target="_blank" rel="noopener">Add your computer's model</a><a class="cm-setup" href="https://openvibe.bot/machines" target="_blank" rel="noopener">Add your machine for coding</a></span></label>
+<label class="cm-opt"><input type="radio" name="runs_on" value="computer"${model.runs_on === 'computer' ? raw(' checked') : ''}><span><b>My computer</b><small>Nothing is billed for the model, and it answers only while your computer is on. Needs OpenVibe Link v0.36.0 or newer with a local model (Ollama, LM Studio or llama.cpp). Usually slower.</small></span><span class="cm-setups"><a class="cm-setup" href="${allowUrl('node')}" target="_blank" rel="noopener">Add your computer's model</a><a class="cm-setup" href="https://openvibe.bot/machines" target="_blank" rel="noopener">Add your machine for coding</a></span></label>
 <button class="cm-save" type="submit">Save</button>
 </form></main>`,
         });

@@ -190,7 +190,7 @@ function load(env = process.env) {
 
         // Skills that run code in a sandbox (plan HO8, ADR-060). A tool's code is stored in Media under Actor's
         // tenant; a run is one OpenVibe.Run function job (openvibe-skill-runner@1.0.0) with a 120 s lifetime. The
-        // placement wait is how long the step waits for a Node before it says, plainly, that none offered to run it.
+        // placement wait is how long the step waits for a Link before it says, plainly, that none offered to run it.
         skills: {
             mediaTenant: trim(env.ACTOR_MEDIA_TENANT || env.OV_OAUTH_CLIENT_ID || 'actor'),
             placementWaitMs: Math.max(1000, int(env.ACTOR_SKILL_PLACEMENT_WAIT_MS, 12000)),

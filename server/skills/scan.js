@@ -118,7 +118,7 @@ const CODE_RULES = ['code.env', 'code.process', 'code.dynamic', 'code.vm', 'code
     'code.network', 'code.encoded', 'code.minified', 'code.require', 'code.timer', 'code.loop'];
 
 // The only modules a v1 tool may require: Node's own, with no process, no child, no worker and no raw socket. `fs`
-// is here because reading the job directory is allowed by the Node sandbox; the scan blocks every write below.
+// is here because reading the job directory is allowed by the Link sandbox; the scan blocks every write below.
 const SAFE_REQUIRE = new Set(['assert', 'buffer', 'crypto', 'events', 'fs', 'path', 'punycode', 'querystring', 'stream', 'string_decoder', 'url', 'util', 'zlib']);
 const REQUIRE = /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
 const REQUIRE_COMPUTED = /\brequire\s*\(\s*(?!['"])|\bmodule\s*\.\s*require\s*\(|\bcreateRequire\s*\(/;

@@ -88,10 +88,10 @@ const TEMPLATES = [
     { group: 'Your robot', badge: 'Robot', type: 'toy', needs: 'Turn on Your agent on the robot\'s panel first.', items: [
         { title: 'Drive your rover and say hello', text: 'Drive my rover forward for two seconds, turn on its headlights, then say hello.' },
     ] },
-    { group: 'Your computer', badge: 'Computer', type: 'site', needs: 'Needs the OpenVibe Node\'s computer plugin on that machine.', items: [
+    { group: 'Your computer', badge: 'Computer', type: 'site', needs: 'Needs the OpenVibe Link\'s computer plugin on that machine.', items: [
         { title: 'The ten largest files in your Downloads', text: 'On my computer, list the ten largest files in my Downloads folder.' },
     ] },
-    { group: 'On a desk of its own', badge: 'Desk', type: 'cam', needs: 'Needs a computer or desk host with the OpenVibe Node\'s computer plugin. Watch the desk and take it over from the task.', items: [
+    { group: 'On a desk of its own', badge: 'Desk', type: 'cam', needs: 'Needs a computer or desk host with the OpenVibe Link\'s computer plugin. Watch the desk and take it over from the task.', items: [
         { title: 'Sign in on its desk, then read your account', text: 'On my computer, open the sign-in page of <a site I use> on your desk and hand it to me to sign in; then tell me what my account page shows.' },
     ] },
     { group: 'Private', badge: 'Private', type: 'person', needs: 'Answered on OpenVibe\'s own model; nothing leaves OpenVibe.', items: [
@@ -505,7 +505,7 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
             [html`Your own agents (<a href="/me/agents">Your agents</a>): instructions, memory you can read and edit, a schedule (hourly, daily or weekly), a budget per run and a daily cap`, 'Live.'],
             [html`Your own robots on <a href="https://openvibe.bot">OpenVibe.Bot</a>: see them and drive the ones you opened to your agent, through Bot's limits and e-stop`, 'Live: turn on "Let my OpenVibe.Actor agent drive this robot" on the robot\'s panel.'],
             [html`Coding tasks on your own machine, through <a href="https://openvibe.codes/run">OpenVibe.Codes</a>: name the repository and what to change, and get the summary, the files and the patch`, html`Live: add the machine on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a> and start one task on openvibe.codes/run first. The model use is on your machine's own keys.`],
-            [html`Your own computers, through <a href="https://openvibe.bot/docs/computers">OpenVibe.Bot</a>: list and read files, run programs and write files there, as you, at the level you set on the computer`, html`Live: install OpenVibe Node with <code>--computer ask</code> and turn on "Let my agent use this computer" on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>. At <code>ask</code>, you approve each run or write on the computer.`],
+            [html`Your own computers, through <a href="https://openvibe.bot/docs/computers">OpenVibe.Bot</a>: list and read files, run programs and write files there, as you, at the level you set on the computer`, html`Live: install OpenVibe Link with <code>--computer ask</code> and turn on "Let my agent use this computer" on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>. At <code>ask</code>, you approve each run or write on the computer.`],
             [html`<a href="/console">The Console</a>: what runs now, what waits for you, today's spend, your agents, computers and robots, and one box to start a task`, 'Live, for signed-in people.'],
             [html`Ask in chat: write <code>@actor</code> and your question in OpenVibe's global chat or your own channel, and the answer comes back in the room`, 'Live: public tools only (never your computers, robots or code), 5 an hour, on your free tier.'],
             [html`Run your own: Actor on your server with your own model (<a href="https://github.com/OpenVibers/OpenVibe.Actor/blob/main/docs/self-host.md">how</a>), signed in with your password, data on your disk`, 'Live: Docker or plain Node, Ollama or any OpenAI-compatible model.'],
@@ -1411,7 +1411,7 @@ ${a.available ? '' : html`<p class="muted small">${a.reason}</p>`}
 <p class="ag-id muted small"><code>${a.id}</code>${a.model ? html` · ${a.model}` : ''} · prices checked ${a.rate_card.verified_at}</p>
 </li>`;
             })}</ul>
-<p class="ag-soon">Coming: your own models and API keys, and your own computer through the OpenVibe Node.</p>
+<p class="ag-soon">Coming: your own models and API keys, and your own computer through the OpenVibe Link.</p>
 <details class="ag-fold" id="modes"><summary>Modes: how Actor picks (${MODES.length})</summary>
 ${table(['Mode', 'What it picks'], MODES.map((m) => [html`<strong>${MODE_LABEL[m]}</strong> <code>${m}</code>`, MODE_TEXT[m]]))}</details>
 <details class="ag-fold" id="classes"><summary>What a task needs (5 kinds)</summary>

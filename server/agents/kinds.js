@@ -26,7 +26,7 @@ const KINDS = [
     'install',         // install a skill or connect a connector
     'routine',         // set up a task that keeps running
     'money',           // spend the person's money
-    'skill.run',       // run a skill's code in a sandbox on a Node (ADR-060)
+    'skill.run',       // run a skill's code in a sandbox on a Link (ADR-060)
 ];
 
 // The plain words a person reads for each kind. Never an id, never a code: this is the sentence on the card.

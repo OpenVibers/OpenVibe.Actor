@@ -35,7 +35,7 @@ async function startDesk(a, person, core, ctx) {
     const { kind, ...rest } = a;
     const chosen = a.desk === 'private' ? kind : deskKind(desks, a.machine, kind);   // private: a whole desk
     const body = chosen ? { ...rest, kind: chosen } : rest;
-    // The person's sign-ins carry from task to task (Node v0.24.0): every task's desk starts from the browser profile
+    // The person's sign-ins carry from task to task (Link v0.24.0): every task's desk starts from the browser profile
     // kept for their agent on that machine, and saves it back when it stops. Never the model's choice.
     delete body.profile;
     if (body.desk !== 'private' && desks && desks.keeps && desks.keeps.has(a.machine)) body.profile = AGENT_PROFILE;
@@ -82,7 +82,7 @@ module.exports = {
                     }
                     if (!order.length) return { text: json({ error: `none of the person's computers runs desks for you now, and ${ses.error}` }), isError: true };
                 }
-                if (!order.length) return { text: json({ error: 'none of the person\'s computers runs desks for you now: it needs OpenVibe Node v0.19.0 or newer, online, with "Let my agent use this computer" on' }), isError: true };
+                if (!order.length) return { text: json({ error: 'none of the person\'s computers runs desks for you now: it needs OpenVibe Link v0.19.0 or newer, online, with "Let my agent use this computer" on' }), isError: true };
                 return { text: json({ error: `every computer of the person's that runs desks is full right now (${out && out.error})` }), isError: true };
             } else return { text: json({ error: 'no desk of yours runs yet: start one with computer_desk start and machine "any"' }), isError: true };
         }

@@ -39,7 +39,7 @@ const { stepFor } = require('./actions');
  *                               the agent's own browser on the machine (a profile of its own): open, click, fill, press,
  *                               back, read, close; pages answer as text and links, so no vision is needed
  *   computer_desk(machine, action)
- *                               the machine's private desk (contracts 0.214.0, Node v0.15.0 on Linux): start, stop or
+ *                               the machine's private desk (contracts 0.214.0, Link v0.15.0 on Linux): start, stop or
  *                               status; computer_screen, computer_input and computer_browser take desk: "private" to work
  *                               there, never on the person's own screen (agent mode on a desk of its own)
  *
@@ -200,7 +200,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
 
     /**
      * A task's own desk (Desks plan D1). The model only ever says desk "private"; on a machine that runs several desks
-     * (Node v0.19.0) that is a desk named for this run, so two tasks at once on one machine never see or drive each
+     * (Link v0.19.0) that is a desk named for this run, so two tasks at once on one machine never see or drive each
      * other's screen, browser or files; elsewhere it is the machine's one private desk, as before. close() stops every
      * desk the run used. A model's own desk name is refused, so a run can never reach another task's desk.
      */
@@ -223,10 +223,10 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     }
 
     /**
-     * The kind of the task's desk (Desks plan D2, Node v0.23.0). Web work goes on a browser desk (a browser alone, half
+     * The kind of the task's desk (Desks plan D2, Link v0.23.0). Web work goes on a browser desk (a browser alone, half
      * the cost of a whole desk) where the machine runs them; a whole desk (desktop) when the model asks for one (apps,
      * a terminal on the desk) or the machine runs only those. The model's own ask goes through as asked (the machine
-     * says when it cannot). A machine that does not list its kinds (an older Node) is sent none.
+     * says when it cannot). A machine that does not list its kinds (an older Link) is sent none.
      */
     function deskKind(run, machine, asked) {
         if (asked != null) return asked;   // checked where the desk starts (computers.desk)
@@ -270,7 +270,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     async function handToPerson(person, a, { signal, desks, emit, waitForPerson, pollMs = PERSON_POLL_MS, quietMs = PERSON_QUIET_MS } = {}) {
         const what = String(a.what || '').replace(/\s+/g, ' ').trim().slice(0, 300);
         if (!what) return { error: 'what is the step the person should do, in a sentence' };
-        // The task's own desk on a machine that runs several; else the machine's one private desk (an older Node).
+        // The task's own desk on a machine that runs several; else the machine's one private desk (an older Link).
         const desk = desks && desks.used.has(a.machine) ? desks.name : 'private';
         const watch = pcs.watchUrl(a.machine, desk);
         const granted = waitForPerson ? waitForPerson(PERSON_WAIT_MS) : 0;
@@ -341,7 +341,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                             }
                             if (!order.length) return json({ error: `none of the person's computers runs desks for you now, and ${ses.error}` });
                         }
-                        if (!order.length) return json({ error: 'none of the person\'s computers runs desks for you now: it needs OpenVibe Node v0.19.0 or newer, online, with "Let my agent use this computer" on' });
+                        if (!order.length) return json({ error: 'none of the person\'s computers runs desks for you now: it needs OpenVibe Link v0.19.0 or newer, online, with "Let my agent use this computer" on' });
                         return json({ error: `every computer of the person's that runs desks is full right now (${out.error})` });
                     } else return json({ error: 'no desk of yours runs yet: start one with computer_desk start and machine "any"' });
                 }
@@ -352,7 +352,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                         const { kind, ...rest } = a;
                         const chosen = a.desk === 'private' ? kind : deskKind(desks, a.machine, kind);   // private: a whole desk
                         a = chosen ? { ...rest, kind: chosen } : rest;
-                        // The person's sign-ins carry from task to task (Node v0.24.0): every task's desk starts from the
+                        // The person's sign-ins carry from task to task (Link v0.24.0): every task's desk starts from the
                         // browser profile kept for their agent on that machine, and saves it back when it stops. Never
                         // the model's choice.
                         delete a.profile;
@@ -421,7 +421,7 @@ const COMPUTER_TOOLS = new Set([...COMPUTER_DEFS, SCREEN_DEF, INPUT_DEF, BROWSER
 const PERSON_WAIT_MS = 10 * 60_000;
 const PERSON_POLL_MS = 3000;
 const PERSON_QUIET_MS = 20_000;
-// The browser profile kept for the person's agent on each of their machines (Node v0.24.0: sign in once).
+// The browser profile kept for the person's agent on each of their machines (Link v0.24.0: sign in once).
 const AGENT_PROFILE = 'agent';
 // The tools that work on a screen: their desk "private" is the task's own desk (deskRun).
 const DESK_TOOLS = new Set(['computer_screen', 'computer_input', 'computer_browser', 'computer_desk', 'computer_run']);
