@@ -37,9 +37,9 @@ module.exports = {
     /** Only an agent with a weekly allowance of its own, on a server that can pay it, is offered this tool. */
     available(ctx) {
         const s = ctx && ctx.spend ? ctx.spend : null;
-        const billing = ctx && ctx.config && ctx.config.services ? ctx.config.services.billingUrl : '';
+        const tips = ctx && ctx.config && ctx.config.services ? ctx.config.services.tipsUrl : '';
         // A chat has its own consent card, not the approval floor; money is only offered behind the floor.
-        return !!(s && Number(s.weekly) > 0 && billing && !ctx.chatPolicy);
+        return !!(s && Number(s.weekly) > 0 && tips && !ctx.chatPolicy);
     },
 
     /**

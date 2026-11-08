@@ -206,7 +206,7 @@ ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-c
             ? html`<form method="post" action="/me/approvals/${a.id}" class="pa-actions"><button type="submit" name="decision" value="approve" class="pa-btn pa-primary">${coding ? 'Approve and start it' : (money ? 'Approve and pay' : 'Approve for a retry')}</button> ${allowButton} <button type="submit" name="decision" value="decline" class="pa-btn">Decline</button></form>${allowHint}`
             : html`<p class="pa-hint">${decided}${a.decided_at ? html` Decided ${whenAt(a.decided_at, nowMs)}.` : ''}</p>${a.result_task_id ? html`<p>Started as <a href="/tasks/${a.result_task_id}">this task</a>.</p>` : ''}`;
         const moneyCard = money ? html`<section class="pa-panel"><h2>What it would do</h2>
-<p>It would send <strong>${Number(money.amount) || 0} Vibes</strong> to ${money.to_label || money.to}${money.to_label && money.to && money.to_label !== money.to ? html` <span class="pa-when">(${money.to})</span>` : ''}.</p>
+<p>It would send <strong>${Number(money.amount) || 0} Vibes</strong> to ${money.to_label || money.to}.</p>
 ${money.reason ? html`<p>Why: ${money.reason}</p>` : ''}
 ${left ? html`<p>Left this week for ${agentName}: <strong>${left.left} of ${left.weekly} Vibes</strong> (${left.start} to ${left.end} UTC).</p>` : ''}
 <p class="pa-hint">The money moves when you approve, from your own Vibes and with your own session. It is never paid later and never by the agent itself.</p></section>` : '';
@@ -448,7 +448,7 @@ ${allowRules.length ? html`<ul class="pa-notes">${allowRules.map((r) => html`<li
 <p>Left this week: <strong>${allowance.left} of ${allowance.weekly} Vibes</strong> (${allowance.start} to ${allowance.end} UTC). The week starts on Monday.</p>
 <h3 class="pa-sub">What it spent</h3>
 ${payments.length ? html`<ul class="pa-notes">${payments.map((p2) => html`<li><p class="pa-note-text">${p2.state === 'paid' ? html`${p2.amount} Vibes to ${p2.to_label || p2.to_subject}` : html`${p2.amount} Vibes to ${p2.to_label || p2.to_subject} — not paid`}</p>
-<p class="pa-note-meta">${p2.reason ? html`${p2.reason} · ` : ''}${p2.state === 'paid' ? 'Paid' : html`Refused: ${p2.error || 'Billing did not pay it'}`} · ${time(p2.created_at)}</p></li>`)}</ul>` : html`<p class="muted">It has not spent anything yet.</p>`}
+<p class="pa-note-meta">${p2.reason ? html`${p2.reason} · ` : ''}${p2.state === 'paid' ? 'Paid' : html`Refused: ${p2.error || 'Tips did not pay it'}`} · ${time(p2.created_at)}</p></li>`)}</ul>` : html`<p class="muted">It has not spent anything yet.</p>`}
 </section>
 <section class="pa-panel" id="decisions" aria-labelledby="pa-dec-h"><h2 id="pa-dec-h">What you decided</h2>
 <p class="pa-hint">Every approval this agent asked for, and what you answered: once, always, or no.</p>

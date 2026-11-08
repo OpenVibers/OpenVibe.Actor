@@ -173,11 +173,9 @@ function load(env = process.env) {
             // OpenVibe.Watch: where a trigger's subscription lives (plan §12 A-4). The person's own token is
             // always the authority; empty turns triggers off.
             watchUrl: trim(env.ACTOR_WATCH_URL != null ? env.ACTOR_WATCH_URL : (selfHosted ? '' : 'http://127.0.0.1:4730')),
-            // OpenVibe.Billing: where a tip is paid (plan HO7). The person's own token pays it, at their own
-            // approval; empty turns the spending tool off.
-            billingUrl: trim(env.ACTOR_BILLING_URL != null ? env.ACTOR_BILLING_URL : (selfHosted ? '' : 'http://127.0.0.1:4600')),
-            // OpenVibe.Tips: the creators' pages, used to turn a name into the person who receives a tip
-            // (plan HO7). Empty turns the name lookup off: a tip then needs the creator's account id (usr_…).
+            // OpenVibe.Tips: where a tip is paid (its checkout makes the Billing transfer) and where a creator's
+            // page is looked up to resolve the person who receives it (plan HO7). The person's own token pays, at
+            // their own approval; empty turns the spending tool off.
             tipsUrl: trim(env.ACTOR_TIPS_URL != null ? env.ACTOR_TIPS_URL : (selfHosted ? '' : 'http://127.0.0.1:4610')),
         },
 

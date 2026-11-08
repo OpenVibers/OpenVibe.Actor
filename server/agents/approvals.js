@@ -143,13 +143,15 @@ async function decide(ctx, owner, id, decision, { idempotent = false, personToke
 }
 
 /**
- * A payment, at the person's own approval (plan HO7). The money moves in OpenVibe.Billing with the person's own
- * token: never a service token, never later from a worker. The approval id is the idempotency key, so a second
- * click (or two clicks at once) never pays twice. A refusal from Billing shows its reason and leaves the approval
- * pending, so the person can top up their Vibes and try again.
+ * A payment, at the person's own approval (plan HO7). The money moves through OpenVibe.Tips' checkout with the
+ * person's own token: never a service token, never later from a worker. The approval id is the idempotency key, so a
+ * second click (or two clicks at once) never pays twice. A definite refusal from Tips shows its reason and leaves the
+ * approval pending, so the person can top up their Vibes and try again. An unknown answer keeps the claim 'paying':
+ * the money may have moved, so it still counts against the week, and the retry after the stale window sends the same
+ * key, which Tips replays.
  */
 async function pay(ctx, row, { personToken = null } = {}) {
-    const { s, billing } = ctx;
+    const { s, tips } = ctx;
     const owner = row.owner;
     const payload = typeof row.payload === 'string' ? JSON.parse(row.payload || '{}') : (row.payload || {});
     const amount = Number(payload.amount);
@@ -159,11 +161,11 @@ async function pay(ctx, row, { personToken = null } = {}) {
     if (!personToken) {
         return { error: 'A payment is paid by you, on this page, with your own Vibes. Nothing was paid.', status: 409, pending: true };
     }
-    if (!billing || typeof billing.tip !== 'function') {
-        return { error: 'OpenVibe.Billing is not connected on this server, so nothing was paid.', status: 503, pending: true };
+    if (!tips || typeof tips.tip !== 'function') {
+        return { error: 'OpenVibe.Tips is not connected on this server, so nothing was paid.', status: 503, pending: true };
     }
     // Reserve the payment first (one claim per approval, one weekly cap per agent), then move the money with the
-    // person's own token. The approval id is Billing's idempotency key, so a retry replays instead of paying twice.
+    // person's own token. The approval id is Tips' idempotency key, so a retry replays instead of paying twice.
     const reserved = await spend.claim(s, {
         owner, agentId, approvalId: row.id, to, toLabel: payload.to_label || null, amount,
         reason: payload.reason || null, target: payload.target || null,
@@ -171,15 +173,19 @@ async function pay(ctx, row, { personToken = null } = {}) {
     if (reserved.paid) return { row: await approvePaid(s, owner, row), spend: reserved.paid, note: 'This tip was already paid.' };
     if (reserved.busy) return { error: 'This tip is already being paid. Refresh this page in a moment.', status: 409, pending: true };
     if (reserved.error) return { error: reserved.error, status: reserved.status || 422, pending: true };
-    const out = await billing.tip({
+    const out = await tips.tip({
         token: personToken, to, amount,
         message: payload.reason || null,
-        target: payload.target || null,
         key: row.id,
     });
     if (!out.ok) {
+        if (out.unknown) {
+            // The money may have moved: keep the claim 'paying'. It counts against the week, the card stays pending,
+            // and the retry after the stale window sends the same Idempotency-Key, which Tips replays.
+            return { error: out.error, status: 502, pending: true, unconfirmed: true };
+        }
         await spend.fail(s, reserved.claim.id, out.error).catch(() => null);
-        const status = [409, 422, 429].includes(out.status) ? out.status : 502;
+        const status = [409, 422].includes(out.status) ? out.status : 502;
         return { error: out.error, status, pending: true };
     }
     const paid = await spend.settle(s, reserved.claim.id, out.id || null);
@@ -187,7 +193,7 @@ async function pay(ctx, row, { personToken = null } = {}) {
         const recorded = await spend.paidFor(s, owner, row.id);
         if (!recorded) {
             return {
-                error: 'Billing paid the tip, but Actor could not record it. Reload this page; nothing will be paid twice.',
+                error: 'OpenVibe.Tips paid the tip, but Actor could not record it. Reload this page; nothing will be paid twice.',
                 status: 503, pending: true,
             };
         }

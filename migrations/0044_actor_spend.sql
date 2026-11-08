@@ -3,9 +3,10 @@
 --
 -- The allowance lives on the agent (spend_weekly_vibes): 0 means off, and an agent with no allowance is never offered
 -- the spending tool at all. The payments are their own rows (actor_spends): one claim per approval, reserved before
--- Billing is called and settled when it answers, so the week can be counted and the person can see every tip their
--- agent sent. A payment Billing refused is kept as a failed attempt: it never counts against the allowance and never
--- shows as a payment.
+-- Tips' checkout is called and settled when it answers, so the week can be counted and the person can see every tip
+-- their agent sent. A payment Tips definitely refused is kept as a failed attempt: it never counts against the
+-- allowance and never shows as a payment. A claim whose answer was unknown stays 'paying' and counts, because the
+-- money may have moved; the same idempotency key retries it.
 --
 -- Expand-only: a new column with a default and a new table. Nothing renamed, nothing dropped, so the previous
 -- release keeps writing rows and an old row reads as "no allowance".
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS actor_spends (
     reason      text COLLATE "C",                      -- the person's own words for it
     target      jsonb,                                 -- what the money is for (a creator's page, a channel …)
     state       text COLLATE "C" NOT NULL CHECK (state IN ('paying', 'paid', 'failed')),
-    txn_id      text COLLATE "C",                      -- Billing's transaction id
+    txn_id      text COLLATE "C",                      -- Tips' interaction id for a paid tip
     error       text COLLATE "C",                      -- why a refusal did not pay
     week_start  text COLLATE "C" NOT NULL,             -- the allowance week it counts in (a Monday, UTC)
     created_at  text COLLATE "C" NOT NULL
