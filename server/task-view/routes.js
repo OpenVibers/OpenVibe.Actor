@@ -21,9 +21,12 @@ function createTaskView(ctx, { fetchImpl } = {}) {
             res.json({ url: `${config.baseUrl}/embed/task/${encodeURIComponent(row.id)}?t=${issued.ticket}`, expires_at: issued.expires_at });
         } catch { log.warn('[Actor] task view issue failed', req.params.id); res.sendStatus(503); }
     });
+    embed.use('/embed/task', (_req, res, next) => {
+        res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
+        next();
+    });
     embed.use('/embed/task', require('express-rate-limit')({ windowMs: 60_000, limit: 240, standardHeaders: true, legacyHeaders: false }));
     embed.use('/embed/task/:id', async (req, res, next) => {
-        res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
         res.removeHeader('X-Frame-Options');
         res.set('Content-Security-Policy', `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self' ${(await origins()).join(' ')}`);
         try {
