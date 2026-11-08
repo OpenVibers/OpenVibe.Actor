@@ -11,9 +11,10 @@
 .sk-list.ovk-list { overflow: visible; margin-bottom: 0; }
 .sk-card { align-items: flex-start; }
 .sk-card .ovk-row-main { gap: 2px; }
+.sk-card .ovk-row-sub > span:first-child { white-space: normal; overflow: visible; text-overflow: clip; }
 .sk-name { font-weight: 650; }
 .sk-desc { color: var(--text-secondary); font-size: .85rem; line-height: 1.4; }
-.sk-state { flex: none; max-width: 13rem; color: var(--text-muted); font-size: .76rem; line-height: 1.35; }
+.sk-state { color: var(--text-muted); font-size: .76rem; line-height: 1.35; }
 .sk-state--passed { color: var(--text-secondary); }
 .sk-state--flagged { color: var(--text-secondary); }
 .sk-state--failed { color: var(--text-primary); font-weight: 650; }

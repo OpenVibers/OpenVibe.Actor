@@ -62,8 +62,8 @@ function createSkillPages(ctx) {
         const state = listing.scan && listing.scan.state;
         return html`<li class="ovk-row ovk-row--static sk-card">
 <span class="ovk-row-main"><span class="ovk-row-top"><a class="sk-name" href="/skills/${skill.slug}">${skill.name}</a></span>
-<span class="ovk-row-sub"><span class="sk-desc">${skill.description}</span></span></span>
-<span class="sk-state sk-state--${state}">${SCAN_WORDS[state] || SCAN_WORDS.pending}</span>
+<span class="ovk-row-sub"><span class="sk-desc">${skill.description}</span></span>
+<span class="sk-state sk-state--${state}">${SCAN_WORDS[state] || SCAN_WORDS.pending}</span></span>
 </li>`;
     };
 
@@ -113,7 +113,7 @@ ${raw(kit.list(listings.map(card), { empty: 'No skills are offered right now.' }
 <header class="sk-head"><h1>${skill.name}</h1><p class="sk-lede">${skill.description}</p>
 <p class="sk-meta">Published by ${listing.publisher.kind === 'openvibe' ? 'OpenVibe' : (listing.publisher.name || 'a person')} · version ${skill.version} · ${listing.installs} ${listing.installs === 1 ? 'person has' : 'people have'} it</p></header>
 <section class="sk-panel"><h2>The scan</h2><p class="sk-state sk-state--${state}">${SCAN_WORDS[state] || SCAN_WORDS.pending}</p>
-${findings.length ? html`<ul class="sk-findings">${findings.map((f) => html`<li><span class="sk-sev sk-sev--${f.severity}">${SEVERITY_WORDS[f.severity] || f.severity}</span> ${f.note} <span class="sk-where">(${f.where})</span></li>`)}</ul>` : html`<p class="sk-hint">The scan found nothing to report.</p>`}
+${findings.length ? html`<ul class="sk-findings">${findings.map((f) => html`<li><span class="sk-sev sk-sev--${f.severity}">${SEVERITY_WORDS[f.severity] || f.severity}</span> ${f.note} <span class="sk-where">(${f.where})</span></li>`)}</ul>` : state === 'passed' ? '' : html`<p class="sk-hint">The scan found nothing to report.</p>`}
 ${listing.scan && listing.scan.scanned_at ? html`<p class="sk-hint">Scanned ${time(listing.scan.scanned_at)}.</p>` : ''}</section>
 <section class="sk-panel"><h2>What it may ask for</h2><p>${asksOf(skill)}</p>
 ${skill.requires && skill.requires.hosts && skill.requires.hosts.length ? html`<p class="sk-hint">It reaches ${skill.requires.hosts.join(', ')}.</p>` : ''}</section>
