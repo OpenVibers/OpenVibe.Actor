@@ -4,7 +4,7 @@ What changed in OpenVibe.Actor, newest first. Each site also publishes its patch
 
 ## Unreleased — the skills registry (plan HO2)
 
-- **A skill is a document, and the registry vouches for it** (plan HO2, ADR-058; contracts 0.337.0): `actor.skill@1`
+- **A skill is a document, and the registry vouches for it** (plan HO2, ADR-058; contracts 0.340.0): `actor.skill@1`
   is a slug, a name, a one-line description, a version, Markdown instructions, up to ten text resources and what it may
   ask an agent to do. It runs as a prompt and nothing else — no code, no binary, no install recipe — and it grants
   nothing: the agent's level and its approvals still decide every step. The document's integrity hash is not a
