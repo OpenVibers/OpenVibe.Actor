@@ -360,6 +360,23 @@ const doneTurn = { content: 'The tip was sent.' };
             assert.strictEqual((await spend.allowance(t.ctx.s, owner, agent.id)).spent, 17, 'only the payment counts');
         });
 
+        await check('every 4xx from Tips is definite (no money moved), except an idempotency claim still in progress', async () => {
+            const answer = (status, code = null) => async () => new Response(JSON.stringify({ code, detail: `answered ${status}` }), { status, headers: { 'content-type': 'application/json' } });
+            const tipWith = (fetchImpl) => spend.createTips({ config: { services: { tipsUrl: 'https://tips.example' } }, fetchImpl })
+                .tip({ token: 'tok', to: creator, amount: 5, key: 'apr_x' });
+            for (const [status, code] of [[401, 'token.invalid'], [403, null], [404, 'tips.no_creator'], [409, 'billing.insufficient_funds'], [422, null], [429, 'rate.limited']]) {
+                const out = await tipWith(answer(status, code));
+                assert.strictEqual(out.definite, true, `${status} is definite`);
+                assert.ok(!out.unknown, `${status} is not unknown`);
+            }
+            for (const [status, code] of [[409, 'idempotency.in_progress'], [500, null], [502, null], [503, null]]) {
+                const out = await tipWith(answer(status, code));
+                assert.strictEqual(out.unknown, true, `${status} ${code || ''} is unknown: it keeps counting`);
+            }
+            const thrown = await tipWith(async () => { throw new Error('socket hang up'); });
+            assert.strictEqual(thrown.unknown, true, 'no answer at all is unknown');
+        });
+
         await check('an unknown answer keeps the claim paying, counts it, and a retry after the stale window replays it once', async () => {
             const goodTips = t.ctx.tips;
             t.ctx.tips = spend.createTips({ config: t.config, fetchImpl: globalThis.fetch, timeoutMs: 80 });

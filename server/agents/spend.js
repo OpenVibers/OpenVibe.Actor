@@ -222,9 +222,10 @@ function createTips({ config, fetchImpl = globalThis.fetch, timeoutMs = 15_000 }
         }
         const code = (data && data.code) || null;
         const detail = (data && (data.detail || data.title)) || `OpenVibe.Tips answered ${res.status}`;
-        // 422 is Tips' validation refusal; a 409 is one of its business refusals (not enough Vibes, not accepting,
-        // the payment failed) — except the idempotency claim still in progress, where the first request may pay.
-        if (res.status === 422 || (res.status === 409 && code !== 'idempotency.in_progress')) {
+        // Any 4xx is Tips refusing before it moved money (409 not enough Vibes or not accepting, 422 validation, 401/403
+        // the session, 404 no such creator, 429 too many): definite. Except the idempotency claim still in progress,
+        // where the first request may pay; that, a 5xx and no answer at all are unknown and keep counting.
+        if (res.status >= 400 && res.status < 500 && !(res.status === 409 && code === 'idempotency.in_progress')) {
             return { ok: false, definite: true, status: res.status, code, error: String(detail).slice(0, 300) };
         }
         return { ok: false, unknown: true, status: res.status, code, error: UNCONFIRMED };
