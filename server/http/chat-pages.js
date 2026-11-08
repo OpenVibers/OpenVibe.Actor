@@ -307,15 +307,22 @@ ${readOnly ? '' : html`<div class="ovt-card-acts"><button type="submit" class="o
     }
 
     /**
-     * The routines this turn made (plan §12 A-4): one card each, its latest state. What runs and when in words, the
-     * next run in the reader's own zone, how the last run went, and the person's moves as plain forms (they work with
-     * no script): Pause or Resume, Run now, and Undo for ten minutes, then Delete with a confirmation. A shared, read-only
-     * turn shows the card as it was made, with no moves and nothing read beyond the turn itself.
+     * The routines this turn made (plan §12 A-4): one card each, its latest state, and under it the runs'
+     * answers (plan HO4) — each run posts its answer, its sources and a link to the run into this chat.
+     * What runs and when in words, the next run in the reader's own zone, how the last run went, and the
+     * person's moves as plain forms (they work with no script): Pause or Resume, Run now, and Undo for ten
+     * minutes, then Delete with a confirmation. A shared, read-only turn shows the card as it was made, with
+     * no moves and nothing read beyond the turn itself.
      */
     async function triggerBlocks(row, events, readOnly = false) {
         const latest = new Map();
+        const runs = new Map();
         for (const e of events || []) {
             if (e && e.kind === 'output' && e.step === 'trigger' && e.trigger && TRIGGER_ID.test(String(e.trigger.id || ''))) latest.set(e.trigger.id, e.trigger);
+            if (e && e.kind === 'output' && e.step === 'trigger-run' && TRIGGER_ID.test(String(e.trigger_id || ''))) {
+                if (!runs.has(e.trigger_id)) runs.set(e.trigger_id, []);
+                runs.get(e.trigger_id).push(e);
+            }
         }
         if (!latest.size) return '';
         const owner = String(row.requester || '').replace(/^user:/, '');
@@ -327,37 +334,85 @@ ${readOnly ? '' : html`<div class="ovt-card-acts"><button type="submit" class="o
                 const live = await ctx.triggers.get(owner, id).catch(() => null);
                 if (live) card = live; else gone = true;
             }
-            cards.push(triggerCard(row, card, { gone, readOnly }));
+            cards.push(triggerCard(row, card, { gone, readOnly, runs: runs.get(id) || [] }));
         }
         return html`${cards}`;
     }
 
-    function triggerCard(row, card, { gone = false, readOnly = false } = {}) {
+    /**
+     * One run of a routine, as it was posted into this chat (plan HO4): when it ran, its answer, the addresses
+     * it read and a link to the run. A run that did not finish is one line that says why. A goal's run also
+     * shows the run's own verdict on the done-test when there is one.
+     */
+    function runPost(run) {
+        const at = run.at ? new Date(run.at) : null;
+        const when = at && !Number.isNaN(at.getTime())
+            ? html`<time datetime="${at.toISOString()}" data-ct-local>${at.toISOString().slice(0, 16).replace('T', ' ')} UTC</time>`
+            : 'A run';
+        const taskId = run.run && run.run.task_id;
+        const failed = run.run && run.run.state !== 'ok';
+        const sources = Array.isArray(run.sources) ? run.sources.slice(0, 8) : [];
+        const body = failed || !run.text
+            ? html`<p class="ct-trig-run-line">${String(run.text || 'That run did not finish.')}</p>`
+            : html`<div class="prose">${raw(markdown(String(run.text).slice(0, 8000), { headingOffset: 3 }))}</div>`;
+        return html`<div class="ct-trig-run${failed ? ' is-bad' : ''}">
+<p class="ct-trig-run-h">${when}${taskId ? html` · <a href="/tasks/${taskId}">open the run</a>` : ''}</p>
+${body}
+${sources.length ? html`<p class="ct-trig-sources">${sources.map((u, i) => html`${i ? ' · ' : ''}<a href="${u}" target="_blank" rel="noopener nofollow">${clip(String(u).replace(/^https?:\/\//, ''), 60)}</a>`)}</p>` : ''}
+</div>`;
+    }
+
+    function triggerCard(row, card, { gone = false, readOnly = false, runs = [] } = {}) {
         const when = card.when || {};
+        const goal = card.goal || null;
         const paused = !gone && card.state === 'paused';
-        const state = gone ? 'Deleted' : paused ? 'Paused' : 'On';
+        const done = !gone && card.state === 'done';
+        const state = gone ? 'Deleted' : done ? 'Done' : paused ? 'Paused' : 'On';
         const last = card.last_run && LAST_RUN[card.last_run.state] ? card.last_run : null;
         const undoable = !gone && card.undo_until && Date.parse(card.undo_until) > now();
-        const why = paused ? (card.paused_reason === 'failed' ? `Paused after ${Number(card.failures) || 5} failed runs in a row. Resume it once the cause is fixed.` : 'Paused by you.') : '';
-        const icon = card.kind === 'event' ? 'zap' : 'calendar';
+        const why = done
+            ? (card.paused_reason === 'done' && goal ? `The goal is reached: ${goal.done_test}.` : 'This goal is finished.')
+            : paused ? (card.paused_reason === 'failed' ? `Paused after ${Number(card.failures) || 5} failed runs in a row. Resume it once the cause is fixed.`
+                : card.paused_reason === 'budget' ? 'Stopped: its runs or its money ran out.'
+                    : card.paused_reason === 'deadline' ? 'Stopped: its deadline passed.'
+                        : 'Paused by you.') : '';
+        const icon = card.kind === 'event' ? 'zap' : card.kind === 'goal' ? 'target' : 'calendar';
         const words = String(when.words || (card.kind === 'event' ? 'When it happens' : 'On a schedule'));
-        const zone = card.kind === 'schedule' && when.timezone && !words.includes(when.timezone) ? ` (${when.timezone})` : '';
+        const zone = card.kind !== 'event' && when.timezone && !words.includes(when.timezone) ? ` (${when.timezone})` : '';
         const meta = [];
-        if (!gone && !paused && card.next_run_at) meta.push(html`Next run <time datetime="${new Date(card.next_run_at).toISOString()}" data-ct-local>${new Date(card.next_run_at).toISOString().slice(0, 16).replace('T', ' ')} UTC</time>`);
+        // A goal's progress in one line (plan HO3): "Run 4 of at most 12 · not yet: €134".
+        if (goal) {
+            const used = Number(goal.runs_used) || 0;
+            const cap = goal.runs_max == null ? null : Number(goal.runs_max);
+            const spend = goal.budget_usd == null ? '' : ` · $${Number(goal.spent_usd || 0).toFixed(2)} of $${Number(goal.budget_usd).toFixed(2)}`;
+            const nobody = done || paused || gone ? '' : (goal.not_yet ? ` · not yet: ${clip(goal.not_yet, 120)}` : '');
+            meta.push(html`<span class="ct-trig-goal">Run ${used}${cap == null ? '' : ` of at most ${cap}`}${spend}${nobody}</span>`);
+            if (goal.deadline_at && !done && !gone) meta.push(html`until <time datetime="${new Date(goal.deadline_at).toISOString()}" data-ct-local>${new Date(goal.deadline_at).toISOString().slice(0, 10)}</time>`);
+        }
+        if (!gone && !paused && !done && card.next_run_at) meta.push(html`Next run <time datetime="${new Date(card.next_run_at).toISOString()}" data-ct-local>${new Date(card.next_run_at).toISOString().slice(0, 16).replace('T', ' ')} UTC</time>`);
         if (last) meta.push(html`<a href="/tasks/${last.task_id}">Last run ${LAST_RUN[last.state]}</a>`);
         if (card.agent_name) meta.push(html`Runs as ${card.agent_name}`);
         const moves = gone || readOnly ? '' : html`<div class="ovt-card-acts">
-${paused ? html`<button type="submit" class="ovt-card-btn" name="do" value="resume">Resume</button>` : html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="pause">Pause</button>`}
-<button type="submit" class="ovt-card-btn is-quiet" name="do" value="run">Run now</button>
+${paused ? html`<button type="submit" class="ovt-card-btn" name="do" value="resume">Resume</button>` : ''}
+${!paused && !done ? html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="pause">Pause</button>` : ''}
+${done ? '' : html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="run">Run now</button>`}
 ${undoable ? html`<button type="submit" class="ovt-card-btn is-quiet" name="do" value="undo">Undo</button>`
         : html`<details class="ct-trig-del"><summary class="ovt-card-btn is-quiet">Delete</summary><p>Delete it for good? No future run happens.</p><button type="submit" class="ovt-card-btn is-danger" name="do" value="delete">Delete it</button></details>`}
 </div>`;
-        return html`<form class="ovt-card ct-trig${paused ? ' is-paused' : ''}${gone ? ' is-gone' : ''}" method="post" action="/chat/${row.id}/trigger/${card.id}" data-ct-trigger="${card.id}">
+        // The two switches (plan HO4): answer in this chat, and also tell me through notifications.
+        const switches = gone || readOnly ? '' : html`<div class="ovt-card-acts ct-trig-switches">
+<button type="submit" class="ovt-card-btn is-quiet${card.answer_in_chat === false ? '' : ' is-on'}" name="do" value="${card.answer_in_chat === false ? 'answer-on' : 'answer-off'}" aria-pressed="${card.answer_in_chat === false ? 'false' : 'true'}">Answer in this chat: ${card.answer_in_chat === false ? 'off' : 'on'}</button>
+<button type="submit" class="ovt-card-btn is-quiet${card.notify ? ' is-on' : ''}" name="do" value="${card.notify ? 'notify-off' : 'notify-on'}" aria-pressed="${card.notify ? 'true' : 'false'}">Tell me too: ${card.notify ? 'on' : 'off'}</button>
+</div>`;
+        const shown = runs.slice(-8).map(runPost);
+        return html`<form class="ovt-card ct-trig${paused ? ' is-paused' : ''}${gone ? ' is-gone' : ''}${done ? ' is-done' : ''}" method="post" action="/chat/${row.id}/trigger/${card.id}" data-ct-trigger="${card.id}">
 <p class="ovt-card-h">${raw(glyphs.svg(icon, { size: 18 }))}<span class="ct-trig-when"><b>${words}</b>${zone}</span><span class="ct-trig-state">${state}</span></p>
 <p class="ct-trig-task">${String(card.task || '')}</p>
+${goal && goal.text ? html`<p class="ct-trig-goal-text">${clip(goal.text, 400)}</p>` : ''}
 ${meta.length ? html`<p class="ct-trig-meta">${meta.map((m, i) => html`${i ? ' · ' : ''}${m}`)}</p>` : ''}
 ${why ? html`<p class="ct-trig-why">${why}</p>` : ''}
-${moves}</form>`;
+${moves}${switches}</form>
+${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
     }
 
     /** The files beside the question (thread.files draws them). */
@@ -712,7 +767,10 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
                 : move === 'run' ? await t.runNow(owner, req.params.tid)
                     : move === 'undo' ? await t.undo(owner, req.params.tid, { token })
                         : move === 'delete' ? await t.remove(owner, req.params.tid, { token, confirm: true })
-                            : { error: { status: 400, detail: 'Say pause, resume, run, undo or delete.' } };
+                            // The routine's two switches (HO4): answer in this chat, and also tell me.
+                            : move === 'answer-on' || move === 'answer-off' ? await t.setSwitch(owner, req.params.tid, { answerInChat: move === 'answer-on' })
+                                : move === 'notify-on' || move === 'notify-off' ? await t.setSwitch(owner, req.params.tid, { notify: move === 'notify-on' })
+                                    : { error: { status: 400, detail: 'Say pause, resume, run, undo, delete, answer-on or notify-on.' } };
         if (out && out.error) {
             const status = out.error.status || 409;
             if (wantsJson) return res.status(status).json({ error: out.error.detail || 'That did not change.', code: out.error.code || null });

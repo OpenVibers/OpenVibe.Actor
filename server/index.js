@@ -80,6 +80,12 @@ async function start() {
         ];
         extra.push(() => { for (const stop of ctx.waitJobs) stop(); });
     }
+    // The night's tidy (HO5): a due-based job, one row per person who turned it on. The tick only looks for rows
+    // whose next_due_at has come; nothing runs for a person who did not ask for it. The job decides for itself whether
+    // it runs: off in a drill (ACTOR_DRILL=1) and in a test, like the other boot jobs.
+    const tidy = require('./memory/tidy');
+    ctx.memoryJobs = tidy.startJobs(ctx, { log: console });
+    if (ctx.memoryJobs.length) extra.push(() => { for (const stop of ctx.memoryJobs) stop(); });
     // The curator of the skills registry (plan HO2): it asks at night what is DUE — a listing nobody has loaded for
     // 30 days goes stale, for 90 days it is archived, and a stale or archived listing is not offered any more. It is
     // a background loop, so it is off in a drill (ACTOR_DRILL=1) and in a test (the tests boot the app, not the

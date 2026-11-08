@@ -358,10 +358,12 @@ function createApi(ctx) {
             ? await triggers.forDelivery(row.owner, { triggerId: body.trigger_id, watchId: body.watch_id })
             : null;
         if (trigger && trigger.state === 'paused') return problem(req, res, 409, 'actor.trigger.paused', 'This trigger is paused, so nothing ran. Resume it on its card.');
+        if (trigger && trigger.state === 'done') return problem(req, res, 409, 'actor.trigger.done', 'This goal is done, so nothing ran.');
         const out = await personal.run(ctx, row, body.input || '', {
             origin: viaWatch ? 'routine' : 'person',
             level: trigger ? trigger.level : null,
             triggerId: trigger ? trigger.id : null,
+            goal: trigger ? trigger.goal : null,
         });
         if (out.code) return problem(req, res, out.status, out.code, out.detail);
         res.set('Location', `/api/v1/tasks/${out.task.id}`);
@@ -675,9 +677,10 @@ function createApi(ctx) {
         const b = req.body || {};
         const out = await triggers.create({
             owner: triggerOwner(req), agentId: b.agent_id, task: b.task, kind: b.kind,
-            cron: b.cron, timezone: b.timezone, event: b.event,
+            cron: b.cron, timezone: b.timezone, event: b.event, goal: b.goal,
             level: 'ask', turnTaskId: TASK_ID.test(String(b.turn_task_id || '')) ? b.turn_task_id : null,
             personToken: watchToken(req),
+            answerInChat: b.answer_in_chat !== false, notify: b.notify === true,
         });
         if (out.error) return triggerFail(req, res, out);
         res.status(201).json({ trigger: out.trigger });

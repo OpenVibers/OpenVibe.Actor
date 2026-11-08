@@ -234,15 +234,18 @@ function stepFor(name, input) {
         // ── A routine: it keeps running after this turn, so the card says what and when in plain words ──
         case 'schedule_trigger': {
             const what = text(a.task || a.request, 160);
+            const goal = a.goal && typeof a.goal === 'object' && a.goal.done_test ? text(a.goal.done_test, 200) : null;
             const when = a.cron ? `${text(a.cron, 40)}${a.timezone ? `, ${text(a.timezone, 40)}` : ''}`
                 : (a.event && a.event.pattern ? `when ${text(a.event.pattern, 80)} happens` : '');
             return {
                 act: 'act',
                 kind: 'routine',
-                summary: `Set up a task that repeats${when ? ` (${when})` : ''}: ${quoted(what, 160) || 'the one you asked for'}`,
+                summary: goal
+                    ? `Keep working${when ? ` (${when})` : ''} until ${quoted(goal, 200)}, then stop: ${quoted(what, 160) || 'the goal you asked for'}`
+                    : `Set up a task that repeats${when ? ` (${when})` : ''}: ${quoted(what, 160) || 'the one you asked for'}`,
                 // What repeats and when, both: allowing a schedule must not allow whatever task rides on it.
                 target: routineTarget(a),
-                payload: safeInput({ request: a.request, task: a.task, cron: a.cron, timezone: a.timezone, event: a.event, agent_id: a.agent_id }),
+                payload: safeInput({ request: a.request, task: a.task, cron: a.cron, timezone: a.timezone, event: a.event, agent_id: a.agent_id, goal: a.goal, notify: a.notify }),
             };
         }
 
