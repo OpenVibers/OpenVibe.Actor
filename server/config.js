@@ -173,6 +173,10 @@ function load(env = process.env) {
             // OpenVibe.Watch: where a trigger's subscription lives (plan §12 A-4). The person's own token is
             // always the authority; empty turns triggers off.
             watchUrl: trim(env.ACTOR_WATCH_URL != null ? env.ACTOR_WATCH_URL : (selfHosted ? '' : 'http://127.0.0.1:4730')),
+            // OpenVibe.Mail (track HO6): an agent answers the mail sent to its own address. Actor reads one letter in
+            // full text and sends the reply from the agent's inbox, over loopback under its own service token. Empty
+            // turns the mail consumer off.
+            mailUrl: trim(env.ACTOR_MAIL_URL != null ? env.ACTOR_MAIL_URL : (selfHosted ? '' : 'http://127.0.0.1:5250')),
         },
 
         // Artifacts (Actor v2, stage V2-4): what one task may make. The bytes live in Actor's own PostgreSQL,
@@ -255,6 +259,20 @@ function load(env = process.env) {
         // points at it; without it the space tools are off.
         space: {
             url: trim(env.ACTOR_SPACE_URL != null ? env.ACTOR_SPACE_URL : (selfHosted ? '' : 'http://127.0.0.1:4940')),
+        },
+
+        // An agent answers the mail sent to its own address (track HO6). `enabled` gates the consumer itself;
+        // `addresses` is what Mail hands out, so a reply to one of the owner's OWN addresses is sent directly (it
+        // never leaves the host) while a reply to anyone else is the person's approval. Keep these in step with
+        // Mail's MAIL_BASE_DOMAIN, MAIL_MASK_DOMAIN and BURNER_DOMAINS.
+        mail: {
+            answers: env.ACTOR_MAIL_ANSWERS !== '0' && !selfHosted,
+            addresses: {
+                base: env.ACTOR_MAIL_BASE_DOMAIN || 'openvibe.email',
+                mask: env.ACTOR_MAIL_MASK_DOMAIN || 'mask.openvibe.email',
+                burners: String(env.ACTOR_MAIL_BURNER_DOMAINS || 'burn1.openvibe.email,burn2.openvibe.email,burn3.openvibe.email')
+                    .split(',').map((d) => d.trim().toLowerCase()).filter(Boolean),
+            },
         },
 
         // OpenVibe.Events → this service (server/events-consumer.js). The secret signs a delivery (comma-separated

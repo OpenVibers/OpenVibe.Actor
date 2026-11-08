@@ -53,6 +53,17 @@ const TABLES = [
     // The agent's live panel beside a conversation (plan HO9): the document it drew, the version and the ticks
     // waiting for the next turn. The thread is the person's own first turn; the canvas goes with them.
     { table: 'actor_canvases', subject: 'owner', value: (usr) => `user:${usr}`, file: 'canvases.json', columns: ['id', 'owner', 'agent_id', 'thread', 'document', 'version', 'notices', 'updated_at'] },
+    // An agent answering the mail sent to its own address (HO6): the mail conversations it kept (the thread key is
+    // the Message-ID chain's root), the switch the person set per inbox, and one row per letter with what happened to
+    // its answer. The draft of a waiting reply lives on the approval, which is exported above; these rows carry the
+    // address, the sender and the outcome, never a body. Before tasks, so the rows are counted before a cascade
+    // could take them.
+    { table: 'actor_mail_threads', subject: 'owner', value: (usr) => `user:${usr}`, file: 'mail-threads.json',
+        columns: ['owner', 'thread_key', 'inbox_id', 'agent_id', 'peer', 'task_id', 'created_at', 'updated_at'] },
+    { table: 'actor_mail_inboxes', subject: 'owner', value: (usr) => `user:${usr}`, file: 'mail-inboxes.json',
+        columns: ['owner', 'inbox_id', 'agent_id', 'address', 'enabled', 'changed_at'] },
+    { table: 'actor_mail_runs', subject: 'owner', value: (usr) => `user:${usr}`, file: 'mail-runs.json',
+        columns: ['message_id', 'message_rfc_id', 'owner', 'inbox_id', 'agent_id', 'thread_key', 'peer', 'subject', 'task_id', 'reply_state', 'reply_to', 'approval_id', 'reason', 'created_at', 'updated_at'] },
     // Every column but webhook_secret (a task's signing secret is a credential, not the person's data).
     {
         table: 'tasks', subject: 'requester', value: (usr) => `user:${usr}`, file: 'tasks.json',

@@ -73,6 +73,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         return root && root.origin === 'routine' ? 'background' : null;
     }
     const setTriggers = (t) => { triggers = t || null; };
+    // An agent's answer to a letter (track HO6): the mail consumer turns a finished run into a reply or the person's
+    // approval. Injected like the triggers, so the engine does not depend on the mail module.
+    let mailReplies = null;
+    const setMailReplies = (m) => { mailReplies = m || null; };
     const controls = new Map();     // task id → the run's control object (live assumptions)
     let stopped = false;
 
@@ -181,6 +185,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             await assignments.syncTaskState(s, row).catch((err) => log.warn && log.warn('[Actor] assignment state:', id, (err && err.message) || err));
             // A trigger's card follows its run: a failure streak grows, five in a row pause it, a success clears it.
             if (triggers) await triggers.taskState(row).catch((err) => log.warn && log.warn('[Actor] trigger state:', id, (err && err.message) || err));
+            // A run that answered a letter settles that letter: sent, waiting for the person, or failed. Only a run
+            // the mail consumer started has a row, so this is a no-op for every other task.
+            if (mailReplies) await mailReplies(row).catch((err) => log.warn && log.warn('[Actor] mail reply:', id, (err && err.message) || err));
             // "Tell me when it's done" (stage V2-6): done or failed, once per task. Cancelled is the person's own action.
             // A routine's run is the exception (plan HO4): its answer already goes into the conversation that made the
             // trigger, so the person is told through notifications only when the routine asked for it.
@@ -880,7 +887,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
 
     const status = () => ({ running: running.size, waiting: waiting.length });
 
-    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, setTriggers, MAX_ATTEMPTS };
+    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, setTriggers, setMailReplies, MAX_ATTEMPTS };
 }
 
 module.exports = { createEngine, MAX_ATTEMPTS };

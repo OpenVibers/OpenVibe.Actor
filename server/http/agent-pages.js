@@ -8,6 +8,7 @@ const { send } = require('../render/layout');
 const personal = require('../agents/personal');
 const contacts = require('../agents/contacts');
 const ui = require('./agent-contacts-ui');
+const mailStore = require('../mail/store');
 const approvals = require('../agents/approvals');
 const voice = require('../agents/voice');
 const shares = require('../agents/voice-shares');
@@ -249,10 +250,37 @@ ${provenance(a)}${suggestedApps(a)}</section>`;
             : '';
     };
 
+    /**
+     * An agent's own mail address (track HO6): the address with Copy, the switch that says whether it answers there
+     * (OFF by default, opt-in), and the last ten letters it answered with a link to each thread. The switch is the
+     * person's; the agent's system never turns it on.
+     */
+    const mailPanel = (a, inbox, answered) => {
+        const address = inbox ? inbox.address : null;
+        const on = Boolean(inbox && inbox.enabled);
+        return html`<section class="pa-panel" id="mail" aria-labelledby="ac-mail-h"><h2 id="ac-mail-h">Its mail address</h2>
+${address ? html`<p class="pa-mail-address"><code>${address}</code> <button type="button" class="pa-btn pa-copy" data-copy="${address}" aria-label="Copy the address">Copy</button></p>`
+        : html`<p class="muted">OpenVibe.Mail is not answering right now, so its address cannot be shown or turned on.</p>`}
+<p class="pa-hint">Mail sent to this address lands in your own mailbox, and this agent may answer it here. Answering is <strong>${on ? 'on' : 'off'}</strong>: ${on ? 'it reads the letters and replies.' : 'it never reads or answers them until you turn this on.'}</p>
+${address ? html`<form method="post" action="/me/agents/${a.id}/mail"><label class="pa-check"><input type="checkbox" name="enabled" value="on" ${on ? 'checked' : ''}> Answer mail sent to this address</label><button type="submit" class="pa-btn pa-primary">${on ? 'Save' : 'Turn answering on'}</button></form>` : ''}
+<p class="pa-hint">A reply to one of your own addresses (your mailbox, a mask, a burner) is sent as it is. A reply to anyone else waits for your yes, in your approvals. OpenVibe Mail cannot send outside OpenVibe yet, so such a reply stays pending there until sending is turned on.</p>
+${answered.length ? html`<h3 class="pa-sub">The last letters it answered</h3><ul class="pa-notes">${answered.map((m) => html`<li><p class="pa-note-text">${m.subject || '(no subject)'}${m.peer ? html` <span class="muted">from ${m.peer}</span>` : ''}</p><p class="pa-note-meta">${m.reply_state === 'sent' ? 'Answered' : m.reply_state === 'awaiting_person' ? 'Waiting for your yes' : m.reply_state === 'refused' ? 'Not answered' : m.reply_state === 'failed' ? 'Could not answer' : 'Answering'} · ${time(m.created_at)}${m.task_id ? html` · <a href="/tasks/${m.task_id}">the thread</a>` : ''}${m.approval_id ? html` · <a href="/me/approvals/${m.approval_id}">your decision</a>` : ''}${m.reason ? html` · ${m.reason}` : ''}</p></li>`)}</ul>` : html`<p class="muted">No letter answered yet.</p>`}</section>`;
+    };
+
     const importPanel = () => html`<section class="pa-panel" id="import" aria-labelledby="ac-import-h"><h2 id="ac-import-h">Import an agent's voice</h2>
 <p class="pa-hint">A voice file is a small JSON document: an agent's name, a short bio, the house voice it speaks in, its rules, its level, and the model and apps it prefers. It never carries memory, a connector's token or a file. Paste one and it becomes one of your agents, at level ask — you raise it yourself.</p>
 <p class="pa-hint">A file may name an author. Nothing checks that, so the agent will say so rather than claim it is that person's.</p>
 <form method="post" action="/me/agents/import"><label class="pa-wide">Voice file (JSON) <textarea name="voice" rows="6" required placeholder='{"voice":"actor.voice@1","name":"A house voice"}'></textarea></label><button type="submit" class="pa-btn pa-primary">Import this voice</button></form></section>`;
+
+    // The switch that says whether this agent answers mail at its own address (track HO6). OFF by default; only the
+    // person turns it on, and Actor keeps its own copy so it stops the moment they turn it off.
+    r.post('/me/agents/:id/mail', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const enabled = Boolean((req.body || {}).enabled);
+        if (ctx.agentMail) await ctx.agentMail.setAnswering(a.owner, a, enabled).catch(() => null);
+        res.redirect(303, `/me/agents/${a.id}#mail`);
+    });
 
     // The agent's voice as a file: the owner downloads it, and another person's agent is the same 404 as one that does
     // not exist.
@@ -395,6 +423,11 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
         // The skills this agent has installed (plan HO2): the name and the line, never the instructions (the agent
         // loads a skill itself, when one of them fits the job).
         const installed = await skills.forAgent(s, a.owner, a.id);
+        // Its mail address (track HO6): what Mail gave it, whether it answers there, and the last ten letters it
+        // answered with the thread each one stayed in.
+        const mail = ctx.agentMail ? await ctx.agentMail.statusFor(a.owner, a).catch(() => ({ address: null, enabled: false, inboxId: null, available: false })) : { address: null, enabled: false, inboxId: null, available: false };
+        const mailAnswered = mail.inboxId ? await mailStore.answeredByAgent({ s, owner: a.owner, inboxId: mail.inboxId, limit: 10 }).catch(() => []) : [];
+        const mailInbox = { address: mail.address, enabled: mail.enabled };
         page(req, res, a.name, html`<p class="crumbs"><a href="/me/agents">Your agents</a></p>
 <header class="pa-head ac-sheet-head">${ui.face(contact, 64)}<div><h1>${a.name}</h1><p class="ac-sheet-uses">${ui.usesLine(contact)}</p>
 <p class="pa-lede">${ui.levelChip(contact.level)} <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></div></header>
@@ -419,7 +452,7 @@ ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}" class="pa-actions"><button type="submit" name="decision" value="apply" class="pa-btn pa-primary">Add to its instructions</button> <button type="submit" name="decision" value="dismiss" class="pa-btn">Dismiss</button></form></li>`)}</ul>` : ''}
 ${applied.length ? html`<details><summary>Added lately</summary><ul class="pa-notes">${applied.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Added ${time(p.decided_at)}</p>
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}"><button type="submit" name="decision" value="undo" class="pa-danger-link">Undo</button></form></li>`)}</ul></details>` : ''}</section>` : ''}
-${voicePanel(a, doc, shared)}<section class="pa-panel" id="skills" aria-labelledby="pa-skills-h"><h2 id="pa-skills-h">Its skills</h2>
+${mailPanel(a, mailInbox, mailAnswered)}${voicePanel(a, doc, shared)}<section class="pa-panel" id="skills" aria-labelledby="pa-skills-h"><h2 id="pa-skills-h">Its skills</h2>
 <p class="pa-hint">A skill is a small document this agent reads to do one kind of job well. It grants nothing: every step the skill helps with still goes through this agent's level and your approvals, exactly as before.</p>
 ${installed.length ? html`<ul class="pa-notes">${installed.map((k) => html`<li><p class="pa-note-text">${k.name}</p><p class="pa-note-meta">${k.description}</p>
 ${k.withdrawn ? html`<p class="pa-note-meta">${k.withdrawn}</p>` : ''}
