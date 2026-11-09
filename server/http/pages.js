@@ -1408,13 +1408,13 @@ ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates |
 ${(catalog.byId(a.id) || {}).blurb ? html`<p class="agent-blurb">${catalog.byId(a.id).blurb}</p>` : ''}
 <dl class="ag-facts"><div><dt>Good at</dt><dd>${can.length ? can.map((c) => html`<span class="ag-chip">${CLASS_WORD[c] || c}</span>`) : '—'}</dd></div>
 <div><dt>Where it runs</dt><dd>${where}</dd></div>
-<div><dt>Cost</dt><dd>${priceText(a.rate_card)} <a class="muted small" href="${a.rate_card.source}" rel="noopener">source</a></dd></div>
+<div><dt>Cost</dt><dd>${a.id === 'codes' ? 'Nothing from Actor: your machine\'s own keys pay its model' : priceText(a.rate_card)} <a class="muted small" href="${a.rate_card.source}" rel="noopener">source</a></dd></div>
 <div><dt>Speed</dt><dd>about ${Math.round(a.typical_latency_ms / 1000)} s</dd></div></dl>
 ${a.available ? '' : html`<p class="muted small">${a.reason}</p>`}
 <p class="ag-id muted small"><code>${a.id}</code>${a.model ? html` · ${a.model}` : ''} · prices checked ${a.rate_card.verified_at}</p>
 </li>`;
             })}</ul>
-<p class="ag-soon">Coming: your own models and API keys, and your own computer through the OpenVibe Link.</p>
+<p class="ag-soon">Not here yet: your own models and API keys in Actor. Your own computers already can work for the runtime: pair one with <a href="https://openvibe.link">OpenVibe Link</a> and let it.</p>
 <details class="ag-fold" id="modes"><summary>Modes: how Actor picks (${MODES.length})</summary>
 ${table(['Mode', 'What it picks'], MODES.map((m) => [html`<strong>${MODE_LABEL[m]}</strong> <code>${m}</code>`, MODE_TEXT[m]]))}</details>
 <details class="ag-fold" id="classes"><summary>What a task needs (5 kinds)</summary>
