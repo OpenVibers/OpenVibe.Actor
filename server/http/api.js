@@ -104,6 +104,7 @@ function createApi(ctx) {
         }
         return next();
     });
+    r.use('/me/actor', require('../day/cors').cors(ctx.config));
     r.use(principal.middleware);
     r.use('/me/actor', require('../day/routes').router(ctx));
     r.use('/chat-apps', require('../chat-apps/routes').router(ctx));

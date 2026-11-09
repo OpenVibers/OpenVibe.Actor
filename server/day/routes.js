@@ -6,9 +6,14 @@ function router(ctx) {
     const r = asyncRouter();
     const { day, principal } = ctx;
     // Only the person's own credential may turn on their all-day Actor or answer its asks.
-    r.use(principal.requireCapability('actor.agent.manage'));
     r.use((req, res, next) => {
-        if (req.principal.kind !== 'user') return http.sendProblem(res, 403, 'capability.denied', { detail: 'Use your own account to manage your Actor.', ctx: req.ov });
+        if (req.principal.kind !== 'dock') return principal.requireCapability('actor.agent.manage')(req, res, next);
+        const scope = ['GET', 'HEAD'].includes(req.method) ? 'actor.me.read' : 'actor.me.write';
+        if (!String(req.principal.claims.scope || '').split(/\s+/).includes(scope)) return http.sendProblem(res, 403, 'scope.denied', { detail: `${scope} is required.`, ctx: req.ov });
+        next();
+    });
+    r.use((req, res, next) => {
+        if (!['user', 'dock'].includes(req.principal.kind)) return http.sendProblem(res, 403, 'capability.denied', { detail: 'Use your own account to manage your Actor.', ctx: req.ov });
         next();
     });
     const route = (fn, status = 200) => async (req, res) => {

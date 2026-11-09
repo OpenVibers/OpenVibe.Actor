@@ -331,6 +331,7 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
     return {
         url: srv.url, publicPem, privatePem, state: st, requests: st.requests, tokenRequests: st.tokenRequests,
         addUser, userToken,
+        dockToken: (u, scope, extra = {}) => { const at = Math.floor(Date.now() / 1000); return signJwt({ iss: `${issuer}/dock`, sub: u.id, subject_id: u.subject, aud: ['openvibe.network'], client_id: 'companion', fam: 'fam_' + 'a'.repeat(24), scope, iat: at, exp: at + 3600, ...extra }, privatePem); },
         /** An authorization code the mock will exchange for this user if the verifier matches. */
         issueCode(user, challenge) { const code = `code_${crypto.randomBytes(8).toString('hex')}`; st.codes.set(code, { user, challenge }); return code; },
         setAllowance(projectId, caps) { st.projects.get(projectId).allowance = caps; },
