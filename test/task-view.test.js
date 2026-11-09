@@ -1,5 +1,7 @@
 'use strict';
 const assert = require('assert');
+const crypto = require('crypto');
+const { serviceAuth } = require('openvibe-contracts');
 const fs = require('fs');
 const path = require('path');
 const nginx = fs.readFileSync(path.join(__dirname, '../deploy/nginx/openvibe.actor.conf'), 'utf8');
@@ -21,6 +23,19 @@ const { createFrames } = require('../server/task-view/frames');
         const mint = (id, options = { bearer }) => t.get(`/api/v1/tasks/${id}/view-ticket`, { method: 'POST', ...options });
         assert.equal((await mint(theirs.id)).status, 404);
         assert.equal((await mint(row.id, { as: me })).status, 403);
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const token = (sub, actorType, extra = {}) => serviceAuth.signServiceToken({
+            iss: t.network.url, sub, actor_type: actorType, aud: ['openvibe.actor'], cap: ['actor.task.view_ticket'],
+            iat: nowSeconds, exp: nowSeconds + 300, jti: crypto.randomUUID(), ...extra,
+        }, t.network.privatePem);
+        const service = token('svc:watch', 'service');
+        assert.equal((await mint(row.id, { bearer: service })).status, 403);
+        assert.equal((await mint(row.id, { bearer: service, headers: { 'X-OV-Subject': me.subject } })).status, 403);
+        const delegated = token('app:app_01JAB2C3D4E5F6G7H8J9K0MNPT', 'app', {
+            on_behalf_of: me.subject, project_id: 'prj_01JAB2C3D4E5F6G7H8J9K0MNPR',
+            ns: ['prj_01JAB2C3D4E5F6G7H8J9K0MNPR'], env: 'production',
+        });
+        assert.equal((await mint(row.id, { bearer: delegated, headers: { 'X-OV-Subject': me.subject } })).status, 403);
         const issued = await mint(row.id);
         assert.equal(issued.status, 200);
         const u = new URL(issued.json().url), raw = u.searchParams.get('t');
