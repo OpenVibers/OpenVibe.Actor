@@ -6,8 +6,14 @@
  * (POST /internal/notifications/push, contracts network.notification-push-request@1, capability
  * network.notifications.push). Each with a token of its own, audience openvibe.network.
  *
- *   needsYou({ subject, what, title, url })       a step only the person can do (the desk hand-off)
- *   taskEnded({ subject, state, taskId, title, url, detail })   done or not finished: what it was and where to read it
+ *   needsYou({ subject, what, kind, title, url })   a step only the person can do (the desk hand-off, an approval,
+ *                                                   a question): the message is the step alone; rich_content carries
+ *                                                   step, kind (approve | answer | choose) and the task's title
+ *   taskEnded({ subject, state, taskId, title, url, detail })   done or not finished: the message is the task's title
+ *                                                   (and why it did not finish); rich_content carries task_title
+ *
+ * The words are for a person: no "Done:"/"approve:" prefixes, no task text in brackets after a step (Shared 4.172
+ * reads rich_content; older clients show the message, which already reads right).
  *
  * Best effort: off without a client secret, never retried (Network keeps no idempotency record for a push, and a person
  * told twice is worse than one told once), and a failure never stops a task. → { sent, reason? }
@@ -17,6 +23,7 @@ const { serviceAuth } = require('openvibe-contracts');
 
 const SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
+const ASK_KINDS = new Set(['approve', 'answer', 'choose']);
 const clip = (s, n) => (String(s == null ? '' : s).length > n ? `${String(s).slice(0, n - 1)}…` : String(s == null ? '' : s));
 
 function createNotifier({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null, log = console }) {
@@ -61,12 +68,13 @@ function createNotifier({ config, fetchImpl = globalThis.fetch, tokens: tokensOv
         }
     }
 
-    /** The agent needs its person for one step on its desk: `what`, the task's `title` and the desk's `url`. */
-    async function needsYou({ subject, what, title = null, url }) {
-        const message = `${clip(what || 'One step only you can do.', 300)}${title ? ` (${clip(title, 120)})` : ''}`;
+    /** The agent needs its person for one step: `what` (the step), its `kind`, the task's `title` and where to do it. */
+    async function needsYou({ subject, what, kind = null, title = null, url }) {
+        const message = clip(String(what || '').trim() || 'One step only you can do.', 300);
         return send(subject, {
             type: 'AGENT_NEEDS_YOU', category: 'service', priority: 'high', icon: '🙋',
             title: 'Your agent needs you', message, url, service: 'actor',
+            rich_content: { step: message, ...(ASK_KINDS.has(kind) ? { kind } : {}), ...(title ? { task_title: clip(title, 160) } : {}) },
         });
     }
 
@@ -78,14 +86,12 @@ function createNotifier({ config, fetchImpl = globalThis.fetch, tokens: tokensOv
         if (!TASK_ID.test(String(taskId || ''))) return { sent: false, reason: 'bad_input' };
         const done = state === 'succeeded';
         const what = clip(title || 'Your task', 160);
-        const message = done
-            ? `Done: ${what}`
-            : `Not finished: ${what}${detail ? ` — ${clip(detail, 140)}` : ''}`;
+        const message = done ? what : `${what}${detail ? ` — ${clip(detail, 140)}` : ''}`;
         return send(subject, {
             type: done ? 'AGENT_TASK_DONE' : 'AGENT_TASK_FAILED',
             category: 'service', priority: done ? 'normal' : 'high', icon: done ? '✅' : '⚠️',
             title: done ? 'Your task is done' : 'Your task did not finish',
-            message, url, service: 'actor', rich_content: { task_id: taskId, state },
+            message, url, service: 'actor', rich_content: { task_id: taskId, state, task_title: what, ...(!done && detail ? { detail: clip(detail, 140) } : {}) },
         });
     }
 
