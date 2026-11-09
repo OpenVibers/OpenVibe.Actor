@@ -424,6 +424,23 @@ const as = { requester: `user:${ME}` };
         assert.match(JSON.parse(await off.call('computer_desk', { machine: 'any', action: 'start' }, { ...as, desks: off.deskRun() })).error, /none of the person's computers runs desks/);
     });
 
+    await check('locker_fill_login requests approval in Run and returns only outcome metadata', async () => {
+        const seen = [];
+        const runConfig = { ...config, services: { ...config.services, runUrl: 'http://run.test' } };
+        const fetchImpl = async (url, init = {}) => {
+            const u = new URL(url); seen.push({ path: u.pathname, body: init.body && JSON.parse(init.body), auth: init.headers.Authorization });
+            if (u.pathname.endsWith('/fill-requests') && init.method === 'POST') return new Response(JSON.stringify({ request_id: 'fr_01JAB2C3D4E5F6G7H8J9K0MNPQ', status: 'pending' }), { status: 201 });
+            return new Response(JSON.stringify({ state: 'ok', outcome: 'ok', reason: null }), { status: 200 });
+        };
+        const pcs = createComputers({ config: runConfig, fetchImpl, tokens });
+        const result = await pcs.fillLogin(ME, 'run:ses_01JAB2C3D4E5F6G7H8J9K0MNPQ', 'https://example.test');
+        assert.deepStrictEqual(result, { ok: true, reason: null });
+        assert.deepStrictEqual(seen[0].body, { origin: 'https://example.test' });
+        assert.match(seen[1].path, /fr_01JAB2C3D4E5F6G7H8J9K0MNPQ$/);
+        assert.ok(seen.every((r) => r.auth === 'Bearer svc-token'));
+        assert.ok(!JSON.stringify(result).match(/username|password|secret|code/i));
+    });
+
     await check('off without a Bot URL or a client secret', async () => {
         assert.strictEqual(createComputers({ config: { ...config, services: { ...config.services, botUrl: '' } } }).enabled, false);
         assert.strictEqual(createComputers({ config: { ...config, oauth: { clientId: 'actor', clientSecret: '' } } }).enabled, false);

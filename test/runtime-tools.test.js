@@ -108,7 +108,7 @@ const good = (name, scope = 'public') => `module.exports = {
         assert.ok(anon.includes('search_openvibe') && anon.includes('search_web') && anon.includes('find_tools') && anon.includes('run_tool') && anon.includes('read_page'));
         assert.ok(!anon.includes('list_my_robots') && !anon.includes('codes_task'), 'no person tools without a signed-in person');
         const person = names({ config: withBot, requester: 'user:usr_01JAB2C3D4E5F6G7H8J9K0MNPT' });
-        for (const n of ['list_my_robots', 'robot_steps', 'list_my_computers', 'computer_run', 'computer_desk', 'hand_to_person', 'codes_task', 'computer_screen']) assert.ok(person.includes(n), n);
+        for (const n of ['list_my_robots', 'robot_steps', 'list_my_computers', 'computer_run', 'computer_desk', 'hand_to_person', 'codes_task', 'computer_screen', 'locker_fill_login']) assert.ok(person.includes(n), n);
         assert.deepStrictEqual(names({ config: withBot, requester: 'user:usr_01JAB2C3D4E5F6G7H8J9K0MNPT', mode: 'private' }), [], 'private mode has no network tools');
         // Files and charts need the signed-in person and a Media store. A public-chat task has no requester, so the
         // person gate never opens; a server without Media has nothing to store into.
