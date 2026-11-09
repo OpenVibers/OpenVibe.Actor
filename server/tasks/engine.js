@@ -80,6 +80,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     const setMailReplies = (m) => { mailReplies = m || null; };
     const controls = new Map();     // task id → the run's control object (live assumptions)
     let stopped = false;
+    let day = null;
+    const setDay = (value) => { day = value; };
 
     const iso = () => new Date(now()).toISOString();
     const subjectOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
@@ -170,6 +172,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             if (assignmentId) event.assignment_id = assignmentId;
         }
         const saved = await store.appendEvent(s, id, event);
+        if (day) await day.event(id, event);
         stream.publish(id, saved);
         return saved;
     }
@@ -205,6 +208,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (routine !== false) await tellPerson(row, state);
             }
         }
+        if (day && row) await day.taskState(row);
         const saved = await store.updateTask(s, id, { state, ...patch });
         if (ended) runTokens.drop(id);
         if (ended) stream.end(id);
@@ -245,13 +249,15 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     }
 
     function submit(id) {
-        if (stopped) return;
+        if (stopped || waiting.includes(id)) return;
         waiting.push(id);
         pump();
     }
     function pump() {
         while (!stopped && running.size < config.maxRunning && waiting.length) {
-            const id = waiting.shift();
+            const index = waiting.findIndex((id) => !running.has(id));
+            if (index < 0) break;
+            const [id] = waiting.splice(index, 1);
             const ac = new AbortController();
             running.set(id, ac);
             execute(id, ac.signal)
@@ -294,6 +300,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     async function execute(id, signal) {
         const row = await store.getTask(s, id);
         if (!row || row.state !== 'queued') return;
+        const dayRun = day ? await day.run(id) : null;
+        if (dayRun && !dayRun.enabled) return setState(id, 'cancelled', { finished_at: iso() });
         const start = await loadStart(row);
         const resume = start && start.kind === 'resume' ? { step: start.checkpoint.step, state: start.checkpoint.state } : null;
         const fork = start && start.kind === 'fork' ? { step: start.step, checkpoint: start.checkpoint, change: start.change } : null;
@@ -479,7 +487,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // Actor v2: every non-private task that is not code-only runs through the one loop. Private mode keeps
             // the local model with no network tools, and a coding task keeps the Codes agent (which the loop can also
             // reach as codes_task). Approval inbox, budgets, cancel, webhooks and the event stream are unchanged.
-            if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy)) {
+            if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy || dayRun)) {
                 const agentId = LOOP_AGENT;
                 // The person-authored part of the task (never a run input that may come from a watch or a webhook),
                 // and the personal agent this run is for, so the memory tools scope their writes.
@@ -505,7 +513,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     return { pending: true, id: out.ask.id, url: out.url };
                 } : null;
                 // The wait that ended (plan A2), if this run was woken by one: the notice, and the event as data.
-                const wakePayload = wakes.get(id) || null;
+                const wakePayload = wakes.get(id) || (dayRun ? await day.wakePayload(id) : null);
                 if (wakePayload) wakes.delete(id);
                 let out = null;
                 const control = {};
@@ -515,6 +523,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // The person's own model choice for this run (plan L55 C3): their own key, through OpenVibe.AI.
                 // Every model call of the run — the loop's, the plan's, the check's — reads it, and no other run's does.
                 let choice = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
+                if (dayRun && dayRun.brain !== 'auto') choice = { subject: row.requester.slice(5), model: dayRun.brain };
                 // "Runs on: my computer": the model on the person's computer, whatever else they chose above it (a
                 // model id they gave for their computer is kept).
                 if (runsOn === 'computer' && !(choice && choice.provider === 'node')) choice = modelPrefs.computerChoice(row.requester);
@@ -538,7 +547,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         // The answer as it is written (plan L55 C2): to the readers that asked, never stored.
                         // The loop streams a model call only while such a reader is there (wanted).
                         delta: typeof stream.delta === 'function' ? Object.assign((d) => stream.delta(id, d), { wanted: () => stream.wants(id) }) : null,
-                        meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment,
+                        meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, day: dayRun ? day : null,
                         chatPolicy, approveChatTool: chatPolicy ? (tool, input) => require('../chat-apps/policy').approve(s, { taskId: id, owner: row.requester, tool, input, signal }) : null,
                         personText, agentId: ownAgent, notifyTask,
                         askPerson, control, resume, fork, spent: () => spent,
@@ -556,6 +565,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         const wait = waits ? await waits.get(out.parked.wait_id) : null;
                         const left = Math.max(0, ends - Date.now());
                         if (wait) await waits.setRemaining(wait.id, left);
+                        if (dayRun) await day.segmentEnd(id);
                         // The desk goes with the run: while the task waits, nothing holds it.
                         await loop.close(out && out.state).catch(() => {});
                         await emit(id, { kind: 'output', step: 'text', agent: agentId, text: 'Waiting: ' + (wait ? wait.line : 'for something') + '. Nothing runs until it arrives or the deadline passes.' });
@@ -810,6 +820,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         }
         const ac = running.get(id);
         if (ac) ac.abort('cancelled');
+        else if (day && await day.run(id)) return setState(id, 'cancelled', { finished_at: iso() });
         return store.getTask(s, id);
     }
 
@@ -916,7 +927,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
 
     const status = () => ({ running: running.size, waiting: waiting.length });
 
-    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, setTriggers, setMailReplies, MAX_ATTEMPTS };
+    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, setTriggers, setMailReplies, setDay, MAX_ATTEMPTS };
 }
 
 module.exports = { createEngine, MAX_ATTEMPTS };

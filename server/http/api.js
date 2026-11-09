@@ -105,6 +105,7 @@ function createApi(ctx) {
         return next();
     });
     r.use(principal.middleware);
+    r.use('/me/actor', require('../day/routes').router(ctx));
     r.use('/chat-apps', require('../chat-apps/routes').router(ctx));
 
     // An Action Center read is a first-party service acting for one person, named in the query. A person's own token
