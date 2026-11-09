@@ -165,6 +165,12 @@ async function createApp(opts = {}) {
     // An agent answers the mail sent to its own address (track HO6): the consumer below takes the event, the engine
     // reports each run's end back here, and the approvals decide() asks it to send an approved draft.
     const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers, skillRun, media, tips };
+    const fabricMail = require('./mail/client').createMailClient({ config, fetchImpl: opts.mailFetch || fetchImpl, tokens: opts.mailTokens || null });
+    ctx.fabric = require('./fabric/service').createFabric({ s, enabled: !!config.fabric?.enabled, readMail: async (args) => {
+        const out = await fabricMail.getMessage(args);
+        if (!out.ok) throw new Error('Fabric Mail Source read unavailable');
+        return out.data;
+    } });
     ctx.day = require('./day').createDay(ctx);
     engine.setDay(ctx.day);
     ctx.agentMail = opts.agentMail || createAgentMail({ config, s, engine, webhooks, notifier, triggers, log, mailFetch: opts.mailFetch || null, mailTokens: opts.mailTokens || null });
@@ -274,12 +280,16 @@ async function createApp(opts = {}) {
     // chat.message.created goes to chat/asks.js (ask Actor from chat); anything else is acknowledged and ignored.
     app.use('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, log,
         // A chat message asks Actor a question; anything else may wake a wait (plan A2).
-        onEvent: (ev) => (ev.event_type === 'chat.message.created' ? chatAsks.onEvent(ev)
+        onEvent: async (ev) => {
+            const intake = await ctx.fabric.onEvent(ev);
+            if (intake.length) return 'fabric';
+            return (ev.event_type === 'chat.message.created' ? chatAsks.onEvent(ev)
             // The agent's steps (design 2026-11-07): every mode publishes agent.step.* with the person's subject.
             : String(ev.event_type || '').startsWith('agent.step.') ? timeline.onEvent(ctx.s, ev)
             // A letter at an agent's own address (track HO6): that agent answers it, with the mail as data.
             : ev.event_type === 'mail.agent_inbox.received' ? ctx.agentMail.onEvent(ev)
-            : waits.onEvent(ev)) }));
+            : waits.onEvent(ev));
+        } }));
 
     // ── Static assets (content-hashed ?v= → immutable) ──────
     app.use('/shared', require('openvibe-shared/serve').handler());
@@ -317,6 +327,7 @@ async function createApp(opts = {}) {
     // OpenVibe.Services reads Actor's task index through a first-party service token on loopback.
     app.use('/api/v1/resources', require('./registry/resource-control').router(ctx));
     app.use('/api/v1/resources', resourceIndex.router(ctx));
+    app.use('/api/v1/fabric', require('./fabric/api').createRoutes(ctx));
     app.use('/api/v1', createApi(ctx));
     // A2A (stage V2-11): another agent hands Actor a task. The card is /.well-known/agent.json, below.
     app.use(createA2APages(ctx));
