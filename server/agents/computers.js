@@ -112,6 +112,10 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             if (s && s.state !== 'ended') await runCall('POST', `/sessions/${s.id}/end`, subject, { signal }).catch(() => null);
             return { error: s && s.end ? `no desk host could take a browser desk now (${s.end.reason})` : 'no desk host took a browser desk in time' };
         }
+        if (actorId) {
+            try { await personSession(subject, s.id, 'back'); }
+            catch (err) { await runCall('POST', `/sessions/${s.id}/end`, subject, { signal }).catch(() => null); return { error: err.message }; }
+        }
         return { machine: `run:${s.id}`, session: s };
     }
     async function endSession(subject, machine, { signal } = {}) {

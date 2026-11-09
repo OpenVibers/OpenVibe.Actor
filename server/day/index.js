@@ -302,7 +302,7 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
         const text = plain(body && body.text, 4000);
         if (!decline && q.kind === 'answer_question' && !text) fail('Write your answer.');
         const answered = { at: s.iso(), decision: decline ? 'decline' : 'answer', ...(text ? { text } : {}) };
-        if (q.session_id && !q.answered) { await ctx.computers.personSession(owner.slice(5), q.session_id, 'save'); await ctx.computers.personSession(owner.slice(5), q.session_id, 'back'); }
+        if (q.session_id && !decline) { await ctx.computers.personSession(owner.slice(5), q.session_id, 'save'); await ctx.computers.personSession(owner.slice(5), q.session_id, 'back'); }
         const row = await s.db.maybe('UPDATE actor_day_asks SET answered=$3::jsonb WHERE id=$1 AND owner=$2 AND answered IS NULL RETURNING *', [id, owner, JSON.stringify(answered)]);
         await resumeAnswers();
         return askView(row || await s.db.maybe('SELECT * FROM actor_day_asks WHERE id=$1', [id]));
