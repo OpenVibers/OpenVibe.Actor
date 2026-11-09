@@ -79,7 +79,7 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.strictEqual(page.status, 200);
             assert.match(page.text, /<p class="ovt-bubble">Which VPS is cheapest for 2 vCPU and 4 GB\?<\/p>/);
             assert.match(page.text, /<div class="ovt-answer" data-ovt-answer><div class="prose">[\s\S]*Hetzner CX22/);
-            assert.match(page.text, new RegExp(`<a class="ovt-act" href="/tasks/${first}\\?view=details">`), 'Details is the full task page');
+            assert.match(page.text, new RegExp(`<a class="ovt-act" href="/tasks/${first}\\?view=details"[^>]*>`), 'Details is the full task page (an icon action: its label in title and aria-label)');
             assert.match(page.text, /<div class="ovt-meta"><span>Balanced/);
             assert.match(page.text, new RegExp(`<input type="hidden" name="parent" value="${first}">`), 'the composer replies to the last turn');
             assert.match(page.text, new RegExp(`<a class="ovk-sidebar-item is-here" href="/chat/${first}" aria-current="page"`), 'the chat is in the list (the network\'s sidebar), marked as the one open');
