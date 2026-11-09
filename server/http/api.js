@@ -29,6 +29,7 @@ const express = require('express');
 const contracts = require('openvibe-contracts');
 const { asyncRouter } = require('./router');
 const store = require('../tasks/store');
+const tickets = require('../task-view/tickets');
 const catalog = require('../agents/catalog');
 const { heuristic } = require('../agents/classify');
 const { route, MODES } = require('../agents/router');
@@ -631,6 +632,18 @@ function createApi(ctx) {
         const computer = await store.taskComputer(s, row);
         if (computer) out.computer = { ...computer, driving: driving.is(row.id, s.now()) };
         res.json(out);
+    });
+
+    // Only the task owner's own Bearer may mint a view ticket. A session or delegated token cannot.
+    r.post('/tasks/:id/view-ticket', principal.requireCapability('actor.task.view_ticket'), limits.reads('actor.task.view_ticket'), async (req, res) => {
+        const p = req.principal;
+        if (p.kind !== 'user' || p.viaSession || !req.get('authorization')?.startsWith('Bearer ')) return res.sendStatus(403);
+        try {
+            const row = await store.getTask(s, req.params.id);
+            if (!row || row.requester !== p.requester) return res.sendStatus(404);
+            const issued = await tickets.issue(s, row);
+            res.json({ url: `${config.baseUrl}/embed/task/${encodeURIComponent(row.id)}?t=${issued.ticket}`, expires_at: issued.expires_at });
+        } catch { ctx.log.warn('[Actor] task view issue failed', req.params.id); res.sendStatus(503); }
     });
 
     // Take over / Give it back (plan 2026-11-07), built on the hand_to_person machinery: the person drives the desk

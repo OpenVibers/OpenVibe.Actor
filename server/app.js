@@ -205,11 +205,7 @@ async function createApp(opts = {}) {
             }
             if (Object.keys(kept).some((k) => METHODS.has(k))) paths[p] = kept;
         }
-        // Additive until the task-view contract release is pinned.
-        const taskViewSpec = require('./task-view/openapi.json');
-        paths['/api/v1/tasks/{id}/view-ticket'] = taskViewSpec.path;
-        const components = { ...doc.components, schemas: { ...doc.components.schemas, 'actor.task-view-ticket.v1': taskViewSpec.schema } };
-        res.set('Cache-Control', 'public, max-age=3600').set('Access-Control-Allow-Origin', '*').json({ ...doc, paths, components });
+        res.set('Cache-Control', 'public, max-age=3600').set('Access-Control-Allow-Origin', '*').json({ ...doc, paths });
     });
     app.disable('x-powered-by');
     app.set('trust proxy', config.trustProxy);
@@ -321,7 +317,6 @@ async function createApp(opts = {}) {
     // OpenVibe.Services reads Actor's task index through a first-party service token on loopback.
     app.use('/api/v1/resources', require('./registry/resource-control').router(ctx));
     app.use('/api/v1/resources', resourceIndex.router(ctx));
-    app.use('/api/v1', taskView.api);
     app.use('/api/v1', createApi(ctx));
     // A2A (stage V2-11): another agent hands Actor a task. The card is /.well-known/agent.json, below.
     app.use(createA2APages(ctx));
