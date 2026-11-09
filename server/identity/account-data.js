@@ -77,7 +77,9 @@ const TABLES = [
         columns: ['id', 'requester', 'project_id', 'task', 'mode', 'agent', 'budget_task', 'budget_day', 'state', 'result', 'error_code', 'error_detail',
             'cost_usd', 'free_usd', 'explanation', 'cancel_at', 'cancel_by', 'last_seq', 'idem_key', 'idem_hash', 'created_at', 'finished_at', 'timeout_ms', 'via', 'webhooks', 'parent_id',
             // A fork's parent step and the one change it was made with (stage V2-9), and how often it resumed.
-            'fork_of_step', 'fork_change', 'resumes', 'agent_id', 'level', 'assignment_id'],
+            'fork_of_step', 'fork_change', 'resumes', 'agent_id', 'level', 'assignment_id',
+            // The catalogue skill a task was started from (migration 0057): its slug, name and the subject's title.
+            'skill_slug', 'skill_name', 'skill_subject_title'],
     },
     // The person's own per-UTC-day spend accounting. Deleted: nothing in Actor keeps a person's spend record for a
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is
