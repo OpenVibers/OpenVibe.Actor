@@ -28,8 +28,8 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.ok(page.text.includes('href="/chat/model"'), 'the plain form, for no script');
             // Their own computer (L55 C3): its own group, set up and allowed at OpenVibe.AI.
             assert.ok(page.text.includes('<p class="ccm-head">Your computer</p>'));
-            assert.ok(page.text.includes('data-ccm-choice="own:node" aria-pressed="false"'));
-            assert.ok(page.text.includes('https://ai.openvibe.services/you?allow=actor&amp;provider=node'));
+            assert.ok(page.text.includes('data-ccm-choice="own:link" aria-pressed="false"'));
+            assert.ok(page.text.includes('https://ai.openvibe.services/you?allow=actor&amp;provider=link'));
         });
 
         await check('a tap saves through the API from the page; the chip says the person\'s own key after', async () => {
@@ -57,11 +57,11 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const bad = await t.get('/chat/model', { as: kim, form: { choice: 'own:openai', model: 'bad model!' }, headers: SAME });
             assert.match(bad.headers.get('location'), /\/chat\/model\?error=/);
             assert.strictEqual((await t.get('/chat/model')).status, 303, 'signed out: sign in first');
-            const pc = await t.get('/chat/model', { as: kim, form: { choice: 'own:node' }, headers: SAME });
+            const pc = await t.get('/chat/model', { as: kim, form: { choice: 'own:link' }, headers: SAME });
             assert.strictEqual(pc.status, 303);
             const pcPage = await t.get('/chat/model?saved=1', { as: kim });
             assert.match(pcPage.text, /Saved\. Your next task runs on Your computer\./);
-            assert.match(pcPage.text, /<input type="radio" name="choice" value="own:node" checked>/);
+            assert.match(pcPage.text, /<input type="radio" name="choice" value="own:link" checked>/);
             assert.match((await t.get('/chat', { as: kim })).text, /<span data-ccm-label>Your computer<\/span>/);
         });
 

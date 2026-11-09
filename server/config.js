@@ -170,8 +170,10 @@ function load(env = process.env) {
             // OpenVibe.Media: where a sandbox skill's code bytes are stored, private to Actor's tenant (ADR-060).
             // Empty means a sandbox skill cannot be published (a prompt skill is unaffected).
             mediaUrl: trim(env.ACTOR_MEDIA_URL != null ? env.ACTOR_MEDIA_URL : (selfHosted ? '' : 'http://127.0.0.1:4100')),
-            // Where "Run it on my machine" goes: Link's setup, which turns the skill runner on a person's Node.
-            linkUrl: trim(env.ACTOR_LINK_URL || 'https://openvibe.bot/link'),
+            // Where "Run it on my machine" goes: Link's setup, which turns the skill runner on a person's Link machine.
+            linkUrl: trim(env.ACTOR_LINK_URL || 'https://openvibe.link'),
+            // Where a person's Link machines and desks live (the panel's /machines pages).
+            linkPublicUrl: trim(env.ACTOR_LINK_PUBLIC_URL || 'https://openvibe.link'),
             // OpenVibe.Space: the person's own spaces, which their agent builds (plan 2026-10-22 §Z stage Z1).
             // Empty turns the space tools off.
             spaceUrl: trim(env.ACTOR_SPACE_URL != null ? env.ACTOR_SPACE_URL : (selfHosted ? '' : 'http://127.0.0.1:4940')),

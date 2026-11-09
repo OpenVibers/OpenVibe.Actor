@@ -7,7 +7,7 @@ What changed in OpenVibe.Actor, newest first. Each site also publishes its patch
 - **`actor.skill@2`: code in a sandbox** (plan HO8, ADR-060; contracts 0.343.0): a sandbox skill carries one to five
   tools and its code as ordinary `.js` text resources. The registry reads the code, never runs it, and fails a tool
   that reads `process.env`, starts a process, worker or `vm`, writes a file, builds code at run time, requires anything
-  but Node's safe modules, carries an encoded blob or minified code, or reaches the network outside the `net` its tool
+  but Link's safe modules, carries an encoded blob or minified code, or reaches the network outside the `net` its tool
   declares; it flags any network use, timers over 5 s and loops over input. Every finding names its tool. The
   cross-field rules (a tool's entry is a resource, every code resource is a tool's entry, tool names are unique) are
   checked before anything is listed.

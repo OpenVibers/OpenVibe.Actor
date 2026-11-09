@@ -63,11 +63,11 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         });
         assert.strictEqual(out.done, true);
         assert.match(out.note, /Look at it again/);
-        assert.strictEqual(out.watch, `https://openvibe.bot/machines/${PC}/screen?desk=${run.name}`);
+        assert.strictEqual(out.watch, `https://openvibe.link/machines/${PC}/screen?desk=${run.name}`);
         assert.ok(asked > 0, 'the task\'s clock was asked to wait');
         assert.strictEqual(said.length, 1);
         assert.strictEqual(said[0].step, 'text');
-        assert.match(said[0].text, new RegExp(`^Needs you: Sign in to your Google account in the browser\\. .*https://openvibe\\.bot/machines/${PC}/screen\\?desk=${run.name}$`));
+        assert.match(said[0].text, new RegExp(`^Needs you: Sign in to your Google account in the browser\\. .*https://openvibe\\.link/machines/${PC}/screen\\?desk=${run.name}$`));
         assert.ok(bot.asked.every((d) => d === run.name), 'it watched the task\'s own desk');
         assert.deepStrictEqual(told.at(-1), { subject: ME, what: 'Sign in to your Google account in the browser.', url: out.watch }, 'the person is told wherever they are, with the link');
     });
@@ -93,7 +93,7 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         const run = t.deskRun();
         const started = JSON.parse(await t.call('computer_desk', { machine: PC, action: 'start' }, { requester: `user:${ME}`, desks: run }));
         assert.strictEqual(Object.keys(started)[0], 'watch', 'the link comes first, so a clipped result keeps it');
-        assert.strictEqual(started.watch, `https://openvibe.bot/machines/${PC}/screen?desk=${run.name}`);
+        assert.strictEqual(started.watch, `https://openvibe.link/machines/${PC}/screen?desk=${run.name}`);
         const stopped = JSON.parse(await t.call('computer_desk', { machine: PC, action: 'stop' }, { requester: `user:${ME}`, desks: run }));
         assert.strictEqual(stopped.watch, undefined);
     });
@@ -103,7 +103,7 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         const alice = t.network.addUser('desk-alice');
         const id = t.ctx.s.newId('tsk');
         await store.insertTask(t.ctx.s, { id, requester: `user:${alice.subject}`, task: 'Book it', mode: 'balanced', budget_task: 0.05, budget_day: 1, created_at: t.ctx.s.iso() });
-        const watch = `https://openvibe.bot/machines/${PC}/screen?desk=desk-0123456789`;
+        const watch = `https://openvibe.link/machines/${PC}/screen?desk=desk-0123456789`;
         await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'plan', agent: 'openvibe-runtime', text: 'OpenVibe runtime takes it.' });
         await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'text', text: `Needs you: Sign in to the airline. Open your agent's desk, take it over, do it, then let go: ${watch}` });
         await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'text', text: `See https://evil.example/machines/${PC}/screen?desk=desk-0123456789 too` });
@@ -124,7 +124,7 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         const bea = t.network.addUser('desk-bea');
         const id = t.ctx.s.newId('tsk');
         await store.insertTask(t.ctx.s, { id, requester: `user:${bea.subject}`, task: 'Book it', mode: 'balanced', budget_task: 0.05, budget_day: 1, created_at: t.ctx.s.iso() });
-        const watch = `https://openvibe.bot/machines/${PC}/screen?desk=desk-0123456789`;
+        const watch = `https://openvibe.link/machines/${PC}/screen?desk=desk-0123456789`;
         await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'plan', agent: 'openvibe-runtime', text: 'OpenVibe runtime takes it.' });
         assert.strictEqual((await t.get(`/api/v1/tasks/${id}`, { as: bea })).json().needs_you, undefined, 'nothing waits yet');
         const e = await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'text', text: `Needs you: Sign in to the airline. Open your agent's desk, take it over, do it, then let go: ${watch}` });
@@ -137,7 +137,7 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         const cy = t.network.addUser('desk-cy');
         const id = t.ctx.s.newId('tsk');
         await store.insertTask(t.ctx.s, { id, requester: `user:${cy.subject}`, task: 'Find a flight', mode: 'balanced', budget_task: 0.05, budget_day: 1, created_at: t.ctx.s.iso() });
-        const watch = `https://openvibe.bot/machines/${PC}/screen?desk=desk-0123456789`;
+        const watch = `https://openvibe.link/machines/${PC}/screen?desk=desk-0123456789`;
         await store.appendEvent(t.ctx.s, id, { kind: 'output', step: 'plan', agent: 'openvibe-runtime', text: 'OpenVibe runtime takes it.' });
         const before = await t.get(`/tasks/${id}`, { as: cy });
         assert.ok(/<section class="desk-card" id="desk-card" aria-live="polite" hidden>/.test(before.text), 'no desk yet: the card waits, hidden');

@@ -83,7 +83,7 @@ function fakeRun({ job = null, submitStatus = null, read = null } = {}) {
 
 function runOf(fetchImpl, { waitMs = 1000, clock = { t: 0 } } = {}) {
     return createSkillRun({
-        config: { services: { runUrl: 'https://run.test', linkUrl: 'https://openvibe.bot/link' }, skills: { placementWaitMs: waitMs, ttlMs: 120000 }, oauth: { clientId: 'actor', clientSecret: 's' }, networkInternalUrl: 'http://network.test' },
+        config: { services: { runUrl: 'https://run.test', linkUrl: 'https://openvibe.link' }, skills: { placementWaitMs: waitMs, ttlMs: 120000 }, oauth: { clientId: 'actor', clientSecret: 's' }, networkInternalUrl: 'http://network.test' },
         fetchImpl,
         tokens: { authHeaders: async () => ({ Authorization: 'Bearer actor-token' }), invalidate() {} },
         projects: { forSubject: async () => [{ project_id: PRJ, role: 'owner', archived: false }] },
@@ -300,14 +300,14 @@ function runOf(fetchImpl, { waitMs = 1000, clock = { t: 0 } } = {}) {
         });
 
         await check('no node: the step says so plainly, links Link\'s setup, and nothing runs elsewhere', async () => {
-            const run = { execute: async () => ({ ok: false, no_node: true, error: 'No machine is offering to run this skill right now. Run it on my machine: https://openvibe.bot/link — turn the skill runner on there, then try again. Nothing ran anywhere else.' }) };
+            const run = { execute: async () => ({ ok: false, no_node: true, error: 'No machine is offering to run this skill right now. Run it on my machine: https://openvibe.link — turn the skill runner on there, then try again. Nothing ran anywhere else.' }) };
             const tools = await toolModule.toolsFor(t.ctx.s, { owner: `user:${alice.subject}`, agentId, run });
             const runtime = tools.byAlias.get(toolModule.aliasOf('slugify-a-title', 'slugify'));
             const out = await runtime.run({ title: 'A title' }, { store: t.ctx.s });
             assert.strictEqual(out.isError, true);
             assert.match(out.text, /No machine is offering to run this skill/);
             assert.match(out.text, /Run it on my machine/);
-            assert.match(out.text, /openvibe\.bot\/link/);
+            assert.match(out.text, /openvibe\.link/);
             assert.strictEqual(JSON.parse(out.text).untrusted_tool_result.no_node, true);
         });
     } finally { await t.close(); }
@@ -399,7 +399,7 @@ function runOf(fetchImpl, { waitMs = 1000, clock = { t: 0 } } = {}) {
         assert.strictEqual(out.no_node, true);
         assert.match(out.error, /No machine is offering to run this skill/);
         assert.match(out.error, /Run it on my machine/);
-        assert.match(out.error, /openvibe\.bot\/link/);
+        assert.match(out.error, /openvibe\.link/);
         assert.ok(stub.calls.some((c) => c.method === 'POST' && /\/cancel$/.test(c.url)), 'the queued job is cancelled');
         assert.ok(!stub.calls.some((c) => c.method === 'POST' && !/\/api\/v1\/jobs$|\/cancel$/.test(c.url)), 'nothing else was called');
     });

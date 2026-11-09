@@ -502,8 +502,8 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
             [html`Tasks a watch hands over when its condition fires (<a href="https://openvibe.watch">OpenVibe.Watch</a>)`, 'Live: the task is yours, with your allowance; Watch sees only the tasks it started.'],
             [html`Your own agents (<a href="/me/agents">Your agents</a>): instructions, memory you can read and edit, a schedule (hourly, daily or weekly), a budget per run and a daily cap`, 'Live.'],
             [html`Your own robots on <a href="https://openvibe.bot">OpenVibe.Bot</a>: see them and drive the ones you opened to your agent, through Bot's limits and e-stop`, 'Live: turn on "Let my OpenVibe.Actor agent drive this robot" on the robot\'s panel.'],
-            [html`Coding tasks on your own machine, through <a href="https://openvibe.codes/run">OpenVibe.Codes</a>: name the repository and what to change, and get the summary, the files and the patch`, html`Live: add the machine on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a> and start one task on openvibe.codes/run first. The model use is on your machine's own keys.`],
-            [html`Your own computers, through <a href="https://openvibe.bot/docs/computers">OpenVibe.Bot</a>: list and read files, run programs and write files there, as you, at the level you set on the computer`, html`Live: install OpenVibe Link with <code>--computer ask</code> and turn on "Let my agent use this computer" on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>. At <code>ask</code>, you approve each run or write on the computer.`],
+            [html`Coding tasks on your own machine, through <a href="https://openvibe.codes/run">OpenVibe.Codes</a>: name the repository and what to change, and get the summary, the files and the patch`, html`Live: add the machine on <a href="https://openvibe.link/machines">openvibe.link/machines</a> and start one task on openvibe.codes/run first. The model use is on your machine's own keys.`],
+            [html`Your own computers, through <a href="https://openvibe.bot/docs/computers">OpenVibe.Bot</a>: list and read files, run programs and write files there, as you, at the level you set on the computer`, html`Live: install OpenVibe Link with <code>--computer ask</code> and turn on "Let my agent use this computer" on <a href="https://openvibe.link/machines">openvibe.link/machines</a>. At <code>ask</code>, you approve each run or write on the computer.`],
             [html`<a href="/console">The Console</a>: what runs now, what waits for you, today's spend, your agents, computers and robots, and one box to start a task`, 'Live, for signed-in people.'],
             [html`Ask in chat: write <code>@actor</code> and your question in OpenVibe's global chat or your own channel, and the answer comes back in the room`, 'Live: public tools only (never your computers, robots or code), 5 an hour, on your free tier.'],
             [html`Run your own: Actor on your server with your own model (<a href="https://github.com/OpenVibers/OpenVibe.Actor/blob/main/docs/self-host.md">how</a>), signed in with your password, data on your disk`, 'Live: Docker or plain Node, Ollama or any OpenAI-compatible model.'],
@@ -1128,7 +1128,7 @@ ${!shared ? relatedRunsBlock(row, { forks, others }) : ''}
 ${open ? planCard(plan, { editable: !shared && (live || (waiting && !(question && question.kind === 'acting'))), taskId: row.id }) : ''}
 ${!shared && open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
 <p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
-<a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
+<a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : linkPages}" rel="noopener" target="_blank">Watch and take over</a>
 </section>` : ''}
 ${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(' hidden')}>
 <a id="last-look-link" href="${look ? `/tasks/${row.id}/look?at=${look.at}` : '#'}" target="_blank" rel="noopener" title="Open it full size"><img id="last-look-img" src="${look ? `/tasks/${row.id}/look?at=${look.at}` : ''}" alt="The screen your agent last looked at"${look && look.width ? raw(` width="${Number(look.width)}" height="${Number(look.height)}"`) : ''} loading="lazy"></a>
@@ -1348,10 +1348,11 @@ ${a.refused ? html`<details class="refused"><summary>See the answer that didn't 
 </section>`;
     }
 
-    // A step's links to the person's own desk on OpenVibe.Bot (Desks plan D4: Watch, Take over) are made clickable;
+    // A step's links to the person's own desk on OpenVibe Link (Desks plan D4: Watch, Take over) are made clickable;
     // every other address in a step stays text (a model writes steps too, and its links are never vouched for).
     const botPages = String((config.services && config.services.botPublicUrl) || 'https://openvibe.bot').replace(/\/+$/, '');
-    const deskLink = new RegExp(`${botPages.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/machines/dev_[0-9A-HJKMNP-TV-Z]{26}/screen(?:\\?desk=[a-z0-9-]{1,40})?`, 'g');
+    const linkPages = String((config.services && config.services.linkPublicUrl) || 'https://openvibe.link').replace(/\/+$/, '');
+    const deskLink = new RegExp(`${linkPages.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/machines/dev_[0-9A-HJKMNP-TV-Z]{26}/screen(?:\\?desk=[a-z0-9-]{1,40})?`, 'g');
     function withDeskLinks(text) {
         const t = String(text || '');
         const parts = [];

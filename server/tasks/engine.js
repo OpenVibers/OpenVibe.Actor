@@ -537,7 +537,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (dayRun) choice = await day.modelChoice(id);
                 // "Runs on: my computer": the model on the person's computer, whatever else they chose above it (a
                 // model id they gave for their computer is kept).
-                if (runsOn === 'computer' && !(choice && choice.provider === 'node')) choice = modelPrefs.computerChoice(row.requester);
+                if (runsOn === 'computer' && !(choice && choice.provider === 'link')) choice = modelPrefs.computerChoice(row.requester);
                 // The person the task belongs to rides on every router call (on_behalf_of): their allowance pays,
                 // even when they chose no key. A task with no person (a watch, a webhook) names nobody, and AI
                 // serves it from free or untolled capacity only.
@@ -745,7 +745,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (!placement.selected) {
                     if (attempt > 1) break;
                     const why = pinnedAgent === 'codes' && !row.agent
-                        ? { code: 'actor.no_agent', detail: 'Your coding tasks run on your own machine (Runs on: my computer) through OpenVibe.Codes, and it is not connected here. Add your machine on https://openvibe.bot/machines, or switch Runs on back to OpenVibe at https://openvibe.actor/chat/model.' }
+                        ? { code: 'actor.no_agent', detail: 'Your coding tasks run on your own machine (Runs on: my computer) through OpenVibe.Codes, and it is not connected here. Add your machine on https://openvibe.link/machines, or switch Runs on back to OpenVibe at https://openvibe.actor/chat/model.' }
                         : whyNone(placement, { cls, mode: row.mode, budgetUsd: budgetLeft() });
                     return await setState(id, 'failed', { error_code: why.code, error_detail: why.detail, finished_at: iso() });
                 }

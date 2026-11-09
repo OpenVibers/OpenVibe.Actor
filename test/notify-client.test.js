@@ -19,7 +19,7 @@ const reply = (status, body) => new Response(JSON.stringify(body), { status, hea
             return reply(200, { ok: true });
         };
         const n = createNotifier({ config, fetchImpl, tokens, log: { warn() {} } });
-        const url = 'https://openvibe.bot/machines/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9/screen?desk=desk-0123456789';
+        const url = 'https://openvibe.link/machines/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9/screen?desk=desk-0123456789';
         assert.deepStrictEqual(await n.needsYou({ subject: ME, what: 'Sign in to the airline.', url }), { sent: true });
         assert.strictEqual(calls[0].url, `http://network.test/internal/identity/resolve?subject_id=${ME}`);
         assert.deepStrictEqual(calls[1].body, { user_id: 42, type: 'AGENT_NEEDS_YOU', category: 'service', priority: 'high', icon: '🙋', title: 'Your agent needs you', message: 'Sign in to the airline.', url, service: 'actor', rich_content: { step: 'Sign in to the airline.' } });

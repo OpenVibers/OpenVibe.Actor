@@ -48,7 +48,7 @@ A sandbox skill's `.js` resources are read by the code rules instead (`code.env`
 `code.vm`, `code.worker`, `code.fs_write`, `code.network`, `code.encoded`, `code.minified`, `code.require`,
 `code.timer`, `code.loop`): the registry reads the code, never runs it, and every finding names the tool whose entry
 runs that code. The scan fails a tool that reads the environment, starts a process or worker, loads `vm`, writes a
-file, builds code at run time, requires anything but Node's safe modules, carries an encoded blob or minified code, or
+file, builds code at run time, requires anything but Link's safe modules, carries an encoded blob or minified code, or
 reaches the network outside what its `net` declares; it flags any network use, timers over 5 s and loops over input.
 
 A sentence that says "never", "not" or "without" says the opposite, so no rule fires on it: the scan reads what a
