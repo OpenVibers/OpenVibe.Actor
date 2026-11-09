@@ -98,6 +98,8 @@ function taskItem(row, { lastEvent = null, steps = null, wait = null, now = () =
     const updated = row.finished_at || (lastEvent && lastEvent.at) || row.created_at;
     const last = lastEvent && (lastEvent.text || (lastEvent.tool ? `Using ${lastEvent.tool}` : ''));
     const waiting = waitLineOf(wait, now);
+    // The shared code map (Contracts' ai.run-error@1, manifests/ai-run-error-codes.v1.json) is the source of truth; the
+    // words below are what Actor answers with until the Contracts release that carries the manifest is pinned here.
     const failure = row.state === 'failed' ? { code: 'task.failed', words: 'This task could not finish.', next: 'Open the task to review it, then retry.', action: 'open' } : null;
     const summary = waiting || (needs ? needs.what : (failure ? failure.words : (answerOf(row.result) || last)));
     const duration = row.started_at && row.finished_at ? Math.max(0, Date.parse(row.finished_at) - Date.parse(row.started_at)) : null;
