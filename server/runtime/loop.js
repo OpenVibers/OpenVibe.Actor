@@ -65,7 +65,10 @@ const MAX_PLAN_CHARS = 8000;
 
 const today = (now) => new Date(now()).toISOString().slice(0, 10);
 
-const SYSTEM = ({ date, plan, maxCalls = 12, note = '', ledger = '' }) => `You are OpenVibe Actor's agent. You complete a person's task by acting through your tools, then answer them. Today is ${date}.
+// The rules come first and what changes between tasks (today's date, the plan, the ledger, a demoted-tools note)
+// comes last, so the prompt prefix a provider caches is byte-identical from one task to the next and a cache
+// breakpoint never has to cover a date. Nothing the model is told changes; only its place in the prompt does.
+const SYSTEM = ({ date, plan, maxCalls = 12, note = '', ledger = '' }) => `You are OpenVibe Actor's agent. You complete a person's task by acting through your tools, then answer them.
 
 How the answer is grounded:
 - Every number, price, score, standing, weather reading, count, date, name or current status comes from a tool result in this run. Cite it inline as [E1], [E2], … right after the fact it supports.
@@ -90,6 +93,8 @@ How to work:
 Your plan:
 ${plan}
 ${ledger ? `\n${ledger}` : ''}${note ? `\n${note}` : ''}
+
+Today is ${date}.
 
 Begin your answer with the answer itself, not with a statement about it.`;
 
