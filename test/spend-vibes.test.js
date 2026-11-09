@@ -242,7 +242,11 @@ const doneTurn = { content: 'The tip was sent.' };
             assert.strictEqual(res.status, 303, res.text.slice(0, 200));
             assert.strictEqual(tips.calls.length, 1, 'the tip was paid once');
             const call = tips.calls[0];
-            assert.strictEqual(call.auth, `Bearer ${t.network.userToken(ada)}`, 'paid with the person\'s own token');
+            // The person's own token: one Network signed, for this person (a fresh userToken() differs by its iat
+            // whenever the second turns between the two, so compare who it is for, not the string).
+            const [jh, jp, js] = String(call.auth).replace(/^Bearer /, '').split('.');
+            assert.ok(crypto.verify('RSA-SHA256', Buffer.from(`${jh}.${jp}`), t.network.publicPem, Buffer.from(js || '', 'base64url')), 'a token Network signed');
+            assert.strictEqual(JSON.parse(Buffer.from(jp, 'base64url').toString('utf8')).subject_id, ada.subject, 'paid with the person\'s own token');
             assert.strictEqual(call.key, ask.id, 'the approval id is the idempotency key');
             assert.strictEqual(call.contentType, 'application/json');
             assert.deepStrictEqual(call.body, { creator, amount: 12, message: 'thanks for the stream', pay_with: 'credit' });
