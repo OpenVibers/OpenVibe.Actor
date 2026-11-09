@@ -300,8 +300,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     async function execute(id, signal) {
         const row = await store.getTask(s, id);
         if (!row || row.state !== 'queued') return;
-        const dayRun = day ? await day.run(id) : null;
+        let dayRun = day ? await day.run(id) : null;
+        if (dayRun && dayRun.segment_at) {
+            // An interrupted slice cannot get another full time allowance after a restart.
+            await day.segmentEnd(id);
+            dayRun = await day.run(id);
+        }
         if (dayRun && !dayRun.enabled) return setState(id, 'cancelled', { finished_at: iso() });
+        if (dayRun && Number(dayRun.active_ms) >= Number(dayRun.reserved_ms)) return setState(id, 'failed', { error_code: 'actor.task.timeout', error_detail: 'This goal has used its time for this run.', finished_at: iso() });
         const start = await loadStart(row);
         const resume = start && start.kind === 'resume' ? { step: start.checkpoint.step, state: start.checkpoint.state } : null;
         const fork = start && start.kind === 'fork' ? { step: start.step, checkpoint: start.checkpoint, change: start.change } : null;
@@ -316,6 +322,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // Billing (T5) is not in the loop yet: every cent is the free allowance's, and says so.
             await store.updateTask(s, id, { cost_usd: spent, free_usd: spent });
             await store.addSpend(s, row.requester, v);
+            if (dayRun) await day.recordSpend(id, v);
         };
         const budgetLeft = () => budget - spent;
         const abortAtEnd = () => { if (running.has(id)) running.get(id).abort('timeout'); };
@@ -323,6 +330,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         // A task that waited (plan A2) keeps the wall clock it had left when it parked: the wait was not its
         // time to spend. Its budget clock stops while it waits, because no model runs.
         let timeoutMs = Math.max(10_000, Number(row.timeout_ms) || config.taskTimeoutMs);
+        if (dayRun) timeoutMs = Math.max(1, Math.min(timeoutMs, Number(dayRun.reserved_ms) - Number(dayRun.active_ms)));
         const parked = waits ? await waits.remaining(id) : null;
         if (parked) timeoutMs = Math.max(10_000, Math.min(timeoutMs, parked));
         let ends = Date.now() + timeoutMs;
@@ -564,11 +572,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     if (out && out.parked) {
                         const wait = waits ? await waits.get(out.parked.wait_id) : null;
                         const left = Math.max(0, ends - Date.now());
-                        if (wait) await waits.setRemaining(wait.id, left);
                         if (dayRun) await day.segmentEnd(id);
                         // The desk goes with the run: while the task waits, nothing holds it.
                         await loop.close(out && out.state).catch(() => {});
                         await emit(id, { kind: 'output', step: 'text', agent: agentId, text: 'Waiting: ' + (wait ? wait.line : 'for something') + '. Nothing runs until it arrives or the deadline passes.' });
+                        if (wait) await waits.setRemaining(wait.id, left);
                         return undefined;
                     }
                 } catch (err) {

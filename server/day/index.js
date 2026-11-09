@@ -58,8 +58,9 @@ function createDay(ctx) {
         return s.tx(async () => {
             const locked = await s.db.maybe('SELECT * FROM actors WHERE owner = $1 FOR UPDATE', [owner]);
             if (locked.active_task) fail('Pause your Actor before changing its settings.', 409);
+            const latest = { ...locked, ...body, caps: budget(body.caps || locked.caps, locked.caps, true) };
             return s.db.maybe(`UPDATE actors SET name=$2,avatar=$3::jsonb,brain=$4,computer=$5::jsonb,caps=$6::jsonb,updated_at=$7 WHERE owner=$1 RETURNING *`,
-                [owner, next.name.trim(), JSON.stringify(next.avatar), next.brain, JSON.stringify(pc), JSON.stringify(next.caps), s.iso()]);
+                [owner, latest.name.trim(), JSON.stringify(latest.avatar), latest.brain, JSON.stringify(latest.computer), JSON.stringify(latest.caps), s.iso()]);
         });
     }
     const goals = (owner) => s.db.many('SELECT * FROM actor_day_goals WHERE owner=$1 AND deleted_at IS NULL ORDER BY next_due_at,id', [owner]);
@@ -75,11 +76,17 @@ function createDay(ctx) {
         v.asks_before = body.asks_before || (old && old.lane === v.lane ? old.asks_before : LANES[v.lane].asks_before);
         if (!Array.isArray(v.asks_before) || v.asks_before.length > 20 || v.asks_before.some((x) => typeof x !== 'string' || !x.trim() || x.length > 100)) fail('Use a short list of things to ask you before doing.');
         if (typeof v.enabled !== 'boolean' || !Number.isInteger(v.every_minutes) || v.every_minutes < 5 || v.every_minutes > 525600 || !Number.isFinite(Date.parse(v.next_due_at))) fail('Choose a valid schedule, at least five minutes apart.');
-        return s.db.maybe(`INSERT INTO actor_day_goals (id,actor_id,owner,text,lane,budget,asks_before,enabled,every_minutes,next_due_at,created_at,updated_at)
+        const saved = await s.tx(async () => {
+            const current = await s.db.maybe('SELECT * FROM actors WHERE id=$1 FOR UPDATE', [a.id]);
+            const active = current.active_task ? await run(current.active_task) : null;
+            if (active && active.goal_id === id) fail('Pause your Actor before changing its active goal.', 409);
+            return s.db.maybe(`INSERT INTO actor_day_goals (id,actor_id,owner,text,lane,budget,asks_before,enabled,every_minutes,next_due_at,created_at,updated_at)
             VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$11)
             ON CONFLICT (id) DO UPDATE SET text=EXCLUDED.text,lane=EXCLUDED.lane,budget=EXCLUDED.budget,asks_before=EXCLUDED.asks_before,
                 enabled=EXCLUDED.enabled,every_minutes=EXCLUDED.every_minutes,next_due_at=EXCLUDED.next_due_at,updated_at=EXCLUDED.updated_at RETURNING *`,
         [id || s.newId('agl'), a.id, owner, v.text.trim(), v.lane, JSON.stringify(v.budget), JSON.stringify(v.asks_before), v.enabled, v.every_minutes, date(Date.parse(v.next_due_at)), old ? old.created_at : s.iso()]);
+        });
+        return saved;
     }
     async function removeGoal(owner, id) {
         const g = await s.db.maybe('UPDATE actor_day_goals SET enabled=false,deleted_at=$3 WHERE id=$1 AND owner=$2 AND deleted_at IS NULL RETURNING *', [id, owner, s.iso()]);
@@ -92,16 +99,36 @@ function createDay(ctx) {
         return { deleted: true };
     }
     async function usage(actorId, goalId = null) {
+        const actual = await s.db.maybe(`SELECT COALESCE(sum(usd),0) AS usd,COALESCE(sum(active_ms),0) AS ms
+            FROM actor_day_usage WHERE actor_id=$1 AND day=$2 AND ($3::text IS NULL OR goal_id=$3)`, [actorId, dayOf(s.now()), goalId]);
         const rows = await s.db.many(`SELECT r.*,t.cost_usd FROM actor_day_runs r JOIN tasks t ON t.id=r.task_id
-            WHERE r.actor_id=$1 AND (r.day=$2 OR r.finished_at IS NULL) AND ($3::text IS NULL OR r.goal_id=$3)`, [actorId, dayOf(s.now()), goalId]);
-        return rows.reduce((v, r) => ({ usd: v.usd + (r.finished_at ? Number(r.cost_usd) : Math.max(Number(r.cost_usd), Number(r.reserved_usd))),
-            minutes: v.minutes + Number(r.finished_at ? r.active_ms : r.reserved_ms) / 60000,
-            cost_usd: v.cost_usd + Number(r.cost_usd || 0) }), { usd: 0, minutes: 0, cost_usd: 0 });
+            WHERE r.actor_id=$1 AND r.finished_at IS NULL AND ($2::text IS NULL OR r.goal_id=$2)`, [actorId, goalId]);
+        return rows.reduce((v, r) => ({ usd: v.usd + Math.max(0, Number(r.reserved_usd) - Number(r.cost_usd)),
+            minutes: v.minutes + Math.max(0, Number(r.reserved_ms) - Number(r.active_ms)) / 60000,
+            cost_usd: v.cost_usd }), { usd: Number(actual.usd), minutes: Number(actual.ms) / 60000, cost_usd: Number(actual.usd) });
+    }
+    async function addUsage(r, day, usd, ms) {
+        await s.db.query(`INSERT INTO actor_day_usage (actor_id,goal_id,owner,day,usd,active_ms) VALUES ($1,$2,$3,$4,$5,$6)
+            ON CONFLICT (goal_id,day) DO UPDATE SET usd=actor_day_usage.usd+EXCLUDED.usd,active_ms=actor_day_usage.active_ms+EXCLUDED.active_ms`,
+        [r.actor_id, r.goal_id, r.owner, day, usd, ms]);
+    }
+    async function recordSpend(taskId, usd) {
+        const r = await run(taskId);
+        if (r) await addUsage(r, dayOf(s.now()), usd, 0);
     }
     async function journal(r, text, extra = {}) {
-        await s.db.query(`INSERT INTO actor_day_journal (id,actor_id,goal_id,owner,task_id,text,looking_at,thumbnail,cost_usd,created_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)`, [s.newId('ajr'), r.actor_id, r.goal_id, r.owner, r.task_id,
-            plain(text), extra.looking_at || null, JSON.stringify(extra.thumbnail || null), extra.cost_usd || 0, s.iso()]);
+        await s.tx(async () => {
+            // Serialise journal charges for parallel tool results. Each row owns only the cost since the last row.
+            const locked = await s.db.maybe('SELECT task_id FROM actor_day_runs WHERE task_id=$1 FOR UPDATE', [r.task_id]);
+            if (!locked) return;
+            const totals = await s.db.maybe(`SELECT t.cost_usd,
+                (SELECT COALESCE(sum(j.cost_usd),0) FROM actor_day_journal j WHERE j.task_id=t.id) AS recorded
+                FROM tasks t WHERE t.id=$1`, [r.task_id]);
+            const cost = Math.max(0, Number(extra.cost_usd == null ? totals.cost_usd : extra.cost_usd) - Number(totals.recorded));
+            await s.db.query(`INSERT INTO actor_day_journal (id,actor_id,goal_id,owner,task_id,text,looking_at,thumbnail,cost_usd,created_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)`, [s.newId('ajr'), r.actor_id, r.goal_id, r.owner, r.task_id,
+                plain(text), extra.looking_at || null, JSON.stringify(extra.thumbnail || null), cost, s.iso()]);
+        });
     }
     const journalPage = (owner, before = '', limit = 30) => s.db.many(`SELECT * FROM actor_day_journal WHERE owner=$1 AND ($2='' OR id<$2) ORDER BY id DESC LIMIT $3`,
         [owner, before, Math.min(100, Math.max(1, Number(limit) || 30))]);
@@ -109,10 +136,11 @@ function createDay(ctx) {
         const a = await ensure(owner);
         const recent = await journalPage(owner, '', 3);
         const pending = await asks(owner);
+        const looking = a.active_task ? await s.db.maybe('SELECT looking_at FROM actor_day_journal WHERE task_id=$1 AND looking_at IS NOT NULL ORDER BY id DESC LIMIT 1', [a.active_task]) : null;
         const next = (await goals(owner)).find((g) => g.enabled);
         return { ...a, avatar: a.avatar || { person: owner.slice(5) }, now: {
             current_step: pending.length ? pending[0].text : a.status === 'working' && recent[0] ? recent[0].text : a.enabled ? 'Resting until the next goal is due.' : 'Paused',
-            looking_at: recent[0] ? recent[0].looking_at : null, last_three_steps: recent,
+            looking_at: looking ? looking.looking_at : null, last_three_steps: recent,
             next: next ? { goal: next.id, text: next.text, at: next.next_due_at } : null,
             cost_today: (await usage(a.id)).cost_usd }, asks: pending };
     }
@@ -178,7 +206,10 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
         const r = await run(task.id);
         if (!r) return;
         const ended = ['succeeded', 'failed', 'cancelled'].includes(task.state);
-        if (task.state === 'running' && !r.segment_at) await s.db.query('UPDATE actor_day_runs SET segment_at=$2 WHERE task_id=$1 AND segment_at IS NULL', [task.id, s.iso()]);
+        if (task.state === 'running' && !r.segment_at) {
+            await s.db.query('UPDATE actor_day_runs SET segment_at=$2 WHERE task_id=$1 AND segment_at IS NULL', [task.id, s.iso()]);
+            await s.db.query("UPDATE actors SET status='working' WHERE id=$1 AND enabled", [r.actor_id]);
+        }
         if (!ended) return;
         await segmentEnd(task.id);
         await s.db.query('UPDATE actor_day_runs SET finished_at=$2 WHERE task_id=$1 AND finished_at IS NULL', [task.id, s.iso()]);
@@ -188,8 +219,21 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
             : task.state === 'cancelled' ? 'Stopped when you paused this work.' : 'This part could not finish. I will try again when the goal is due.', { cost_usd: Number(task.cost_usd || 0) });
     }
     async function segmentEnd(taskId) {
-        await s.db.query(`UPDATE actor_day_runs SET active_ms=active_ms+GREATEST(0,EXTRACT(EPOCH FROM ($2::timestamptz-segment_at::timestamptz))*1000)::bigint,segment_at=NULL
-            WHERE task_id=$1 AND segment_at IS NOT NULL`, [taskId, s.iso()]);
+        await s.tx(async () => {
+            const r = await s.db.maybe('SELECT * FROM actor_day_runs WHERE task_id=$1 FOR UPDATE', [taskId]);
+            if (!r || !r.segment_at) return;
+            const begin = Date.parse(r.segment_at);
+            const elapsed = Math.max(0, Math.min(s.now() - begin, Number(r.reserved_ms) - Number(r.active_ms)));
+            // Split at UTC midnight: waiting time is absent because parking clears segment_at.
+            let at = begin;
+            while (at < begin + elapsed) {
+                const end = Math.min(begin + elapsed, Date.parse(dayOf(at)) + 86400000);
+                await addUsage(r, dayOf(at), 0, end - at);
+                at = end;
+            }
+            await s.db.query('UPDATE actor_day_runs SET active_ms=active_ms+$2,segment_at=NULL WHERE task_id=$1', [taskId, elapsed]);
+            await s.db.query("UPDATE actors SET status=CASE WHEN enabled THEN 'resting' ELSE 'paused' END WHERE active_task=$1", [taskId]);
+        });
     }
     async function event(taskId, e) {
         if (e.kind !== 'output' || !['text', 'tool_result', 'tool_call'].includes(e.step)) return;
@@ -239,10 +283,10 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
         if (claimed && notifier) await notifier.needsYou({ subject: q.owner.slice(5), what: q.text, title: 'Your Actor needs you', url: `${config.baseUrl}/you?ask=${q.id}` });
     }
     async function answer(owner, id, body, decline = false) {
-        const q = await s.db.maybe('SELECT q.*,w.status AS wait_status FROM actor_day_asks q JOIN actor_waits w ON w.id=q.wait_id WHERE q.id=$1 AND q.owner=$2', [id, owner]);
+        const q = await s.db.maybe('SELECT q.*,w.status AS wait_status,w.deadline_at FROM actor_day_asks q JOIN actor_waits w ON w.id=q.wait_id WHERE q.id=$1 AND q.owner=$2', [id, owner]);
         if (!q) fail('Ask not found.', 404);
         if (q.answered) return askView(q);
-        if (q.wait_status !== 'waiting') fail('This ask has ended.', 409);
+        if (q.wait_status !== 'waiting' || q.deadline_at <= s.iso()) fail('This ask has ended.', 409);
         const text = plain(body && body.text, 4000);
         if (!decline && q.kind === 'answer_question' && !text) fail('Write your answer.');
         const answered = { at: s.iso(), decision: decline ? 'decline' : 'answer', ...(text ? { text } : {}) };
@@ -252,14 +296,14 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
     }
     async function resumeAnswers() {
         const pending = await s.db.many(`SELECT q.* FROM actor_day_asks q JOIN actor_waits w ON w.id=q.wait_id JOIN actors a ON a.id=q.actor_id
-            WHERE q.answered IS NOT NULL AND w.status='waiting' AND w.remaining_ms IS NOT NULL AND a.enabled LIMIT 50`);
+            WHERE q.answered IS NOT NULL AND w.status='waiting' AND w.remaining_ms IS NOT NULL AND a.enabled AND w.deadline_at > $1 LIMIT 50`, [s.iso()]);
         for (const q of pending) {
             const queued = await s.tx(async () => {
                 const a = await s.db.maybe('SELECT * FROM actors WHERE id=$1 FOR UPDATE', [q.actor_id]);
                 if (!a.enabled || a.active_task !== q.task_id) return false;
                 const w = await waitStore.markWoken(s, q.wait_id, { by: 'person', at: s.iso() });
                 if (!w) return false;
-                return s.db.maybe("UPDATE tasks SET state='queued',resumes=resumes+1,finished_at=NULL WHERE id=$1 AND state IN ('running','needs_you') RETURNING id", [q.task_id]);
+                return s.db.maybe("UPDATE tasks SET state='queued',resumes=resumes+1,finished_at=NULL,timeout_ms=LEAST(timeout_ms,$2) WHERE id=$1 AND state IN ('running','needs_you') RETURNING id", [q.task_id, Math.max(1, Number(w.remaining_ms))]);
             });
             if (queued) engine.submit(q.task_id);
         }
@@ -310,6 +354,6 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
         return [require('../utils/jobs').every('actor-day', 15000, tick, { initialDelayMs: 1000, log: ctx.log })];
     }
     return { ensure, get, update, goals, saveGoal, removeGoal, usage, now, setEnabled, tell, journalPage, asks, ask, answer,
-        run, taskState, segmentEnd, event, screen, guardTool, wakePayload, resumeAnswers, tick, startJobs, lanes: LANES };
+        run, taskState, recordSpend, segmentEnd, event, screen, guardTool, wakePayload, resumeAnswers, tick, startJobs, lanes: LANES };
 }
 module.exports = { createDay, askView, fingerprint, budget };

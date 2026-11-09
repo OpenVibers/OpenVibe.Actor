@@ -45,6 +45,7 @@ async function until(fn) {
         const ask = await until(async () => (await t.ctx.day.asks(owner))[0]);
         const q = await t.ctx.s.db.maybe('SELECT * FROM actor_day_asks WHERE id=$1', [ask.id]);
         await until(async () => { const w = await t.ctx.waits.get(q.wait_id); return w.remaining_ms != null; });
+        const runBeforeAnswer = await t.ctx.day.run(id);
         const calls = t.providers.loopCalls();
         await new Promise((r) => setTimeout(r, 100));
         assert.equal(t.providers.loopCalls(), calls, 'a parked goal makes no model calls');
@@ -54,11 +55,14 @@ async function until(fn) {
         assert.equal(answered.status, 200, answered.text);
         const end = await t.waitFor(id);
         assert.equal(end.state, 'succeeded', end.error_detail);
+        assert.ok(Number(end.timeout_ms) < Number(runBeforeAnswer.reserved_ms), 'answering retains only the unused time');
+        assert.ok((await t.ctx.day.usage(a.id)).cost_usd > 0, 'actual spend reaches today’s Actor balance');
         assert.ok(t.providers.requests.some((r) => JSON.stringify(r).includes('Berlin')), 'the durable answer reaches the resumed model');
         assert.equal((await t.ctx.day.asks(owner)).length, 0);
         const journal = (await api(bea, '/journal')).json();
         assert.ok(journal.items.length > 0);
         assert.ok(journal.items.every((x) => x.goal_id === goal.id));
+        assert.ok(Math.abs(journal.items.reduce((sum, x) => sum + Number(x.cost_usd), 0) - Number(end.cost_usd)) < 1e-8, 'journal step costs sum to the measured run cost');
         assert.ok((await tasks.getTask(t.ctx.s, id)).task.includes('Focus on the cost of living.'));
         assert.equal((await api(other, '/journal')).json().items.length, 0);
         await api(bea, '/pause', {});
@@ -150,7 +154,25 @@ async function until(fn) {
             assert.equal(Number(reserved.timeout_ms), 60000, 'the minute cap bounds the actual engine timeout');
             assert.equal(Number(reserved.budget_task), capUsd, 'the money cap bounds the task budget');
             assert.deepEqual(await t.ctx.day.tick(), [], 'reserved money and minutes cannot be spent twice');
+            const picture = await require('sharp')({ create: { width: 4, height: 4, channels: 3, background: '#123456' } }).png().toBuffer();
+            const artifacts = require('../server/runtime/artifacts').createArtifactStore({ store: t.ctx.s, config: t.config, taskId: reservedId, requester: 'user:' + cappedUser.subject });
+            await require('../server/runtime/tools/_person').lookAtScreen(cappedUser.subject, { machine: 'dev_test', question: 'What is on this screen?' }, {
+                taskId: reservedId, day: t.ctx.day, artifacts, models: { chat: async () => ({ text: 'A test screen.', cost_usd: 0 }) },
+            }, { pcs: { screen: async () => ({ format: 'png', content_b64: picture.toString('base64'), width: 4, height: 4 }) } });
+            const screen = (await t.ctx.day.journalPage('user:' + cappedUser.subject))[0];
+            assert.equal(screen.thumbnail.mime, 'image/webp');
+            const imagePath = new URL(screen.thumbnail.url).pathname;
+            assert.equal((await t.get(imagePath, { as: cappedUser })).status, 200);
+            assert.equal((await t.get(imagePath, { as: other })).status, 404, 'a screenshot is owner-only');
+
+            clock = Date.parse(new Date(clock).toISOString().slice(0, 10)) + 86400000 - 30000;
+            await t.ctx.s.db.query('UPDATE actor_day_runs SET segment_at=$2 WHERE task_id=$1', [reservedId, new Date(clock).toISOString()]);
+            clock += 60000;
+            await t.ctx.day.segmentEnd(reservedId);
+            const nextDay = await t.ctx.day.usage(runRow.actor_id);
+            assert.equal(nextDay.minutes, 0.5, 'only the thirty seconds after midnight belong to today');
             await tasks.updateTask(t.ctx.s, reservedId, { cost_usd: capUsd, state: 'succeeded' });
+            await t.ctx.day.recordSpend(reservedId, capUsd);
             await t.ctx.day.taskState(await tasks.getTask(t.ctx.s, reservedId));
             await api(cappedUser, '/goals/' + future.id, { next_due_at: new Date(clock).toISOString() }, 'PATCH');
             clock += 60001;

@@ -25,7 +25,7 @@ All paths below start with `/api/v1/me/actor`.
 
 `computer` is `{kind:'none'}`, `{kind:'link', machine_id:'dev_…'}`, or `{kind:'openvibe'}`. A named Link computer cannot silently fall back to another machine. OpenVibe selection opens a Run computer rather than trying the person's Link machines first. Actual computer access still goes through the existing owner checks.
 
-`caps` is `{usd,minutes,balance_floor_usd}`. A goal's `budget` is `{usd,minutes}`. Goal fields also include `asks_before` (plain strings, defaulting to the lane table), `enabled`, `every_minutes` (default 1440, minimum 5), and `next_due_at` (ISO timestamp, default now). Limits use UTC days. Settings cannot change during an active slice: pause first. A null stored avatar is returned as `{person:'usr_…'}` for the consumer to resolve through the existing person profile.
+`caps` is `{usd,minutes,balance_floor_usd}`. A goal's `budget` is `{usd,minutes}`. Goal fields also include `asks_before` (plain strings, defaulting to the lane table), `enabled`, `every_minutes` (default 1440, minimum 5), and `next_due_at` (ISO timestamp, default now). Limits use UTC days; actual model spend and active minutes are booked to the day they occur, including runs that wait across midnight. Settings cannot change during an active slice: pause first. A null stored avatar is returned as `{person:'usr_…'}` for the consumer to resolve through the existing person profile.
 
 ## Running and waiting
 

@@ -6,7 +6,7 @@ module.exports = {
         kind: { type: 'string', enum: ['answer_question', 'do_yourself'] }, text: { type: 'string', maxLength: 2000 },
         options: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 200 } },
     } },
-    scope: 'person', acts: false, costUsd: 0,
+    scope: 'person', acts: false, costUsd: 0, timeoutMs: 30000,
     available: (ctx) => Boolean(ctx.day),
     async run(input, ctx) { return ctx.day.ask(ctx.taskId, input); },
 };

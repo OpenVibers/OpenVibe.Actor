@@ -84,3 +84,15 @@ CREATE TABLE actor_day_messages (
     task_id text COLLATE "C" REFERENCES tasks(id) ON DELETE SET NULL,
     created_at text COLLATE "C" NOT NULL
 );
+
+-- Actual spend belongs to the UTC day it happened, including a run resumed after midnight.
+CREATE TABLE actor_day_usage (
+    actor_id text COLLATE "C" NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+    goal_id text COLLATE "C" NOT NULL REFERENCES actor_day_goals(id) ON DELETE CASCADE,
+    owner text COLLATE "C" NOT NULL,
+    day text COLLATE "C" NOT NULL,
+    usd double precision NOT NULL DEFAULT 0,
+    active_ms bigint NOT NULL DEFAULT 0,
+    PRIMARY KEY (goal_id,day)
+);
+CREATE INDEX actor_day_usage_actor ON actor_day_usage(actor_id,day);
