@@ -19,6 +19,7 @@ if (!playwright || !fs.existsSync('/usr/bin/google-chrome') || process.env.OV_SK
         await t.ctx.s.db.query("UPDATE actors SET enabled=true,status='working' WHERE id=$1",[a.id]);
         const goal=(await t.ctx.day.goals(a.owner))[0];
         await t.ctx.s.db.query("INSERT INTO actor_day_journal(id,actor_id,goal_id,owner,text,cost_usd,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)",[t.ctx.s.newId('ajr'),a.id,goal.id,a.owner,'Comparing three remote design roles with your experience.',0.04,t.ctx.s.iso()]);
+        await t.ctx.s.db.query('INSERT INTO actor_day_usage(actor_id,goal_id,owner,day,usd) VALUES($1,$2,$3,$4,$5)',[a.id,goal.id,a.owner,t.ctx.s.iso().slice(0,10),0.04]);
         await t.ctx.day.tell(a.owner,'Focus on teams that offer flexible hours.');
         browser=await playwright.chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
         const out=process.env.ACTOR_SCREENSHOT_DIR;

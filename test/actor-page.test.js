@@ -40,8 +40,10 @@ const SAME = { 'sec-fetch-site':'same-origin' };
         await api('',{computer:{kind:'openvibe'}},'PATCH');
         await api('/resume',{});
         t.providers.state.smart='tool';t.providers.state.script=[{content:'What city?',tool_calls:[{id:'ask-city',type:'function',function:{name:'hand_to_person',arguments:JSON.stringify({machine:'run:ses_01J8Z4M2Q0R7T9YV3K6N8P1W2A',what:'Sign in on this screen'})}}]}];
-        await t.ctx.s.db.query('UPDATE actor_day_goals SET schedule=NULL WHERE id=$1',[g.id]);
-        const ids=await t.ctx.day.tick();
+        const tomorrow=(new Date().getUTCDay()+1)%7;
+        await t.ctx.s.db.query('UPDATE actor_day_goals SET schedule=$2::jsonb WHERE id=$1',[g.id,JSON.stringify({days:[tomorrow],start:0,end:24,zone:'UTC'})]);
+        const immediate=await api('/do-now',{goal:g.id});assert.equal(immediate.status,200,immediate.text);
+        const ids=[immediate.json().active_task];assert.ok(ids[0],'Do it now runs outside the usual hours');
         const until=Date.now()+15000;let q;
         while(Date.now()<until){q=(await t.ctx.day.asks('user:'+user.subject))[0];if(q)break;await new Promise(r=>setTimeout(r,25));}
         assert.ok(q);

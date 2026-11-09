@@ -71,8 +71,8 @@ function createPageData(ctx, day) {
         // Claimed messages remain readable after a crash until a saved step records their ids.
         return s.tx(async () => {
             const rows = await s.db.many(`SELECT id,text,attachments FROM actor_day_messages
-                WHERE actor_id=$1 AND (task_id IS NULL OR (task_id=$2 AND created_at > $3))
-                AND NOT (id=ANY($4::text[])) ORDER BY created_at LIMIT 20 FOR UPDATE`, [r.actor_id,taskId,r.created_at,seen]);
+                WHERE actor_id=$1 AND (task_id IS NULL OR (task_id=$2 AND in_prompt=false))
+                AND NOT (id=ANY($3::text[])) ORDER BY created_at LIMIT 20 FOR UPDATE`, [r.actor_id,taskId,seen]);
             if (rows.length) await s.db.query('UPDATE actor_day_messages SET task_id=$2 WHERE id=ANY($1)', [rows.map(m=>m.id),taskId]);
             return rows;
         });

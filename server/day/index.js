@@ -206,7 +206,7 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [task.id, a.id, g.id, a.owner, dayOf(s.now()), chosen.usd, chosen.ms, s.iso()]);
                 await s.db.query("UPDATE actors SET active_task=$2,status='working',updated_at=$3 WHERE id=$1", [a.id, task.id, s.iso()]);
                 await s.db.query('UPDATE actor_day_goals SET next_due_at=$2,do_now=false WHERE id=$1', [g.id, date(s.now() + g.every_minutes * 60000)]);
-                if (messages.length) await s.db.query('UPDATE actor_day_messages SET task_id=$2 WHERE id=ANY($1) AND task_id IS NULL', [messages.map((m) => m.id), task.id]);
+                if (messages.length) await s.db.query('UPDATE actor_day_messages SET task_id=$2,in_prompt=true WHERE id=ANY($1) AND task_id IS NULL', [messages.map((m) => m.id), task.id]);
             } });
         if (out.status === 201) { engine.submit(out.task.id); return out.task; }
         return null;
