@@ -56,7 +56,7 @@ const COMPUTER = { session_id: SESSION, machine: 'a shared desk host', where: 'n
             const { desk: _desk, needs_you: _needs, ...task } = r.json();
             valid(task);
             assert.deepStrictEqual(r.json().computer, { ...COMPUTER, driving: false });
-            assert.ok(r.json().desk && /openvibe\.bot/.test(r.json().desk.url), 'the watch link is still there');
+            assert.ok(r.json().desk && /openvibe\.link/.test(r.json().desk.url), 'the watch link is still there');
         });
 
         await check('the still is its person\'s alone: another person and a signed-out visitor get 404', async () => {

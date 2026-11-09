@@ -67,7 +67,7 @@ const toolsFor = (bot) => createOpenVibeTools({ config, fetchImpl: bot.fetchImpl
         assert.ok(asked > 0, 'the task\'s clock was asked to wait');
         assert.strictEqual(said.length, 1);
         assert.strictEqual(said[0].step, 'text');
-        assert.match(said[0].text, new RegExp(`^Needs you: Sign in to your Google account in the browser\\. .*https://openvibe\\.bot/machines/${PC}/screen\\?desk=${run.name}$`));
+        assert.match(said[0].text, new RegExp(`^Needs you: Sign in to your Google account in the browser\\. .*https://openvibe\\.link/machines/${PC}/screen\\?desk=${run.name}$`));
         assert.ok(bot.asked.every((d) => d === run.name), 'it watched the task\'s own desk');
         assert.deepStrictEqual(told.at(-1), { subject: ME, what: 'Sign in to your Google account in the browser.', url: out.watch }, 'the person is told wherever they are, with the link');
     });

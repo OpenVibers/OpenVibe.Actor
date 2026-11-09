@@ -1128,7 +1128,7 @@ ${!shared ? relatedRunsBlock(row, { forks, others }) : ''}
 ${open ? planCard(plan, { editable: !shared && (live || (waiting && !(question && question.kind === 'acting'))), taskId: row.id }) : ''}
 ${!shared && open ? html`<section class="desk-card" id="desk-card" aria-live="polite"${desk ? '' : raw(' hidden')}>
 <p><strong>Your agent is working on a desk of its own</strong><span id="desk-kind">${desk && desk.kind === 'browser' ? ' (a browser)' : ''}</span>. Watch it live, and take it over whenever you like: while you use it, the agent waits; when you stop, it goes on.</p>
-<a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : botPages}" rel="noopener" target="_blank">Watch and take over</a>
+<a class="sc-btn sc-primary" id="desk-link" href="${desk ? desk.url : linkPages}" rel="noopener" target="_blank">Watch and take over</a>
 </section>` : ''}
 ${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(' hidden')}>
 <a id="last-look-link" href="${look ? `/tasks/${row.id}/look?at=${look.at}` : '#'}" target="_blank" rel="noopener" title="Open it full size"><img id="last-look-img" src="${look ? `/tasks/${row.id}/look?at=${look.at}` : ''}" alt="The screen your agent last looked at"${look && look.width ? raw(` width="${Number(look.width)}" height="${Number(look.height)}"`) : ''} loading="lazy"></a>
@@ -1348,10 +1348,11 @@ ${a.refused ? html`<details class="refused"><summary>See the answer that didn't 
 </section>`;
     }
 
-    // A step's links to the person's own desk on OpenVibe.Bot (Desks plan D4: Watch, Take over) are made clickable;
+    // A step's links to the person's own desk on OpenVibe Link (Desks plan D4: Watch, Take over) are made clickable;
     // every other address in a step stays text (a model writes steps too, and its links are never vouched for).
     const botPages = String((config.services && config.services.botPublicUrl) || 'https://openvibe.bot').replace(/\/+$/, '');
-    const deskLink = new RegExp(`${botPages.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/machines/dev_[0-9A-HJKMNP-TV-Z]{26}/screen(?:\\?desk=[a-z0-9-]{1,40})?`, 'g');
+    const linkPages = String((config.services && config.services.linkPublicUrl) || 'https://openvibe.link').replace(/\/+$/, '');
+    const deskLink = new RegExp(`${linkPages.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/machines/dev_[0-9A-HJKMNP-TV-Z]{26}/screen(?:\\?desk=[a-z0-9-]{1,40})?`, 'g');
     function withDeskLinks(text) {
         const t = String(text || '');
         const parts = [];

@@ -76,7 +76,7 @@ const as = { requester: `user:${ME}` };
         assert.ok(bot.calls.every((c) => c.subject === ME && c.auth === 'Bearer svc-token'), 'as the person, with Actor\'s token');
         const none = JSON.parse(await tools(fakeBot({ machines: [] })).call('list_my_computers', {}, as));
         assert.deepStrictEqual(none.computers, []);
-        assert.match(none.note, /https:\/\/openvibe\.bot\/machines.*--computer.*Let my agent use this computer/);
+        assert.match(none.note, /https:\/\/openvibe\.link\/machines.*--computer.*Let my agent use this computer/);
     });
 
     await check('files and programs go to Bot as the person; refusals and an unanswered approval come back as errors', async () => {

@@ -55,7 +55,7 @@ const BROWSER_KEYS = new Set(['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', '
 
 function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null }) {
     const base = config.services.botUrl;
-    const pages = config.services.botPublicUrl || base;
+    const pages = config.services.linkPublicUrl || 'https://openvibe.link';
     const enabled = !!(base && (tokensOverride || config.oauth.clientSecret));
     const tokens = !enabled ? null : tokensOverride || serviceAuth.createTokenClient({
         tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
