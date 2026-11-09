@@ -105,7 +105,9 @@ function createApi(ctx) {
         }
         return next();
     });
+    r.use('/me/actor', require('../day/cors').cors(ctx.config));
     r.use(principal.middleware);
+    r.use('/me/actor', require('../day/routes').router(ctx));
     r.use('/chat-apps', require('../chat-apps/routes').router(ctx));
 
     // An Action Center read is a first-party service acting for one person, named in the query. A person's own token
@@ -209,7 +211,7 @@ function createApi(ctx) {
     // The catalogue is public: a skill is a document anybody may read, and the listing says who published it, what
     // the scan found and whether the curator still offers it (actor.skill-listing@1).
     r.get('/skills', async (req, res) => {
-        res.json({ listings: await skills.catalogue(s) });
+        res.set('Access-Control-Allow-Origin', '*').json({ listings: await skills.catalogue(s) });
     });
     r.get('/skills/:id', async (req, res) => {
         const listing = await skills.get(s, req.params.id, req.principal && req.principal.kind === 'user' ? req.principal.requester : null);
@@ -594,6 +596,31 @@ function createApi(ctx) {
         return out;
     };
 
+    // One catalogue skill starts an ordinary task with the person's own approval level. Its prompt is pinned to
+    // this run, so editing the catalogue later never changes a task already under way.
+    r.post('/runs', principal.requireCapability('actor.skill.run'), limits.budget('actor.task.create'), async (req, res) => {
+        const b = req.body || {};
+        const listing = await skills.get(s, String(b.skill || ''), req.principal.requester);
+        if (!listing) return problem(req, res, 404, 'actor.skill.not_found', 'No such skill.');
+        const may = skills.installability(listing);
+        if (!may.ok || listing.skill.runs !== 'prompt') return problem(req, res, 422, 'actor.skill.not_runnable', may.ok ? 'This skill needs a sandbox runner.' : may.why);
+        if (b.input != null && (typeof b.input !== 'object' || Array.isArray(b.input))) return problem(req, res, 422, 'actor.skill.input', 'Input must be an object.');
+        const input = JSON.stringify(b.input || {});
+        if (input.length > 4000) return problem(req, res, 422, 'actor.skill.input', 'Input is too long.');
+        const mode = b.choice && b.choice.mode || 'balanced';
+        if (!['cheapest','balanced','best','fastest','private'].includes(mode) || (b.choice && Object.keys(b.choice).some((k) => k !== 'mode')))
+            return problem(req, res, 422, 'actor.skill.choice', 'Choose one task mode.');
+        const doc = listing.skill;
+        const task = `Use the skill “${doc.name}” (${doc.slug}@${doc.version}) for this request.\n\n${doc.instructions}\n\nPerson's input: ${input}\n\nAsk the person for missing details before acting. Keep the result for their review.`;
+        if (task.length > 20000) return problem(req, res, 422, 'actor.skill.input', 'This skill and input are too long together.');
+        const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: { task, mode }, personToken: watchToken(req), timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null });
+        if (out.code) return problem(req, res, out.status, out.code, out.detail);
+        const subjectTitle = typeof b.input?.title === 'string' ? b.input.title.replace(/\s+/g,' ').trim().slice(0,160) : null;
+        await s.db.query('UPDATE tasks SET skill_slug = $1, skill_name = $2, skill_subject_title = $3 WHERE id = $4', [doc.slug, doc.name, subjectTitle, out.task.id]);
+        res.set('Location', `/api/v1/tasks/${out.task.id}`);
+        return res.status(out.status).json({ run: { ...(await wireTask(out.task)), skill: doc.slug, subject: subjectTitle || doc.name } });
+    });
+
     r.post('/tasks', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), async (req, res) => {
         const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: req.body || {}, personToken: watchToken(req), timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null });
         if (out.code) {
@@ -749,6 +776,21 @@ function createApi(ctx) {
         if (!row) return;
         const after = await engine.cancel(row.id, req.principal.requester);
         res.status(store.OPEN.includes(after.state) ? 202 : 200).json(await wireTask(after));
+    });
+
+    r.post('/tasks/:id/retry', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), async (req, res) => {
+        const p = req.principal;
+        const delegated = Boolean(p && p.kind === 'app' && p.via === 'service:network' && p.claims && String(p.requester || '').startsWith('user:'));
+        const row = await load(req, res, { delegated });
+        if (!row) return;
+        if (!['failed', 'cancelled', 'succeeded'].includes(row.state)) return problem(req, res, 409, 'actor.task.not_retryable', 'This task has not stopped.');
+        const mode = req.body && req.body.mode || row.mode || 'balanced';
+        if (!['cheapest', 'balanced', 'best', 'fastest', 'private'].includes(mode)) return problem(req, res, 422, 'actor.task.mode', 'Choose a task mode.');
+        const out = await createTask({ s, config, engine, webhooks, principal: p, body: { task: row.task, mode }, personToken: watchToken(req) });
+        if (out.code) return problem(req, res, out.status, out.code, out.detail);
+        if (row.skill_slug) await s.db.query('UPDATE tasks SET skill_slug = $1, skill_name = $2, skill_subject_title = $3 WHERE id = $4', [row.skill_slug, row.skill_name, row.skill_subject_title, out.task.id]);
+        res.set('Location', `/api/v1/tasks/${out.task.id}`);
+        return res.status(201).json({ run: await wireTask(out.task) });
     });
 
 

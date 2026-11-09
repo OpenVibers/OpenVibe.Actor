@@ -69,6 +69,8 @@ async function start() {
     const subscriptions = require('./events-consumer').startSubscriptions({ config, port: config.port, secret: config.events.secrets[0] || '',
         topics: config.chat.asks ? ['chat.message.created'] : [] });
     const extra = [() => { if (subscriptions) subscriptions.stop(); }];
+    const dayJobs = ctx.day.startJobs();
+    extra.push(() => { for (const stop of dayJobs) stop(); });
     // The waits (plan A2): the deadline loop fires the waits whose time is up, and the sweep reads the topics
     // with open waits from their cursor (the recovery path when a delivery was missed). Both are background
     // loops, so both are off in a drill (ACTOR_DRILL=1).

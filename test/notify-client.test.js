@@ -22,9 +22,18 @@ const reply = (status, body) => new Response(JSON.stringify(body), { status, hea
         const url = 'https://openvibe.link/machines/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9/screen?desk=desk-0123456789';
         assert.deepStrictEqual(await n.needsYou({ subject: ME, what: 'Sign in to the airline.', url }), { sent: true });
         assert.strictEqual(calls[0].url, `http://network.test/internal/identity/resolve?subject_id=${ME}`);
-        assert.deepStrictEqual(calls[1].body, { user_id: 42, type: 'AGENT_NEEDS_YOU', category: 'service', priority: 'high', icon: '🙋', title: 'Your agent needs you', message: 'Sign in to the airline.', url, service: 'actor' });
+        assert.deepStrictEqual(calls[1].body, { user_id: 42, type: 'AGENT_NEEDS_YOU', category: 'service', priority: 'high', icon: '🙋', title: 'Your agent needs you', message: 'Sign in to the airline.', url, service: 'actor', rich_content: { step: 'Sign in to the airline.' } });
+        calls.length = 0;
+        await n.needsYou({ subject: ME, what: 'Run "ls" on your computer', kind: 'approve', title: 'Call the computer_run tool', url });
+        const asked = calls.find((c) => c.method === 'POST').body;
+        assert.strictEqual(asked.message, 'Run "ls" on your computer', 'the step alone: no prefix, no task text in brackets');
+        assert.deepStrictEqual(asked.rich_content, { step: 'Run "ls" on your computer', kind: 'approve', task_title: 'Call the computer_run tool' });
+        calls.length = 0;
+        await n.needsYou({ subject: ME, what: 'x', kind: 'shout', url });
+        assert.deepStrictEqual(calls.find((c) => c.method === 'POST').body.rich_content, { step: 'x' }, 'an unknown kind is left out');
+        calls.length = 0;
         assert.deepStrictEqual(await n.needsYou({ subject: 'usr_01M4W5JBFEG3QG9ER8W1A2K0RY', what: 'x', url }), { sent: false, reason: 'unknown_subject' });
-        assert.strictEqual(calls.filter((c) => c.method === 'POST').length, 1, 'only the known person was told');
+        assert.strictEqual(calls.filter((c) => c.method === 'POST').length, 0, 'only the known person was told');
         assert.deepStrictEqual(await n.needsYou({ subject: ME, what: 'x', url: 'http://evil.example/' }), { sent: false, reason: 'bad_input' }, 'only an https link');
     });
 
@@ -41,14 +50,15 @@ const reply = (status, body) => new Response(JSON.stringify(body), { status, hea
         assert.deepStrictEqual(await n.taskEnded({ subject: ME, state: 'succeeded', taskId, title: 'Say hello.', url }), { sent: true });
         const done = calls.find((c) => c.method === 'POST').body;
         assert.strictEqual(done.type, 'AGENT_TASK_DONE');
-        assert.match(done.message, /Done: Say hello\./);
+        assert.strictEqual(done.message, 'Say hello.', 'the task itself, no "Done:" prefix');
         assert.strictEqual(done.url, url);
-        assert.deepStrictEqual(done.rich_content, { task_id: taskId, state: 'succeeded' });
+        assert.deepStrictEqual(done.rich_content, { task_id: taskId, state: 'succeeded', task_title: 'Say hello.' });
         calls.length = 0;
         await n.taskEnded({ subject: ME, state: 'failed', taskId, title: 'Plan the trip', url, detail: 'It ran too long.' });
         const failed = calls.find((c) => c.method === 'POST').body;
         assert.strictEqual(failed.type, 'AGENT_TASK_FAILED');
-        assert.match(failed.message, /Not finished: Plan the trip — It ran too long\./);
+        assert.strictEqual(failed.message, 'Plan the trip — It ran too long.');
+        assert.deepStrictEqual(failed.rich_content, { task_id: taskId, state: 'failed', task_title: 'Plan the trip', detail: 'It ran too long.' });
         assert.deepStrictEqual(await n.taskEnded({ subject: ME, state: 'failed', taskId: 'nope', title: 'x', url }), { sent: false, reason: 'bad_input' });
     });
 

@@ -30,7 +30,7 @@ const subject = require('./subject');
 
 const PRINCIPAL_SUB = /^(svc|app|mod|agent):/;
 const PROJECT_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
-const CAPABILITIES = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.task.view_ticket', 'actor.agent.read', 'actor.agent.manage', 'actor.agent.run', 'actor.resource.read', 'actor.resource.control', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task', 'actor.model.manage', 'actor.config.manage', 'actor.timeline.read', 'actor.assignment.read', 'actor.assignment.cancel'];
+const CAPABILITIES = ['actor.task.create', 'actor.skill.run', 'actor.task.read', 'actor.task.list', 'actor.task.view_ticket', 'actor.agent.read', 'actor.agent.manage', 'actor.agent.run', 'actor.resource.read', 'actor.resource.control', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task', 'actor.model.manage', 'actor.config.manage', 'actor.timeline.read', 'actor.assignment.read', 'actor.assignment.cancel'];
 
 function decodePayload(token) {
     const parts = String(token || '').split('.');
@@ -63,6 +63,13 @@ function createPrincipal({ config, keys }) {
         if (header.startsWith('Bearer ')) {
             const token = header.slice(7).trim();
             const payload = decodePayload(token);
+            if (payload && payload.iss === `${config.networkIssuer.replace(/\/+$/, '')}/dock`) {
+                const v = await keys.verifyUser(token, { issuer: payload.iss, audience: 'openvibe.network' });
+                if (!v.ok) return { error: [401, 'token.invalid', v.reason] };
+                const c = v.claims;
+                if (c.client_id !== 'companion' || c.typ !== undefined || c.purpose !== undefined || c.actor_type !== undefined || c.role !== undefined || c.staff_caps !== undefined || !/^fam_[0-9a-f]{24}$/.test(c.fam || '') || !ids.isSubjectId('user', c.subject_id)) return { error: [401, 'token.invalid', 'Not a Dock sign-in.'] };
+                return { principal: { kind: 'dock', requester: `user:${c.subject_id}`, claims: c, viaSession: false } };
+            }
             if (payload && typeof payload.sub === 'string' && PRINCIPAL_SUB.test(payload.sub)) {
                 const publicKey = await keys.pemForToken(token);
                 if (!publicKey) return { error: [503, 'identity.unavailable', 'the Network signing key is not loaded yet'] };
@@ -119,10 +126,11 @@ function createPrincipal({ config, keys }) {
                 if (p.viaSession && req.method !== 'GET' && !sameOrigin(req, config.baseUrl)) return http.sendProblem(res, 403, 'request.cross_site', { detail: 'A signed-in request that changes something must come from openvibe.actor itself.', ctx: req.ov });
                 return next();
             }
+            if (p.kind === 'dock') return http.sendProblem(res, 403, 'scope.denied', { detail: 'This Dock sign-in only grants access to your Actor.', ctx: req.ov });
             const decision = capabilities.check(p.claims, cap);
             if (decision.allowed) return next();
             // These v1 ids are enforced here until the matching Contracts manifests are released.
-            if (['actor.agent.manage', 'actor.agent.run'].includes(cap) && Array.isArray(p.claims.cap) && p.claims.cap.includes(cap)) return next();
+            if (['actor.agent.manage', 'actor.agent.run', 'actor.skill.run'].includes(cap) && Array.isArray(p.claims.cap) && p.claims.cap.includes(cap)) return next();
             return http.sendProblem(res, 403, decision.code || 'capability.denied', { detail: decision.reason || `${cap} not granted`, ctx: req.ov });
         };
     }

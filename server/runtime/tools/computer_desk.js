@@ -59,6 +59,16 @@ module.exports = {
         let a = { ...input };
 
         // Machine "any": a desk start goes where there is room, the next machine when one is full.
+        if (ctx.day && a.action === 'start' && a.machine === 'any' && desks && !desks.placed) {
+            const dayRun = await ctx.day.run(ctx.taskId);
+            if (dayRun && dayRun.computer.kind === 'openvibe') {
+                const ses = await core.pcs.openSession(person, { taskId: ctx.taskId, actorId: dayRun.actor_id, width: a.width, height: a.height, signal: ctx.signal });
+                if (ses.error) return { text: json(ses), isError: true };
+                desks.placed = ses.machine;
+                return { text: json({ machine: ses.machine, running: true, kind: 'browser', where: 'an OpenVibe computer' }),
+                    data: ses, computer: computerOf({ run: desks, machine: ses.machine, ses }) };
+            }
+        }
         if (a.machine === 'any') {
             if (desks && desks.placed) a = { ...a, machine: desks.placed };
             else if (a.action === 'start') {
@@ -75,7 +85,7 @@ module.exports = {
                 // None of the person's own machines has room (or none runs desks): a browser desk on a desk host,
                 // through an OpenVibe.Run session (Desks plan D6), for browser work only.
                 if (core.pcs.sessionsOn && (a.kind == null || a.kind === 'browser')) {
-                    const ses = await core.pcs.openSession(person, { taskId: desks && desks.taskId, width: a.width, height: a.height, signal: ctx.signal });
+                    const ses = await core.pcs.openSession(person, { taskId: desks && desks.taskId, actorId: ctx.day ? (await ctx.day.run(ctx.taskId)).actor_id : null, width: a.width, height: a.height, signal: ctx.signal });
                     if (!ses.error) {
                         if (desks) desks.placed = ses.machine;
                         return { text: json({ machine: ses.machine, running: true, kind: 'browser', where: 'a desk host (none of your own computers had a desk free)', note: 'A browser alone, on a machine that is not the person\'s: computer_browser, computer_screen and computer_input work there with machine "any"; no programs or files. It ends with the task.' }), data: ses, computer: computerOf({ run: desks, machine: ses.machine, ses }) };

@@ -165,6 +165,8 @@ async function createApp(opts = {}) {
     // An agent answers the mail sent to its own address (track HO6): the consumer below takes the event, the engine
     // reports each run's end back here, and the approvals decide() asks it to send an approved draft.
     const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers, skillRun, media, tips };
+    ctx.day = require('./day').createDay(ctx);
+    engine.setDay(ctx.day);
     ctx.agentMail = opts.agentMail || createAgentMail({ config, s, engine, webhooks, notifier, triggers, log, mailFetch: opts.mailFetch || null, mailTokens: opts.mailTokens || null });
     engine.setMailReplies((task) => ctx.agentMail.answered(task));
     // The skills registry (plan HO2, ADR-058): OpenVibe's own skills are documents in the repository (skills/), and
@@ -230,7 +232,7 @@ async function createApp(opts = {}) {
                 scriptSrc: ["'self'", "'unsafe-inline'", 'https://openvibe.network', 'https://static.cloudflareinsights.com'],
                 styleSrc: ["'self'", "'unsafe-inline'", 'https://openvibe.network', 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com'],
                 fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com'],
-                imgSrc: ["'self'", 'data:', 'https://openvibe.network', 'https://openvibe.media'],
+                imgSrc: ["'self'", 'data:', 'blob:', 'https://openvibe.network', 'https://openvibe.media'],
                 // The navbar's Messages count asks Chat (openvibe-shared 4.130.0).
                 connectSrc: ["'self'", 'https://openvibe.chat', 'https://openvibe.network', 'https://cloudflareinsights.com', 'https://openvibe.events'],
                 // Bot's watch links: a chat turn frames the desk the agent works on, live (plan L55 C1b).
@@ -353,6 +355,7 @@ async function createApp(opts = {}) {
         if (req.path !== '/.well-known/agent.json' && !twin) return next();
         return agentLayer(req, res, next);
     });
+    app.use(require('./day/page').router(ctx));
     app.use(pageRoutes);
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/">giving Actor a task</a>, <a href="/agents">the agents</a> or <a href="/docs">the API</a>.</p>` }));
 

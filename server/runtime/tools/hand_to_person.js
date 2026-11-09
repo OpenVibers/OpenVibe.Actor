@@ -21,6 +21,9 @@ module.exports = {
         // A desk on a desk host (an OpenVibe.Run session) is not the person's to take over yet.
         const desks = ctx.state && ctx.state.desks;
         const target = input.machine === 'any' && desks ? desks.placed : input.machine;
+        if (ctx.day && core.pcs.isSession && core.pcs.isSession(target)) {
+            return ctx.day.ask(ctx.taskId, { kind: 'sign_in', text: input.what, options: ['Sign in on its screen', 'Done'], session_id: target.slice(4) });
+        }
         if (core.pcs.isSession && core.pcs.isSession(target)) return { text: json({ done: false, note: 'Your desk is on a desk host, which the person cannot take over from here: tell them in your answer what is left for them to do, and where.' }), data: null };
         const data = await handToPerson(person, input, ctx, core);
         return { text: json(data), data };

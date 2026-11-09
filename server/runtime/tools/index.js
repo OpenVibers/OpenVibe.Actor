@@ -151,13 +151,19 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
         if (!tool) return { text: JSON.stringify({ error: `unknown tool ${name}` }), data: null, sources: [], isError: true };
         if (!allowedBy(tool.scope, ctx)) return { text: JSON.stringify({ error: `tool ${name} is not available for this task` }), data: null, sources: [], isError: true };
         if (!require('../../chat-apps/policy').allowed(tool, ctx.chatPolicy)) return normalize({ text: 'This tool is unavailable in this chat.', isError: true });
+        let dayApproved = false;
+        if (ctx.day) {
+            const gate = await ctx.day.guardTool(ctx.taskId, name, input, tool);
+            if (gate && !gate.approved) return normalize(gate);
+            dayApproved = Boolean(gate && gate.approved);
+        }
         if (ctx.chatPolicy && tool.acts === true) {
             if (!ctx.approveChatTool || !await ctx.approveChatTool(name, input)) return normalize({ text: 'The action was not approved. Nothing ran.', isError: true });
         }
         // The approval gate (plan §12 A-2): every acting tool sees levels.decide with its act and its
         // always-ask category before it changes anything. A tool that only writes Actor's own working
         // state says null and goes on. A chat has its own consent card above, so it is not asked twice.
-        if (!ctx.chatPolicy && tool.acts === true && typeof ctx.requestApproval === 'function') {
+        if (!dayApproved && !ctx.chatPolicy && tool.acts === true && typeof ctx.requestApproval === 'function') {
             // A dynamic tool may know a step the generic mapping cannot (a skill's code: kind skill.run, target
             // "<slug>@<version> <tool>"); a module file says it in agents/actions.js.
             const step = typeof tool.step === 'function' ? tool.step(input) : stepFor(name, input);
