@@ -37,8 +37,9 @@ const SAME = { 'sec-fetch-site':'same-origin' };
         t.ctx.computers.personSession=async(...args)=>{calls.push(args);return{saved:true};};
         const r=await t.ctx.s.db.maybe('SELECT id FROM actors WHERE owner=$1',['user:'+user.subject]);
         // The ordinary day test covers full park/resume; sign-in also carries the screen and saves before answering.
+        await api('',{computer:{kind:'openvibe'}},'PATCH');
         await api('/resume',{});
-        t.providers.state.smart='tool';t.providers.state.script=[{content:'What city?',tool_calls:[{id:'ask-city',type:'function',function:{name:'ask_person',arguments:JSON.stringify({kind:'answer_question',text:'Which city?',options:['Paris']})}}]}];
+        t.providers.state.smart='tool';t.providers.state.script=[{content:'What city?',tool_calls:[{id:'ask-city',type:'function',function:{name:'hand_to_person',arguments:JSON.stringify({machine:'run:ses_01J8Z4M2Q0R7T9YV3K6N8P1W2A',what:'Sign in on this screen'})}}]}];
         await t.ctx.s.db.query('UPDATE actor_day_goals SET schedule=NULL WHERE id=$1',[g.id]);
         const ids=await t.ctx.day.tick();
         const until=Date.now()+15000;let q;
@@ -51,7 +52,10 @@ const SAME = { 'sec-fetch-site':'same-origin' };
         assert.equal((await t.ctx.day.stepMessages(ids[0],incoming.map(m=>m.id))).length,0,'saved steps do not repeat messages');
         const snapshots=require('../server/runtime/checkpoint-state');
         assert.deepEqual(snapshots.restore(snapshots.snapshot({dayMessageIds:incoming.map(m=>m.id)})).dayMessageIds,incoming.map(m=>m.id));
-        await t.ctx.s.db.query('UPDATE actor_day_asks SET session_id=$2 WHERE id=$1',[q.id,'ses_01J8Z4M2Q0R7T9YV3K6N8P1W2A']);
+        assert.equal(q.kind,'sign_in');assert.ok(q.options.includes('Done'));
+        const parkedUntil=Date.now()+5000; let parked;
+        while(Date.now()<parkedUntil){parked=await t.ctx.s.db.maybe('SELECT w.remaining_ms FROM actor_waits w JOIN actor_day_asks q ON q.wait_id=w.id WHERE q.id=$1',[q.id]);if(parked?.remaining_ms!=null)break;await new Promise(r=>setTimeout(r,20));}
+        assert.ok(parked.remaining_ms>0,'sign-in parks the task and stops its clock');
         assert.equal(await t.ctx.day.retainDesk(ids[0]),true);
         const answer=await api('/asks/'+q.id+'/answer',{text:'Done'});assert.equal(answer.status,200,answer.text);
         assert.deepEqual(calls.slice(0,2).map(c=>c[2]),['save','back']);

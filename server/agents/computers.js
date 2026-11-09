@@ -120,6 +120,11 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const r = await runCall('POST', `/sessions/${m[1]}/end`, subject, { signal });
         return r.ok ? { running: false, stopped: true } : runProblem(r, 'ending the session');
     }
+    async function sessionList(subject) {
+        const r = await runCall('GET', '/sessions?state=all&limit=100', subject, {});
+        if (!r.ok) throw Object.assign(new Error('The computer history could not be loaded.'), {status:r.status || 502});
+        return r.data.sessions || [];
+    }
     async function profileSites(subject, actorId, site) {
         const r = await runCall(site ? 'DELETE' : 'GET', `/actor-profiles/${encodeURIComponent(actorId)}/sites${site ? '/' + encodeURIComponent(site) : ''}`, subject, {});
         if (!r.ok) throw Object.assign(new Error('The saved sign-ins are unavailable right now.'), { status: 502 });
@@ -467,7 +472,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { url: data.url, expires_at: data.expires_at || null, control: !!data.control, desk: data.desk || desk };
     }
 
-    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, profileSites, personSession, openSession, endSession, fillLogin, still, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
+    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, sessionList, profileSites, personSession, openSession, endSession, fillLogin, still, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
 }
 
 module.exports = { createComputers };

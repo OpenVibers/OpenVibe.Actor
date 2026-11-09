@@ -1,7 +1,7 @@
 'use strict';
 const { services, http } = require('openvibe-contracts');
 // Match Network's manifest-based first-party list; never include hosted tenant subdomains.
-const origins = new Set((services.manifests || []).flatMap(m => m.domains || []).map(d => `https://${d}`));
+const origins = new Set((services.manifests || []).flatMap(m => m.domains || []).flatMap(d => [`https://${d}`, `https://www.${d}`]));
 origins.add('https://openvibe.computer');
 function cors(config) {
     return (req, res, next) => {

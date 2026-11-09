@@ -28,6 +28,7 @@ function router(ctx) {
     r.get('/page', route(owner => day.pageData(owner)));
     r.post('/do-now', route((owner, req) => day.doNow(owner, req.body.goal)));
     r.post('/earnings', route((owner, req) => day.earn(owner, req.body), 201));
+    r.get('/computer-log', route(owner => day.computerLog(owner)));
     r.get('/sites', route(owner => day.sites(owner)));
     r.delete('/sites/:site', route((owner, req) => day.sites(owner, req.params.site)));
     r.post('/computer/:action', route((owner, req) => day.computerCall(owner, req.params.action, req.body)));

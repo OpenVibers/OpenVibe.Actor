@@ -17,6 +17,19 @@ function createPageData(ctx, day) {
         if (!id) fail('No computer is open right now.', 409);
         return computers.personSession(owner.slice(5), id, action, body);
     }
+    async function computerLog(owner) {
+        const a = await day.ensure(owner);
+        if (a.computer.kind !== 'openvibe') return {sessions:[],actions:[]};
+        const runs = await s.db.many('SELECT task_id FROM actor_day_runs WHERE owner=$1', [owner]);
+        const ids = new Set(runs.map(r=>r.task_id));
+        const sessions = (await computers.sessionList(owner.slice(5))).filter(r=>ids.has(r.task_id));
+        const actions = [];
+        for (const row of sessions.slice(0,10)) {
+            const h = await computers.personSession(owner.slice(5),row.id,'history');
+            for (const action of h.actions || []) if (action.kind === 'control') actions.push(action);
+        }
+        return {sessions,actions:actions.sort((a,b)=>String(b.at).localeCompare(String(a.at)))};
+    }
     async function sites(owner, site) {
         const a = await day.ensure(owner);
         if (a.computer.kind !== 'openvibe') return { sites: [] };
@@ -73,6 +86,6 @@ function createPageData(ctx, day) {
         return { subject, model: r.brain === 'openvibe' ? null : r.brain };
     }
     const retainDesk = async taskId => Boolean(await s.db.maybe('SELECT id FROM actor_day_asks WHERE task_id=$1 AND session_id IS NOT NULL AND answered IS NULL', [taskId]));
-    return { session, computerCall, sites, pageData, doNow, earn, retainDesk, modelChoice, stepMessages };
+    return { session, computerCall, computerLog, sites, pageData, doNow, earn, retainDesk, modelChoice, stepMessages };
 }
 module.exports = { createPageData };

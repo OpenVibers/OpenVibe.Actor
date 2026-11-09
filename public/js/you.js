@@ -35,7 +35,7 @@
         if ($('[data-back]')) $('[data-back]').hidden = false;
         notice('The screen is yours. Sign in there, then choose Done.');
     }
-    async function input(value) { return request('/computer/input', { kind: 'input', value }); }
+    async function input(value) { const result=await request('/computer/input', { kind: 'input', value }); if(result.result==='refused') throw new Error('Take over the screen before using it.'); return result; }
     async function showSites() {
         const result = await request('/sites');
         const list = document.createElement('ul');
@@ -76,8 +76,9 @@
         else if (b.dataset.brain) { const id = $('#ay-brain-goal').value; await request(id ? '/goals/' + id : '', id ? { brain_override:b.dataset.brain } : { brain:b.dataset.brain }, 'PATCH'); $('#ay-brain').close(); notice('From the next step.'); await refresh(); }
         else if (b.hasAttribute('data-sites')) await showSites();
         else if (b.dataset.signOut) { await request('/sites/' + encodeURIComponent(b.dataset.signOut),undefined,'DELETE'); await showSites(); }
-        else if (b.hasAttribute('data-history')) { const h = await request('/computer/history'); $('#ay-history').textContent = h.actions.map(x => new Date(x.at).toLocaleTimeString() + ' · ' + (x.actor.kind === 'person' ? 'You' : 'Your Actor') + ' · ' + (x.action || x.kind)).join('\n') || 'No take-overs yet.'; }
-        else if (b.hasAttribute('data-earlier')) { const result = await request('/journal?limit=100' + (cursor ? '&before=' + encodeURIComponent(cursor) : '')); cursor = result.next_cursor; const list = document.createElement('ul'); for (const j of result.items) { const li = document.createElement('li'); li.textContent = new Date(j.created_at).toLocaleString() + ' · ' + j.text; list.append(li); } b.before(list); b.hidden = !result.next_cursor || !result.items.length; }
+        else if (b.hasAttribute('data-computer-time')) { const h=await request('/computer-log'); const list=document.createElement('ul'); for(const row of h.sessions) { const li=document.createElement('li'); li.textContent=new Date(row.timings.created_at).toLocaleDateString()+' · '+Math.ceil(row.usage.desk_seconds/60)+' minutes'; list.append(li); } $('#ay-computer-time').replaceChildren(list); if(!h.sessions.length) $('#ay-computer-time').textContent='No computer time yet.'; }
+        else if (b.hasAttribute('data-history')) { const h = await request('/computer-log'); $('#ay-history').textContent = h.actions.map(x => new Date(x.at).toLocaleTimeString() + ' · ' + (x.actor.kind === 'person' ? 'You took over' : x.actor.kind === 'ai' ? 'Handed back to your Actor' : 'Control ended')).join('\n') || 'No take-overs yet.'; }
+        else if (b.hasAttribute('data-earlier')) { const before=cursor || b.dataset.before; const result = await request('/journal?limit=100' + (before ? '&before=' + encodeURIComponent(before) : '')); cursor = result.next_cursor; const list = document.createElement('ul'); for (const j of result.items) { const li = document.createElement('li'); li.textContent = new Date(j.created_at).toLocaleString() + ' · ' + j.text; list.append(li); } b.before(list); b.hidden = !result.next_cursor || !result.items.length; }
     }));
     document.addEventListener('change', handle(async ev => {
         const n = ev.target;
@@ -107,6 +108,11 @@
         const x=Math.round((ev.clientX-left)/scale), y=Math.round((ev.clientY-top)/scale);
         if(x>=0 && x<width && y>=0 && y<height) await input({action:'click',x,y,width,height});
     }));
+    document.addEventListener('wheel', ev => {
+        if(ev.target.id!=='ay-screen' || !controlling) return;
+        ev.preventDefault();
+        input({action:'scroll',dy:Math.sign(ev.deltaY)*3}).catch(err=>notice(err.message,true));
+    },{passive:false});
     const poll=setInterval(() => { if (!document.querySelector('[data-actor-page]')) return clearInterval(poll); if (!document.hidden) refresh().catch(()=>{}); },15000);
     const frames=setInterval(async () => {
         const img=$('#ay-screen'); if (!document.querySelector('[data-actor-page]')) return clearInterval(frames); if (!img || document.hidden) return;

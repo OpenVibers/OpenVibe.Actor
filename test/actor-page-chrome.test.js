@@ -35,7 +35,8 @@ if (!playwright || !fs.existsSync('/usr/bin/google-chrome') || process.env.OV_SK
             const response=await page.goto(t.base+'/you',{waitUntil:'load'});
             assert.equal(response.status(),200,await page.locator('body').innerText());
             assert.ok(await page.locator('#ay-now').count(),'Actor page missing: '+page.url()+' '+(await page.locator('body').innerText()).slice(0,500));
-            await page.evaluate(s=>{document.documentElement.setAttribute('data-theme',s);document.body.setAttribute('data-theme',s);},scheme);
+            await page.waitForFunction(()=>Boolean(window.OpenVibeThemeLoader));
+            await page.evaluate(s=>window.OpenVibeThemeLoader.apply(s==='light'?'daylight':'vibe'),scheme);
             await page.waitForSelector('#ay-now');
             assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width,'no horizontal scroll');
             assert.equal(await page.locator('.ay-state').textContent(),'Working');
@@ -52,7 +53,14 @@ if (!playwright || !fs.existsSync('/usr/bin/google-chrome') || process.env.OV_SK
             await page.locator('#ay-goal-form button[type=submit], #ay-goal-form button:not([type])').first().click();
             await page.waitForFunction(()=>!document.getElementById('ay-goal-editor').open,null,{timeout:10000}).catch(async err=>{throw new Error(err.message+' Notice: '+await page.locator('#ay-notice').textContent()+' Invalid: '+await page.locator('#ay-goal-form :invalid').evaluateAll(ns=>ns.map(n=>n.name+':'+n.validationMessage).join(';')));});
             await page.waitForFunction(()=>document.getElementById('ay-goals').textContent.includes('Watch the price of a desk lamp'));
+            await page.evaluate(()=>window.scrollTo(0,0));
+            assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width,'no overflow after updating goals');
             if(out)await page.screenshot({path:path.join(out,'actor-'+width+'-'+scheme+'.png'),fullPage:true});
+            await page.locator('[data-ovk-sheet="#ay-brain"]').click();
+            await page.waitForSelector('#ay-brain[open]');
+            await page.locator('#ay-brain [data-ovk-close]').click();
+            const added=(await t.ctx.day.goals(a.owner)).find(g=>g.text==='Watch the price of a desk lamp');
+            await t.ctx.day.removeGoal(a.owner,added.id);
             assert.deepEqual(errors,[]);
             await context.close();
         }
