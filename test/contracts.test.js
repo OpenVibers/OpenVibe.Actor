@@ -13,7 +13,7 @@ const contracts = require('openvibe-contracts');
 const configLib = require('../server/config');
 const { boot, check, done } = require('./helpers/boot');
 
-const CAPS = ['actor.task.create', 'actor.task.read', 'actor.task.list', 'actor.task.view_ticket', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task', 'actor.model.manage', 'actor.config.manage', 'actor.timeline.read', 'actor.assignment.read', 'actor.assignment.cancel'];
+const CAPS = ['actor.task.create', 'actor.skill.run', 'actor.task.read', 'actor.task.list', 'actor.task.view_ticket', 'actor.agent.read', 'actor.resource.read', 'actor.resource.control', 'actor.agent.manage', 'actor.agent.run', 'actor.actions.read', 'actor.approval.decide', 'actor.a2a.task', 'actor.model.manage', 'actor.config.manage', 'actor.timeline.read', 'actor.assignment.read', 'actor.assignment.cancel'];
 const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 // Routes added after the pinned contracts release but covered by an existing grant (or public on purpose). The trace is
 // the task's own read, so actor.task.read decides it exactly as it decides GET /api/v1/tasks/:id. The live-stats reads
