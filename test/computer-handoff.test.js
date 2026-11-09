@@ -45,7 +45,7 @@ const COMPUTER = { session_id: SESSION, machine: 'a shared desk host', where: 'n
         const id = await runningTask('Compare three hosting plans under $10 a month and tell me which one to pick.');
         await store.appendEvent(s, id, {
             at: new Date().toISOString(), kind: 'output', step: 'tool_result', tool: 'computer_desk', is_error: false,
-            text: JSON.stringify({ watch: 'https://openvibe.bot/machines/dev_01J8Z4M2Q0R7T9YV3K6N8P1W2A/screen?desk=desk-trains', running: true, kind: 'browser' }),
+            text: JSON.stringify({ watch: 'https://openvibe.link/machines/dev_01J8Z4M2Q0R7T9YV3K6N8P1W2A/screen?desk=desk-trains', running: true, kind: 'browser' }),
             computer: COMPUTER,
         });
 

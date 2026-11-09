@@ -7,7 +7,7 @@
  *   auto            Actor decides, as today (the operator's tiers and keys)
  *   openvibe        OpenVibe's own keys, through OpenVibe.AI (the gateway: its routing, quota and cost)
  *   own:<provider>  the person's OWN key for that provider, sealed in OpenVibe.AI's vault
- *   own:node        a model on the person's own computer (OpenVibe.AI's "Your computer": their OpenVibe Link, through
+ *   own:link        a model on the person's own computer (OpenVibe.AI's "Your computer": their OpenVibe Link, through
  *                   OpenVibe.Bot; no key, nothing billed), used only after they allow Actor there
  *
  * The provider is one of the six OpenVibe.AI knows a person's key for. The model id is optional: without one,
@@ -22,8 +22,8 @@ const CHOICES = ['auto', 'openvibe'];
 // OpenVibe.Codes (the codes agent), for every turn but robot and computer-control tasks.
 const RUNS_ON = ['openvibe', 'computer'];
 const KEY_PROVIDERS = ['openai', 'anthropic', 'deepseek', 'google', 'openrouter', 'mistral'];
-// Plus their own computer (plan L55 C3): node is OpenVibe.AI's name for it.
-const OWN_PROVIDERS = [...KEY_PROVIDERS, 'node'];
+// Plus their own computer (plan L55 C3): Link is OpenVibe.AI's name for it.
+const OWN_PROVIDERS = [...KEY_PROVIDERS, 'link'];
 // A model id: letters, digits and the marks providers use (gpt-5.1, claude-sonnet-4-5, deepseek/flash, org/model).
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/;
 // An exact id (D3: org/model[:quant]@revision), accepted only while the AI catalog is on: `@` and `_` are marks an
@@ -89,10 +89,10 @@ async function runsOnFor(s, requester) {
     return row && RUNS_ON.includes(row.runs_on) ? row.runs_on : 'openvibe';
 }
 
-/** The model choice "Runs on: my computer" means: the person's own computer, through OpenVibe.AI's node credential. */
+/** The model choice "Runs on: my computer" means: the person's own computer, through OpenVibe.AI's Link credential. */
 function computerChoice(requester) {
     const subject = String(requester || '').startsWith('user:') ? requester.slice(5) : null;
-    return subject ? { subject, provider: 'node', model: null } : null;
+    return subject ? { subject, provider: 'link', model: null } : null;
 }
 
 /** Set where the person's tasks run. Returns { runs_on } or { error }; the model choice is left as it is. */

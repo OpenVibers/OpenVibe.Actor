@@ -78,7 +78,7 @@ const AGENTS = [
         can: ['task:code'],
         // The model use is on the person's own machine and keys: nothing for Actor to meter.
         rate_card: { input_usd_per_mtok: 0, output_usd_per_mtok: 0, source: 'https://openvibe.codes/run', verified_at: VERIFIED },
-        blurb: 'Coding work goes to OpenVibe.Codes and runs on your own machine (add it on openvibe.bot/machines, then start one task on openvibe.codes/run). Name the repository; you get the summary, the changed files and the patch. The model use is on your machine\'s own keys, so Actor charges nothing for it.',
+        blurb: 'Coding work goes to OpenVibe.Codes and runs on your own machine (add it on openvibe.link/machines, then start one task on openvibe.codes/run). Name the repository; you get the summary, the changed files and the patch. The model use is on your machine\'s own keys, so Actor charges nothing for it.',
     },
 ];
 

@@ -114,7 +114,7 @@ ${today ? html`<p class="cn-note" data-allowance>${leftLine(tier, today)}</p>` :
     function computersCard(result) {
         const body = !bot.computers.enabled ? html`<p class="cn-empty">Not connected to OpenVibe.Bot on this server.</p>`
             : !result.ok ? html`<p class="cn-empty">${result.why}</p>`
-                : !result.value.computers.length ? html`<p class="cn-empty">No computer is open to your agent. Add one on <a href="${pages}/machines">openvibe.bot/machines</a> with <code>--computer ask</code>, then turn on “Let my agent use this computer”.</p>`
+                : !result.value.computers.length ? html`<p class="cn-empty">No computer is open to your agent. Add one on <a href="${pages}/machines">openvibe.link/machines</a> with <code>--computer ask</code>, then turn on “Let my agent use this computer”.</p>`
                     : html`<ul class="cn-list">${result.value.computers.map((c) => html`<li><span class="cn-dot${c.online ? ' on' : ''}" aria-hidden="true"></span><b>${c.name || c.id}</b>
 <span class="cn-meta">${c.online ? 'Online' : 'Offline'} · ${LEVEL_TEXT[c.level] || 'On'}${c.can.length ? html` · ${c.can.join(', ')}` : ''}</span>
 ${c.waiting_for_approval ? html`<span class="pill pill-running">${String(c.waiting_for_approval)} waiting on the machine</span>` : ''}
@@ -189,7 +189,7 @@ ${commandBox(prefill(req), today)}
 ${live.length ? html`<ul class="cn-tasks">${live.map(taskRow)}</ul><p class="cn-note">This page refreshes every 10 seconds while something runs.</p>` : html`<p class="cn-empty">Nothing is running.</p>`}</section>
 <section class="cn-card${nWaiting ? ' cn-attn' : ''}" aria-labelledby="cn-waiting"><h2 id="cn-waiting">Waiting for you${nWaiting ? html` <span class="cn-count">${String(nWaiting)}</span>` : ''}</h2>
 ${waiting.length ? html`<ul class="cn-list">${waiting.slice(0, 4).map((a) => html`<li><a href="/me/approvals/${a.id}"><b>${clip(a.summary, 80)}</b></a><span class="cn-meta">Asked ${time(a.created_at)}</span></li>`)}</ul>` : ''}
-${onMachines ? html`<p class="cn-note">${String(onMachines)} on your computers: answer them there, in the Link's tray, with a notification's Approve button, or with <code>openvibe-node approvals</code>.</p>` : ''}
+${onMachines ? html`<p class="cn-note">${String(onMachines)} on your computers: answer them there, in the Link's tray, with a notification's Approve button, or with <code>openvibe-link approvals</code>.</p>` : ''}
 ${nWaiting ? '' : html`<p class="cn-empty">Nothing waits for you.</p>`}
 <p class="cn-more"><a href="/me/approvals">All approvals</a></p></section>
 <section class="cn-card" aria-labelledby="cn-today"><h2 id="cn-today">Today</h2>

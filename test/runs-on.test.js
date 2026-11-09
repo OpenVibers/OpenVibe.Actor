@@ -1,7 +1,7 @@
 'use strict';
 // "Runs on: my computer" (plan L55 C3; the owner, 11-01: "a remote session, or a local agent session"): a person
 // chooses where their tasks run, beside the model they chose. On their computer, every model call of the agent loop
-// goes to the model on their own computer (OpenVibe.AI's node credential, whatever key they chose above it), and a
+// goes to the model on their own computer (OpenVibe.AI's Link credential, whatever key they chose above it), and a
 // coding task is pinned to Codes on their machine. Private mode and a public chat's ask stay on OpenVibe.
 //   node test/runs-on.test.js
 const assert = require('assert');
@@ -70,7 +70,7 @@ function aiModels(calls) {
             assert.strictEqual(row.state, 'succeeded', JSON.stringify([row.error_code, row.error_detail]));
             const loopCalls = calls.filter((c) => c.url.endsWith('/chat/completions'));
             assert.ok(loopCalls.length >= 1, 'the loop called a model');
-            assert.ok(loopCalls.every((c) => c.headers['x-openvibe-credential'] === `node:${kim.subject || kim.id}`), JSON.stringify(loopCalls.map((c) => c.headers['x-openvibe-credential'])));
+            assert.ok(loopCalls.every((c) => c.headers['x-openvibe-credential'] === `link:${kim.subject || kim.id}`), JSON.stringify(loopCalls.map((c) => c.headers['x-openvibe-credential'])));
             const why = JSON.stringify(row.explanation);
             assert.ok(why.includes('on the model on your computer'), 'the explanation says where it ran');
         });
@@ -91,7 +91,7 @@ function aiModels(calls) {
             calls.length = 0;
             const made = await t.get('/api/v1/tasks', { as: kim, json: { task: 'What is two plus two?', mode: 'private' }, headers: SAME });
             await t.waitFor(made.json().id);
-            assert.ok(calls.every((c) => !String(c.headers['x-openvibe-credential'] || '').startsWith('node:')), 'never their computer');
+            assert.ok(calls.every((c) => !String(c.headers['x-openvibe-credential'] || '').startsWith('link:')), 'never their computer');
             await t.get('/api/v1/me/model', { as: kim, method: 'PUT', json: { runs_on: 'openvibe' }, headers: SAME });
         });
 
@@ -100,8 +100,8 @@ function aiModels(calls) {
             assert.strictEqual(page.status, 200);
             assert.ok(page.text.includes('id="runs-on"'));
             assert.ok(page.text.includes('name="runs_on" value="openvibe" checked'));
-            assert.ok(page.text.includes('https://ai.openvibe.services/you?allow=actor&amp;provider=node'), 'set up the computer\'s model at OpenVibe.AI');
-            assert.ok(page.text.includes('https://openvibe.bot/machines'), 'add the machine for coding');
+            assert.ok(page.text.includes('https://ai.openvibe.services/you?allow=actor&amp;provider=link'), 'set up the computer\'s model at OpenVibe.AI');
+            assert.ok(page.text.includes('https://openvibe.link/machines'), 'add the machine for coding');
             const saved = await t.get('/chat/runs-on', { as: kim, form: { runs_on: 'computer' }, headers: SAME });
             assert.strictEqual(saved.status, 303);
             assert.strictEqual(saved.headers.get('location'), '/chat/model?saved=runs#runs-on');
@@ -118,8 +118,8 @@ function aiModels(calls) {
             assert.match(anon.headers.get('location'), /^\/auth\/login/);
         });
 
-        await check('the choice "Runs on: my computer" means: AI\'s node credential, for a person only', async () => {
-            assert.deepStrictEqual(prefs.computerChoice('user:usr_1'), { subject: 'usr_1', provider: 'node', model: null });
+        await check('the choice "Runs on: my computer" means: AI\'s Link credential, for a person only', async () => {
+            assert.deepStrictEqual(prefs.computerChoice('user:usr_1'), { subject: 'usr_1', provider: 'link', model: null });
             assert.strictEqual(prefs.computerChoice('ip:1.2.3.4'), null);
             assert.deepStrictEqual(prefs.RUNS_ON, ['openvibe', 'computer']);
             assert.deepStrictEqual(prefs.wire(null).runs_on, 'openvibe');
