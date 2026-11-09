@@ -71,7 +71,7 @@ const run = (codes, extra = {}) => {
         await assert.rejects(codes.adapter({ task: 'https://github.com/a/b fix', requester: 'ip:1.2.3.4', emit: async () => {} }), /signed in/);
         await assert.rejects(codes.adapter({ task: 'fix my code', requester: `user:${ME}`, emit: async () => {} }), (e) => e.code === 'actor.task.no_repo');
         const none = fakeCodes({ start: 409, startBody: { code: 'codes.no_project', detail: 'no /run task yet' } });
-        await assert.rejects(run(createCodes({ config, fetchImpl: none.fetchImpl, tokens, sleep: async () => {}, pollMs: 0 })), /openvibe\.bot\/machines.*openvibe\.codes\/run/);
+        await assert.rejects(run(createCodes({ config, fetchImpl: none.fetchImpl, tokens, sleep: async () => {}, pollMs: 0 })), /openvibe\.link\/machines.*openvibe\.codes\/run/);
     });
 
     await check('past Actor\'s own time the answer links the live page; an expired task says the machine never took it', async () => {

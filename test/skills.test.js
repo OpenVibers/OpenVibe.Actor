@@ -130,7 +130,7 @@ const RULES = [
             const res = await t.get('/api/v1/skills');
             assert.strictEqual(res.status, 200, res.text);
             const listings = res.json().listings;
-            assert.strictEqual(listings.length, 4, 'the four skills of the repository');
+            assert.strictEqual(listings.length, 6, 'the six starter skills of the repository');
             for (const listing of listings) {
                 assert.deepStrictEqual(contracts.validate('actor.skill-listing@1', listing).errors, [], 'the listing is the contract');
                 assert.deepStrictEqual(contracts.validate('actor.skill@1', listing.skill).errors, [], 'the document inside it is the contract');
@@ -139,8 +139,24 @@ const RULES = [
                 assert.strictEqual(listing.curator.state, 'active');
             }
             const slugs = listings.map((l) => l.skill.slug).sort();
-            assert.deepStrictEqual(slugs, ['changelog-draft', 'price-watch-goal', 'research-brief', 'stream-recording-summary']);
+            assert.deepStrictEqual(slugs, ['changelog-draft', 'image-create', 'price-watch-goal', 'research-brief', 'stream-recording-summary', 'wiki-article']);
             listingId = listings.find((l) => l.skill.slug === 'research-brief').id;
+        });
+
+        await check('one catalogue skill starts a normal task with its label and subject retained for the Dock', async () => {
+            const res = await t.get('/api/v1/runs', { as: alice, json: { skill: listingId, input: { title: 'Local transport' }, choice: { mode: 'cheapest' } }, headers: SAME });
+            assert.strictEqual(res.status, 201, res.text);
+            const run = res.json().run;
+            assert.strictEqual(run.skill, 'research-brief');
+            const row = await t.ctx.s.db.maybe('SELECT skill_slug, skill_name, skill_subject_title FROM tasks WHERE id = $1', [run.id]);
+            assert.deepStrictEqual([row.skill_slug, row.skill_name, row.skill_subject_title], ['research-brief', 'A research brief, with its sources', 'Local transport']);
+            const pending = await t.get(`/api/v1/tasks/${run.id}/retry`, { as: alice, json: {}, headers: SAME });
+            assert.strictEqual(pending.status, 409, 'an active task cannot run twice from Retry');
+            await t.ctx.s.db.query("UPDATE tasks SET state = 'failed', finished_at = $2 WHERE id = $1", [run.id, t.ctx.s.iso()]);
+            const retried = await t.get(`/api/v1/tasks/${run.id}/retry`, { as: alice, json: { mode: 'best' }, headers: SAME });
+            assert.strictEqual(retried.status, 201, retried.text);
+            const next = await t.ctx.s.db.maybe('SELECT skill_slug, skill_subject_title, mode FROM tasks WHERE id = $1', [retried.json().run.id]);
+            assert.deepStrictEqual([next.skill_slug, next.skill_subject_title, next.mode], ['research-brief', 'Local transport', 'best']);
         });
 
         await check('a skill\'s page shows its instructions, what it may ask for in plain words, and the scan\'s words', async () => {

@@ -197,7 +197,7 @@ function scanCode(resource, tool) {
     }
     const badModules = new Set();
     for (const m of code.matchAll(REQUIRE)) {
-        const name = String(m[2] || '').replace(/^node:/, '');
+        const name = String(m[2] || '').replace(/^link:/, '');
         if (!SAFE_REQUIRE.has(name)) badModules.add(name);
     }
     if (badModules.size) {

@@ -1,0 +1,184 @@
+'use strict';
+const assert = require('assert');
+const crypto = require('crypto');
+const { boot, done } = require('./helpers/boot');
+const tasks = require('../server/tasks/store');
+const SAME = { 'sec-fetch-site': 'same-origin' };
+async function until(fn) {
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) { const value = await fn(); if (value) return value; await new Promise((r) => setTimeout(r, 25)); }
+    throw new Error('condition did not become true');
+}
+(async () => {
+    let clock = Date.now();
+    const notices = [];
+    const t = await boot({ now: () => clock, env: { ACTOR_CHECKPOINT_KEY: crypto.randomBytes(32).toString('hex') },
+        notifier: { needsYou: async (q) => { notices.push(q); }, taskEnded: async () => {} } });
+    const api = (user, path = '', json, method) => t.get('/api/v1/me/actor' + path, { as: user, json, method, headers: SAME });
+    try {
+        const bea = t.network.addUser('bea');
+        const other = t.network.addUser('other');
+        const owner = 'user:' + bea.subject;
+        const a = (await api(bea)).json();
+        assert.equal(a.enabled, false);
+        assert.equal(a.status, 'paused');
+        assert.equal((await api(bea)).json().id, a.id, 'one Actor per person');
+        const saved = await api(bea, '/goals', { text: 'Research a useful topic', lane: 'brief_me' });
+        assert.equal(saved.status, 201, saved.text);
+        const goal = saved.json();
+        assert.deepEqual(goal.asks_before, []);
+        assert.equal((await api(other, '/goals/' + goal.id, { text: 'stolen' }, 'PATCH')).status, 404);
+        await api(bea, '/tell', { text: 'Focus on the cost of living.' });
+        assert.deepEqual(await t.ctx.day.tick(), [], 'off means no task');
+        assert.equal(t.providers.loopCalls(), 0);
+        const on = await api(bea, '/resume', {});
+        assert.equal(on.status, 200, on.text);
+        t.config.loop.selfReflections = 0;
+        t.providers.reset(); t.providers.state.smart = 'tool';
+        t.providers.state.script = [{ content: 'I need your preferred city.', tool_calls: [{ id: 'ask_1', type: 'function', function: {
+            name: 'ask_person', arguments: JSON.stringify({ kind: 'answer_question', text: 'Which city should I research?', options: ['Paris', 'Berlin'] }),
+        } }] }];
+        const ids = await t.ctx.day.tick();
+        assert.equal(ids.length, 1, 'a due goal starts');
+        const id = ids[0];
+        assert.deepEqual(await t.ctx.day.tick(), [], 'an active goal cannot start twice');
+        const ask = await until(async () => (await t.ctx.day.asks(owner))[0]);
+        const q = await t.ctx.s.db.maybe('SELECT * FROM actor_day_asks WHERE id=$1', [ask.id]);
+        await until(async () => { const w = await t.ctx.waits.get(q.wait_id); return w.remaining_ms != null; });
+        const runBeforeAnswer = await t.ctx.day.run(id);
+        const calls = t.providers.loopCalls();
+        await new Promise((r) => setTimeout(r, 100));
+        assert.equal(t.providers.loopCalls(), calls, 'a parked goal makes no model calls');
+        assert.equal(notices.length, 1, 'one push for this ask');
+        assert.equal((await api(other, '/asks/' + ask.id + '/answer', { text: 'Paris' })).status, 404);
+        const answered = await api(bea, '/asks/' + ask.id + '/answer', { text: 'Berlin' });
+        assert.equal(answered.status, 200, answered.text);
+        const end = await t.waitFor(id);
+        assert.equal(end.state, 'succeeded', end.error_detail);
+        assert.ok(Number(end.timeout_ms) < Number(runBeforeAnswer.reserved_ms), 'answering retains only the unused time');
+        assert.ok((await t.ctx.day.usage(a.id)).cost_usd > 0, 'actual spend reaches today’s Actor balance');
+        assert.ok(t.providers.requests.some((r) => JSON.stringify(r).includes('Berlin')), 'the durable answer reaches the resumed model');
+        assert.equal((await t.ctx.day.asks(owner)).length, 0);
+        const journal = (await api(bea, '/journal')).json();
+        assert.ok(journal.items.length > 0);
+        assert.ok(journal.items.every((x) => x.goal_id === goal.id));
+        assert.ok(Math.abs(journal.items.reduce((sum, x) => sum + Number(x.cost_usd), 0) - Number(end.cost_usd)) < 1e-8, 'journal step costs sum to the measured run cost');
+        assert.ok((await tasks.getTask(t.ctx.s, id)).task.includes('Focus on the cost of living.'));
+        assert.equal((await api(other, '/journal')).json().items.length, 0);
+        await api(bea, '/pause', {});
+        await api(bea, '', { caps: { usd: 0, minutes: 60, balance_floor_usd: 0 } }, 'PATCH');
+        clock += 2 * 86400000;
+        await api(bea, '/resume', {});
+        assert.deepEqual(await t.ctx.day.tick(), [], 'money cap stops the day');
+        await api(bea, '/pause', {});
+        await api(bea, '', { caps: { usd: 1, minutes: 0, balance_floor_usd: 0 } }, 'PATCH');
+        await api(bea, '/resume', {});
+        assert.deepEqual(await t.ctx.day.tick(), [], 'minutes cap stops the day');
+        await api(bea, '/pause', {});
+        await api(bea, '', { caps: { usd: 1, minutes: 60, balance_floor_usd: 1000 } }, 'PATCH');
+        await api(bea, '/resume', {});
+        assert.deepEqual(await t.ctx.day.tick(), [], 'balance floor stops the day');
+        await api(bea, '/pause', {});
+        assert.equal((await api(bea)).json().status, 'paused');
+        // A consequential tool parks BEFORE it runs, and only its exact approved input runs once.
+        await api(bea, '', { caps: { usd: 1, minutes: 60, balance_floor_usd: 0 } }, 'PATCH');
+        await api(bea, '/goals/' + goal.id, { enabled: false }, 'PATCH');
+        const coding = (await api(bea, '/goals', { text: 'Build a tiny calculator', lane: 'build_it' })).json();
+        const tool = t.ctx.registry.get('codes_task');
+        let acted = 0;
+        tool.available = () => true;
+        tool.run = async () => { acted++; return { text: 'Made the calculator.' }; };
+        const args = { instruction: 'Make the calculator', repo: 'https://github.com/example/calculator' };
+        const call = () => ({ content: 'I will make the calculator.', tool_calls: [{ id: 'code_1', type: 'function', function: {
+            name: 'codes_task', arguments: JSON.stringify(args),
+        } }] });
+        t.providers.reset(); t.providers.state.script = [call()];
+        await api(bea, '/resume', {});
+        const racing = await Promise.all([t.ctx.day.tick(), t.ctx.day.tick()]);
+        const codingIds = racing.flat();
+        assert.equal(codingIds.length, 1, 'two workers start the due goal once');
+        const codeId = codingIds[0];
+        const approval = await until(async () => (await t.ctx.day.asks(owner))[0]);
+        const approvalRow = await t.ctx.s.db.maybe('SELECT * FROM actor_day_asks WHERE id=$1', [approval.id]);
+        await until(async () => (await t.ctx.waits.get(approvalRow.wait_id)).remaining_ms != null);
+        assert.equal(approval.kind, 'approve_action');
+        assert.equal(acted, 0, 'nothing ran before approval');
+        t.providers.state.script = [call()];
+        assert.equal((await api(bea, '/asks/' + approval.id + '/answer', {})).status, 200);
+        await t.waitFor(codeId);
+        assert.equal(acted, 1, 'the approved exact action ran');
+        const reused = await t.ctx.day.guardTool(codeId, 'codes_task', args, tool);
+        assert.ok(reused.isError, 'a finished run cannot spend an approval again');
+        await api(bea, '/pause', {});
+        clock += 2 * 86400000;
+        t.providers.reset(); t.providers.state.script = [call()];
+        await api(bea, '/resume', {});
+        const [declineId] = await t.ctx.day.tick();
+        const declineAsk = await until(async () => (await t.ctx.day.asks(owner))[0]);
+        const declineRow = await t.ctx.s.db.maybe('SELECT * FROM actor_day_asks WHERE id=$1', [declineAsk.id]);
+        await until(async () => (await t.ctx.waits.get(declineRow.wait_id)).remaining_ms != null);
+        t.providers.state.script = [call()];
+        await api(bea, '/asks/' + declineAsk.id + '/decline', {});
+        await t.waitFor(declineId);
+        assert.equal(acted, 1, 'a declined action does not run');
+        await api(bea, '/pause', {});
+        clock += 2 * 86400000;
+        t.providers.reset(); t.providers.state.script = [call()];
+        await api(bea, '/resume', {});
+        const [pausedId] = await t.ctx.day.tick();
+        const pausedAsk = await until(async () => (await t.ctx.day.asks(owner))[0]);
+        const pausedRow = await t.ctx.s.db.maybe('SELECT * FROM actor_day_asks WHERE id=$1', [pausedAsk.id]);
+        await until(async () => (await t.ctx.waits.get(pausedRow.wait_id)).remaining_ms != null);
+        await until(async () => t.ctx.engine.status().running === 0);
+        await api(bea, '/pause', {});
+        assert.equal((await t.waitFor(pausedId)).state, 'cancelled', 'pause cancels a parked slice');
+        assert.equal((await api(bea, '/asks/' + pausedAsk.id + '/answer', {})).status, 409);
+        assert.deepEqual(await t.ctx.day.tick(), []);
+        assert.equal((await api(bea, '/goals/' + coding.id, undefined, 'DELETE')).status, 200);
+        const cappedUser = t.network.addUser('capped');
+        const capUsd = Math.min(t.config.allowance.perTaskUsd, t.config.allowance.perDayUsd / 2, 0.1);
+        await api(cappedUser, '', { caps: { usd: capUsd, minutes: 1, balance_floor_usd: 0 } }, 'PATCH');
+        const future = (await api(cappedUser, '/goals', { text: 'Future work', lane: 'brief_me', next_due_at: new Date(clock + 3600000).toISOString() })).json();
+        await api(cappedUser, '/resume', {});
+        assert.deepEqual(await t.ctx.day.tick(), [], 'a future goal is not due');
+        const dueGoal = (await api(cappedUser, '/goals', { text: 'Due work', lane: 'brief_me', budget: { usd: capUsd, minutes: 1 } })).json();
+        clock += 60001;
+        const submit = t.ctx.engine.submit;
+        t.ctx.engine.submit = () => {};
+        try {
+            const [reservedId] = await t.ctx.day.tick();
+            assert.ok(reservedId);
+            const reserved = await tasks.getTask(t.ctx.s, reservedId);
+            const runRow = await t.ctx.day.run(reservedId);
+            assert.equal(runRow.goal_id, dueGoal.id, 'the next due goal wins over future work');
+            assert.equal(Number(reserved.timeout_ms), 60000, 'the minute cap bounds the actual engine timeout');
+            assert.equal(Number(reserved.budget_task), capUsd, 'the money cap bounds the task budget');
+            assert.deepEqual(await t.ctx.day.tick(), [], 'reserved money and minutes cannot be spent twice');
+            const picture = await require('sharp')({ create: { width: 4, height: 4, channels: 3, background: '#123456' } }).png().toBuffer();
+            const artifacts = require('../server/runtime/artifacts').createArtifactStore({ store: t.ctx.s, config: t.config, taskId: reservedId, requester: 'user:' + cappedUser.subject });
+            await require('../server/runtime/tools/_person').lookAtScreen(cappedUser.subject, { machine: 'dev_test', question: 'What is on this screen?' }, {
+                taskId: reservedId, day: t.ctx.day, artifacts, models: { chat: async () => ({ text: 'A test screen.', cost_usd: 0 }) },
+            }, { pcs: { screen: async () => ({ format: 'png', content_b64: picture.toString('base64'), width: 4, height: 4 }) } });
+            const screen = (await t.ctx.day.journalPage('user:' + cappedUser.subject))[0];
+            assert.equal(screen.thumbnail.mime, 'image/webp');
+            const imagePath = new URL(screen.thumbnail.url).pathname;
+            assert.equal((await t.get(imagePath, { as: cappedUser })).status, 200);
+            assert.equal((await t.get(imagePath, { as: other })).status, 404, 'a screenshot is owner-only');
+
+            clock = Date.parse(new Date(clock).toISOString().slice(0, 10)) + 86400000 - 30000;
+            await t.ctx.s.db.query('UPDATE actor_day_runs SET segment_at=$2 WHERE task_id=$1', [reservedId, new Date(clock).toISOString()]);
+            clock += 60000;
+            await t.ctx.day.segmentEnd(reservedId);
+            const nextDay = await t.ctx.day.usage(runRow.actor_id);
+            assert.equal(nextDay.minutes, 0.5, 'only the thirty seconds after midnight belong to today');
+            await tasks.updateTask(t.ctx.s, reservedId, { cost_usd: capUsd, state: 'succeeded' });
+            await t.ctx.day.recordSpend(reservedId, capUsd);
+            await t.ctx.day.taskState(await tasks.getTask(t.ctx.s, reservedId));
+            await api(cappedUser, '/goals/' + future.id, { next_due_at: new Date(clock).toISOString() }, 'PATCH');
+            clock += 60001;
+            assert.deepEqual(await t.ctx.day.tick(), [], 'finished spend exhausts the daily cap');
+        } finally { t.ctx.engine.submit = submit; }
+        console.log('actor day: off, due, ask, durable answer, privacy, journal and caps');
+    } finally { await t.close(); }
+    done();
+})().catch((err) => { console.error(err); process.exit(1); });

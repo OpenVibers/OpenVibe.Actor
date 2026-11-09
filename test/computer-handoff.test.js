@@ -45,7 +45,7 @@ const COMPUTER = { session_id: SESSION, machine: 'a shared desk host', where: 'n
         const id = await runningTask('Compare three hosting plans under $10 a month and tell me which one to pick.');
         await store.appendEvent(s, id, {
             at: new Date().toISOString(), kind: 'output', step: 'tool_result', tool: 'computer_desk', is_error: false,
-            text: JSON.stringify({ watch: 'https://openvibe.bot/machines/dev_01J8Z4M2Q0R7T9YV3K6N8P1W2A/screen?desk=desk-trains', running: true, kind: 'browser' }),
+            text: JSON.stringify({ watch: 'https://openvibe.link/machines/dev_01J8Z4M2Q0R7T9YV3K6N8P1W2A/screen?desk=desk-trains', running: true, kind: 'browser' }),
             computer: COMPUTER,
         });
 
@@ -56,7 +56,7 @@ const COMPUTER = { session_id: SESSION, machine: 'a shared desk host', where: 'n
             const { desk: _desk, needs_you: _needs, ...task } = r.json();
             valid(task);
             assert.deepStrictEqual(r.json().computer, { ...COMPUTER, driving: false });
-            assert.ok(r.json().desk && /openvibe\.bot/.test(r.json().desk.url), 'the watch link is still there');
+            assert.ok(r.json().desk && /openvibe\.link/.test(r.json().desk.url), 'the watch link is still there');
         });
 
         await check('the still is its person\'s alone: another person and a signed-out visitor get 404', async () => {

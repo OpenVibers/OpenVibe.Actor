@@ -1,0 +1,23 @@
+{
+  "skill": "actor.skill@1",
+  "version": "1.0.0",
+  "runs": "prompt",
+  "license": "CC-BY-4.0",
+  "created_at": "2026-11-09T00:00:00.000Z",
+  "slug": "wiki-article",
+  "name": "Make a wiki article",
+  "description": "Research a topic and prepare a sourced article for OpenVibe.Wiki.",
+  "instructions": "Ask the person for the topic if they have not given one. Read multiple reliable sources and note their dates. Draft a neutral article with a clear title, short introduction, sections, and citations beside the claims they support. Check that every link opens and supports the sentence. Place the article in OpenVibe.Wiki as a draft for the person to review; do not publish it without their approval.",
+  "requires": {
+    "kinds": [
+      "post"
+    ],
+    "hosts": [
+      "openvibe.wiki"
+    ]
+  },
+  "integrity": {
+    "alg": "sha256",
+    "hash": "aadb5e8ffd33e0345b1184f6dce8a74bd8d38ca7c18050978e30adff2d866612"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "skill": "actor.skill@1",
+  "version": "1.0.0",
+  "runs": "prompt",
+  "license": "CC-BY-4.0",
+  "created_at": "2026-11-09T00:00:00.000Z",
+  "slug": "image-create",
+  "name": "Make an image",
+  "description": "Turn an idea into an image in OpenVibe.Pics for review.",
+  "instructions": "Ask the person for the subject and style when those are missing. Use OpenVibe.Pics to create an image from their idea. Show the result and its link for review. Keep it private until the person approves publishing, and ask before using any paid credit.",
+  "requires": {
+    "kinds": [
+      "computer.browser",
+      "publish"
+    ],
+    "hosts": [
+      "openvibe.pics"
+    ]
+  },
+  "integrity": {
+    "alg": "sha256",
+    "hash": "734ac80d6b5ec18c22719a70ae03738aef039fa524901860d29b429bf4b2d309"
+  }
+}

@@ -76,7 +76,7 @@ const as = { requester: `user:${ME}` };
         assert.ok(bot.calls.every((c) => c.subject === ME && c.auth === 'Bearer svc-token'), 'as the person, with Actor\'s token');
         const none = JSON.parse(await tools(fakeBot({ machines: [] })).call('list_my_computers', {}, as));
         assert.deepStrictEqual(none.computers, []);
-        assert.match(none.note, /https:\/\/openvibe\.bot\/machines.*--computer.*Let my agent use this computer/);
+        assert.match(none.note, /https:\/\/openvibe\.link\/machines.*--computer.*Let my agent use this computer/);
     });
 
     await check('files and programs go to Bot as the person; refusals and an unanswered approval come back as errors', async () => {
@@ -221,7 +221,7 @@ const as = { requester: `user:${ME}` };
         assert.ok(defs.some((d) => d.function.name === 'computer_desk'), 'offered with the computer tools');
         ['computer_screen', 'computer_input', 'computer_browser'].forEach((n) => assert.deepStrictEqual(defs.find((d) => d.function.name === n).function.parameters.properties.desk.enum, ['main', 'private'], n));
         assert.deepStrictEqual(JSON.parse(await t.call('list_my_computers', {}, as)).computers[0].can, ['screen', 'input', 'browser', 'desk'], 'the model sees the machine has a desk');
-        assert.deepStrictEqual(JSON.parse(await t.call('computer_desk', { machine: PC, action: 'start', width: 1920, height: 1080 }, as)), { watch: `https://openvibe.bot/machines/${PC}/screen?desk=private`, running: true, display: ':91', width: 1920, height: 1080 }, 'with the link to watch and take it over (Desks plan D4)');
+        assert.deepStrictEqual(JSON.parse(await t.call('computer_desk', { machine: PC, action: 'start', width: 1920, height: 1080 }, as)), { watch: `https://openvibe.link/machines/${PC}/screen?desk=private`, running: true, display: ':91', width: 1920, height: 1080 }, 'with the link to watch and take it over (Desks plan D4)');
         const started = bot.calls.filter((c) => c.body && c.body.kind === 'desk').at(-1);
         assert.deepStrictEqual([started.subject, started.body.value, started.body.ms], [ME, { action: 'start', width: 1920, height: 1080 }, 120000], 'as the person, with time for an approval');
         const look = JSON.parse(await t.call('computer_screen', { machine: PC, question: 'What is open?', desk: 'private' }, as));
@@ -385,6 +385,24 @@ const as = { requester: `user:${ME}` };
             assert.match(JSON.parse(await t.call('computer_browser', { machine: PC, ...bad }, as)).error, /ref is an element/, JSON.stringify(bad));
         }
         assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
+    });
+
+    await check('a new Actor profile starts under Actor control; reusing a session never steals control', async () => {
+        const id='ses_01J8Z4M2Q0R7T9YV3K6N8P1W2A', taskId='tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A';
+        let existing=false; const calls=[];
+        const session={id,state:'running',task_id:taskId};
+        const pcs=createComputers({config:{...config,services:{...config.services,runUrl:'http://run.test'}},tokens,fetchImpl:async(url,init)=>{
+            const u=new URL(url), body=init.body?JSON.parse(init.body):null; calls.push({path:u.pathname,body});
+            let out=u.pathname.endsWith('/control/grant')?{lease:{}}:session;
+            if(init.method==='GET' && u.pathname==='/api/v1/sessions') out={sessions:existing?[session]:[]};
+            return new Response(JSON.stringify(out),{status:200,headers:{'content-type':'application/json'}});
+        }});
+        const opts={taskId,actorId:'act_01J8Z4M2Q0R7T9YV3K6N8P1W2A'};
+        assert.equal((await pcs.openSession(ME,opts)).machine,'run:'+id);
+        assert.deepEqual(calls.at(-1).body,{holder:{kind:'ai',subject:'svc:actor'}});
+        existing=true;calls.length=0;
+        await pcs.openSession(ME,opts);
+        assert.equal(calls.length,1);assert.equal(calls[0].path,'/api/v1/sessions');
     });
 
     await check('a desk on a desk host when none of the person\'s computers has one (Desks plan D6, OpenVibe.Run sessions)', async () => {

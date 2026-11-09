@@ -86,6 +86,12 @@ async function lookAtScreen(person, a, ctx, core) {
     // What the agent last saw, for the person's own task page (in memory only).
     const desks = ctx.state && ctx.state.desks;
     if (desks && desks.taskId) looks.put(desks.taskId, shot);
+    if (ctx.day && ctx.artifacts && ctx.artifacts.available) {
+        const bytes = await require('sharp')(Buffer.from(shot.content_b64, 'base64'))
+            .resize({ width: 320, withoutEnlargement: true }).webp({ quality: 65 }).toBuffer();
+        const artifact = await ctx.artifacts.save({ name: `screen-${Date.now()}.webp`, mime: 'image/webp', bytes });
+        await ctx.day.screen(ctx.taskId, artifact, a.question);
+    }
     const question = String(a.question || '').trim().slice(0, 500) || 'Describe what is on the screen: the windows, what each shows, and any message or error in full.';
     const r = await ctx.models.chat({
         tier: 'vision',

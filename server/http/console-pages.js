@@ -42,6 +42,7 @@ function createConsolePages(ctx, { robots = null, computers = null } = {}) {
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, css: ['css/console.css'], ...o });
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const pages = config.services.botPublicUrl || 'https://openvibe.bot';
+    const linkPages = config.services.linkPublicUrl || 'https://openvibe.link';
 
     /** One Bot read, bounded so a slow Bot never holds the page; { ok, value } or { ok: false, why }. */
     async function fromBot(fn) {
@@ -114,13 +115,13 @@ ${today ? html`<p class="cn-note" data-allowance>${leftLine(tier, today)}</p>` :
     function computersCard(result) {
         const body = !bot.computers.enabled ? html`<p class="cn-empty">Not connected to OpenVibe.Bot on this server.</p>`
             : !result.ok ? html`<p class="cn-empty">${result.why}</p>`
-                : !result.value.computers.length ? html`<p class="cn-empty">No computer is open to your agent. Add one on <a href="${pages}/machines">openvibe.bot/machines</a> with <code>--computer ask</code>, then turn on “Let my agent use this computer”.</p>`
+                : !result.value.computers.length ? html`<p class="cn-empty">No computer is open to your agent. Add one on <a href="${linkPages}/machines">openvibe.link/machines</a> with <code>--computer ask</code>, then turn on “Let my agent use this computer”.</p>`
                     : html`<ul class="cn-list">${result.value.computers.map((c) => html`<li><span class="cn-dot${c.online ? ' on' : ''}" aria-hidden="true"></span><b>${c.name || c.id}</b>
 <span class="cn-meta">${c.online ? 'Online' : 'Offline'} · ${LEVEL_TEXT[c.level] || 'On'}${c.can.length ? html` · ${c.can.join(', ')}` : ''}</span>
 ${c.waiting_for_approval ? html`<span class="pill pill-running">${String(c.waiting_for_approval)} waiting on the machine</span>` : ''}
-${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${pages}/machines/${encodeURIComponent(c.id)}/screen">Watch the screen</a>` : ''}</li>`)}</ul>`;
+${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${linkPages}/machines/${encodeURIComponent(c.id)}/screen">Watch the screen</a>` : ''}</li>`)}</ul>`;
         return html`<section class="cn-card" aria-labelledby="cn-computers"><h2 id="cn-computers">Your computers</h2>${body}
-<p class="cn-more"><a href="${pages}/machines">Machines on OpenVibe.Bot</a></p></section>`;
+<p class="cn-more"><a href="${linkPages}/machines">Machines on OpenVibe Link</a></p></section>`;
     }
 
     function robotsCard(result) {
@@ -144,7 +145,7 @@ ${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${pages}/
             ['Waiting for you', 'What an agent asks before it acts. Approve or decline here, in Link\'s tray, or from a notification.', null, false],
             ['Today', `How many of your ${String(tier.tasksPerDay)} free tasks a day you have used and what they cost, with the last 7 days.`, null, false],
             ['Your agents', 'Tasks you set up once, with a memory and a schedule.', ['/agents', 'See the agents'], false],
-            ['Your computers', 'Your own machines running jobs for your agents.', [`${pages}/machines`, 'Machines on OpenVibe.Bot'], false],
+            ['Your computers', 'Your own machines running jobs for your agents.', [`${linkPages}/machines`, 'Machines on OpenVibe Link'], false],
             ['Your robots', 'Robots your agents may drive, with their battery and e-stop.', [`${pages}/robots`, 'Robots on OpenVibe.Bot'], false],
         ];
         return html`<div class="cn-grid cn-preview" aria-label="What the console shows">${cards.map(([title, what, link, wide], i) => html`<section class="cn-card${wide ? ' cn-wide' : ''}" aria-labelledby="cn-p${String(i)}"><h2 id="cn-p${String(i)}">${title}</h2>
@@ -189,7 +190,7 @@ ${commandBox(prefill(req), today)}
 ${live.length ? html`<ul class="cn-tasks">${live.map(taskRow)}</ul><p class="cn-note">This page refreshes every 10 seconds while something runs.</p>` : html`<p class="cn-empty">Nothing is running.</p>`}</section>
 <section class="cn-card${nWaiting ? ' cn-attn' : ''}" aria-labelledby="cn-waiting"><h2 id="cn-waiting">Waiting for you${nWaiting ? html` <span class="cn-count">${String(nWaiting)}</span>` : ''}</h2>
 ${waiting.length ? html`<ul class="cn-list">${waiting.slice(0, 4).map((a) => html`<li><a href="/me/approvals/${a.id}"><b>${clip(a.summary, 80)}</b></a><span class="cn-meta">Asked ${time(a.created_at)}</span></li>`)}</ul>` : ''}
-${onMachines ? html`<p class="cn-note">${String(onMachines)} on your computers: answer them there, in the Link's tray, with a notification's Approve button, or with <code>openvibe-node approvals</code>.</p>` : ''}
+${onMachines ? html`<p class="cn-note">${String(onMachines)} on your computers: answer them there, in the Link's tray, with a notification's Approve button, or with <code>openvibe-link approvals</code>.</p>` : ''}
 ${nWaiting ? '' : html`<p class="cn-empty">Nothing waits for you.</p>`}
 <p class="cn-more"><a href="/me/approvals">All approvals</a></p></section>
 <section class="cn-card" aria-labelledby="cn-today"><h2 id="cn-today">Today</h2>

@@ -229,7 +229,7 @@ function fakeModels(script) {
         await check('a hand-off asks the person through the same deduped path', async () => {
             const asked = [];
             const ctx = { state: { desks: null }, waitForPerson: () => 1, notifyTask: async (kind, detail) => { asked.push({ kind, detail }); } };
-            const core = { pcs: { watchUrl: () => `https://openvibe.bot/machines/dev_${'0'.repeat(26)}/screen`, deskTurn: async () => ({ error: 'no desk in this test' }) } };
+            const core = { pcs: { watchUrl: () => `https://openvibe.link/machines/dev_${'0'.repeat(26)}/screen`, deskTurn: async () => ({ error: 'no desk in this test' }) } };
             const out = await handToPerson(u.subject, { machine: `dev_${'0'.repeat(26)}`, what: 'Sign in to the airline.' }, ctx, core);
             assert.strictEqual(out.done, false);
             assert.strictEqual(asked.length, 1);

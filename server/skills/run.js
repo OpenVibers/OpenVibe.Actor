@@ -96,7 +96,7 @@ function createSkillRun({ config, fetchImpl = globalThis.fetch, tokens: tokensOv
     const services = (config && config.services) || {};
     const skills = (config && config.skills) || {};
     const base = String(services.runUrl || '').replace(/\/+$/, '');
-    const link = String(services.linkUrl || 'https://openvibe.bot/link');
+    const link = String(services.linkUrl || 'https://openvibe.link');
     const enabled = !!(base && (tokensOverride || (config.oauth && config.oauth.clientSecret)));
     const tokens = !enabled ? null : tokensOverride || serviceAuth.createTokenClient({
         tokenUrl: `${config.networkInternalUrl}/oauth/token`,

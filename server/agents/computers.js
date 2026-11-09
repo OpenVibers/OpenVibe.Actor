@@ -55,7 +55,7 @@ const BROWSER_KEYS = new Set(['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', '
 
 function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null }) {
     const base = config.services.botUrl;
-    const pages = config.services.botPublicUrl || base;
+    const pages = config.services.linkPublicUrl || 'https://openvibe.link';
     const enabled = !!(base && (tokensOverride || config.oauth.clientSecret));
     const tokens = !enabled ? null : tokensOverride || serviceAuth.createTokenClient({
         tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
@@ -86,14 +86,20 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
      * A browser session for the person on a desk host (Desks plan D6), started and waited for until its desk runs (at
      * most 45 s). → { machine: 'run:ses_…', session } or { error }
      */
-    async function openSession(subject, { taskId = null, ttlS = 3600, width, height, signal } = {}) {
+    async function openSession(subject, { taskId = null, actorId = null, ttlS = 3600, width, height, signal } = {}) {
         if (!sessionsOn) return { error: 'no desk host is reachable from here (OpenVibe.Run sessions are off)' };
         if (!USER_SUBJECT.test(subject)) return { error: 'a session is only for a signed-in person' };
         const body = { kind: 'browser', ttl_s: Math.min(14400, Math.max(60, Math.round(ttlS))), idle_s: 900,
             ...(Number.isInteger(width) ? { width } : {}), ...(Number.isInteger(height) ? { height } : {}),
             // The session carries the task back (contracts 0.327.0): one id across Surf, the Computer and Actor.
             ...(taskId ? { idempotency_key: `actor:${taskId}`, task_id: taskId } : {}) };
-        const made = await runCall('POST', '/sessions', subject, { body, signal });
+        if (actorId) {
+            const existing = await runCall('GET', '/sessions', subject, { signal });
+            const found = existing.ok && existing.data.sessions && existing.data.sessions.find(s => s.task_id === taskId && s.state === 'running');
+            if (found) return { machine: `run:${found.id}`, session: found };
+            body.idempotency_key = `actor:${taskId}:${require('crypto').randomUUID()}`;
+        }
+        const made = await runCall('POST', actorId ? `/sessions?template=kept-browser&actor=${encodeURIComponent(actorId)}` : '/sessions', subject, { body, signal });
         if (!made.ok) return runProblem(made, 'a browser session');
         let s = made.data;
         const until = Date.now() + 45_000;
@@ -106,6 +112,10 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             if (s && s.state !== 'ended') await runCall('POST', `/sessions/${s.id}/end`, subject, { signal }).catch(() => null);
             return { error: s && s.end ? `no desk host could take a browser desk now (${s.end.reason})` : 'no desk host took a browser desk in time' };
         }
+        if (actorId) {
+            try { await personSession(subject, s.id, 'back'); }
+            catch (err) { await runCall('POST', `/sessions/${s.id}/end`, subject, { signal }).catch(() => null); return { error: err.message }; }
+        }
         return { machine: `run:${s.id}`, session: s };
     }
     async function endSession(subject, machine, { signal } = {}) {
@@ -113,6 +123,25 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         if (!m || !sessionsOn) return { error: 'not a session desk' };
         const r = await runCall('POST', `/sessions/${m[1]}/end`, subject, { signal });
         return r.ok ? { running: false, stopped: true } : runProblem(r, 'ending the session');
+    }
+    async function sessionList(subject) {
+        const r = await runCall('GET', '/sessions?state=all&limit=100', subject, {});
+        if (!r.ok) throw Object.assign(new Error('The computer history could not be loaded.'), {status:r.status || 502});
+        return r.data.sessions || [];
+    }
+    async function profileSites(subject, actorId, site) {
+        const r = await runCall(site ? 'DELETE' : 'GET', `/actor-profiles/${encodeURIComponent(actorId)}/sites${site ? '/' + encodeURIComponent(site) : ''}`, subject, {});
+        if (!r.ok) throw Object.assign(new Error('The saved sign-ins are unavailable right now.'), { status: 502 });
+        return r.data;
+    }
+    async function personSession(subject, id, action, body = {}) {
+        const paths = { take: ['POST', '/control/take'], back: ['POST', '/control/grant'], input: ['POST', '/person-commands'], history: ['GET', '/timeline'], save: ['POST', '/profile/save'] };
+        const spec = paths[action];
+        if (!spec || !/^ses_[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) throw Object.assign(new Error('Choose the Actor’s open screen.'), { status: 422 });
+        const payload = action === 'back' ? { holder: { kind: 'ai', subject: 'svc:actor' } } : body;
+        const r = await runCall(spec[0], `/sessions/${id}${spec[1]}`, subject, { body: spec[0] === 'POST' ? payload : undefined });
+        if (!r.ok) throw Object.assign(new Error('The computer could not complete that step. Please try again.'), { status: r.status || 502 });
+        return r.data;
     }
     async function fillLogin(subject, machine, origin, { signal, timeoutMs = 125_000 } = {}) {
         const m = SESSION_MACHINE.exec(String(machine || ''));
@@ -447,7 +476,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { url: data.url, expires_at: data.expires_at || null, control: !!data.control, desk: data.desk || desk };
     }
 
-    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, openSession, endSession, fillLogin, still, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
+    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, sessionList, profileSites, personSession, openSession, endSession, fillLogin, still, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
 }
 
 module.exports = { createComputers };

@@ -2,7 +2,7 @@
 
 /**
  * The `codes` agent (plan T16/T17): a person's coding task goes to OpenVibe.Codes, which runs it on that person's own
- * machine (openvibe.codes/run: an OpenVibe.Run job placed only on a machine of theirs, added on openvibe.bot/machines).
+ * machine (openvibe.codes/run: an OpenVibe.Run job placed only on a machine of theirs, added on openvibe.link/machines).
  * Actor calls Codes' task API (Contracts 0.162 codes.task.*) with its own service token (audience openvibe.codes) and
  * X-OV-Subject naming the person; Codes shows Actor only the tasks Actor started for that person. The model use is on
  * the machine's own keys, so Actor meters nothing for it.
@@ -92,7 +92,7 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         await emit({ step: 'tool_call', tool: 'codes.task.start', input: repo });
         const started = await call('POST', '/tasks', subject, { body: { repo, prompt: String(task).slice(0, 8000), ...(taskId ? { idempotency_key: String(taskId).slice(0, 128) } : {}) }, signal });
         if (started.status === 409 && started.data && started.data.code === 'codes.no_project') {
-            throw new ProviderError(`Before Actor can send coding work to your machine: add the machine at https://openvibe.bot/machines, then start one task yourself at ${pages}/run (it picks the project your tasks run in).`, { code: 'actor.agent.unavailable' });
+            throw new ProviderError(`Before Actor can send coding work to your machine: add the machine at https://openvibe.link/machines, then start one task yourself at ${pages}/run (it picks the project your tasks run in).`, { code: 'actor.agent.unavailable' });
         }
         if (!started.ok || !started.data || !started.data.task) throw new ProviderError(why(started), { code: 'actor.agent.failed' });
         if (!TASK_ID.test(String(started.data.task.id))) throw new ProviderError('OpenVibe.Codes answered with no task id', { code: 'actor.agent.failed' });
@@ -122,7 +122,7 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         if (!TERMINAL.has(t.state)) {
             return { text: `${LABEL[t.state] || t.state}, and it is not done yet. Follow it live, and see the change when it ends: [the task on OpenVibe.Codes](${t.url})`, sources, model: 'openvibe-codes' };
         }
-        if (t.state === 'expired') throw new ProviderError(`No machine of yours took the task in time. Is it online at https://openvibe.bot/machines, with the Codes job runner (install it with --worker)? The task: ${t.url}`, { code: 'actor.agent.failed' });
+        if (t.state === 'expired') throw new ProviderError(`No machine of yours took the task in time. Is it online at https://openvibe.link/machines, with the Codes job runner (install it with --worker)? The task: ${t.url}`, { code: 'actor.agent.failed' });
         if (t.state !== 'succeeded') throw new ProviderError(`The task ${t.state === 'cancelled' ? 'was cancelled' : 'failed'}${t.error ? `: ${t.error}` : ''}. ${t.url}`, { code: 'actor.agent.failed' });
         if (!t.result || !t.result.ok) throw new ProviderError(`The agents on your machine did not finish${t.result && t.result.error ? `: ${t.result.error}` : ''}. ${t.url}`, { code: 'actor.agent.failed' });
         return { text: answerOf(t), sources, model: (t.result.agents || [])[0] || 'openvibe-codes' };

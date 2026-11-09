@@ -28,20 +28,20 @@ const MACHINE = 'dev_01JZ0000000000000000000000';
         const deskEvent = (watch, running = true) => store.appendEvent(s, id, { step: 'tool_result', tool: 'computer_desk', is_error: false, text: JSON.stringify({ watch, running, kind: 'browser' }) });
 
         await check('Bot\'s screen page address names the machine and the desk', async () => {
-            assert.deepStrictEqual(store.deskPlace(`https://openvibe.bot/machines/${MACHINE}/screen?desk=desk-trains`), { machine: MACHINE, desk: 'desk-trains' });
-            assert.deepStrictEqual(store.deskPlace(`https://openvibe.bot/machines/${MACHINE}/screen`), { machine: MACHINE, desk: 'main' }, 'no desk named is the machine\'s own screen');
+            assert.deepStrictEqual(store.deskPlace(`https://openvibe.link/machines/${MACHINE}/screen?desk=desk-trains`), { machine: MACHINE, desk: 'desk-trains' });
+            assert.deepStrictEqual(store.deskPlace(`https://openvibe.link/machines/${MACHINE}/screen`), { machine: MACHINE, desk: 'main' }, 'no desk named is the machine\'s own screen');
             assert.strictEqual(store.deskPlace('https://example.com/elsewhere'), null);
         });
 
         await check('a working turn on an agent desk offers the live desk; the owner\'s screen does not', async () => {
             await s.db.query("UPDATE tasks SET state = 'running' WHERE id = $1", [id]);
-            await deskEvent(`https://openvibe.bot/machines/${MACHINE}/screen?desk=desk-trains`);
+            await deskEvent(`https://openvibe.link/machines/${MACHINE}/screen?desk=desk-trains`);
             let page = await t.get(`/chat/${id}`, { as: kim });
             assert.match(page.text, new RegExp(`data-watch="/chat/${id}/watch"`), 'the figure says where to ask');
-            await deskEvent(`https://openvibe.bot/machines/${MACHINE}/screen`);
+            await deskEvent(`https://openvibe.link/machines/${MACHINE}/screen`);
             page = await t.get(`/chat/${id}`, { as: kim });
             assert.ok(!page.text.includes('data-watch='), 'the owner\'s own screen is never framed');
-            await deskEvent(`https://openvibe.bot/machines/${MACHINE}/screen?desk=desk-trains`);
+            await deskEvent(`https://openvibe.link/machines/${MACHINE}/screen?desk=desk-trains`);
         });
 
         await check('only the requester, from openvibe.actor, while it works, gets the link; it is reused, not remade', async () => {
@@ -63,7 +63,7 @@ const MACHINE = 'dev_01JZ0000000000000000000000';
             const other = (await t.get('/api/v1/tasks', { as: kim, json: { task: 'And back on Sunday' }, headers: SAME })).json().id;
             await t.waitFor(other);
             await s.db.query("UPDATE tasks SET state = 'running' WHERE id = $1", [other]);
-            await store.appendEvent(s, other, { step: 'tool_result', tool: 'computer_desk', is_error: false, text: JSON.stringify({ watch: `https://openvibe.bot/machines/${MACHINE}/screen?desk=private`, running: true }) });
+            await store.appendEvent(s, other, { step: 'tool_result', tool: 'computer_desk', is_error: false, text: JSON.stringify({ watch: `https://openvibe.link/machines/${MACHINE}/screen?desk=private`, running: true }) });
             answer = () => ({ error: 'capability.denied', code: 'capability.denied' });
             const no = await t.get(`/chat/${other}/watch`, { as: kim, method: 'POST', headers: SAME });
             assert.strictEqual(no.status, 502);

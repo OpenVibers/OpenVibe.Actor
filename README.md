@@ -127,7 +127,7 @@ The resource index is for OpenVibe.Services on loopback and is blocked at the pu
     which fits the result clip, so the tool is offered without a vision key.
   - Reading, screenshots and closing run at every level; the rest wait for approval at `ask`. Below `full` the machine
     refuses addresses on its own network.
-  - Approvals can come from the Link's tray or notification buttons, as well as `openvibe-node approve` (Link v0.11.0).
+  - Approvals can come from the Link's tray or notification buttons, as well as `openvibe-link approve` (Link v0.11.0).
   - `computer_desk` (contracts 0.214.0, Link v0.15.0 on Linux) starts, stops or reports the machine's private desk: a
     screen of its own (Xvfb with its own bus and window manager) where the agent works without touching the person's.
     `computer_screen`, `computer_input` and `computer_browser` take `desk: "private"` to act there. Bot refuses that on
@@ -196,7 +196,7 @@ Readiness requires the database and at least one available agent.
 
 ## Acceptance
 
-Run the suite with Node 22 (the Development block below):
+Run the suite with Link 22 (the Development block below):
 
 - `npm test` — every [test/*.test.js](test/) in its own process on temp PGlite databases, with in-process mocks of OpenVibe.Network, OpenVibe.Events and OpenVibe.Media and stand-in model providers; nothing needs the network or a running site.
 - `npm run test:pg` — the same suite against PostgreSQL instead of PGlite.
@@ -261,7 +261,7 @@ Reporting a vulnerability: [SECURITY.md](SECURITY.md).
 Part of the [OpenVibe network](https://openvibe.network). Built in the open by [OpenVibers](https://github.com/OpenVibers).
 
 <!-- versions:start -->
-- openvibe-contracts: v0.350.0
-- openvibe-sdk: v0.96.0
-- openvibe-shared: v4.157.0
+- openvibe-contracts: v0.373.0
+- openvibe-sdk: v0.125.0
+- openvibe-shared: v4.178.0
 <!-- versions:end -->
