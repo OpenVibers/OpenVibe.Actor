@@ -49,6 +49,12 @@ const { signJwt } = require('./helpers/mocks');
         const me = await s.get('/auth/me', { as: staff });
         assert.strictEqual(me.status, 200, me.text.slice(0, 200));
         assert.strictEqual(JSON.parse(me.text).user.username, staff.username);
+        const token = s.network.userToken(staff);
+        const nav = await s.get('/auth/navbar-token', { cookie: `ov_token=${token}` });
+        assert.strictEqual(nav.status, 200);
+        assert.strictEqual(JSON.parse(nav.text).token, token, 'the Dock receives the verified Network token');
+        assert.strictEqual(nav.headers.get('cache-control'), 'private, no-store');
+        assert.strictEqual((await s.get('/auth/navbar-token')).status, 401, 'a guest receives no token');
     });
 
     await check('another site cannot sign a person out; this site can', async () => {
