@@ -108,7 +108,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         try {
             if (!(await taskNotices.once(s, row.id, kind))) return;
             if (kind === 'needs_you') {
-                await notifier.needsYou({ subject, what: detail.what, title: await taskTitle(row), url: detail.url || `${config.baseUrl}/tasks/${row.id}` });
+                await notifier.needsYou({ subject, what: detail.what, kind: detail.kind || null, title: await taskTitle(row), url: detail.url || `${config.baseUrl}/tasks/${row.id}` });
             } else {
                 await notifier.taskEnded({
                     subject, state: kind, taskId: row.id, title: await taskTitle(row),
@@ -372,7 +372,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // The person is told before the task says it needs them: a reader that sees the task waiting
             // for an answer must find the notification already sent, the same way the run's own end is
             // published last (see setState).
-            await tellPerson(row, 'needs_you', { what: `${questionKind === 'acting' ? 'choose for an interrupted action' : 'answer'}: ${clean}`, url: `${config.baseUrl}/tasks/${id}` });
+            await tellPerson(row, 'needs_you', {
+                what: questionKind === 'acting' ? `An action stopped halfway: ${clean}` : clean,
+                kind: questionKind === 'acting' ? 'choose' : 'answer', url: `${config.baseUrl}/tasks/${id}`,
+            });
             await setState(id, 'needs_you');
             waitForPerson(15 * 60_000);
             const answer = await waiting;
@@ -427,7 +430,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             const url = `${config.baseUrl}/me/approvals/${ask.id}`;
             const shown = money ? money.summary : summary;
             await emit(id, { kind: 'output', step: 'text', agent, text: `Your agent wants to ${String(shown).toLowerCase()} Nothing runs until you approve it: ${url}` });
-            await tellPerson(row, 'needs_you', { what: `approve: ${shown}`, url });
+            await tellPerson(row, 'needs_you', { what: String(shown), kind: 'approve', url });
             return { asked: true, decision, ask, url };
         };
         // A child hand-off (a sub-agent's consult, a Codes task, a Space action) is one node below this task's.
