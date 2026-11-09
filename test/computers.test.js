@@ -387,6 +387,24 @@ const as = { requester: `user:${ME}` };
         assert.strictEqual(bot.calls.length, before, 'nothing went to Bot');
     });
 
+    await check('a new Actor profile starts under Actor control; reusing a session never steals control', async () => {
+        const id='ses_01J8Z4M2Q0R7T9YV3K6N8P1W2A', taskId='tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A';
+        let existing=false; const calls=[];
+        const session={id,state:'running',task_id:taskId};
+        const pcs=createComputers({config:{...config,services:{...config.services,runUrl:'http://run.test'}},tokens,fetchImpl:async(url,init)=>{
+            const u=new URL(url), body=init.body?JSON.parse(init.body):null; calls.push({path:u.pathname,body});
+            let out=u.pathname.endsWith('/control/grant')?{lease:{}}:session;
+            if(init.method==='GET' && u.pathname==='/api/v1/sessions') out={sessions:existing?[session]:[]};
+            return new Response(JSON.stringify(out),{status:200,headers:{'content-type':'application/json'}});
+        }});
+        const opts={taskId,actorId:'act_01J8Z4M2Q0R7T9YV3K6N8P1W2A'};
+        assert.equal((await pcs.openSession(ME,opts)).machine,'run:'+id);
+        assert.deepEqual(calls.at(-1).body,{holder:{kind:'ai',subject:'svc:actor'}});
+        existing=true;calls.length=0;
+        await pcs.openSession(ME,opts);
+        assert.equal(calls.length,1);assert.equal(calls[0].path,'/api/v1/sessions');
+    });
+
     await check('a desk on a desk host when none of the person\'s computers has one (Desks plan D6, OpenVibe.Run sessions)', async () => {
         const SES = 'ses_01JD2C3D4E5F6G7H8J9K0MNPQR';
         const runCalls = [];

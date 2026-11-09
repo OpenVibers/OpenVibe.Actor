@@ -60,6 +60,7 @@ function snapshot(state, { spent = 0, now = () => Date.now() } = {}) {
         provider: state.provider || null,
         calls: Number(state.calls) || 0,
         lastText: String(state.lastText || ''),
+        dayMessageIds: clone(state.dayMessageIds || []),
         answered: state.answered === true,
         // An acting tool call that started but had not returned: a resume must ask the person, never run it again on
         // its own (stage V2-9 follow-up).
@@ -119,6 +120,7 @@ function restore(snap) {
         signal: null,
         messages: clone(Array.isArray(snap.messages) ? snap.messages : []),
         lastText: String(snap.lastText || ''),
+        dayMessageIds: clone(snap.dayMessageIds || []),
         answered: snap.answered === true,
         acting: clone(Array.isArray(snap.acting) ? snap.acting : []),
         model: snap.model || null,

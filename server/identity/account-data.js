@@ -25,6 +25,9 @@ const { createAccountData, TOPICS } = require('openvibe-sdk/account-data');
  * store `user:usr_…` (server/tasks/store.js takes the requester straight from the principal).
  */
 const TABLES = [
+    ...['actor_day_earnings', 'actor_day_asks', 'actor_day_journal', 'actor_day_messages', 'actor_day_usage', 'actor_day_runs', 'actor_day_goals', 'actors'].map((table) => ({
+        table, subject: 'owner', value: (usr) => `user:${usr}`, file: table + '.json', erase: 'delete',
+    })),
     // The files and charts their tasks made (Actor v2, stage V2-4): the rows go with the person, and their bytes come
     // with them in the extra part below. The bytes are not in the row list: a part may carry 20 MB, and one person's
     // charts must not fill it. First, so the rows are erased and counted before their tasks go (and take them with a

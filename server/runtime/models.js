@@ -470,7 +470,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
         const input = {
             messages,
-            model: routerModel(tier),
+            model: (currentChoice() && currentChoice().model) || routerModel(tier),
             ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {}),
             ...(json ? { response_format: { type: 'json_object' } } : {}),
             max_tokens: Math.max(1, Math.min(Number(maxTokens) || 1500, 16000)),
@@ -576,7 +576,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER, latency_class: null };
         }
         // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
-        if (routerOn()) {
+        if (routerOn() || (choice && choice.model && !choice.provider)) {
             const r = await chatViaRouter({ tier, messages, tools, json, maxTokens, signal, onDelta, subject: subject || (choice && choice.subject), target: choice && choice.target, latency });
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }

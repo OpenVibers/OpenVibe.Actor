@@ -63,6 +63,13 @@ function createPrincipal({ config, keys }) {
         if (header.startsWith('Bearer ')) {
             const token = header.slice(7).trim();
             const payload = decodePayload(token);
+            if (payload && payload.iss === `${config.networkIssuer.replace(/\/+$/, '')}/dock`) {
+                const v = await keys.verifyUser(token, { issuer: payload.iss, audience: 'openvibe.network' });
+                if (!v.ok) return { error: [401, 'token.invalid', v.reason] };
+                const c = v.claims;
+                if (c.client_id !== 'companion' || c.typ !== undefined || c.purpose !== undefined || c.actor_type !== undefined || c.role !== undefined || c.staff_caps !== undefined || !/^fam_[0-9a-f]{24}$/.test(c.fam || '') || !ids.isSubjectId('user', c.subject_id)) return { error: [401, 'token.invalid', 'Not a Dock sign-in.'] };
+                return { principal: { kind: 'dock', requester: `user:${c.subject_id}`, claims: c, viaSession: false } };
+            }
             if (payload && typeof payload.sub === 'string' && PRINCIPAL_SUB.test(payload.sub)) {
                 const publicKey = await keys.pemForToken(token);
                 if (!publicKey) return { error: [503, 'identity.unavailable', 'the Network signing key is not loaded yet'] };
@@ -119,6 +126,7 @@ function createPrincipal({ config, keys }) {
                 if (p.viaSession && req.method !== 'GET' && !sameOrigin(req, config.baseUrl)) return http.sendProblem(res, 403, 'request.cross_site', { detail: 'A signed-in request that changes something must come from openvibe.actor itself.', ctx: req.ov });
                 return next();
             }
+            if (p.kind === 'dock') return http.sendProblem(res, 403, 'scope.denied', { detail: 'This Dock sign-in only grants access to your Actor.', ctx: req.ov });
             const decision = capabilities.check(p.claims, cap);
             if (decision.allowed) return next();
             // These v1 ids are enforced here until the matching Contracts manifests are released.

@@ -80,6 +80,16 @@ const ok = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`);
         assert.ok(!calls.some((c) => /api\.(deepseek|openai)/.test(c.url)), 'no provider key or address');
     });
 
+    await ok('a personal Actor model choice pins the catalogue model on the router without naming an own-key credential', async () => {
+        const { fetchImpl, calls } = fakeAi();
+        const models = createModels({ config: configLib.load(env), fetchImpl, log: quiet });
+        await models.withChoice({ subject: USR, model: 'example/brain@v1' }, () => models.chat({ messages: [{ role: 'user', content: 'Hello' }] }));
+        const call = calls.find((c) => c.url.includes('/api/v1/runs'));
+        assert.strictEqual(call.body.input.model, 'example/brain@v1');
+        assert.deepStrictEqual(call.body.on_behalf_of, { type: 'user', id: USR });
+        assert.ok(!headerOf(call.headers, 'x-openvibe-credential'));
+    });
+
     await ok('a streamed call sends the deltas as they come and ends with the run', async () => {
         const { fetchImpl, calls } = fakeAi();
         const models = createModels({ config: configLib.load(env), fetchImpl, log: quiet });
