@@ -98,23 +98,33 @@ function taskItem(row, { lastEvent = null, steps = null, wait = null, now = () =
     const updated = row.finished_at || (lastEvent && lastEvent.at) || row.created_at;
     const last = lastEvent && (lastEvent.text || (lastEvent.tool ? `Using ${lastEvent.tool}` : ''));
     const waiting = waitLineOf(wait, now);
-    const summary = waiting || (needs ? needs.what : (row.state === 'failed' ? row.error_detail : (answerOf(row.result) || last)));
+    // The shared code map (Contracts' ai.run-error@1, manifests/ai-run-error-codes.v1.json) is the source of truth; the
+    // words below are what Actor answers with until the Contracts release that carries the manifest is pinned here.
+    const failure = row.state === 'failed' ? { code: 'task.failed', words: 'This task could not finish.', next: 'Open the task to review it, then retry.', action: 'open' } : null;
+    const summary = waiting || (needs ? needs.what : (failure ? failure.words : (answerOf(row.result) || last)));
+    const duration = row.started_at && row.finished_at ? Math.max(0, Date.parse(row.finished_at) - Date.parse(row.started_at)) : null;
     return {
         service: 'actor',
         id: row.id,
         kind: 'agent_task',
-        title: plain(row.task || row.id, 160) || row.id,
+        title: plain(row.skill_subject_title || row.skill_name || row.task || row.id, 160) || row.id,
         summary: summary ? plain(summary, 400) : null,
         bucket,
         state,
         agent: row.agent ? plain(row.agent, 80) : (lastEvent && lastEvent.agent ? plain(lastEvent.agent, 80) : null),
         cost_usd: row.cost_usd == null ? null : Number(row.cost_usd),
         steps: steps == null ? null : Number(steps),
-        error: row.error_detail ? plain(row.error_detail, 400) : null,
+        error: failure ? failure.words : null,
+        run_error: failure,
+        skill: row.skill_slug || null,
+        subject: { kind: row.skill_slug && /wiki|article/.test(row.skill_slug) ? 'wiki' : row.skill_slug && /post|changelog/.test(row.skill_slug) ? 'post' : row.skill_slug && /image|pic/.test(row.skill_slug) ? 'image' : 'task', title: plain(row.skill_subject_title || row.skill_name || row.task || row.id, 160) || row.id, url: `${PUBLIC_ORIGIN}/tasks/${row.id}` },
+        model: null, maker: null,
+        duration_ms: Number.isFinite(duration) ? duration : null,
+        step: bucket === 'running' ? plain(last || 'Working on your task', 240) : null,
         created_at: row.created_at,
         updated_at: updated,
         href: `${PUBLIC_ORIGIN}/tasks/${row.id}`,
-        actions: actionsFor(bucket, { canCancel: OPEN.includes(row.state) }),
+        actions: actionsFor(bucket, { canCancel: OPEN.includes(row.state), canRetry: row.state === 'failed' || row.state === 'cancelled' }),
     };
 }
 
