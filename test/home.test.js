@@ -23,9 +23,9 @@ const { boot, check, done } = require('./helpers/boot');
         assert.strictEqual((r.text.match(/<dl class="ovk-stats"/g) || []).length, 1, 'the numbers are one kit.stats strip');
         assert.match(r.text, stat('tools it can run', '1'), 'only the callable tool (mx), not the job tool');
         assert.match(r.text, /<dt><a href="#tools">tools it can run<\/a><\/dt>/, 'the tools number opens the tools fold');
-        assert.match(r.text, stat('ways to choose', '5'));
-        assert.match(r.text, stat('free tasks a day'));
-        assert.match(r.text, stat('agents? to choose from'));
+        assert.match(r.text, stat('free jobs a day'));
+        assert.match(r.text, stat('models? to run on'));
+        assert.doesNotMatch(r.text, /ways to choose|agents? to choose from/, 'no router numbers (Actor v3)');
         const tools = foldOf(r.text, 'tools');
         assert.match(tools, />MX Lookup</);
         assert.ok(!tools.includes('Video download'), 'a job tool is not offered');
@@ -40,7 +40,8 @@ const { boot, check, done } = require('./helpers/boot');
         const r = await t.get('/');
         // The folds hold showcase sections of their own, so the part runs from its heading to the questions.
         const more = r.text.slice(r.text.indexOf('<h2 id="h-how">'), r.text.indexOf('<section class="sc-sec" id="faq"'));
-        for (const id of ['route', 'why', 'status', 'tools', 'api']) assert.ok(foldOf(more, id), `the ${id} part is a fold`);
+        for (const id of ['status', 'tools', 'api']) assert.ok(foldOf(more, id), `the ${id} part is a fold`);
+        for (const id of ['route', 'why']) assert.ok(!foldOf(more, id), `the router's ${id} fold is gone (Actor v3)`);
         assert.ok(!/<details class="ovk-fold" open/.test(more), 'every fold starts closed');
         assert.match(foldOf(more, 'status'), /OpenAI&#39;s web agent as one of the routed agents|OpenAI's web agent as one of the routed agents/, 'what works today is all still there');
         assert.match(foldOf(more, 'api'), /\/api\/v1\/route/, 'the API sample');
@@ -52,6 +53,20 @@ const { boot, check, done } = require('./helpers/boot');
         const launcher = (/<section class="sc-sec sc-apps-sec" id="network"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
         for (const host of ['openvibe.tools', 'openvibe.watch', 'openvibe.bot', 'openvibe.codes']) assert.ok(launcher.includes(`<a href="https://${host}/?ov_from=actor">`), `the launcher links ${host}`);
         assert.ok(!/class="(hm-template|hm-tgroup|agent-card|hm-qa)\b/.test(r.text), 'no hand-built card stacks are left');
+    });
+
+    await check('Actor v3 (owner, 11-09): your own AI working for you; the lanes, watching, the model and the comparison', async () => {
+        const r = await t.get('/');
+        assert.match(r.text, /Your own AI\./, 'the hero says what it is');
+        assert.doesNotMatch(r.text, /Like OpenRouter|Ask once\.|The right agent does it/, 'no router pitch');
+        assert.doesNotMatch(r.text, /Tokyo|standing desk|Lisbon/, 'none of the old errand examples');
+        const templates = (/<section class="ovk-rail[^"]*" id="templates"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
+        for (const lane of ['Work', 'Earn', 'Channel', 'Brief', 'Watch', 'Build']) assert.ok(templates.includes(`>${lane}<`), `the ${lane} lane has a card`);
+        assert.match(r.text, /id="watch"[\s\S]*Take over any time/, 'how you watch it and take over');
+        assert.match(r.text, /id="brains"[\s\S]*Your own keys, no fee/, 'the model is your call');
+        const cmp = (/<section class="sc-sec" id="compare"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
+        for (const name of ['Grok Bot', 'OpenAI Dots', 'Meta Muse']) assert.ok(cmp.includes(name), `compared with ${name}`);
+        assert.match(r.text, /<p class="hm-now-k">Example · Find me work<\/p>/, 'the card beside the hero is marked as an example');
     });
 
     await check('templates fill the task box; signed out, the chosen task waits for sign-in', async () => {

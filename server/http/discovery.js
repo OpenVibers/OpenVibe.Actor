@@ -13,11 +13,11 @@ const cache = require('openvibe-shared/cache-policy');
 const { asyncRouter } = require('./router');
 
 const SITE_NAME = 'OpenVibe.Actor';
-const DESCRIPTION = 'OpenVibe.Actor is an AI agent router and OpenVibe\'s own agent: give it a task in plain words and it sends it to the best agent for it — OpenVibe\'s runtime acting through OpenVibe services, another platform\'s agent such as OpenAI\'s web agent, or an open model on OpenVibe hardware for private tasks — checks the answer with a second model and shows the cost and why. Like OpenRouter, for agents.';
+const DESCRIPTION = 'OpenVibe.Actor is your own AI that works for you: it finds work and drafts applications, writes and prices a gig, grows your channel, briefs you every morning, watches for deals and builds things. You watch it work from any OpenVibe page, it asks before it spends, posts or sends, and it runs on the model you pick, your own keys included.';
 const DISALLOW = ['/auth/', '/api/', '/tasks'];
 
 const PAGE_TEXT = {
-    '/': ['OpenVibe.Actor home', 'Give a task in plain words; Actor picks the agent, checks the answer and shows the cost and why. What it can do today and what comes next.'],
+    '/': ['OpenVibe.Actor home', 'Your own AI that works for you while you watch: jobs, a gig, your channel, a morning brief, deals and builds. It asks before it acts and runs on the model you pick.'],
     '/agents': ['The agents', 'Every agent system Actor routes to, with what it can do, its trust class, its price per million tokens and whether it works now; the modes and the check.'],
     '/docs': ['The Actor API', 'Create a task, watch it over server-sent events, read the result with its cost and explanation, cancel; list the agents and dry-run the router.'],
     '/updates': ['What shipped on OpenVibe.Actor', 'This site\'s update log, from the network changelog feed.'],
@@ -35,7 +35,7 @@ function homeJsonLd(config) {
     const site = String(config.baseUrl).replace(/\/+$/, '');
     return [
         seo.jsonLd.website({ name: SITE_NAME, url: site, description: DESCRIPTION }),
-        seo.jsonLd.softwareApp({ name: SITE_NAME, url: site, description: DESCRIPTION, category: 'BusinessApplication', keywords: 'ai agent, ai agent router, openrouter for agents, autonomous ai agent, ai assistant that does tasks, computer use agent, browser agent, cheap ai agent, open source ai agent, self-hosted ai agent, agent api' }),
+        seo.jsonLd.softwareApp({ name: SITE_NAME, url: site, description: DESCRIPTION, category: 'BusinessApplication', keywords: 'personal ai agent, ai that works for you, ai agent that makes money, ai job application assistant, autonomous ai agent, ai assistant that does tasks, computer use agent, browser agent, cheap ai agent, open source ai agent, self-hosted ai agent, agent api' }),
         seo.jsonLd.webPage({ name: SITE_NAME, url: `${site}/`, description: DESCRIPTION, siteUrl: site }),
     ];
 }

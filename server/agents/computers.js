@@ -114,6 +114,21 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const r = await runCall('POST', `/sessions/${m[1]}/end`, subject, { signal });
         return r.ok ? { running: false, stopped: true } : runProblem(r, 'ending the session');
     }
+    async function fillLogin(subject, machine, origin, { signal, timeoutMs = 125_000 } = {}) {
+        const m = SESSION_MACHINE.exec(String(machine || ''));
+        if (!m || !sessionsOn) return { ok: false, reason: 'no_private_browser_session' };
+        if (typeof origin !== 'string') return { ok: false, reason: 'origin_required' };
+        const created = await runCall('POST', `/sessions/${m[1]}/fill-requests`, subject, { body: { origin }, signal });
+        if (!created.ok || !created.data || !created.data.request_id || created.data.status !== 'pending') return { ok: false, reason: 'request_refused' };
+        const until = Date.now() + timeoutMs;
+        while (Date.now() < until && !(signal && signal.aborted)) {
+            await pause(1000, signal);
+            const r = await runCall('GET', `/sessions/${m[1]}/fill-requests/${created.data.request_id}`, subject, { signal, timeoutMs: 8000 });
+            if (!r.ok) return { ok: false, reason: 'request_unavailable' };
+            if (['ok', 'failed', 'expired'].includes(r.data.state)) return { ok: r.data.outcome === 'ok', reason: r.data.reason || null };
+        }
+        return { ok: false, reason: signal && signal.aborted ? 'cancelled' : 'approval_timeout' };
+    }
 
     /**
      * The session's newest frame (plan 2026-11-07): Run's still, as Actor's service token acting for the person
@@ -432,7 +447,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { url: data.url, expires_at: data.expires_at || null, control: !!data.control, desk: data.desk || desk };
     }
 
-    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, openSession, endSession, still, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
+    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, openSession, endSession, fillLogin, still, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
 }
 
 module.exports = { createComputers };

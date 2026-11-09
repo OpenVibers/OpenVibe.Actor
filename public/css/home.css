@@ -73,3 +73,22 @@
     .fold-bare { margin-top: 0; }
     .fold:not(.fold-bare) .fold-body > .sc-sec { margin-top: 0; }
 }
+
+/* Actor v3 (2026-11-09): beside the hero, what watching your Actor looks like, marked as an example. */
+.hm-now { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--border, #2a2f3a); border-radius: 16px;
+    background: var(--bg-card, #11151c); box-shadow: 0 18px 40px rgba(0,0,0,.25); max-width: 420px; }
+.hm-now-k { margin: 0; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted, #8b93a7); }
+.hm-now-step { display: flex; gap: 10px; align-items: flex-start; margin: 0; font-weight: 650; line-height: 1.4; }
+.hm-now-dot { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: var(--success, #22c55e);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--success, #22c55e) 22%, transparent); animation: hmNowPulse 1.8s ease-in-out infinite; }
+@keyframes hmNowPulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .hm-now-dot { animation: none; } }
+.hm-now-done { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--text-secondary, #b6bdd2); font-size: .9rem; }
+.hm-now-ask { display: grid; gap: 4px; padding: 12px; border-radius: 12px; background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 35%, transparent); }
+.hm-now-ask b { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-light, var(--accent, #60a5fa)); }
+.hm-now-btns { display: flex; gap: 8px; margin-top: 4px; }
+.hm-now-btn { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border, #2a2f3a); font-size: .85rem; font-weight: 650; }
+.hm-now-btn.is-yes { background: var(--accent-strong, #2563eb); border-color: transparent; color: var(--on-accent-strong, #fff); }
+.hm-now-meta { margin: 0; font-size: .82rem; color: var(--text-muted, #8b93a7); }
+.hm-compare-src { position: relative; clear: both; margin: 22px 0 28px; font-size: .78rem; color: var(--text-muted, #8b93a7); max-width: 70ch; }
