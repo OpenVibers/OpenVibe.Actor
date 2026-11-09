@@ -19,8 +19,8 @@ function budget(v, fallback, floor = false) {
     return out;
 }
 function askView(r) {
-    return { id: r.id, actor: r.actor_id, goal: r.goal_id, kind: r.kind, text: r.text,
-        options: r.options, created: r.created_at, answered: r.answered || null };
+    return { id: r.id, actor: r.actor_id, goal: r.goal_id, kind: r.session_id ? 'sign_in' : r.kind, text: r.text,
+        options: r.options, evidence: r.evidence || null, screen_url: r.session_id ? '/you?screen=1' : null, created: r.created_at, answered: r.answered || null };
 }
 function fingerprint(name, input) {
     const stable = (v) => Array.isArray(v) ? v.map(stable) : object(v)
@@ -31,7 +31,7 @@ function fingerprint(name, input) {
 function createDay(ctx) {
     const { s, config, engine, waits, notifier, models, checkpoints } = ctx;
     const get = (owner) => s.db.maybe('SELECT * FROM actors WHERE owner = $1', [owner]);
-    const run = (id) => s.db.maybe(`SELECT r.*, a.enabled, a.computer, a.brain, a.caps, g.lane, g.asks_before
+    const run = (id) => s.db.maybe(`SELECT r.*, a.enabled, a.computer, COALESCE(g.brain_override,a.brain) AS brain, a.caps, g.lane, g.asks_before
         FROM actor_day_runs r JOIN actors a ON a.id = r.actor_id JOIN actor_day_goals g ON g.id = r.goal_id WHERE r.task_id = $1`, [id]);
     async function ensure(owner) {
         if (!/^user:usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(owner)) fail('Sign in to your own account.', 401);
@@ -41,13 +41,14 @@ function createDay(ctx) {
     }
     async function update(owner, body) {
         const a = await ensure(owner);
-        if (!object(body) || Object.keys(body).some((k) => !['name', 'avatar', 'brain', 'computer', 'caps'].includes(k))) fail('Choose a name, picture, brain, computer or daily limits.');
+        if (!object(body) || Object.keys(body).some((k) => !['name', 'avatar', 'brain', 'computer', 'caps', 'adult_opt_in'].includes(k))) fail('Choose a name, picture, brain, computer or daily limits.');
         const next = { ...a, ...body };
         if (typeof next.name !== 'string' || !next.name.trim() || next.name.length > 80) fail('Give your Actor a name of up to 80 characters.');
         if (next.avatar !== null && (!object(next.avatar) || Object.keys(next.avatar).join() !== 'media_id' || !/^med_[0-9A-HJKMNP-TV-Z]{26}$/.test(next.avatar.media_id))) fail('Choose a Media picture, or use your own picture.');
-        if (next.brain !== 'auto') {
+        if (typeof next.adult_opt_in !== 'boolean') fail('Choose whether to show adult models.');
+        if (!['auto', 'openvibe', 'own:node', ...require('../runtime/model-prefs').KEY_PROVIDERS.map(p => 'own:' + p)].includes(next.brain)) {
             const entries = models.aiCatalog ? await models.aiCatalog() : null;
-            if (!entries || !entries.some((m) => m.id === next.brain && m.availability !== 'unavailable')) fail('Choose an available model from the catalogue.');
+            if (!entries || !entries.some((m) => m.id === next.brain && m.availability !== 'unavailable' && (next.adult_opt_in || !/uncensored|18\+/i.test(JSON.stringify(m))))) fail('Choose an available model from the catalogue.');
         }
         const pc = next.computer;
         if (!object(pc) || !['none', 'link', 'openvibe'].includes(pc.kind) || Object.keys(pc).some((k) => !['kind', 'machine_id'].includes(k))) fail('Choose no computer, your Link computer, or an OpenVibe computer.');
@@ -57,10 +58,10 @@ function createDay(ctx) {
         // Limit edits apply between runs; pause first to stop a running slice immediately.
         return s.tx(async () => {
             const locked = await s.db.maybe('SELECT * FROM actors WHERE owner = $1 FOR UPDATE', [owner]);
-            if (locked.active_task) fail('Pause your Actor before changing its settings.', 409);
+            if (locked.active_task && Object.keys(body).some(k => ['computer', 'caps'].includes(k))) fail('Pause your Actor before changing its settings.', 409);
             const latest = { ...locked, ...body, caps: budget(body.caps || locked.caps, locked.caps, true) };
-            return s.db.maybe(`UPDATE actors SET name=$2,avatar=$3::jsonb,brain=$4,computer=$5::jsonb,caps=$6::jsonb,updated_at=$7 WHERE owner=$1 RETURNING *`,
-                [owner, latest.name.trim(), JSON.stringify(latest.avatar), latest.brain, JSON.stringify(latest.computer), JSON.stringify(latest.caps), s.iso()]);
+            return s.db.maybe(`UPDATE actors SET name=$2,avatar=$3::jsonb,brain=$4,computer=$5::jsonb,caps=$6::jsonb,updated_at=$7,adult_opt_in=$8 WHERE owner=$1 RETURNING *`,
+                [owner, latest.name.trim(), JSON.stringify(latest.avatar), latest.brain, JSON.stringify(latest.computer), JSON.stringify(latest.caps), s.iso(), next.adult_opt_in]);
         });
     }
     const goals = (owner) => s.db.many('SELECT * FROM actor_day_goals WHERE owner=$1 AND deleted_at IS NULL ORDER BY next_due_at,id', [owner]);
@@ -68,7 +69,7 @@ function createDay(ctx) {
         const a = await ensure(owner);
         const old = id ? await s.db.maybe('SELECT * FROM actor_day_goals WHERE id=$1 AND owner=$2 AND deleted_at IS NULL', [id, owner]) : null;
         if (id && !old) fail('Goal not found.', 404);
-        if (!object(body) || Object.keys(body).some((k) => !['text', 'lane', 'budget', 'asks_before', 'enabled', 'every_minutes', 'next_due_at'].includes(k))) fail('Unknown goal field.');
+        if (!object(body) || Object.keys(body).some((k) => !['text', 'lane', 'budget', 'asks_before', 'enabled', 'every_minutes', 'next_due_at', 'schedule', 'brain_override'].includes(k))) fail('Unknown goal field.');
         const v = { enabled: true, every_minutes: 1440, next_due_at: s.iso(), ...(old || {}), ...body };
         if (!LANES[v.lane]) fail('Choose a goal lane.');
         if (typeof v.text !== 'string' || !v.text.trim() || v.text.length > 4000) fail('Describe your goal in up to 4000 characters.');
@@ -76,17 +77,24 @@ function createDay(ctx) {
         v.asks_before = body.asks_before || (old && old.lane === v.lane ? old.asks_before : LANES[v.lane].asks_before);
         if (!Array.isArray(v.asks_before) || v.asks_before.length > 20 || v.asks_before.some((x) => typeof x !== 'string' || !x.trim() || x.length > 100)) fail('Use a short list of things to ask you before doing.');
         if (typeof v.enabled !== 'boolean' || !Number.isInteger(v.every_minutes) || v.every_minutes < 5 || v.every_minutes > 525600 || !Number.isFinite(Date.parse(v.next_due_at))) fail('Choose a valid schedule, at least five minutes apart.');
-        const saved = await s.tx(async () => {
+        if (!require('./schedule').valid(v.schedule)) fail('Choose valid days, hours and a time zone.');
+        if (v.brain_override != null && typeof v.brain_override !== 'string') fail('Choose a model.');
+        if (v.brain_override && !['auto', 'openvibe', ...require('../runtime/model-prefs').OWN_PROVIDERS.map(p => 'own:' + p)].includes(v.brain_override)) {
+            const choices = models.aiCatalog ? await models.aiCatalog() || [] : [];
+            if (!choices.some(m => m.id === v.brain_override && m.availability !== 'unavailable' && (a.adult_opt_in || !/uncensored|18\+/i.test(JSON.stringify(m))))) fail('Choose an available model.');
+        }
+
+        return s.tx(async () => {
             const current = await s.db.maybe('SELECT * FROM actors WHERE id=$1 FOR UPDATE', [a.id]);
             const active = current.active_task ? await run(current.active_task) : null;
-            if (active && active.goal_id === id) fail('Pause your Actor before changing its active goal.', 409);
-            return s.db.maybe(`INSERT INTO actor_day_goals (id,actor_id,owner,text,lane,budget,asks_before,enabled,every_minutes,next_due_at,created_at,updated_at)
+            if (active && active.goal_id === id && Object.keys(body).some(k => k !== 'brain_override')) fail('Pause your Actor before changing its active goal.', 409);
+            const saved = await s.db.maybe(`INSERT INTO actor_day_goals (id,actor_id,owner,text,lane,budget,asks_before,enabled,every_minutes,next_due_at,created_at,updated_at)
             VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$11)
             ON CONFLICT (id) DO UPDATE SET text=EXCLUDED.text,lane=EXCLUDED.lane,budget=EXCLUDED.budget,asks_before=EXCLUDED.asks_before,
                 enabled=EXCLUDED.enabled,every_minutes=EXCLUDED.every_minutes,next_due_at=EXCLUDED.next_due_at,updated_at=EXCLUDED.updated_at RETURNING *`,
         [id || s.newId('agl'), a.id, owner, v.text.trim(), v.lane, JSON.stringify(v.budget), JSON.stringify(v.asks_before), v.enabled, v.every_minutes, date(Date.parse(v.next_due_at)), old ? old.created_at : s.iso()]);
+            return s.db.maybe('UPDATE actor_day_goals SET schedule=$2::jsonb,brain_override=$3 WHERE id=$1 RETURNING *', [saved.id, JSON.stringify(v.schedule || null), v.brain_override || null]);
         });
-        return saved;
     }
     async function removeGoal(owner, id) {
         const g = await s.db.maybe('UPDATE actor_day_goals SET enabled=false,deleted_at=$3 WHERE id=$1 AND owner=$2 AND deleted_at IS NULL RETURNING *', [id, owner, s.iso()]);
@@ -151,11 +159,12 @@ function createDay(ctx) {
         if (!enabled && a.active_task) await engine.cancel(a.active_task, owner);
         return now(owner);
     }
-    async function tell(owner, text) {
+    async function tell(owner, text, attachments = []) {
         const a = await ensure(owner);
         if (typeof text !== 'string' || !text.trim() || text.length > 4000) fail('Write a message of up to 4000 characters.');
-        const message = await s.db.maybe(`INSERT INTO actor_day_messages (id,actor_id,owner,text,created_at) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-            [s.newId('ams'), a.id, owner, text.trim(), s.iso()]);
+        if (!Array.isArray(attachments) || attachments.length > 5 || attachments.some(f => !f || typeof f.name !== 'string' || f.name.length > 120 || typeof f.text !== 'string' || f.text.length > 8000)) fail('Attach up to five small text files.');
+        const message = await s.db.maybe(`INSERT INTO actor_day_messages (id,actor_id,owner,text,created_at,attachments) VALUES ($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`,
+            [s.newId('ams'), a.id, owner, text.trim(), s.iso(), JSON.stringify(attachments)]);
         // Kept until a run claims it, including while the Actor is off or waiting on an answer.
         return message;
     }
@@ -167,7 +176,7 @@ function createDay(ctx) {
         const minutes = a.caps.minutes - used.minutes;
         if (usd <= 0.000001 || minutes < 1 / 6) return null;
         for (const g of await goals(a.owner)) {
-            if (!g.enabled || g.next_due_at > s.iso()) continue;
+            if (!g.enabled || g.next_due_at > s.iso() || (!g.do_now && !require('./schedule').open(g.schedule, s.now()))) continue;
             const spent = await usage(a.id, g.id);
             const money = Math.min(usd, g.budget.usd - spent.usd);
             const time = Math.min(minutes, g.budget.minutes - spent.minutes, config.taskTimeoutMs / 60000);
@@ -179,12 +188,12 @@ function createDay(ctx) {
         const chosen = await pick(a);
         if (!chosen) return null;
         const g = chosen.goal;
-        const messages = await s.db.many('SELECT id,text FROM actor_day_messages WHERE actor_id=$1 AND task_id IS NULL ORDER BY created_at LIMIT 20', [a.id]);
+        const messages = await s.db.many('SELECT id,text,attachments FROM actor_day_messages WHERE actor_id=$1 AND task_id IS NULL ORDER BY created_at LIMIT 20', [a.id]);
         const recent = await journalPage(a.owner, '', 5);
         const prompt = `Work on this standing goal: ${g.text}\nLane: ${g.lane}. Ask before: ${g.asks_before.join(', ') || 'read-only work'}.
 Use ask_person when the person must answer or do something. Actions require exact approval; never work around an Ask.
 Computer: ${JSON.stringify(a.computer)}. Finish this slice with a plain account of progress, what you learned, and the next useful step.
-Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages from your person: ${JSON.stringify(messages.map((x) => x.text))}`;
+Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages from your person: ${JSON.stringify(messages.map((x) => ({ text: x.text, attachments: x.attachments })))}`;
         const out = await createTask({ s, config, engine: { submit() {} }, principal: { requester: a.owner, via: 'actor-day', kind: 'user' },
             body: { task: prompt.slice(0, 16000), mode: 'balanced', budget: { per_task_usd: chosen.usd, per_day_usd: config.allowance.perDayUsd } }, assignmentOrigin: 'routine',
             beforeInsert: async () => {
@@ -196,7 +205,7 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
                 await s.db.query(`INSERT INTO actor_day_runs (task_id,actor_id,goal_id,owner,day,reserved_usd,reserved_ms,created_at)
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [task.id, a.id, g.id, a.owner, dayOf(s.now()), chosen.usd, chosen.ms, s.iso()]);
                 await s.db.query("UPDATE actors SET active_task=$2,status='working',updated_at=$3 WHERE id=$1", [a.id, task.id, s.iso()]);
-                await s.db.query('UPDATE actor_day_goals SET next_due_at=$2 WHERE id=$1', [g.id, date(s.now() + g.every_minutes * 60000)]);
+                await s.db.query('UPDATE actor_day_goals SET next_due_at=$2,do_now=false WHERE id=$1', [g.id, date(s.now() + g.every_minutes * 60000)]);
                 if (messages.length) await s.db.query('UPDATE actor_day_messages SET task_id=$2 WHERE id=ANY($1) AND task_id IS NULL', [messages.map((m) => m.id), task.id]);
             } });
         if (out.status === 201) { engine.submit(out.task.id); return out.task; }
@@ -211,6 +220,8 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
             await s.db.query("UPDATE actors SET status='working' WHERE id=$1 AND enabled", [r.actor_id]);
         }
         if (!ended) return;
+        const held = await s.db.many('SELECT DISTINCT session_id FROM actor_day_asks WHERE task_id=$1 AND session_id IS NOT NULL', [task.id]);
+        for (const h of held) await ctx.computers.endSession(r.owner.slice(5), 'run:' + h.session_id).catch(() => {});
         await segmentEnd(task.id);
         await s.db.query('UPDATE actor_day_runs SET finished_at=$2 WHERE task_id=$1 AND finished_at IS NULL', [task.id, s.iso()]);
         await s.db.query(`UPDATE actors SET active_task=NULL,status=CASE WHEN enabled THEN 'resting' ELSE 'paused' END,next_due_at=$2 WHERE id=$1 AND active_task=$3`, [r.actor_id, date(s.now() + 60000), task.id]);
@@ -262,7 +273,8 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
         if (!r || !r.enabled || !checkpoints || !checkpoints.enabled) fail('This Actor is paused.', 409);
         const text = plain(input.text);
         const kind = input.kind || 'answer_question';
-        if (!text || !['approve_action', 'answer_question', 'do_yourself'].includes(kind)) fail('Say what you need your person to do.');
+        if (!text || !['approve_action', 'answer_question', 'do_yourself', 'sign_in'].includes(kind)) fail('Say what you need your person to do.');
+        if (kind === 'sign_in' && !/^ses_[0-9A-HJKMNP-TV-Z]{26}$/.test(input.session_id || '')) fail('Open the Actor’s screen first.');
         const options = Array.isArray(input.options) ? [...new Set(input.options.map((x) => plain(x, 200)).filter(Boolean))].slice(0, 12) : [];
         const q = await s.tx(async () => {
             const a = await s.db.maybe('SELECT enabled FROM actors WHERE id=$1 FOR UPDATE', [r.actor_id]);
@@ -270,9 +282,9 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
             const existing = await s.db.maybe('SELECT * FROM actor_day_asks WHERE task_id=$1 AND answered IS NULL ORDER BY created_at LIMIT 1', [taskId]);
             if (existing) return existing;
             const w = await waits.create({ taskId, requester: r.owner, source: 'time', seconds: 6 * 3600, onTimeout: 'fail', line: plain(text, 200) });
-            return s.db.maybe(`INSERT INTO actor_day_asks (id,actor_id,goal_id,owner,task_id,wait_id,kind,text,options,action_hash,created_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11) RETURNING *`,
-            [s.newId('ask'), r.actor_id, r.goal_id, r.owner, taskId, w.id, kind, text, JSON.stringify(options), actionHash, s.iso()]);
+            return s.db.maybe(`INSERT INTO actor_day_asks (id,actor_id,goal_id,owner,task_id,wait_id,kind,text,options,action_hash,created_at,session_id,evidence)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13::jsonb) RETURNING *`,
+            [s.newId('ask'), r.actor_id, r.goal_id, r.owner, taskId, w.id, kind === 'sign_in' ? 'do_yourself' : kind, text, JSON.stringify(options), actionHash, s.iso(), kind === 'sign_in' ? input.session_id : null, JSON.stringify(input.evidence || null)]);
         });
         await notify(q).catch((err) => ctx.log.warn('[Actor] ask notification:', err.message));
         return { text: JSON.stringify({ waiting: true, ask: askView(q) }), data: askView(q), park: { wait_id: q.wait_id } };
@@ -290,6 +302,7 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
         const text = plain(body && body.text, 4000);
         if (!decline && q.kind === 'answer_question' && !text) fail('Write your answer.');
         const answered = { at: s.iso(), decision: decline ? 'decline' : 'answer', ...(text ? { text } : {}) };
+        if (q.session_id && !q.answered) { await ctx.computers.personSession(owner.slice(5), q.session_id, 'save'); await ctx.computers.personSession(owner.slice(5), q.session_id, 'back'); }
         const row = await s.db.maybe('UPDATE actor_day_asks SET answered=$3::jsonb WHERE id=$1 AND owner=$2 AND answered IS NULL RETURNING *', [id, owner, JSON.stringify(answered)]);
         await resumeAnswers();
         return askView(row || await s.db.maybe('SELECT * FROM actor_day_asks WHERE id=$1', [id]));
@@ -323,6 +336,7 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
             if (r.computer.kind === 'link' && input.machine !== r.computer.machine_id) return { text: 'Use only the Link computer your person selected.', isError: true };
             if (r.computer.kind === 'openvibe' && input.machine && input.machine !== 'any' && !String(input.machine).startsWith('run:ses_')) return { text: 'Use the OpenVibe computer selected for this Actor.', isError: true };
         }
+        if (name === 'hand_to_person') return { approved: true };
         if (tool.acts !== true || LOCAL.has(name)) return null;
         const hash = fingerprint(name, input);
         const prior = await s.db.maybe('SELECT * FROM actor_day_asks WHERE task_id=$1 AND action_hash=$2 ORDER BY created_at DESC LIMIT 1', [taskId, hash]);
@@ -332,7 +346,7 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
             return won ? { approved: true } : { text: 'This approval has already been used. Check the result; do not repeat the action.', isError: true };
         }
         const step = require('../agents/actions').stepFor(name, input);
-        return ask(taskId, { kind: 'approve_action', text: step ? step.summary : `Allow this step: ${tool.description.split('.')[0]}?`, options: ['Approve', 'Decline'] }, hash);
+        return ask(taskId, { kind: 'approve_action', text: step ? step.summary : `Allow this step: ${tool.description.split('.')[0]}?`, options: ['Approve', 'Decline'], evidence: { text: plain(JSON.stringify(input), 2000) } }, hash);
     }
     async function tick() {
         if (config.drill || !checkpoints || !checkpoints.enabled) return [];
@@ -353,7 +367,8 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
         if (config.drill || config.nodeEnv === 'test') return [];
         return [require('../utils/jobs').every('actor-day', 15000, tick, { initialDelayMs: 1000, log: ctx.log })];
     }
-    return { ensure, get, update, goals, saveGoal, removeGoal, usage, now, setEnabled, tell, journalPage, asks, ask, answer,
+    const page = require('./page-data').createPageData(ctx, { ensure, get, run, goals, now, tick, journalPage });
+    return { ...page, ensure, get, update, goals, saveGoal, removeGoal, usage, now, setEnabled, tell, journalPage, asks, ask, answer,
         run, taskState, recordSpend, segmentEnd, event, screen, guardTool, wakePayload, resumeAnswers, tick, startJobs, lanes: LANES };
 }
 module.exports = { createDay, askView, fingerprint, budget };

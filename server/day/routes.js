@@ -25,8 +25,22 @@ function router(ctx) {
     };
     r.get('/', route((owner) => day.now(owner)));
     r.patch('/', route((owner, req) => day.update(owner, req.body)));
+    r.get('/page', route(owner => day.pageData(owner)));
+    r.post('/do-now', route((owner, req) => day.doNow(owner, req.body.goal)));
+    r.post('/earnings', route((owner, req) => day.earn(owner, req.body), 201));
+    r.get('/sites', route(owner => day.sites(owner)));
+    r.delete('/sites/:site', route((owner, req) => day.sites(owner, req.params.site)));
+    r.post('/computer/:action', route((owner, req) => day.computerCall(owner, req.params.action, req.body)));
+    r.get('/computer/history', route(owner => day.computerCall(owner, 'history')));
+    r.get('/computer/still', async (req, res) => {
+        const id = await day.session(req.principal.requester);
+        if (!id) return res.sendStatus(404);
+        const shot = await ctx.computers.still(req.principal.requester.slice(5), id);
+        if (!shot || shot.error) return res.sendStatus(502);
+        res.type(shot.type).end(shot.bytes);
+    });
     r.get('/lanes', route(() => day.lanes));
-    r.get('/models', route(async () => ({ models: [{ id: 'auto', name: 'Auto' }, ...(ctx.models.aiCatalog ? await ctx.models.aiCatalog() || [] : [])] })));
+    r.get('/models', route(async owner => { const a = await day.ensure(owner); const entries = ctx.models.aiCatalog ? await ctx.models.aiCatalog() || [] : []; return { models: [{ id: 'auto', name: 'Auto' }, ...entries.filter(m => a.adult_opt_in || !/uncensored|18\+/i.test(JSON.stringify(m)))] }; }));
     r.post('/pause', route((owner) => day.setEnabled(owner, false)));
     r.post('/resume', route((owner) => day.setEnabled(owner, true)));
     r.get('/goals', route((owner) => day.goals(owner)));
@@ -40,7 +54,7 @@ function router(ctx) {
         const items = await day.journalPage(owner, String(req.query.before || ''), req.query.limit);
         return { items, next_cursor: items.length ? items[items.length - 1].id : null };
     }));
-    r.post('/tell', route((owner, req) => day.tell(owner, req.body && req.body.text), 201));
+    r.post('/tell', route((owner, req) => day.tell(owner, req.body && req.body.text, req.body && req.body.attachments), 201));
     return r;
 }
 module.exports = { router };

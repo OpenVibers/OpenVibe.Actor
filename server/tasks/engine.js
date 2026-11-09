@@ -531,7 +531,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // The person's own model choice for this run (plan L55 C3): their own key, through OpenVibe.AI.
                 // Every model call of the run — the loop's, the plan's, the check's — reads it, and no other run's does.
                 let choice = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
-                if (dayRun && dayRun.brain !== 'auto') choice = { subject: row.requester.slice(5), model: dayRun.brain };
+                if (dayRun) choice = await day.modelChoice(id);
                 // "Runs on: my computer": the model on the person's computer, whatever else they chose above it (a
                 // model id they gave for their computer is kept).
                 if (runsOn === 'computer' && !(choice && choice.provider === 'node')) choice = modelPrefs.computerChoice(row.requester);

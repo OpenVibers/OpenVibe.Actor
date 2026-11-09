@@ -22,4 +22,4 @@ const { boot, done } = require('./helpers/boot');
         assert.equal((await t.get(path, { method: 'OPTIONS', headers: { ...headers, 'access-control-request-method': 'PATCH' } })).status, 204);
         for (const extra of [{ client_id: 'other' }, { role: 'admin' }, { fam: '' }]) assert.equal((await t.get(path, { bearer: t.network.dockToken(user, 'actor.me.read', extra), headers })).status, 401);
     } finally { await t.close(); }
-})().then(() => done(), done);
+})().then(()=>done()).catch(e=>{process.stderr.write((e.stack||String(e))+'\n');process.exit(1);});
