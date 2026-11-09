@@ -23,6 +23,9 @@ const skills = require('../skills');
 const kinds = require('../agents/kinds');
 const contacts = require('../agents/contacts');
 
+/** When a skill was scanned, as a day ("Nov 8, 2026"); the exact time stays in the element's datetime. */
+const scanDay = (iso) => { const d = new Date(iso); return Number.isFinite(d.getTime()) ? html`<time datetime="${iso}">${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}</time>` : time(iso); };
+
 /** The scan's state, in words. Never a code: a person reads this card. */
 const SCAN_WORDS = {
     passed: 'The scan found nothing to worry about.',
@@ -130,7 +133,7 @@ ${raw(kit.list(listings.map(card), { empty: 'No skills are offered right now.' }
                     : html`<p class="sk-hint">${may.why}</p>`;
         page(req, res, html`<p class="sk-crumbs"><a href="/skills">Skills</a></p>
 <header class="sk-head"><h1>${skill.name}</h1><p class="sk-lede">${skill.description}</p>
-<p class="sk-meta">Published by ${listing.publisher.kind === 'openvibe' ? 'OpenVibe' : (listing.publisher.name || 'a person')} · version ${skill.version}${listing.visibility === 'private' ? html` · <span class="sk-chip">Private</span>` : ''} · ${listing.installs} ${listing.installs === 1 ? 'person has' : 'people have'} it</p>
+<p class="sk-meta">Published by ${listing.publisher.kind === 'openvibe' ? 'OpenVibe' : (listing.publisher.name || 'a person')} · version ${skill.version}${listing.visibility === 'private' ? html` · <span class="sk-chip">Private</span>` : ''} · ${listing.installs ? `${listing.installs} ${listing.installs === 1 ? 'person has' : 'people have'} it` : 'nobody has it yet'}</p>
 </header>
 ${tools.length ? html`<section class="sk-panel sk-sandbox"><h2>Its code</h2>
 <p class="sk-text">It runs in a sandbox on a machine of yours that turned the skill runner on, or in OpenVibe's pool, never on an OpenVibe server: with the network each tool declares, and the exact bytes the registry scanned.</p>
@@ -139,7 +142,7 @@ ${tools.length ? html`<section class="sk-panel sk-sandbox"><h2>Its code</h2>
 <section class="sk-panel"><h2>The scan</h2><p class="sk-state sk-state--${state}">${SCAN_WORDS[state] || SCAN_WORDS.pending}</p>
 ${findings.length ? html`<ul class="sk-findings">${findings.map((f) => html`<li>${f.tool ? html`<span class="sk-toolname">${f.tool}</span> ` : ''}<span class="sk-sev sk-sev--${f.severity}">${SEVERITY_WORDS[f.severity] || f.severity}</span> ${f.note} <span class="sk-where">(${f.where})</span></li>`)}</ul>` : state === 'passed' ? '' : html`<p class="sk-hint">The scan found nothing to report.</p>`}
 ${findings.some((f) => f.tool) ? html`<p class="sk-hint">A finding with a tool's name is about that tool's code.</p>` : ''}
-${listing.scan && listing.scan.scanned_at ? html`<p class="sk-hint">Scanned ${time(listing.scan.scanned_at)}.</p>` : ''}</section>
+${listing.scan && listing.scan.scanned_at ? html`<p class="sk-hint">Scanned ${scanDay(listing.scan.scanned_at)}.</p>` : ''}</section>
 <section class="sk-panel"><h2>What it may ask for</h2><p class="sk-text">${asksOf(skill)}</p>
 ${skill.requires && skill.requires.hosts && skill.requires.hosts.length ? html`<p class="sk-hint">It reaches ${skill.requires.hosts.join(', ')}.</p>` : ''}</section>
 <section class="sk-panel"><h2>Its instructions</h2><pre class="sk-instructions">${skill.instructions}</pre></section>
