@@ -6,21 +6,9 @@ const { createFrames } = require('./frames');
 const { html, render } = require('../render/html');
 
 function createTaskView(ctx, { fetchImpl } = {}) {
-    const { s, principal, config, stream, computers, log } = ctx;
+    const { s, config, stream, computers, log } = ctx;
     const origins = createFrames({ fetchImpl, networkUrl: config.networkInternalUrl });
-    const api = express.Router(), embed = express.Router();
-    // Only the person's own Bearer may mint; delegated apps and sessions cannot.
-    api.post('/tasks/:id/view-ticket', principal.middleware, async (req, res) => {
-        res.set('Cache-Control', 'no-store');
-        const p = req.principal;
-        if (!p || p.kind !== 'user' || p.viaSession || !req.get('authorization')?.startsWith('Bearer ')) return res.sendStatus(403);
-        try {
-            const row = await tasks.getTask(s, req.params.id);
-            if (!row || row.requester !== p.requester) return res.sendStatus(404);
-            const issued = await tickets.issue(s, row);
-            res.json({ url: `${config.baseUrl}/embed/task/${encodeURIComponent(row.id)}?t=${issued.ticket}`, expires_at: issued.expires_at });
-        } catch { log.warn('[Actor] task view issue failed', req.params.id); res.sendStatus(503); }
-    });
+    const embed = express.Router();
     embed.use('/embed/task', (_req, res, next) => {
         res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
         next();
@@ -75,6 +63,6 @@ function createTaskView(ctx, { fetchImpl } = {}) {
     });
     // No request under this prefix reaches session-authenticated pages or write routes.
     embed.all('/embed/task/:id*', (_req, res) => res.sendStatus(405));
-    return { api, embed };
+    return { embed };
 }
 module.exports = { createTaskView };
