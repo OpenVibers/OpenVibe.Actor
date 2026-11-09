@@ -14,7 +14,7 @@ const { boot, check, done } = require('./helpers/boot');
         const r = await t.get('/');
         assert.strictEqual(r.status, 200, r.text.slice(0, 300));
         const home = r.text;
-        for (const [id, title] of [['agents', 'The agents'], ['how', 'How it works'], ['faq', 'Questions'], ['shipped', 'Recently shipped on OpenVibe.Actor']]) {
+        for (const [id, title] of [['agents', 'What it runs on today'], ['how', 'How it works'], ['faq', 'Questions'], ['shipped', 'Recently shipped on OpenVibe.Actor']]) {
             const re = new RegExp(`<div class="fold[^"]*" id="fold-${id}"><input class="fold-toggle" type="checkbox" id="fold-${id}-open">`
                 + `<label class="fold-h" for="fold-${id}-open"><h2[^>]*>[^<]*${title}[^<]*</h2>.*?<div class="fold-body">`);
             assert.ok(re.test(home), `the ${title} fold is on the home`);

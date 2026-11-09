@@ -52,47 +52,45 @@ const MODE_TEXT = {
 const MODE_LABEL = { cheapest: 'Cheapest', balanced: 'Balanced', best: 'Best', fastest: 'Fastest', private: 'Private' };
 const CLASS_WORD = { answer: 'Answers', lookup: 'Lookups', research: 'Reading pages', web: 'Web search', code: 'Code', robot: 'Your robot', computer: 'Your computer' };
 const STATE_KIND = { queued: '', running: 'info', verifying: 'info', succeeded: 'ok', failed: 'bad', cancelled: '' };
-// What people really hand agents like this (the owner, 2026-11-01: "I hate all the current examples… people aren't
-// gonna use it for that… search what people use Grok-style agents for"; research the same day: OpenAI's agent launch,
-// Manus reviews and Perplexity's Comet usage study put travel and bookings, shopping and deals, fact-checks and
-// research, watching for something, and lists and tables first). The chat's starters are the same set.
+// What it does for you (the owner, 2026-11-09: the old examples, a flight, a desk, Lisbon, "suck"; lead with work,
+// money, a channel, a brief and building things; Actor v3 plan). Every one runs on today's engine: web and OpenVibe
+// search, reading pages, writing, files, Watch and coding. Grouped by the lane the Actor v3 plan names.
 const EXAMPLES = [
-    'Find the cheapest round trip from New York to Tokyo in March. Show me the best three and stop before paying.',
-    'Compare the five best standing desks under $500: price, reviews, and where each is cheapest today.',
-    'Fact-check this with real sources, and tell me what is true, what is false and what is unclear: ',
+    'Find 10 remote junior video editing jobs posted this week on OpenVibe.Work and the web. Rank them by fit, then write a short tailored cover letter for the best three. Do not apply: show me first.',
+    'Look at what the top 10 Fiverr gigs for "stream highlights into YouTube Shorts" charge and promise, then write my gig: a title, three price tiers with what each includes, a description and five search tags.',
+    'Give me my morning brief: the three AI stories that matter today, what Bitcoin and the S&P 500 did overnight, and today\'s weather in my city. Under 150 words.',
     'Watch eBay for a used RTX 4090 under $900 and tell me the moment one is listed.',
 ];
 
-// Tasks to start from, by what they need. On the home they are a rail of cards (kit.card): a short title, the kind as
-// the badge and the card type's icon; the card's link puts the whole task in the task box, ready to run or change. What a
-// robot, computer, desk or private task needs is said in the box once that task is chosen (NEEDS).
+// The cards to start from: the lane as the badge, the card type's icon; a card puts its whole task in the box, ready to
+// run or change. What a computer, desk or private task needs is said in the box once that task is chosen (NEEDS).
 const TEMPLATES = [
-    { group: 'Book and buy', badge: 'Errand', type: 'site', items: [
-        { title: 'The cheapest flight to Tokyo in March', text: EXAMPLES[0] },
-        { title: 'The best standing desk under $500', text: EXAMPLES[1] },
+    { group: 'Find me work', badge: 'Work', type: 'post', items: [
+        { title: 'Find jobs and draft the applications', text: EXAMPLES[0] },
+        { title: 'Rewrite my CV for one job, honestly', text: 'Rewrite my CV for this job post so it matches what they ask for, without inventing anything. The post and my CV: ' },
     ] },
-    { group: 'Check and research', badge: 'Research', type: 'report', items: [
-        { title: 'Is this true? Check it with sources', text: EXAMPLES[2] },
-        { title: 'What people say about the new iPhone today', text: 'What are people saying about the newest iPhone today on Reddit, X and the news? Give me the short version.' },
+    { group: 'Earn with a gig', badge: 'Earn', type: 'site', items: [
+        { title: 'A Fiverr gig, priced from the market', text: EXAMPLES[1] },
+        { title: 'Price what I want to sell', text: 'I want to sell these: <list them>. Find what each sells for used on eBay this month, then suggest a price and a listing title for each.' },
+    ] },
+    { group: 'Grow my channel', badge: 'Channel', type: 'stream', items: [
+        { title: 'Where to post about my stream', text: 'Find five places where people talk about <my game> (subreddits, Discord servers, forums), with each one\'s rule on self-promotion, and draft a helpful first post for each.' },
+        { title: 'A month of posts in one go', text: 'Write 20 short posts for X and Threads about my streaming channel (<what I stream>), one for each weekday of the next month: useful, funny, no hashtag spam.' },
+    ] },
+    { group: 'Brief me', badge: 'Brief', type: 'report', items: [
+        { title: 'My morning brief', text: EXAMPLES[2] },
     ] },
     { group: 'Watch for it', badge: 'Watch', type: 'cam', items: [
-        { title: 'A used RTX 4090 under $900 on eBay', text: EXAMPLES[3] },
+        { title: 'A used RTX 4090 under $900', text: EXAMPLES[3] },
     ] },
-    { group: 'Plan and list', badge: 'Plan', type: 'post', items: [
-        { title: 'A weekend in Lisbon for two', text: 'Plan a weekend in Lisbon for two: a hotel under $150 a night, where to eat, and a plan for each day.' },
-        { title: '20 small gaming streamers, in a table', text: 'Make a table of 20 small gaming streamers (under 10k followers) with their channel links and when they stream.' },
+    { group: 'Build it', badge: 'Build', type: 'site', items: [
+        { title: 'A one-page site for my channel', text: 'Make me a one-page website for my streaming channel: my schedule, my links and a short about section, as a single HTML file I can upload.' },
     ] },
-    { group: 'Across OpenVibe', badge: 'OpenVibe', type: 'stream', items: [
-        { title: 'Who is live on OpenVibe, and about what', text: 'Open openvibe.live, find the channels that are live right now, and tell me what is happening on each.' },
-    ] },
-    { group: 'Your robot', badge: 'Robot', type: 'toy', needs: 'Turn on Your agent on the robot\'s panel first.', items: [
-        { title: 'Drive your rover and say hello', text: 'Drive my rover forward for two seconds, turn on its headlights, then say hello.' },
-    ] },
-    { group: 'Your computer', badge: 'Computer', type: 'site', needs: 'Needs the OpenVibe Link\'s computer plugin on that machine.', items: [
+    { group: 'On your computer', badge: 'Computer', type: 'site', needs: 'Needs OpenVibe Link on that computer.', items: [
         { title: 'The ten largest files in your Downloads', text: 'On my computer, list the ten largest files in my Downloads folder.' },
     ] },
-    { group: 'On a desk of its own', badge: 'Desk', type: 'cam', needs: 'Needs a computer or desk host with the OpenVibe Link\'s computer plugin. Watch the desk and take it over from the task.', items: [
-        { title: 'Sign in on its desk, then read your account', text: 'On my computer, open the sign-in page of <a site I use> on your desk and hand it to me to sign in; then tell me what my account page shows.' },
+    { group: 'On its screen', badge: 'Screen', type: 'cam', needs: 'It opens the page on its screen and hands it to you: you sign in yourself, so it never sees your password, and it stays signed in.', items: [
+        { title: 'You sign in on its screen; it reads your account', text: 'On my computer, open the sign-in page of <a site I use> on your desk and hand it to me to sign in; then tell me what my account page shows.' },
     ] },
     { group: 'Private', badge: 'Private', type: 'person', needs: 'Answered on OpenVibe\'s own model; nothing leaves OpenVibe.', items: [
         { title: 'Summarize a note without it leaving OpenVibe', text: 'Summarize the following note in three bullet points, without it leaving OpenVibe:', mode: 'private' },
@@ -468,25 +466,25 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
         const st = engine && typeof engine.status === 'function' ? engine.status() : null;
         const running = st ? (Number(st.running) || 0) + (Number(st.waiting) || 0) : 0;
         const faq = faqItems(agents);
+        // Actor v3 (the owner, 2026-11-09): your own AI that works for you, on your behalf, while you watch.
         const hero = showcase.hero({
-            eyebrow: 'OpenVibe.Actor · your agent for everything · alpha',
-            title: 'Ask once.', accent: 'The right agent does it.',
-            lede: 'Give Actor a task in plain words. It picks the agent that fits, OpenVibe\'s own or another platform\'s, has a second model check the answer, and shows you what it cost and why. Like OpenRouter, for agents.',
-            actions: signed ? [{ label: 'Give it a task', href: '#task', primary: true }, { label: 'Your tasks', href: '/tasks' }] : [{ label: 'Sign in to start', href: '/auth/login?next=%2F', primary: true }, { label: 'See the agents', href: '/agents' }],
+            eyebrow: 'OpenVibe.Actor · alpha',
+            title: 'Your own AI.', accent: 'It works for you while you watch.',
+            lede: 'Tell it what you want: find you work, earn from a gig, grow your channel, brief you every morning, build something. It works on a screen you can watch from any OpenVibe page, uses your own accounts, asks before it spends, posts or applies, and runs on the model you pick.',
+            actions: signed ? [{ label: 'Give it a job', href: '#task', primary: true }, { label: 'Your Actor', href: '/console' }] : [{ label: 'Start your Actor', href: '/auth/login?next=%2F', primary: true }, { label: 'What it can do', href: '#templates' }],
             note: `Open source (AGPL-3.0). Free: ${tier.tasksPerDay} tasks a day and ${usd(tier.perDayUsd)} of model use, no card.`,
-            aside: { html: String(routerCard(agents)) },
+            aside: { html: String(nowCard()) },
         });
         // One strip of numbers (it scrolls sideways on a phone instead of stacking four tiles); zero is left out.
         const stats = kit.stats([
-            [running, running === 1 ? 'task running now' : 'tasks running now', '/tasks'],
-            [ready, ready === 1 ? 'agent to choose from' : 'agents to choose from', '#agents'],
+            [running, running === 1 ? 'job running now' : 'jobs running now', '/tasks'],
+            [ready, ready === 1 ? 'model to run on' : 'models to run on', '#agents'],
             [tools.length, 'tools it can run', '#tools'],
-            [MODES.length, 'ways to choose', '/agents#modes'],
-            [tier.tasksPerDay, 'free tasks a day', '#faq'],
+            [tier.tasksPerDay, 'free jobs a day', '#faq'],
         ], { label: 'OpenVibe.Actor in numbers' });
         // Tasks to start from: one card each, the kind as its badge and a non-default mode in its corner.
         const starts = kit.rail({
-            id: 'templates', title: 'Start from one of these',
+            id: 'templates', title: 'What it can do for you',
             items: TEMPLATES.flatMap((g) => g.items.map((t) => kit.card({ href: templateHref(t), title: t.title, type: g.type, ratio: '3/1', badge: g.badge, corner: t.mode && MODE_LABEL[t.mode] !== g.badge ? MODE_LABEL[t.mode] : '', peek: t.text, share: false }))),
         });
         // Signed out and nothing chosen yet, the hero's Sign in is the door: the box would only repeat it.
@@ -523,42 +521,39 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
             css: ['css/home.css'],
             body: html`${raw(hero)}
 <div class="hm-stats-sec">${raw(stats)}</div>
-<section class="sc-sec hm-task" id="task" aria-labelledby="h-task"><h2 id="h-task">Give Actor a task</h2>
+<section class="sc-sec hm-task" id="task" aria-labelledby="h-task"><h2 id="h-task">Give it a job</h2>
 ${box}
 ${raw(starts)}</section>
+${raw(showcase.features({ id: 'watch', title: 'Watch it work, from anywhere', lede: 'It is your AI, doing things on your behalf, so you can always see what it is doing.', items: [
+                { icon: 'fa-eye', title: 'Its screen, live', text: 'When it works on a computer, watch its screen from the Dock on any OpenVibe page, or on your phone.' },
+                { icon: 'fa-list-check', title: 'What it is doing, in plain words', text: 'Away from a screen: the step it is on, what it read, what it did last and what it will do next.' },
+                { icon: 'fa-hand-pointer', title: 'Take over any time', text: 'Tap to take the mouse, then hand it back. Signing in? It hands you its screen and you type your own password.' },
+                { icon: 'fa-bell', title: 'It asks before it acts', text: 'Spending money, posting, applying or messaging someone waits for your yes, on any OpenVibe page or your phone.' },
+            ] }))}
+${raw(showcase.features({ id: 'brains', title: 'The model is your call', lede: 'Pick what it thinks with for each job, and change it any time.', items: [
+                { icon: 'fa-wand-magic-sparkles', title: 'OpenVibe\'s models', text: 'DeepSeek, GPT and open models, at cost, through OpenVibe.Exchange.' },
+                { icon: 'fa-key', title: 'Your own keys, no fee', text: 'Claude, OpenAI, DeepSeek or Gemini on your own account: OpenVibe adds nothing.' },
+                { icon: 'fa-terminal', title: 'Your Codex or Claude Code plan', text: 'Coding jobs run through OpenVibe.Codes on the plan you already pay for.' },
+                { icon: 'fa-desktop', title: 'On your own computer', text: 'With OpenVibe Link it can work on your machine, with your models, from your own internet address.' },
+            ] }))}
+${raw(showcase.compare({ id: 'compare', title: 'Yours, not theirs', lede: 'The big personal agents of 2026 each lock you to one company\'s model and cloud.', columns: ['OpenVibe.Actor', 'Grok Bot', 'OpenAI Dots', 'Meta Muse'], rows: [
+                { label: 'Pick any model, including your own', values: [true, false, false, false] },
+                { label: 'Works on your own computer, free', values: [true, false, false, true] },
+                { label: 'Open source', values: [true, false, false, false] },
+                { label: 'Free to start', values: [true, false, false, true] },
+            ] }))}
+<p class="hm-compare-src">Grok Bot runs xAI's models on its own cloud computer, Dots runs GPT-6 Astra inside ChatGPT's paid plans, and Muse runs Meta's model on Meta's machine or its desktop app, with a free tier (as reported in September and October 2026).</p>
 ${raw(foldBlock({
         id: 'agents',
-        head: '<h2 id="h-agents">The agents</h2>',
+        head: '<h2 id="h-agents">What it runs on today</h2>',
         html: String(html`<section class="sc-sec" id="agents" aria-labelledby="h-agents">
-<p class="sc-lede">Every agent Actor can route to, what it charges and whether it is working right now. <a href="/agents">What each one is, its modes and details</a>.</p>
+<p class="sc-lede">The models and engines it can use right now, what each charges and whether it is working. <a href="/agents">Details for each</a>.</p>
 ${raw(kit.list(agents.map((a) => kit.row({ href: `/agents#${a.id}`, title: a.name, badge: a.available ? kit.badge('working', 'ok') : kit.badge('not here yet'), sub: `${priceText(a.rate_card)}${a.model ? ` · ${a.model}` : ''}` }))))}</section>`),
     }))}
 ${raw(foldBlock({
         id: 'how',
         head: '<h2 id="h-how">How it works</h2>',
         html: String(html`<section class="sc-sec hm-more" aria-labelledby="h-how">
-${fold({ id: 'route', title: 'How a task finds its agent', meta: '5 steps', body: showcase.steps({
-                items: [
-                    { title: 'Sort the task', text: 'An answer, a lookup, research, a live web search, code, your own robot or your own computer: that decides what an agent must be able to do.' },
-                    { title: 'Hard limits first', text: 'An agent that cannot do it, that private mode does not trust, that is down or that would cost more than your budget is out, and the task says why.' },
-                    { title: 'Then your mode', text: 'Cheapest, Balanced, Best, Fastest or Private picks among the rest, through the same placement engine every OpenVibe service uses.' },
-                    { title: 'Run, check, deliver', text: 'The agent works while you watch its steps; another model checks the answer, from another model family where one is available; you get the answer, its sources, the cost and the explanation.' },
-                    { title: 'Or hand it on', text: 'An agent that fails, or an answer that fails its check, goes to the next agent that can do it, within your budget.' },
-                ],
-            }) })}
-${fold({ id: 'why', title: 'Why a router, not one agent', meta: 'compared', body: showcase.compare({
-                lede: 'One company\'s agent is as good as that company\'s models and tools. Actor picks per task, and can use theirs too.',
-                columns: ['OpenVibe.Actor', 'A single-vendor agent'],
-                rows: [
-                    { label: 'Picks the best agent for each task', values: [true, false] },
-                    { label: 'Can hand a task to another platform\'s agent', values: [true, false] },
-                    { label: 'Shows the cost and why, per task', values: [true, false] },
-                    { label: 'A second model family checks the answer', values: [true, false] },
-                    { label: 'A private mode on its own hardware', values: [true, false] },
-                    { label: 'Open source, self-hostable', values: [true, false] },
-                    { label: 'Free tier', values: [true, null] },
-                ],
-            }) })}
 ${fold({ id: 'status', title: 'What works today', meta: `${status.length} pieces, all live`, body: String(table(['Piece', 'State'], status)) })}
 ${tools.length ? fold({ id: 'tools', title: 'Tools it can run', meta: `${tools.length} from OpenVibe.Tools`, body: String(html`<p class="muted">For exact answers, OpenVibe's own agent runs these ${tools.length} OpenVibe.Tools tools itself instead of guessing: the same public tools anyone can use on openvibe.tools.</p>
 <ul class="hm-chips hm-tools">${tools.map((t) => html`<li>${/^https:\/\//.test(t.docs || '') ? html`<a href="${t.docs}">${t.name}</a>` : t.name}</li>`)}</ul>`) }) : ''}
@@ -591,15 +586,27 @@ ${raw(foldBlock({
         const names = agents.filter((a) => a.available).map((a) => a.name);
         const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
         return [
-            ['What does OpenVibe.Actor do?', 'You describe a task in plain words. Actor sorts it, picks the agent that can do it best within your budget and mode, runs it while you watch its steps, has a second model check the answer, and shows you the answer with its sources, what it cost and why that agent.'],
-            ['What does it cost?', `The free tier gives ${tier.tasksPerDay} tasks a day and ${usd(tier.perDayUsd)} of model use, with no card. Every task shows its real cost to a fraction of a cent, and what is left of today's allowance is beside the box.`],
-            list ? ['Which agents does it use?', `${list} are ready to pick from. The agents page lists each one with its price per million tokens and what it can do.`] : null,
-            ['Is the answer checked?', 'Yes. A second model reads every answer before you see it, from another model family where one is available. An answer that fails its check goes to the next agent that can do the task.'],
-            ['What is private mode?', 'Private mode uses only an open model on OpenVibe\'s own server, so the task never leaves OpenVibe. It is for short answers; tasks that need search or tools go to the other agents in the other modes.'],
-            ['Can it use my computer or my robot?', 'Only if you turn it on. On openvibe.bot you let your agent use a computer or drive a robot, one at a time. On a computer at the ask level, each program or write waits for your approval on that computer.'],
+            ['What does OpenVibe.Actor do?', 'It is your own AI that does things for you: finds work and drafts applications, writes and prices a gig, finds places to post about your channel, briefs you in the morning, watches for a deal, builds a page. You watch it work, it asks before anything that spends, posts or sends, and you get the result with its sources and what it cost.'],
+            ['Will it make me money?', 'It does the legwork that earning takes: finding jobs and tailoring applications, a gig that is priced from the market, listings for what you sell. You send, publish and get paid yourself, and every job shows what it cost, so you can see whether it pays.'],
+            ['Does it act as me?', 'Yes, on your behalf and while you can watch. It uses your own accounts: when a site needs a sign-in it hands you its screen and you type your own password, so it never sees it, and it stays signed in. With OpenVibe Link on your computer it also works from your own internet address.'],
+            ['What does it cost?', `The free tier gives ${tier.tasksPerDay} jobs a day and ${usd(tier.perDayUsd)} of model use, with no card. Every job shows its real cost, and what is left of today's allowance is beside the box. Your own model keys cost you nothing extra.`],
+            list ? ['Which models does it use?', `${list} are ready now. You can bring your own Claude, OpenAI, DeepSeek or Gemini keys, or your Codex or Claude Code plan for coding jobs.`] : null,
+            ['Is the answer checked?', 'Yes. A second model reads every answer before you see it, from another model family where one is available.'],
+            ['Can it use my computer?', 'Only if you turn it on. Install OpenVibe Link and allow your Actor on that computer; at the ask level, each program it runs or file it writes waits for your yes.'],
             ['Can I run it myself?', 'Yes. Actor is open source under the AGPL-3.0 and runs on your own server with Docker or plain Node and your own model, such as Ollama or any OpenAI-compatible one.'],
             ['Can my app use it?', 'Yes. Apps get actor.task.* grants on OpenVibe.Services and use the same API: create a task, follow its live stream, and receive signed webhooks when it ends.'],
         ].filter(Boolean);
+    }
+
+    /** Beside the hero: what watching your Actor looks like, marked as an example. */
+    function nowCard() {
+        return html`<div class="hm-now" aria-label="An example of an Actor at work">
+<p class="hm-now-k">Example · Find me work</p>
+<p class="hm-now-step"><span class="hm-now-dot" aria-hidden="true"></span> Tailoring a cover letter for a remote junior video editor job</p>
+<ol class="hm-now-done"><li>Read 14 new posts on OpenVibe.Work and two job boards</li><li>Kept 4 that match your CV and your pay floor</li></ol>
+<div class="hm-now-ask"><b>It asks you</b><span>Send this application?</span><span class="hm-now-btns"><span class="hm-now-btn is-yes">Send</span><span class="hm-now-btn">Change it</span></span></div>
+<p class="hm-now-meta">Model: DeepSeek · today $0.21 of your $2 cap</p>
+</div>`;
     }
 
     function routerCard(agents) {
