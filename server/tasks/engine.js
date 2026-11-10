@@ -49,6 +49,16 @@ const LOOP_AGENT = 'openvibe-runtime';
 // What a task asked in a public chat may be (chat/asks.js): nothing that uses the person's own computers, robots or code.
 const PUBLIC_CLASSES = ['answer', 'lookup', 'research', 'web'];
 
+/** A product conversation turn's allow-list as stored (one-engine slice): an array of registry tool names, or null. */
+function parseTurnTools(value) {
+    if (value == null) return null;
+    try {
+        const v = typeof value === 'string' ? JSON.parse(value) : value;
+        if (!Array.isArray(v)) return null;
+        return v.filter((n) => typeof n === 'string');
+    } catch { return null; }
+}
+
 function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null }) {
     const running = new Map();      // id → AbortController
     const waiting = [];
@@ -500,10 +510,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             const runsOn = row.mode === 'private' || fromChat || !String(row.requester || '').startsWith('user:')
                 ? 'openvibe' : await modelPrefs.runsOnFor(s, row.requester).catch(() => 'openvibe');
 
+            // A product conversation turn (one-engine slice): the registry tool names the run may call, stored at
+            // creation. A turn always runs in the loop below, the path that honors the list — a code-classified
+            // turn must not escape to the Codes agent.
+            const turnAllowed = parseTurnTools(row.tools);
             // Actor v2: every non-private task that is not code-only runs through the one loop. Private mode keeps
             // the local model with no network tools, and a coding task keeps the Codes agent (which the loop can also
             // reach as codes_task). Approval inbox, budgets, cancel, webhooks and the event stream are unchanged.
-            if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy || dayRun)) {
+            if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy || dayRun || turnAllowed)) {
                 const agentId = LOOP_AGENT;
                 // The person-authored part of the task (never a run input that may come from a watch or a webhook),
                 // and the personal agent this run is for, so the memory tools scope their writes.
@@ -550,6 +564,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     const subject = String(row.requester || '').startsWith('user:') ? row.requester.slice(5) : null;
                     if (subject) choice = { ...(choice || {}), subject };
                 }
+                // A product conversation turn may name its model (one-engine slice): it rides as the run's model
+                // choice, resolved by OpenVibe.AI like an exact id the person picked themselves. A run the model
+                // cannot serve fails with AI's own error, in words.
+                if (typeof row.model === 'string' && row.model.trim()) choice = { ...(choice || {}), model: row.model.trim().slice(0, 256) };
                 try {
                     // The conversation so far, and any canvas tick the person made since the last turn (HO9): a
                     // tick starts no turn by itself, so the next run is told which item changed.
@@ -573,6 +591,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         spend: spendAllowance,
                         // A routine's or a goal's run may wait (plan BA/HO): the class it asks AI's router for.
                         latency: await latencyClass(id),
+                        // A product conversation turn (one-engine slice): the tools this run may call.
+                        allowedTools: turnAllowed,
                     }));
                     // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
                     // ('running' is the closest state there is today), its wall clock waits with it, and its
