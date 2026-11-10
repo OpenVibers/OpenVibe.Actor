@@ -107,8 +107,20 @@ const policy = () => ({
             assert.equal((await t.get(`/api/v1/fabric/${agent}/commands/demote`, { as: alice, json: { lane: 'fix', reason: 'Reading a few more observe records first.' }, headers: { Origin: 'https://openvibe.actor' } })).status, 200);
         });
 
+        await check('stored work API returns the durable mandate, evaluation, reports and run/artifact references', async () => {
+            const res = await t.get(`/api/v1/fabric/${agent}/work`, { as: alice });
+            assert.equal(res.status, 200);
+            const body = res.json();
+            assert.equal(body.tickets.length, 1);
+            assert.equal(body.tickets[0].ticket_id, first.id);
+            assert.equal(body.tickets[0].mandate.scope, first.mandate.scope);
+            assert.equal(body.tickets[0].reports[0].state, 'progress');
+            assert.ok(Array.isArray(body.tickets[0].runs));
+            assert.ok(Array.isArray(body.tickets[0].artifacts));
+        });
+
         await check('owner-only: another signed-in person gets 404 from every new read', async () => {
-            for (const path of ['lanes', 'observe', 'reports']) assert.equal((await t.get(`/api/v1/fabric/${agent}/${path}`, { as: bob })).status, 404);
+            for (const path of ['lanes', 'observe', 'reports', 'work']) assert.equal((await t.get(`/api/v1/fabric/${agent}/${path}`, { as: bob })).status, 404);
         });
     } finally { await t.close(); }
     done();
