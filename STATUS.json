@@ -7,11 +7,11 @@
   "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
   "port": 4950,
   "domain": "openvibe.actor",
-  "contracts": "openvibe-contracts v0.373.0",
+  "contracts": "openvibe-contracts v0.384.0",
   "sdk": "openvibe-sdk v0.133.0",
   "shared": "openvibe-shared v4.179.0",
   "packages": [
-    "openvibe-contracts v0.373.0",
+    "openvibe-contracts v0.384.0",
     "openvibe-sdk v0.133.0",
     "openvibe-shared v4.179.0"
   ],
@@ -60,5 +60,5 @@
     "reach from Chat (A4; chat apps' agent, approvals and group policy)",
     "agents as contacts and approval levels (A-1; actor.agent@1, actor.agent-list@1, actor.level-change@1)"
   ],
-  "updated": "2026-11-09"
+  "updated": "2026-11-10"
 }
