@@ -568,6 +568,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // choice, resolved by OpenVibe.AI like an exact id the person picked themselves. A run the model
                 // cannot serve fails with AI's own error, in words.
                 if (typeof row.model === 'string' && row.model.trim()) choice = { ...(choice || {}), model: row.model.trim().slice(0, 256) };
+                // The content tier of the turn (one-engine slice): it rides as the run's policy, so every model call
+                // in the run answers on that tier. A turn that names nobody cannot ask for the uncensored tier
+                // (create.js refuses it), and OpenVibe.AI checks the named person's 18+ confirmation before it
+                // answers on the adult tier.
+                if (row.tier === 'uncensored') choice = { ...(choice || {}), policy: 'uncensored' };
                 try {
                     // The conversation so far, and any canvas tick the person made since the last turn (HO9): a
                     // tick starts no turn by itself, so the next run is told which item changed.

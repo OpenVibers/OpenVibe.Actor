@@ -141,6 +141,49 @@ const findTable = (tables, pred) => tables.find((rows) => rows.some(pred));
         } finally { t.config.loop.selfReflections = saved; }
     });
 
+    await check('a turn may name the content tier, and it is stored on the task', async () => {
+        t.providers.reset();
+        const saved = t.config.loop.selfReflections;
+        t.config.loop.selfReflections = 0;
+        t.providers.state.script = [{ content: 'An answer on the adult tier.' }];
+        try {
+            const r = await create({
+                task: 'Companion Sable: "Say hello."', mode: 'cheapest', budget: { per_task_usd: 0.05 },
+                idempotency_key: 'exchange-companion-adult-1',
+                conversation: { product: 'exchange', id: 'cmp_adult_1' }, tools: [], tier: 'uncensored',
+            });
+            assert.strictEqual(r.status, 201, r.text);
+            await t.waitFor(r.json().id);
+            const tables = await tableRows(t);
+            const tasks = findTable(tables, (row) => row.id === r.json().id);
+            const row = tasks.find((row) => row.id === r.json().id);
+            assert.strictEqual(row.tier, 'uncensored', 'the tier is on the task, beside the conversation');
+            // The floor is unchanged: the tier only decides which offers may answer.
+            assert.strictEqual(row.conversation.product, 'exchange');
+        } finally { t.config.loop.selfReflections = saved; }
+    });
+
+    await check('a turn that names nobody may not ask for the uncensored tier', async () => {
+        const { serviceAuth } = contracts;
+        const crypto = require('crypto');
+        const now = Math.floor(Date.now() / 1000);
+        // A service acting for nobody: no X-OV-Subject, so the task has no person.
+        const svc = serviceAuth.signServiceToken({ iss: t.network.url, sub: 'svc:chat', actor_type: 'service', aud: ['openvibe.actor'], cap: ['actor.task.create'], ns: [], iat: now, exp: now + 300, jti: `tok_${crypto.randomBytes(6).toString('hex')}` }, t.network.privatePem);
+        const r = await t.get('/api/v1/tasks', { bearer: svc, json: {
+            task: 'An anonymous visitor asks for the adult tier.', tier: 'uncensored', conversation: { product: 'chat', id: 'inbox:cnv_anon/turn:1' }, tools: [],
+        } });
+        assert.strictEqual(r.status, 422, r.text);
+        assert.strictEqual(r.json().code, 'actor.tier.no_person');
+        assert.match(r.json().detail, /names nobody|standard tier/);
+    });
+
+    await check('an unknown content tier is refused in plain words', async () => {
+        const r = await create({ task: 'Hi.', tier: 'adult' });
+        assert.strictEqual(r.status, 422);
+        assert.strictEqual(r.json().code, 'actor.task.invalid');
+        assert.match(r.json().detail, /tier/);
+    });
+
     await check('malformed turn fields are refused in plain words', async () => {
         const badTools = await create({ task: 'Hi.', tools: 'read_page' });
         assert.strictEqual(badTools.status, 422);

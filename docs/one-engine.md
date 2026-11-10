@@ -15,10 +15,24 @@ The body is `actor.task-create-request@1` plus three optional fields this slice 
 - `tools`: the registry tool names the run may call. An empty array answers with no tool calls. A name the registry
   does not offer is said aloud in the run's plan, never silently dropped.
 - `model`: one exact model id, resolved by OpenVibe.AI like one the person picked themselves.
+- `tier`: the content tier, `standard` or `uncensored`.
 
 Alongside the words, the body carries `budget.per_task_usd` (what this one turn may cost) and an
 `idempotency_key`, so a repeat of the same turn is the same task and a different turn is refused with
 `409 actor.idempotency.conflict` rather than answered twice.
+
+## The content tier
+
+The uncensored tier is OpenVibe.AI's, and AI is the one that decides it. A turn that asks for it must name
+the person it is for; Actor refuses such a turn with `422 actor.tier.no_person` when it names nobody, so an
+anonymous visitor's turn can never ask for the adult tier. The tier then rides every model call of the run as
+a control field on AI's run, alongside `on_behalf_of`. AI reads it (`server/runs.js`), checks the named
+person's 18+ confirmation on the account (`server/policy/adult-status.js`, a five-minute cache, failing
+closed) and refuses the tier without it, in words. The hard floor — nothing sexual involving a minor — is
+checked on the request, the answer and every streamed chunk, on every tier, and it never moves.
+
+Actor never sends the tier to a provider directly: the adult tier runs on AI, and a server without AI
+configured refuses it (`actor.tier.unavailable`) rather than quietly answering on the standard tier.
 
 ## Who the turn is for, and who pays
 
@@ -69,14 +83,14 @@ answer.
 
 ## What this slice does not do
 
-- **The 18+ tier.** Exchange's companions used to offer OpenVibe.AI's `uncensored` policy; Actor's turn has no
-  policy field yet, so an adult card answers on the standard tier. The floor check stays on the product's side.
 - **The inbox's own actions.** A support inbox's `action_*` tools call the owner's own systems from Chat, signed
   with the action's secret. They stay a Chat-side tool until Actor can call them.
 - **Pictures.** A turn is words, so a visitor's picture travels as its link and a note saying it is there.
+- **Sampling.** A chat's temperature and preset stay saved on the chat; the loop's own sampling applies until a
+  later slice carries them.
 
 ## Next slices
 
 1. Move Vibe room conversations onto Actor tasks, retaining the room UI and its authorization rules.
 2. Move Codes placement behind Actor while Codes continues to run work on the person's machine.
-3. Give the turn a policy field, so the 18+ tier and the inbox's actions come with it.
+3. Let the inbox's actions ride a turn, so a visitor's order question is answered by the owner's own system.

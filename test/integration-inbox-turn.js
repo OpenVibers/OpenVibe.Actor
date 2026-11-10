@@ -95,6 +95,25 @@ const CHAT_DIR = process.env.CHAT_DIR || path.join(__dirname, '..', '..', 'wt-on
     const personSpend = personRows.filter((r) => r && r.requester === `user:${personSubject}` && typeof r.usd === 'number');
     const serviceSpend = personRows.filter((r) => r && r.requester && String(r.requester).startsWith('service:') && typeof r.usd === 'number');
 
+    // The content tier of a turn (one-engine slice): a turn that names nobody may not ask for the adult tier.
+    // Chat's own client never asks for it (a support inbox's visitor is not a person who confirmed 18+), so this
+    // goes to Actor's API the way a product that may ask for it would.
+    let adultRefused = null;
+    try {
+        const r = await fetch(`${t.base}/api/v1/tasks`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${serviceToken(null)}` },
+            body: JSON.stringify({
+                task: 'An anonymous visitor asks for the adult tier.', tier: 'uncensored',
+                conversation: { product: 'chat', id: 'inbox:cnv_anon/turn:adult' }, tools: [],
+            }),
+        });
+        const body = await r.json().catch(() => null);
+        adultRefused = `${r.status} ${(body && body.code) || ''} ${(body && body.detail) || ''}`;
+    } catch (err) {
+        adultRefused = `error ${String((err && err.message) || err)}`;
+    }
+
     process.stderr.write(JSON.stringify({
         ok: Boolean(ok),
         answer: out && out.answer,
@@ -102,6 +121,7 @@ const CHAT_DIR = process.env.CHAT_DIR || path.join(__dirname, '..', '..', 'wt-on
         taskId: anonTaskId,
         storedConversation: taskRow && taskRow.conversation,
         storedTools: taskRow && taskRow.tools,
+        anonymousAdultTier: adultRefused,
         signedIn: {
             ok: Boolean(personOut && !personOut.pending && personOut.answer),
             answer: personOut && personOut.answer,
@@ -113,5 +133,5 @@ const CHAT_DIR = process.env.CHAT_DIR || path.join(__dirname, '..', '..', 'wt-on
     }, null, 2) + '\n');
 
     await t.close();
-    process.exit(ok && personOut && !personOut.pending && personOut.answer ? 0 : 1);
+    const adultOk = /actor\.tier\.no_person/.test(String(adultRefused || ''));    process.exit(ok && personOut && !personOut.pending && personOut.answer && adultOk ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });
