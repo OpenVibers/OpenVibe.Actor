@@ -20,6 +20,15 @@ const SAME = { 'sec-fetch-site':'same-origin' };
         }
         assert.doesNotMatch(render(base),/Uncensored/);
         assert.doesNotMatch(render({...base, actor:{...a, active_task:'tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}, model_switch_enabled:false}),/ay-run-model/);
+        // On: one row in Now. The label says what it changes, the button is one word, the choices are grouped by who runs
+        // them and named as the chat's model menu names them.
+        const sw = render({...base, actor:{...a, active_task:'tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}, model_switch_enabled:true});
+        assert.match(sw, /<label for="ay-run-model-pick">Model for the next step<\/label>/);
+        assert.match(sw, /<optgroup label="On OpenVibe"><option value="auto"[^>]*>Automatic<\/option>/);
+        assert.match(sw, /<optgroup label="Your own keys"><option value="own:openai"[^>]*>Your OpenAI key<\/option>/);
+        assert.match(sw, /<optgroup label="Your own machines"><option value="own:link"[^>]*>Your computer<\/option>/);
+        assert.match(sw, /<button class="ovk-btn ovk-btn--quiet">Switch<\/button>/);
+        assert.doesNotMatch(sw, /Your (openai|link)</, 'no raw provider ids as labels');
         assert.match(render({...base, actor:{...a, active_task:'tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}, active_run:{brain:'openvibe'}, model_switch_enabled:true}),/option value="openvibe" selected/);
         assert.match(render({...base,actor:{...a,adult_opt_in:true}}),/Uncensored/);
         assert.match(render({...base,actor:{...a,asks:[{id:'ask',kind:'sign_in',text:'Sign in to the site',options:['Sign in on its screen','Done']} ]}}),/Waiting for you/);
