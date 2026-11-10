@@ -127,7 +127,7 @@ function createAgentPages(ctx) {
         const rows = await contacts.list(s, config, owner(req));
         const waiting = await approvals.pendingCount(s, owner(req));
         const chosen = TEMPLATES.find((x) => x.id === req.query.template) || null;
-        page(req, res, 'Your agents', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · your agents · alpha</p><h1>Your agents</h1>
+        page(req, res, 'Your agents', html`<header class="pa-head"><h1>Your agents</h1>
 <p class="pa-lede">Each agent is a contact: a face, a model, a computer to work on, the apps it may use, its memory, and how much it may do without asking. Every run is an ordinary Actor task, with the same checks, costs and limits.</p>
 <p class="ac-links"><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> <a href="/memory">Memory</a> <a href="/skills">Skills</a></p></header>
 ${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when })}
@@ -164,7 +164,7 @@ ${importPanel()}<section class="pa-panel" id="create"><h2>${chosen ? `Create: ${
     r.get('/me/approvals', async (req, res) => {
         if (!signed(req)) return login(req, res);
         const rows = await approvals.list(s, owner(req));
-        page(req, res, 'Approvals', html`<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · approvals</p><h1>Approvals</h1>
+        page(req, res, 'Approvals', html`<header class="pa-head"><h1>Approvals</h1>
 <p class="pa-lede">When one of your agents runs while you are away and its work would act for you outside Actor (a coding task on your own machine, a send, a purchase, a deletion, a password field, a Space publish), it asks here first. Nothing runs until you approve. An action's run had already stopped when it asked, so approving it is consent for you to run the task again. A tip your agent asks to send is different: approving it pays it at once, from your own Vibes, with your own session. You may also say "always allow this for this agent": that covers this one kind of step, on this one target, until you revoke it. Spending money, a password, a deletion and a new recipient always ask. A request you leave expires after ${String(approvals.EXPIRES_DAYS)} days.</p></header>
 ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-card"><a href="/me/approvals/${a.id}"><strong>${a.summary}</strong></a> ${approvalPill(a)}<span class="pa-when">${kinds.label(a.kind)} · Asked ${time(a.created_at)}</span></li>`)}</ul>`
         : html`<p class="pa-empty">Nothing to approve. Your agents have not asked for anything yet.</p>`}
@@ -376,7 +376,7 @@ ${answered.length ? html`<h3 class="pa-sub">The last letters it answered</h3><ul
         if (row.revoked_at) return page(req, res, 'Voice not shared', html`<h1>This voice is no longer shared</h1><p>Its owner stopped sharing it. Ask them for a new link.</p>`, 410);
         const doc = voice.read(row.voice).doc || row.voice;
         page(req, res, doc.name, html`<p class="crumbs"><a href="/">OpenVibe.Actor</a></p>
-<header class="pa-head"><p class="pa-eyebrow">OpenVibe.Actor · a shared voice</p><h1>${doc.name}</h1>
+<header class="pa-head"><p class="pa-eyebrow">A shared voice</p><h1>${doc.name}</h1>
 ${doc.bio ? html`<p class="pa-lede">${doc.bio}</p>` : ''}</header>
 <section class="pa-panel"><h2>Its instructions</h2><p class="pa-hint">What it is told to do on every run. Borrowing it gives your agent exactly these words; read them first.</p><pre class="pa-pre">${doc.instructions}</pre></section>
 <section class="pa-panel"><h2>Its rules</h2>${doc.rules && doc.rules.length ? html`<ul>${doc.rules.map((r) => html`<li>${r}</li>`)}</ul>` : html`<p>No rules: it speaks in one voice.</p>`}</section>

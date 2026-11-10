@@ -158,7 +158,7 @@ ${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${linkPag
         if (!signedIn(req)) {
             return page(req, res, {
                 title: 'Console', crumbs: [{ label: 'Console' }],
-                body: html`<header class="cn-head"><p class="cn-eyebrow">OpenVibe.Actor · console</p><h1>Console</h1>
+                body: html`<header class="cn-head"><h1>Console</h1>
 <p class="cn-lede">One place for everything your agents do: the tasks running now, what waits for your approval, your agents, your own computers and robots, and what it all cost today.</p></header>
 <p><a class="cn-run" href="/auth/login?next=${encodeURIComponent(req.originalUrl.startsWith('/console') && req.originalUrl.length <= 500 ? req.originalUrl : '/console')}">Sign in to open your console</a></p>
 ${previewGrid()}`,
@@ -183,7 +183,7 @@ ${previewGrid()}`,
         page(req, res, {
             title: 'Console', crumbs: [{ label: 'Console' }],
             scripts: live.length ? ['js/console.js'] : [],
-            body: html`${live.length ? raw('<noscript><meta http-equiv="refresh" content="10"></noscript>') : ''}<header class="cn-head"${live.length ? raw(' data-live="10"') : ''}><p class="cn-eyebrow">OpenVibe.Actor · console · alpha</p><h1>Console</h1>
+            body: html`${live.length ? raw('<noscript><meta http-equiv="refresh" content="10"></noscript>') : ''}<header class="cn-head"${live.length ? raw(' data-live="10"') : ''}><h1>Console</h1>
 <p class="cn-lede">What your agents, computers and robots are doing, and one box to tell them what to do next.</p></header>
 ${commandBox(prefill(req), today)}
 <div class="cn-grid">
