@@ -97,7 +97,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
 
     async function runtime({ task, requester = null, taskId = null, signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null }) {
         if (!runtimeModel) throw new ProviderError('the runtime has no model configured', { code: 'actor.agent.unavailable' });
-        const tools = await ovTools.definitions({ signal, requester });
+        const tools = await ovTools.definitions({ signal, requester, taskId });
         const robots = tools.some((d) => d.function && d.function.name === 'robot_steps');
         const computers = tools.some((d) => d.function && d.function.name === 'computer_run');
         const messages = [{ role: 'system', content: RUNTIME_SYSTEM(robots, computers) }, { role: 'user', content: task }];
@@ -121,7 +121,7 @@ function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = con
                     let args = {};
                     try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { args = {}; }
                     await emit({ step: 'tool_call', tool: name, input: summarize(args) });
-                    const out = await ovTools.call(name, args, { signal, requester, meter, budgetLeft, desks, emit, waitForPerson, requestApproval });
+                    const out = await ovTools.call(name, args, { signal, requester, taskId, meter, budgetLeft, desks, emit, waitForPerson, requestApproval });
                     evidence.push({ tool: name, result: out.slice(0, 2000) });
                     const isError = /^\{"error"/.test(out);
                     await emit({ step: 'tool_result', tool: name, text: out.slice(0, 600), is_error: isError });

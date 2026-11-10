@@ -27,6 +27,8 @@ const { stepFor } = require('./actions');
  *                               a folder, a file, a program (argv, never a shell line) or a write on one of them, as the
  *                               person, through Bot; at level "ask" each run or write waits for the person's approval
  *                               on the machine itself
+ *   read_my_history(limit)       OpenVibe.Network: recent titles and links from the person's history, only when that
+ *                               person enabled agent access; uses the short-lived person token kept for this task
  *   computer_screen(machine, question)
  *                               the machine's screen now, read by a vision model (`vision`, OpenAI) that answers the
  *                               question about it; the runtime model gets the answer, never the picture, and the
@@ -50,6 +52,7 @@ const { stepFor } = require('./actions');
 const { serviceAuth } = require('openvibe-contracts');
 const { createRobots } = require('./robots');
 const { createComputers } = require('./computers');
+const runTokens = require('../triggers/tokens');
 
 const CATALOG_TTL_MS = 10 * 60_000;
 const RESULT_CHARS = 6000;
@@ -161,7 +164,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     }
 
     /** The function definitions the runtime's model sees, and the dispatcher that runs one call. */
-    async function definitions({ signal, requester = null } = {}) {
+    async function definitions({ signal, requester = null, taskId = null } = {}) {
         const list = await tools({ signal });
         // A self-hosted Actor may leave OpenVibe.Search or OpenVibe.Tools unset (ACTOR_SEARCH_URL / ACTOR_TOOLS_URL empty):
         // the runtime is then offered only the tools it can reach.
@@ -175,6 +178,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         }
         if (bot.enabled && personOf(requester)) defs.push(...ROBOT_DEFS);
         if (pcs.enabled && personOf(requester)) defs.push(...COMPUTER_DEFS, BROWSER_DEF, DESK_DEF, HAND_DEF, ...(vision ? [SCREEN_DEF, INPUT_DEF] : []));
+        if (personOf(requester) && runTokens.get(taskId)?.token) defs.push({ type: 'function', function: { name: 'read_my_history', description: 'Read the recent OpenVibe pages this person visited. Available only if they enabled “My agents may read my history”; returns titles, kinds, sites, links and times, never page contents.', parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 50 } } } } });
         return defs;
     }
 
@@ -297,7 +301,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         return { done: false, note: took ? 'The person was still using the desk when the wait ended: look at it, and tell them what is left if it is not done.' : `The person did not take the desk in ${Math.round(granted / 60000)} minutes: tell them in your answer what is left for them to do, with the link.`, watch };
     }
 
-    async function call(name, args, { signal, requester = null, meter = null, budgetLeft = null, desks = null, emit = null, waitForPerson = null, requestApproval = null } = {}) {
+    async function call(name, args, { signal, requester = null, taskId = null, meter = null, budgetLeft = null, desks = null, emit = null, waitForPerson = null, requestApproval = null } = {}) {
         let a = args && typeof args === 'object' ? args : {};
         // The approval gate (plan §12 A-2): the act and its always-ask category go through levels.decide
         // before the step runs. A read, or Actor's own working state, says null and goes on.
@@ -384,6 +388,16 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                 return json(await pcs.write(person, a.machine, a.path, a.text, { mode: a.mode || 'create', signal }));
             }
             if (name === 'search_openvibe') return json(await searchOpenVibe(a.query, { signal }));
+            if (name === 'read_my_history') {
+                const person = personOf(requester);
+                const token = runTokens.get(taskId)?.token;
+                if (!person || !token) return json({ error: 'history is only available to the signed-in person whose task carries their short-lived authorization' });
+                const limit = Math.min(50, Math.max(1, parseInt(a.limit, 10) || 20));
+                const r = await getJson(`${config.networkInternalUrl}/api/v1/history/agents/recent?limit=${limit}`, { signal, headers: { Authorization: `Bearer ${token}` } });
+                if (r.status === 403) return json({ error: 'not_allowed', note: 'The person has not enabled agent access to history.' });
+                if (!r.ok || !r.data) return json({ error: `Network history answered ${r.status}` });
+                return json(r.data);
+            }
             if (name === 'search_web') return json(await searchWeb(a.query, personOf(requester), { signal }));
             if (name === 'find_tools') return json(await findTools(a.need, { signal }));
             if (name === 'run_tool') return json(await runTool(String(a.tool || ''), a.input, { signal }));
