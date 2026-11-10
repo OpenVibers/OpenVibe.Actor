@@ -44,7 +44,8 @@ function createRoutes(ctx) {
                 rule_id: rule.id,
                 instruction: rule.instruction,
                 enabled: rule.enabled !== false,
-                mode: laneMode(rule),
+                mode: state.policy.mode === 'auto' ? laneMode(rule) : 'observe',
+                configured_mode: laneMode(rule),
                 promoted_at: rule.promoted_at || null,
                 demoted_at: rule.demoted_at || null,
                 demote_reason: rule.demote_reason || null,
@@ -66,6 +67,9 @@ function createRoutes(ctx) {
         const records = await ctx.fabric.observe(req.principal.requester, req.params.agent, { lane, limit });
         return { agent: req.params.agent, lane, records, report_states: reportStates() };
     }));
+
+    /** The six report states alone, for a panel that shows the legend before it loads a ticket. */
+    r.get('/:agent/report-states', run(req => ({ agent: req.params.agent, report_states: reportStates() })));
 
     /** The reports behind the six states, ticket by ticket. */
     r.get('/:agent/reports', run(async (req) => {

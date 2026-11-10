@@ -102,6 +102,8 @@ const policy = () => ({
             const body = (await t.get(`/api/v1/fabric/${agent}/reports`, { as: alice })).json();
             assert.equal(body.tickets.length, 1); assert.equal(body.tickets[0].reports[0].state, 'progress');
             assert.equal(body.report_states.length, 6);
+            const states = (await t.get(`/api/v1/fabric/${agent}/report-states`, { as: alice })).json();
+            assert.deepEqual(states.report_states.map(s => s.state), ['progress', 'waiting', 'ready', 'blocked', 'failed', 'dropped']);
             assert.equal((await t.get(`/api/v1/fabric/${agent}/commands/demote`, { as: alice, json: { lane: 'fix', reason: 'Reading a few more observe records first.' }, headers: { Origin: 'https://openvibe.actor' } })).status, 200);
         });
 

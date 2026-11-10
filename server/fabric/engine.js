@@ -248,7 +248,7 @@ class Engine {
                         : clip(audit.reason || 'No enabled rule matched, so nothing would run.', 400);
             observe = this.recordObserve({
                 thread: Object.keys(this.s.threads).find(key => this.s.threads[key] === th) || null,
-                mode: lanes.length && lanes.every(r => laneMode(r) === 'auto') ? 'auto' : 'observe',
+                mode: this.s.policy.mode === 'auto' && lanes.length && lanes.every(r => laneMode(r) === 'auto') ? 'auto' : 'observe',
                 trigger_ids: e.ids,
                 rule_ids: lanes.map(r => r.id),
                 gate: { admitted: true, strength: e.strength, basis: e.basis || null, decision: preDecision },

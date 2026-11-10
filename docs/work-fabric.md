@@ -77,6 +77,7 @@ All are owner-only (`actor.agent.manage`); a foreign agent is 404. `GET /api/v1/
     "instruction": "Fix requested defects",
     "enabled": true,
     "mode": "observe",
+    "configured_mode": "observe",
     "promoted_at": null,
     "demoted_at": "2026-11-09T17:02:11.000Z",
     "demote_reason": "The job used its whole budget of $1.00. This lane is in observe until you promote it again.",
@@ -117,7 +118,7 @@ All are owner-only (`actor.agent.manage`); a foreign agent is 404. `GET /api/v1/
 }
 ```
 
-`GET /api/v1/fabric/:agent/reports` returns `{agent, tickets: [{ticket_id, state, stage, lanes, threads, reports}], report_states}`; each report is the stored `agent.report@1` (`progress|waiting|ready|blocked|failed|dropped`). The first row of `agent.stage@1` that matches the latest report is the ticket's `stage`.
+`GET /api/v1/fabric/:agent/report-states` returns `{agent, report_states}` (the six objects above) for a legend that loads before any ticket. `GET /api/v1/fabric/:agent/reports` returns `{agent, tickets: [{ticket_id, state, stage, lanes, threads, reports}], report_states}`; each report is the stored `agent.report@1` (`progress|waiting|ready|blocked|failed|dropped`). The first row of `agent.stage@1` that matches the latest report is the ticket's `stage`.
 
 `POST /api/v1/fabric/:agent/commands/promote` with `{"lane":"fix"}` → `{"lane":"fix","mode":"auto","policy_version":"…","changed":true}`. The panel re-reads `/lanes` for the new `last_change`.
 
@@ -125,4 +126,4 @@ All are owner-only (`actor.agent.manage`); a foreign agent is 404. `GET /api/v1/
 
 Time belongs to `sources.js`, not assessment. A schedule is `{id, source, scope, due, text, interval_ms?}`; timestamps are epoch milliseconds. A quiet condition adds `{quiet_thread, since_trigger}`. The Source cancels it if that Thread changes before its due time. Time produces immutable system Triggers; admission requires `clock` in the Source's bot list and the scope in `receive_all`. Time never grants explicit authority. `tick` checks due conditions, expires evaluations and starts pending batches; it never sleeps or calls a model.
 
-Account export/deletion includes the fabric aggregate and the task-to-Ticket binding. The expand-only migrations add no production writes during development. Tests name the corresponding rules from reference docs 001–003; `ov test test/fabric.test.js test/fabric-store.test.js test/fabric-adapters.test.js test/fabric-executors.test.js test/fabric-observe.test.js test/fabric-observe-store.test.js` exercises policy, intake, persistence, ownership, routing, delivery, adapters, observe records, promotion/demotion, the six report states and one real run on the stand-in providers without external services.
+Account export/deletion includes the fabric aggregate, the task-to-Ticket binding, the observe records and the lane changes. The expand-only migrations add no production writes during development. Tests name the corresponding rules from reference docs 001–003; `ov test test/fabric.test.js test/fabric-store.test.js test/fabric-adapters.test.js test/fabric-executors.test.js test/fabric-observe.test.js test/fabric-observe-store.test.js` exercises policy, intake, persistence, ownership, routing, delivery, adapters, observe records, promotion/demotion, the six report states and one real run on the stand-in providers without external services.
