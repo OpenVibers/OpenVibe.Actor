@@ -26,6 +26,7 @@ function router(ctx) {
     r.get('/', route((owner) => day.now(owner)));
     r.patch('/', route((owner, req) => day.update(owner, req.body)));
     r.get('/page', route(owner => day.pageData(owner)));
+    r.post('/runs/:id/model', route((owner, req) => day.switchRunModel(owner, req.params.id, req.body && req.body.model)));
     r.post('/do-now', route((owner, req) => day.doNow(owner, req.body.goal)));
     r.post('/earnings', route((owner, req) => day.earn(owner, req.body), 201));
     r.get('/computer-log', route(owner => day.computerLog(owner)));
