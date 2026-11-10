@@ -175,6 +175,10 @@ async function createApp(opts = {}) {
     engine.setDay(ctx.day);
     ctx.agentMail = opts.agentMail || createAgentMail({ config, s, engine, webhooks, notifier, triggers, log, mailFetch: opts.mailFetch || null, mailTokens: opts.mailTokens || null });
     engine.setMailReplies((task) => ctx.agentMail.answered(task));
+    // The fabric's executor and model adapters (plan S4): work only moves while the owner switch is on, and the job
+    // below drains it. A run's end comes back here as an agent.report@1 on its Ticket.
+    ctx.fabricAdapters = require('./fabric/adapters').createFabricAdapters({ s, config, fabric: ctx.fabric, models, ctx, log, chat: chatClient, mail: fabricMail });
+    engine.setFabric(ctx.fabricAdapters.onTaskState);
     // The skills registry (plan HO2, ADR-058): OpenVibe's own skills are documents in the repository (skills/), and
     // each one is scanned before it is offered. The seed publishes them as listings of publisher kind 'openvibe'.
     ctx.skills = require('./skills');

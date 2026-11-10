@@ -3,6 +3,8 @@ const { policy, gate, revalidate, assessment, assert, text } = require('./policy
 const copy = structuredClone;
 const own = (map, key) => Object.hasOwn(map, key) ? map[key] : undefined;
 const emptyDirection = () => ({ implementation_requested: false, target_basis: 'undetermined', requires_design_decision: false, evidence: [] });
+// The six agent.report@1 states and the stage each one leaves on an open Ticket (agent.stage@1, first match).
+const REPORT_STAGES = Object.freeze({ ready: 'person/review', blocked: 'person/blocked', failed: 'person/failed', waiting: 'idle', progress: 'working', dropped: 'idle' });
 function initial() {
     return { policy: policy(), sources: {}, triggers: {}, threads: {}, tickets: {}, meta: {}, decisions: [], work: [], schedules: {}, accepted: {}, seq: 0 };
 }
@@ -139,12 +141,34 @@ class Engine {
             this.validate('agent.ticket', ticket);
             this.s.tickets[ticket.id] = ticket;
             for (const id of e.ids) this.s.accepted[id] = ticket.id;
-            this.s.meta[ticket.id] = { basis: e.basis, owned: [], handbacks: [], read: [] };
+            this.s.meta[ticket.id] = { basis: e.basis, owned: [], handbacks: [], read: [], reports: [], tasks: [] };
             for (const key of t.threads) this.thread(key).subscriptions[ticket.id] = 'origin';
             this.enqueue('launch', `launch:${ticket.id}`, { ticket, triggers: e.ids.map(id => this.s.triggers[id]) }, `worker:${ticket.id}`);
         }
         th.expiries = 0;
         return { decision: this.finish(th, decision, audit), ...(ticket ? { ticket } : {}) };
+    }
+    /** An executor port bound the Ticket to the task that runs it (the last run of a follow-up is the current one). */
+    bind({ ticket_id, task_id }) {
+        const k = own(this.s.tickets, ticket_id), m = own(this.s.meta, ticket_id);
+        assert(k && m && text(task_id), 'Unknown Ticket or task');
+        m.task_id = task_id;
+        m.tasks ||= [];
+        if (!m.tasks.includes(task_id)) m.tasks.push(task_id);
+        return k;
+    }
+    /** Record one agent.report@1 on the Ticket; a terminal report may end it. */
+    report({ ticket_id, report, end = false }) {
+        const k = own(this.s.tickets, ticket_id), m = own(this.s.meta, ticket_id);
+        assert(k && m && report && typeof report === 'object' && !Array.isArray(report), 'Report needs an open Ticket');
+        assert(k.state === 'open', 'Ticket has ended');
+        const r = copy({ ...report, ticket_id });
+        this.validate('agent.report', r);
+        m.reports ||= [];
+        m.reports.push(r);
+        if (REPORT_STAGES[r.state]) k.stage = REPORT_STAGES[r.state];
+        if (end) this.end({ ticket_id, reason: `report:${r.state}` });
+        return { ticket: k, report: r };
     }
     subscribe({ ticket_id, thread, kind = 'context' }) {
         const k = own(this.s.tickets, ticket_id);
@@ -285,4 +309,4 @@ class Engine {
         return w;
     }
 }
-module.exports = { Engine, initial };
+module.exports = { Engine, initial, REPORT_STAGES };

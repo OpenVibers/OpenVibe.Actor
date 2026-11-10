@@ -78,6 +78,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     // approval. Injected like the triggers, so the engine does not depend on the mail module.
     let mailReplies = null;
     const setMailReplies = (m) => { mailReplies = m || null; };
+    // The work fabric's executor reports a run's outcome on its Ticket (server/fabric/adapters.js). Injected like the
+    // triggers and mail: the engine knows nothing about the fabric's storage.
+    let fabric = null;
+    const setFabric = (f) => { fabric = f || null; };
     const controls = new Map();     // task id → the run's control object (live assumptions)
     let stopped = false;
     let day = null;
@@ -210,6 +214,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         }
         if (day && row) await day.taskState(row);
         const saved = await store.updateTask(s, id, { state, ...patch });
+        if (ended && fabric) await fabric(saved).catch((err) => log.warn && log.warn('[Actor] fabric task report:', id, (err && err.message) || err));
         if (ended) runTokens.drop(id);
         if (ended) stream.end(id);
         // Webhooks that asked for this state hear it; a delivery never holds the task up or fails it.
@@ -938,7 +943,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
 
     const status = () => ({ running: running.size, waiting: waiting.length });
 
-    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, setTriggers, setMailReplies, setDay, MAX_ATTEMPTS };
+    return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, setTriggers, setMailReplies, setFabric, setDay, MAX_ATTEMPTS };
 }
 
 module.exports = { createEngine, MAX_ATTEMPTS };

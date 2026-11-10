@@ -3,7 +3,7 @@ const contracts = require('openvibe-contracts');
 const { Engine, initial } = require('./engine');
 const sources = require('./sources');
 const { assert } = require('./policy');
-const COMMANDS = new Set(['configure', 'start', 'decide', 'subscribe', 'attach', 'unsubscribe', 'handBack', 'read', 'end', 'stop', 'reply', 'claim', 'settle', 'delivered']);
+const COMMANDS = new Set(['configure', 'start', 'decide', 'subscribe', 'attach', 'unsubscribe', 'handBack', 'read', 'end', 'stop', 'reply', 'claim', 'settle', 'delivered', 'bind', 'report']);
 function createFabric({ s, enabled = false, readMail, validate = (name, value) => {
     try { return contracts.assertValid(`${name}@1`, value); }
     catch (err) { if (err.code === 'contract.invalid') err.status = 422; throw err; }

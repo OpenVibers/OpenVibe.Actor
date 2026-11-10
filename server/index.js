@@ -71,6 +71,8 @@ async function start() {
     const extra = [() => { if (subscriptions) subscriptions.stop(); }];
     if (ctx.fabric.enabled && !config.drill) {
         extra.push(require('./utils/jobs').every('actor-fabric-time', 1000, () => ctx.fabric.tick(), { initialDelayMs: 1000, log: console }));
+        // The work the Sources create is claimed and performed here; launch/input submit a task and return at once.
+        extra.push(require('./utils/jobs').every('actor-fabric-work', 2000, () => ctx.fabricAdapters.drainAll(), { initialDelayMs: 1500, log: console }));
     }
     const dayJobs = ctx.day.startJobs();
     extra.push(() => { for (const stop of dayJobs) stop(); });
