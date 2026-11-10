@@ -19,6 +19,10 @@ const SAME = { 'sec-fetch-site':'same-origin' };
             else {assert.doesNotMatch(render({...base,actor}),/id="ay-screen"/);assert.match(render({...base,actor,session_id:'ses_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}),/id="ay-screen"/);}
         }
         assert.doesNotMatch(render(base),/Uncensored/);
+        const computer = render(base);
+        assert.match(computer, /data-ov-machines[^>]*data-needs="desktop"[^>]*data-name="machine_id"/);
+        assert.doesNotMatch(computer, /Link machine ID/);
+        assert.match(render(base, { machine: 'dev_01J8Z4M2Q0R7T9YV3K6N8P1W2A' }), /data-value="dev_01J8Z4M2Q0R7T9YV3K6N8P1W2A"/);
         assert.doesNotMatch(render({...base, actor:{...a, active_task:'tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}, model_switch_enabled:false}),/ay-run-model/);
         // On: one row in Now. The label says what it changes, the button is one word, the choices are grouped by who runs
         // them and named as the chat's model menu names them.
