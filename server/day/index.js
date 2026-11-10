@@ -96,6 +96,34 @@ function createDay(ctx) {
             return s.db.maybe('UPDATE actor_day_goals SET schedule=$2::jsonb,brain_override=$3 WHERE id=$1 RETURNING *', [saved.id, JSON.stringify(v.schedule || null), v.brain_override || null]);
         });
     }
+    async function switchRunModel(owner, taskId, model) {
+        if (!config.a4ModelSwitch) fail('Model switching during a run is not enabled yet.', 404);
+        const value = String(model == null ? '' : model).trim();
+        if (value.length > 256 || !/^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/.test(value)) fail('Choose an available model.');
+        const runRow = await s.db.maybe(`SELECT r.*,a.adult_opt_in FROM actor_day_runs r JOIN actors a ON a.id=r.actor_id
+            JOIN tasks t ON t.id=r.task_id WHERE r.task_id=$1 AND r.owner=$2 AND t.state IN ('queued','running')`, [taskId, owner]);
+        if (!runRow) fail('That run is no longer active.', 409);
+        let selected = value;
+        let unavailable = false;
+        if (selected === 'own:node') selected = 'own:link';
+        if (selected !== 'auto' && selected !== 'openvibe' && !/^own:(openai|anthropic|deepseek|google|openrouter|mistral|link)$/.test(selected)) {
+            const entries = models.aiCatalog ? await models.aiCatalog() || [] : [];
+            const entry = entries.find(m => m.id === selected && m.availability !== 'unavailable' && (runRow.adult_opt_in || !/uncensored|18\\+/i.test(JSON.stringify(m))));
+            if (!entry) unavailable = true;
+            if (entry && (entry.tool_calls === false || entry.capabilities?.tools === false)) fail('That model cannot use the tools this task needs. Choose a model that supports tools.');
+        }
+        if (unavailable) fail('Choose an available model from your account’s list.');
+        return s.tx(async () => {
+            const latest = await s.db.maybe(`SELECT r.model_override,t.state FROM actor_day_runs r JOIN tasks t ON t.id=r.task_id
+                WHERE r.task_id=$1 AND r.owner=$2 FOR UPDATE OF r,t`, [taskId, owner]);
+            if (!latest || !['queued','running'].includes(latest.state)) fail('That run is no longer active.', 409);
+            const switches = await s.db.maybe('SELECT model_switches FROM actor_day_runs WHERE task_id=$1', [taskId]);
+            const history = Array.isArray(switches.model_switches) ? switches.model_switches : [];
+            const record = { model: selected, at: s.iso(), effective: 'next_step' };
+            await s.db.query('UPDATE actor_day_runs SET model_override=$2,model_switches=$3::jsonb WHERE task_id=$1', [taskId, selected, JSON.stringify([...history, record].slice(-100))]);
+            return { task_id: taskId, model: selected, effective: 'next_step', switched_at: record.at };
+        });
+    }
     async function removeGoal(owner, id) {
         const g = await s.db.maybe('UPDATE actor_day_goals SET enabled=false,deleted_at=$3 WHERE id=$1 AND owner=$2 AND deleted_at IS NULL RETURNING *', [id, owner, s.iso()]);
         if (!g) fail('Goal not found.', 404);
@@ -138,7 +166,8 @@ function createDay(ctx) {
                 plain(text), extra.looking_at || null, JSON.stringify(extra.thumbnail || null), cost, s.iso()]);
         });
     }
-    const journalPage = (owner, before = '', limit = 30) => s.db.many(`SELECT * FROM actor_day_journal WHERE owner=$1 AND ($2='' OR id<$2) ORDER BY id DESC LIMIT $3`,
+    const journalPage = (owner, before = '', limit = 30) => s.db.many(`SELECT j.*,(SELECT r.model_switches FROM actor_day_runs r WHERE r.task_id=j.task_id) AS model_switches
+        FROM actor_day_journal j WHERE j.owner=$1 AND ($2='' OR j.id<$2) ORDER BY j.id DESC LIMIT $3`,
         [owner, before, Math.min(100, Math.max(1, Number(limit) || 30))]);
     async function now(owner) {
         const a = await ensure(owner);
@@ -368,7 +397,7 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
         return [require('../utils/jobs').every('actor-day', 15000, tick, { initialDelayMs: 1000, log: ctx.log })];
     }
     const page = require('./page-data').createPageData(ctx, { ensure, get, run, goals, now, tick, journalPage });
-    return { ...page, ensure, get, update, goals, saveGoal, removeGoal, usage, now, setEnabled, tell, journalPage, asks, ask, answer,
+    return { ...page, ensure, get, update, goals, saveGoal, removeGoal, usage, now, setEnabled, tell, journalPage, asks, ask, answer, switchRunModel,
         run, taskState, recordSpend, segmentEnd, event, screen, guardTool, wakePayload, resumeAnswers, tick, startJobs, lanes: LANES };
 }
 module.exports = { createDay, askView, fingerprint, budget };

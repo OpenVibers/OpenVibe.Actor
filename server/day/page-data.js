@@ -48,7 +48,10 @@ function createPageData(ctx, day) {
             w.results = count.n;
         }
         const entries = ctx.models.aiCatalog ? await ctx.models.aiCatalog() || [] : [];
+        const activeRun = a.active_task ? await s.db.maybe(`SELECT r.model_override,r.model_switches,COALESCE(g.brain_override,a.brain) AS brain
+            FROM actor_day_runs r JOIN actor_day_goals g ON g.id=r.goal_id JOIN actors a ON a.id=r.actor_id WHERE r.task_id=$1 AND r.owner=$2`, [a.active_task, owner]) : null;
         return { avatar_url: a.avatar?.media_id ? await ctx.media.photoUrl(a.avatar.media_id) : null, actor: a, goals: items, messages, earnings, weekly, journal: await day.journalPage(owner, '', 100), session_id: await session(owner),
+            model_switch_enabled: Boolean(ctx.config.a4ModelSwitch), active_run: activeRun,
             models: entries.filter(m => a.adult_opt_in || !/uncensored|18\+/i.test(JSON.stringify(m))) };
     }
     async function doNow(owner, id) {
@@ -81,9 +84,10 @@ function createPageData(ctx, day) {
         const r = await day.run(taskId);
         if (!r) return null;
         const subject = r.owner.slice(5);
-        if (r.brain === 'auto') return require('../runtime/model-prefs').choiceFor(s, r.owner);
-        if (r.brain.startsWith('own:')) return { subject, provider: r.brain.slice(4), model: null };
-        return { subject, model: r.brain === 'openvibe' ? null : r.brain };
+        const brain = r.model_override || r.brain;
+        if (brain === 'auto') return require('../runtime/model-prefs').choiceFor(s, r.owner);
+        if (brain.startsWith('own:')) return { subject, provider: brain.slice(4), model: null };
+        return { subject, model: brain === 'openvibe' ? null : brain };
     }
     const retainDesk = async taskId => Boolean(await s.db.maybe('SELECT id FROM actor_day_asks WHERE task_id=$1 AND session_id IS NOT NULL AND answered IS NULL', [taskId]));
     return { session, computerCall, computerLog, sites, pageData, doNow, earn, retainDesk, modelChoice, stepMessages };

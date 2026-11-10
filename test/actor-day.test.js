@@ -12,7 +12,7 @@ async function until(fn) {
 (async () => {
     let clock = Date.now();
     const notices = [];
-    const t = await boot({ now: () => clock, env: { ACTOR_CHECKPOINT_KEY: crypto.randomBytes(32).toString('hex') },
+    const t = await boot({ now: () => clock, env: { ACTOR_CHECKPOINT_KEY: crypto.randomBytes(32).toString('hex'), ACTOR_A4_MODEL_SWITCH: '1' },
         notifier: { needsYou: async (q) => { notices.push(q); }, taskEnded: async () => {} } });
     const api = (user, path = '', json, method) => t.get('/api/v1/me/actor' + path, { as: user, json, method, headers: SAME });
     try {
@@ -46,6 +46,15 @@ async function until(fn) {
         const q = await t.ctx.s.db.maybe('SELECT * FROM actor_day_asks WHERE id=$1', [ask.id]);
         await until(async () => { const w = await t.ctx.waits.get(q.wait_id); return w.remaining_ms != null; });
         const runBeforeAnswer = await t.ctx.day.run(id);
+        const switched = await api(bea, `/runs/${id}/model`, { model: 'openvibe' });
+        assert.equal(switched.status, 200, switched.text);
+        assert.equal(switched.json().effective, 'next_step');
+        assert.deepEqual((await t.ctx.s.db.maybe('SELECT model_override,model_switches FROM actor_day_runs WHERE task_id=$1', [id])).model_switches.map(x=>x.model), ['openvibe']);
+        assert.deepEqual(await t.ctx.day.modelChoice(id), { subject: bea.subject, model: null });
+        t.ctx.models.aiCatalog = async () => [{ id:'no-tools/model@rev1', availability:'available', tool_calls:false }];
+        const refusedModel = await api(bea, `/runs/${id}/model`, { model:'no-tools/model@rev1' });
+        assert.equal(refusedModel.status, 422);
+        assert.match(refusedModel.json().detail,/cannot use the tools this task needs/);
         const calls = t.providers.loopCalls();
         await new Promise((r) => setTimeout(r, 100));
         assert.equal(t.providers.loopCalls(), calls, 'a parked goal makes no model calls');
@@ -61,6 +70,7 @@ async function until(fn) {
         assert.equal((await t.ctx.day.asks(owner)).length, 0);
         const journal = (await api(bea, '/journal')).json();
         assert.ok(journal.items.length > 0);
+        assert.ok(journal.items.some(x => x.task_id === id && x.model_switches?.some(s => s.model === 'openvibe')), 'the Actor run record keeps model-switch history');
         assert.ok(journal.items.every((x) => x.goal_id === goal.id));
         assert.ok(Math.abs(journal.items.reduce((sum, x) => sum + Number(x.cost_usd), 0) - Number(end.cost_usd)) < 1e-8, 'journal step costs sum to the measured run cost');
         assert.ok((await tasks.getTask(t.ctx.s, id)).task.includes('Focus on the cost of living.'));

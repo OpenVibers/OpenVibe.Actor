@@ -28,6 +28,7 @@ function load(env = process.env) {
 
     return {
         service: 'actor',
+        a4ModelSwitch: env.ACTOR_A4_MODEL_SWITCH === '1' || env.ACTOR_A4_MODEL_SWITCH === 'true',
         fabric: { enabled: bool(env.ACTOR_WORK_FABRIC) },
         port,
         host: env.HOST || '127.0.0.1',
