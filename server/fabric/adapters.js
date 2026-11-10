@@ -107,8 +107,8 @@ function createFabricAdapters({ s, config, fabric, models, ctx: taskCtx = null, 
             parentId,
             // The binding commits with the task's own insert, so a run can never end without a report target.
             afterInsert: async (task) => {
-                await s.db.query(`INSERT INTO actor_fabric_tasks (task_id, agent_id, owner, ticket_id, created_at)
-                    VALUES ($1, $2, $3, $4, $5) ON CONFLICT (task_id) DO NOTHING`, [task.id, agentId, owner, ticket.id, s.iso()]);
+                await s.db.query(`INSERT INTO actor_fabric_tasks (task_id, agent_id, owner, ticket_id, created_at, trigger_ids)
+                    VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (task_id) DO NOTHING`, [task.id, agentId, owner, ticket.id, s.iso(), [trigger.id]]);
             },
         });
         if (!out || out.status !== 201 || !out.task) {
@@ -259,7 +259,7 @@ function createFabricAdapters({ s, config, fabric, models, ctx: taskCtx = null, 
         const via = String(row.via || '');
         if (!/^agent:agt_/.test(via)) return;
         let agentId = via.slice(6), owner = row.requester, ticketId = null;
-        const link = await s.db.maybe('SELECT agent_id, owner, ticket_id FROM actor_fabric_tasks WHERE task_id = $1', [row.id]);
+        const link = await s.db.maybe('SELECT agent_id, owner, ticket_id, trigger_ids FROM actor_fabric_tasks WHERE task_id = $1', [row.id]);
         if (link) { agentId = link.agent_id; owner = link.owner; ticketId = link.ticket_id; }
         const found = await s.db.maybe('SELECT state FROM actor_work_fabric WHERE agent_id = $1 AND owner = $2', [agentId, owner]);
         if (!found) return;
@@ -273,7 +273,11 @@ function createFabricAdapters({ s, config, fabric, models, ctx: taskCtx = null, 
         const ticket = state.tickets[ticketId];
         if (ticket.state !== 'open') return;
         const report = reportFor(row, ticket);
-        await fabric.command(owner, agentId, 'report', { ticket_id: ticketId, report, end: true, spent_usd: Number(row.cost_usd) || 0, task_id: row.id });
+        const owned = new Set((state.meta[ticketId] && state.meta[ticketId].owned) || []);
+        const readTriggerIds = row.state === 'succeeded'
+            ? (Array.isArray(link && link.trigger_ids) ? link.trigger_ids : []).filter(id => owned.has(id))
+            : [];
+        await fabric.command(owner, agentId, 'report', { ticket_id: ticketId, report, end: true, spent_usd: Number(row.cost_usd) || 0, task_id: row.id, read_trigger_ids: readTriggerIds });
         // One confirmation to the person on the Source thread, not a stream of progress.
         const source = state.sources[ticket.mandate.actor.source];
         if (source) {

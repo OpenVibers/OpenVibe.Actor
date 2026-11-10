@@ -293,7 +293,7 @@ class Engine {
         return k;
     }
     /** Record one agent.report@1 on the Ticket; a terminal report may end it. */
-    report({ ticket_id, report, end = false, spent_usd = 0, task_id = null }) {
+    report({ ticket_id, report, end = false, spent_usd = 0, task_id = null, read_trigger_ids = [] }) {
         const k = own(this.s.tickets, ticket_id), m = own(this.s.meta, ticket_id);
         assert(k && m && report && typeof report === 'object' && !Array.isArray(report), 'Report needs an open Ticket');
         assert(k.state === 'open', 'Ticket has ended');
@@ -306,6 +306,8 @@ class Engine {
         this.validate('agent.report', r);
         m.reports ||= [];
         m.reports.push(r);
+        // A completed executor turn claims only inputs bound to this task, atomically with its report.
+        if (read_trigger_ids.length) this.read({ ticket_id, trigger_ids: read_trigger_ids });
         m.spent_usd = round(Number(m.spent_usd || 0) + Number(spent_usd || 0));
         if (REPORT_STAGES[r.state]) k.stage = REPORT_STAGES[r.state];
         // The mandate's budget is a cap, not advice: a spent budget puts the lane that produced the Ticket back in
