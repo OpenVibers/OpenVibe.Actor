@@ -1,6 +1,6 @@
 # Actor work fabric (S4)
 
-`ACTOR_WORK_FABRIC=1` enables the backend. It is off by default. Each agent starts with `observe` policy, empty allowed lists and zero budget. There are no UI changes. Configured Sources take over matching events from the legacy Chat/Mail intake, so an event cannot launch through both paths. Unconfigured events retain the existing path.
+`ACTOR_WORK_FABRIC=1` enables the backend and its executor/model adapters. It is off by default. Each agent starts with `observe` policy, empty allowed lists and zero budget. There are no UI changes. Configured Sources take over matching events from the legacy Chat/Mail intake, so an event cannot launch through both paths. Unconfigured events retain the existing path.
 
 ## Transaction and integration boundary
 
@@ -30,10 +30,19 @@ Acceptance creates an immutable Mandate and `launch` work. Subscriptions deliver
 
 ## Stored work
 
-Adapters claim `route`, `assess`, `launch`, `input`, `end` or `reply` work, perform it after the claim commits, then settle using the claim token. `createFabric().drain(owner, agent, handlers)` provides this boundary for in-process adapters. Handlers receive a Ticket-bound worker port: it cannot change policy, accept work, claim a human stop, or create an authoritative subscription. No model/executor adapter is enabled automatically by the feature flag: routing/assessment/worker integrations consume these ports. A rollout needs authorized adapters connected before turning Sources on; otherwise work remains durably queued, and no model calls or spend occur.
+Adapters claim `route`, `assess`, `launch`, `input`, `end` or `reply` work, perform it after the claim commits, then settle using the claim token. `createFabric().drain(owner, agent, handlers)` provides this boundary for in-process adapters. Handlers receive a Ticket-bound worker port: it cannot change policy, accept work, claim a human stop, or create an authoritative subscription.
+
+`server/fabric/adapters.js` is the adapter set the feature flag enables. It performs no work while the switch is off:
+
+- `route` is deterministic: an explicit human ask becomes a Ticket, with no model call.
+- `assess` makes one cheap model call on Actor's model layer (`models.chat({tier:'check', json:true})`), shapes the answer as `agent.decision@1`, and records `unavailable` with a plain reason when the model cannot answer. It never invents evidence; the engine still checks every quote and every enabled rule.
+- `launch` assigns the mandate to the owner's agent through `personal.run` — the same path as a personal agent's scheduled run — which creates a task and an assignment root. A follow-up `input` is one more run of the same agent, as a child of the Ticket's current task.
+- `reply` posts the worker's answer back to the Chat room named by the Source scope (or replies to the Mail letter named by the Trigger's read pointer).
+
+The task-to-Ticket binding is written in the task's own insert transaction (`actor_fabric_tasks`, migration 0060), so a run can never end without a report target. When an Actor task ends, the task engine calls the adapter's `onTaskState`; it records one `agent.report@1` on the Ticket (`ready`, `failed` or `dropped`), ends the Ticket, and queues one reply. Tasks started by anything else have no binding and are ignored. `server/index.js` drains all fabrics every two seconds while the switch is on; the drain claims one item at a time and settles it before the next.
 
 Each adapter must honor the stable idempotency key. Transport is at-least-once; a crash after sending and before settlement retries the same key. Expiring leases recover interrupted sends; stale lease tokens cannot settle newer claims. Retries start at 2 seconds and double to 60 seconds (replies: 5 to 300 seconds). Earlier work blocks later work in the same conversation. Other conversations proceed independently. Replies wait while their Source is off and drop only when its destination is no longer listened to or cannot receive. Drops retain their reason and time and cannot be requeued with the same key. Resume launches include a recovery instruction to inspect existing work before repeating outside actions.
 
 Time belongs to `sources.js`, not assessment. A schedule is `{id, source, scope, due, text, interval_ms?}`; timestamps are epoch milliseconds. A quiet condition adds `{quiet_thread, since_trigger}`. The Source cancels it if that Thread changes before its due time. Time produces immutable system Triggers; admission requires `clock` in the Source's bot list and the scope in `receive_all`. Time never grants explicit authority. `tick` checks due conditions, expires evaluations and starts pending batches; it never sleeps or calls a model.
 
-Account export/deletion includes the fabric aggregate. The expand-only migration adds no production writes during development. Tests name the corresponding rules from reference docs 001–003; `ov test test/fabric.test.js test/fabric-store.test.js` exercises policy, intake, persistence, ownership, routing and delivery without external services.
+Account export/deletion includes the fabric aggregate and the task-to-Ticket binding. The expand-only migrations add no production writes during development. Tests name the corresponding rules from reference docs 001–003; `ov test test/fabric.test.js test/fabric-store.test.js test/fabric-adapters.test.js test/fabric-executors.test.js` exercises policy, intake, persistence, ownership, routing, delivery, adapters and one real run on the stand-in providers without external services.
