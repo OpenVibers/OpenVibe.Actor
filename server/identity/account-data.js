@@ -82,7 +82,10 @@ const TABLES = [
             'skill_slug', 'skill_name', 'skill_subject_title',
             // A product conversation turn (one-engine slice): which conversation it answers, the tools it may call and
             // the model it asked for. The person's own export says which of their turns ran where.
-            'conversation', 'tools', 'model'],
+            'conversation', 'tools', 'model',
+            // The content tier the turn answered under: the person's own export says which of their turns were on
+            // the adult tier.
+            'tier'],
     },
     // The person's own per-UTC-day spend accounting. Deleted: nothing in Actor keeps a person's spend record for a
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is
