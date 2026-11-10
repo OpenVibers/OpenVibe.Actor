@@ -123,6 +123,15 @@ const policy = () => ({
         await check('owner-only: another signed-in person gets 404 from every new read', async () => {
             for (const path of ['lanes', 'observe', 'reports', 'work']) assert.equal((await t.get(`/api/v1/fabric/${agent}/${path}`, { as: bob })).status, 404);
         });
+        await check('the owner can delete ended stored work and active tickets are protected', async () => {
+            const active = await t.get(`/api/v1/fabric/${agent}/work/${first.id}`, { as: alice, method: 'DELETE', headers: { Origin: 'https://openvibe.actor' } });
+            assert.equal(active.status, 409);
+            await t.get(`/api/v1/fabric/${agent}/commands/end`, { as: alice, json: { ticket_id: first.id, reason: 'owner_finished' }, headers: { Origin: 'https://openvibe.actor' } });
+            const deleted = await t.get(`/api/v1/fabric/${agent}/work/${first.id}`, { as: alice, method: 'DELETE', headers: { Origin: 'https://openvibe.actor' } });
+            assert.equal(deleted.status, 200);
+            assert.equal(deleted.json().deleted, true);
+            assert.equal((await t.get(`/api/v1/fabric/${agent}/work`, { as: alice })).json().tickets.length, 0);
+        });
     } finally { await t.close(); }
     done();
 })().catch((err) => { console.error(err); process.exit(1); });

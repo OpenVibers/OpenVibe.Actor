@@ -121,6 +121,7 @@ function createRoutes(ctx) {
         });
         return { agent, tickets };
     }));
+    r.delete('/:agent/work/:ticket', run(req => ctx.fabric.deleteTicket(req.principal.requester, req.params.agent, req.params.ticket)));
 
     r.post('/:agent/commands/:command', run(req => ctx.fabric.command(req.principal.requester, req.params.agent, req.params.command, req.body)));
     return r;
