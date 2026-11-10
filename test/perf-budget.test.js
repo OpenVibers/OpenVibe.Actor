@@ -14,12 +14,12 @@ const { measure, check, format } = require('openvibe-shared/perf-budget');
 // Budgets are set from the numbers measured on 2026-10-08 (the real ones, fresh database), rounded up with about 10%
 // headroom; file counts are the measured counts and external files stay at 0.
 const BUDGETS = {
-    htmlRawKB: 72.9, // 72.9: measured 70.9 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
+    htmlRawKB: 74.5, // 74.5: measured 74.3 with 2026-11-11: openvibe-shared 4.190.0 (the site name's dropdown, the footer's online strip, the balances pill); 72.9: measured 70.9 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
                        // 53.2 with the rich home (10-22): numbers, task templates, the 34 Tools chips, the API samples, the questions
     htmlBrotliKB: 15.6, // 15.6: measured 15.1 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
     jsFiles: 5,   // 5 (theme-loader, web-runtime, navbar, footer, boost: openvibe-shared/shell)
-    jsRawKB: 376.7, // 376.7: measured 368.7 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
-    jsBrotliKB: 89.8, // 89.8: measured 89.7 KB brotli with openvibe-shared 4.186.0 (the mark's Working and Thinking states, the Dock and the menu as one sheet, bare controls), 2026-11-10; 89.5: measured 87.5 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
+    jsRawKB: 393, // 393: measured 392.5 with 2026-11-11: openvibe-shared 4.190.0 (the site name's dropdown, the footer's online strip, the balances pill); 376.7: measured 368.7 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
+    jsBrotliKB: 94, // 94: measured 93.7 with 2026-11-11: openvibe-shared 4.190.0 (the site name's dropdown, the footer's online strip, the balances pill); 89.8: measured 89.7 KB brotli with openvibe-shared 4.186.0 (the mark's Working and Thinking states, the Dock and the menu as one sheet, bare controls), 2026-11-10; 89.5: measured 87.5 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
     cssFiles: 5,   // 5 with the shared kit.css and room.css (2026-10-29: the home as a taste and a door, 17 → 5.1 phone screens); 2 (actor.css + the cached /shared/showcase.css); 3 with home.css, the home's own sections (10-22)
     cssRawKB: 128.7, // 128.7: measured 123.7 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
     cssBrotliKB: 28.3, // 28.3: measured 27.1 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
