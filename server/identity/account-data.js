@@ -79,7 +79,10 @@ const TABLES = [
             // A fork's parent step and the one change it was made with (stage V2-9), and how often it resumed.
             'fork_of_step', 'fork_change', 'resumes', 'agent_id', 'level', 'assignment_id',
             // The catalogue skill a task was started from (migration 0057): its slug, name and the subject's title.
-            'skill_slug', 'skill_name', 'skill_subject_title'],
+            'skill_slug', 'skill_name', 'skill_subject_title',
+            // A product conversation turn (one-engine slice): which conversation it answers, the tools it may call and
+            // the model it asked for. The person's own export says which of their turns ran where.
+            'conversation', 'tools', 'model'],
     },
     // The person's own per-UTC-day spend accounting. Deleted: nothing in Actor keeps a person's spend record for a
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is
