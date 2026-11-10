@@ -75,6 +75,35 @@ function createRoutes(ctx) {
     r.get('/:agent/reports', run(async (req) => {
         const snap = await ctx.fabric.snapshot(req.principal.requester, req.params.agent);
         const state = snap.state;
+        if (req.query.detail === 'work') {
+            const owner = req.principal.requester, agent = req.params.agent;
+            const links = await ctx.s.db.many(`SELECT ft.ticket_id, t.id AS task_id, t.state AS task_state,
+                t.result, t.error_code, t.cost_usd, t.created_at, t.finished_at
+                FROM actor_fabric_tasks ft JOIN tasks t ON t.id = ft.task_id
+                WHERE ft.owner = $1 AND ft.agent_id = $2 ORDER BY t.created_at DESC LIMIT 200`, [owner, agent]);
+            const taskIds = links.map(x => x.task_id);
+            const files = taskIds.length ? await ctx.s.db.many(`SELECT task_id, id, name, mime, size, created_at
+                FROM actor_artifacts WHERE owner = $1 AND task_id = ANY($2::text[]) ORDER BY created_at`, [owner, taskIds]) : [];
+            const byTicket = new Map();
+            for (const row of links) {
+                const list = byTicket.get(row.ticket_id) || [];
+                list.push({ task_id: row.task_id, state: row.task_state, result: row.result,
+                    error_code: row.error_code, cost_usd: Number(row.cost_usd) || 0,
+                    created_at: row.created_at, finished_at: row.finished_at });
+                byTicket.set(row.ticket_id, list);
+            }
+            const tickets = Object.entries(state.tickets || {}).map(([id, ticket]) => {
+                const meta = (state.meta || {})[id] || {}, runs = byTicket.get(id) || [];
+                return { ticket_id: id, state: ticket.state, stage: ticket.stage, mandate: ticket.mandate,
+                    evaluation: (state.decisions || []).filter(x => x.trigger_ids && x.trigger_ids.includes(ticket.trigger_id)),
+                    reports: meta.reports || [], runs,
+                    artifacts: files.filter(x => runs.some(run => run.task_id === x.task_id)).map(x => ({
+                        task_id: x.task_id, id: x.id, name: x.name, mime: x.mime, size: Number(x.size),
+                        url: `/api/v1/tasks/${encodeURIComponent(x.task_id)}/artifacts/${encodeURIComponent(x.id)}`, created_at: x.created_at,
+                    })) };
+            });
+            return { agent: req.params.agent, tickets };
+        }
         const tickets = Object.entries(state.tickets || {}).map(([id, ticket]) => ({
             ticket_id: id,
             state: ticket.state,
@@ -86,7 +115,10 @@ function createRoutes(ctx) {
         return { agent: req.params.agent, tickets, report_states: reportStates() };
     }));
 
-    r.post('/:agent/commands/:command', run(req => ctx.fabric.command(req.principal.requester, req.params.agent, req.params.command, req.body)));
+    /** Durable work detail: ticket decision, final reports, spend and artifact references. Bytes stay behind the task artifact route. */
+    r.post('/:agent/commands/:command', run(req => req.params.command === 'deleteTicket'
+        ? ctx.fabric.deleteTicket(req.principal.requester, req.params.agent, req.body && req.body.ticket_id)
+        : ctx.fabric.command(req.principal.requester, req.params.agent, req.params.command, req.body)));
     return r;
 }
 module.exports = { createRoutes };

@@ -100,12 +100,16 @@ function test(name, fn) { return Promise.resolve(fn()).then(() => { count++; con
 
     await test('task end: ready becomes an agent.report@1 on the Ticket, ends it and queues one reply', async () => {
         const state = fabricState({ ticket: ticket() }); state.meta.ticket_1.task_id = 'tsk_1';
+        state.meta.ticket_1.owned = ['follow_1'];
         const fabric = fakeFabric(state);
-        const s = { db: { maybe: async () => ({ state }) } };
+        const s = { db: { maybe: async (sql) => sql.includes('actor_fabric_tasks')
+            ? { agent_id: AGENT, owner: OWNER, ticket_id: 'ticket_1', trigger_ids: ['follow_1'] }
+            : { state } } };
         const a = createFabricAdapters({ s, config: {}, fabric, models: {} });
         await a.onTaskState({ id: 'tsk_1', via: `agent:${AGENT}`, requester: OWNER, state: 'succeeded', assignment_id: 'asg_1', result: { answer: 'The test is fixed.' } });
         const report = fabric.commands.find((c) => c.name === 'report');
         assert.equal(report.args.report.state, 'ready'); assert.equal(report.args.report.summary, 'The test is fixed.'); assert.equal(report.args.end, true);
+        assert.deepEqual(report.args.read_trigger_ids, ['follow_1']);
         const reply = fabric.commands.find((c) => c.name === 'reply');
         assert.match(reply.args.text, /The test is fixed/); assert.equal(reply.args.key, 'report:tsk_1');
     });
