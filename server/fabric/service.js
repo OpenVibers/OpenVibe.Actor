@@ -3,13 +3,47 @@ const contracts = require('openvibe-contracts');
 const { Engine, initial } = require('./engine');
 const sources = require('./sources');
 const { assert } = require('./policy');
-const COMMANDS = new Set(['configure', 'start', 'decide', 'subscribe', 'attach', 'unsubscribe', 'handBack', 'read', 'end', 'stop', 'reply', 'claim', 'settle', 'delivered', 'bind', 'report']);
+const COMMANDS = new Set(['configure', 'start', 'decide', 'subscribe', 'attach', 'unsubscribe', 'handBack', 'read', 'end', 'stop', 'reply', 'claim', 'settle', 'delivered', 'bind', 'report', 'promote', 'demote']);
+const round = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+// The first promotion review needs a little history; a single run is not a basis for an estimate.
+const ESTIMATE_RUNS = 3;
 function createFabric({ s, enabled = false, readMail, validate = (name, value) => {
     try { return contracts.assertValid(`${name}@1`, value); }
     catch (err) { if (err.code === 'contract.invalid') err.status = 422; throw err; }
 } }) {
     const enabledCheck = () => { if (!enabled) throw Object.assign(new Error('Work fabric is disabled'), { status: 404 }); };
-    async function transact(owner, agent, command) {
+
+    /** The estimate port for a decide: Actor's own finished runs of this agent, or "no data yet". */
+    async function estimator(owner, agent) {
+        try {
+            const rows = await s.db.many(`SELECT cost_usd FROM tasks WHERE requester = $1 AND via = $2 AND state = 'succeeded'
+                AND finished_at IS NOT NULL ORDER BY finished_at DESC, id DESC LIMIT 20`, [owner, `agent:${agent}`]);
+            const costs = rows.map(r => Number(r.cost_usd)).filter(v => Number.isFinite(v) && v > 0);
+            if (costs.length < ESTIMATE_RUNS) return null;
+            const sorted = [...costs].sort((a, b) => a - b);
+            return () => ({ low_usd: round(sorted[0]), high_usd: round(sorted[sorted.length - 1]), basis: `the last ${sorted.length} finished runs of this agent` });
+        } catch { return null; }
+    }
+
+    /** Observe records and lane changes are mirrored from the aggregate in the same transaction that commits it. */
+    async function mirror(db, agent, owner, state) {
+        const lastObserve = Number(await db.value('SELECT COALESCE(MAX(seq), 0) FROM actor_fabric_observe WHERE agent_id = $1', [agent])) || 0;
+        for (const r of state.observe || []) {
+            if (Number(r.seq) <= lastObserve) continue;
+            await db.query(`INSERT INTO actor_fabric_observe (id, agent_id, owner, seq, thread, rule_ids, record, created_at)
+                VALUES ($1,$2,$3,$4,$5,$6::text[],$7::jsonb,$8) ON CONFLICT (id) DO NOTHING`,
+            [r.id, agent, owner, Number(r.seq), r.thread || null, r.rule_ids || [], JSON.stringify(r), r.at || s.iso()]);
+        }
+        const lastLane = Number(await db.value('SELECT COALESCE(MAX(seq), 0) FROM actor_fabric_lane_changes WHERE agent_id = $1', [agent])) || 0;
+        for (const c of state.lane_changes || []) {
+            if (Number(c.seq) <= lastLane) continue;
+            await db.query(`INSERT INTO actor_fabric_lane_changes (id, agent_id, owner, seq, rule_id, from_mode, to_mode, reason, actor, created_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
+            [c.id, agent, owner, Number(c.seq), c.rule_id, c.from_mode, c.to_mode, c.reason, c.actor || 'system', c.at || s.iso()]);
+        }
+    }
+
+    async function transact(owner, agent, command, options = {}) {
         enabledCheck();
         return s.db.tx(async db => {
             // Authorization is inside the transaction and is repeated for every command, including leases.
@@ -17,9 +51,10 @@ function createFabric({ s, enabled = false, readMail, validate = (name, value) =
             if (!exists) throw Object.assign(new Error('Agent not found'), { status: 404 });
             await db.query('INSERT INTO actor_work_fabric (agent_id, owner, state) VALUES ($1,$2,$3::jsonb) ON CONFLICT DO NOTHING', [agent, owner, JSON.stringify(initial())]);
             const row = await db.one('SELECT state FROM actor_work_fabric WHERE agent_id = $1 AND owner = $2 FOR UPDATE', [agent, owner]);
-            const engine = new Engine(row.state, { now: s.now(), validate });
+            const engine = new Engine(row.state, { now: s.now(), validate, estimate: options.estimate || null });
             const result = command(engine);
             assert(!result || typeof result.then !== 'function', 'Engine commands must be synchronous');
+            await mirror(db, agent, owner, engine.s);
             await db.query('UPDATE actor_work_fabric SET state = $3::jsonb, revision = revision + 1, updated_at = $4 WHERE agent_id = $1 AND owner = $2', [agent, owner, JSON.stringify(engine.s), s.iso()]);
             return structuredClone(result ?? null);
         });
@@ -32,8 +67,9 @@ function createFabric({ s, enabled = false, readMail, validate = (name, value) =
             if (!row) throw Object.assign(new Error('Fabric not found'), { status: 404 });
             return row;
         },
-        command(owner, agent, name, args = {}) {
+        async command(owner, agent, name, args = {}) {
             assert(COMMANDS.has(name) || ['schedule', 'cancelSchedule', 'tick'].includes(name), 'Unknown fabric command');
+            const options = name === 'decide' ? { estimate: await estimator(owner, agent) } : {};
             return transact(owner, agent, engine => {
                 if (name === 'schedule') return sources.schedule(engine, args);
                 if (name === 'cancelSchedule') { assert(Object.hasOwn(engine.s.schedules, args.id), 'Unknown schedule'); engine.s.schedules[args.id].cancelled = true; return true; }
@@ -48,7 +84,31 @@ function createFabric({ s, enabled = false, readMail, validate = (name, value) =
                     }
                 }
                 return engine[name](args);
-            });
+            }, options);
+        },
+        /** Observe records newest first, optionally for one lane. */
+        async observe(owner, agent, { lane = null, limit = 50 } = {}) {
+            enabledCheck();
+            assert(!lane || typeof lane === 'string', 'Invalid lane');
+            assert(Number.isInteger(limit) && limit >= 1 && limit <= 200, 'Invalid observe limit');
+            const row = await s.db.maybe('SELECT state, revision FROM actor_work_fabric WHERE agent_id = $1 AND owner = $2', [agent, owner]);
+            if (!row) throw Object.assign(new Error('Fabric not found'), { status: 404 });
+            const rows = lane
+                ? await s.db.many('SELECT record FROM actor_fabric_observe WHERE agent_id = $1 AND owner = $2 AND $3 = ANY(rule_ids) ORDER BY seq DESC LIMIT $4', [agent, owner, lane, limit])
+                : await s.db.many('SELECT record FROM actor_fabric_observe WHERE agent_id = $1 AND owner = $2 ORDER BY seq DESC LIMIT $3', [agent, owner, limit]);
+            return rows.map(r => r.record);
+        },
+        /** Per-lane observe counts and the last change, for the panel's lane row. */
+        async laneStats(owner, agent) {
+            enabledCheck();
+            const row = await s.db.maybe('SELECT state FROM actor_work_fabric WHERE agent_id = $1 AND owner = $2', [agent, owner]);
+            if (!row) throw Object.assign(new Error('Fabric not found'), { status: 404 });
+            const observe = await s.db.many(`SELECT rule_id, count(*)::int AS count, max(created_at) AS last_at
+                FROM (SELECT unnest(rule_ids) AS rule_id, created_at FROM actor_fabric_observe WHERE agent_id = $1 AND owner = $2) r
+                GROUP BY rule_id`, [agent, owner]);
+            const changes = await s.db.many(`SELECT DISTINCT ON (rule_id) rule_id, from_mode, to_mode, reason, actor, created_at
+                FROM actor_fabric_lane_changes WHERE agent_id = $1 AND owner = $2 ORDER BY rule_id, seq DESC`, [agent, owner]);
+            return { state: row.state, observe, changes };
         },
         worker(owner, agent, ticket) {
             const allowed = new Set(['handBack', 'read', 'end', 'subscribe', 'unsubscribe', 'reply']);

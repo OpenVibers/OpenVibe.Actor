@@ -6,7 +6,7 @@ function policy(input = {}) {
     const p = structuredClone({ mode: 'observe', rules: [], sources: {}, budget: { usd: 0, tokens: 0, wall_minutes: 0 }, ...input });
     delete p.version;
     assert(['off', 'observe', 'auto'].includes(p.mode), 'Invalid accept mode');
-    assert(Array.isArray(p.rules) && p.rules.every(r => text(r.id) && text(r.instruction) && typeof r.enabled === 'boolean') && new Set(p.rules.map(r => r.id)).size === p.rules.length, 'Rules need unique ids, instructions and enabled flags');
+    assert(Array.isArray(p.rules) && p.rules.every(r => text(r.id) && text(r.instruction) && typeof r.enabled === 'boolean' && (r.mode == null || ['observe', 'auto'].includes(r.mode))) && new Set(p.rules.map(r => r.id)).size === p.rules.length, 'Rules need unique ids, instructions, enabled flags and an observe or auto mode');
     assert(p.budget && ['usd', 'tokens', 'wall_minutes'].every(k => Number.isFinite(p.budget[k]) && p.budget[k] >= 0) && Number.isInteger(p.budget.tokens), 'Invalid mandate budget');
     assert(p.sources && typeof p.sources === 'object' && !Array.isArray(p.sources), 'Invalid source policies');
     for (const s of Object.values(p.sources)) {
@@ -67,4 +67,6 @@ function assessment(a, p, triggers) {
     if (accepted) assert(text(a.scope), 'Acceptance needs a scope');
     return { matched, accepted };
 }
-module.exports = { policy, gate, revalidate, assessment, assert, text };
+// A lane without an explicit mode is in observe: lanes never inherit autonomy from a global switch by accident.
+const laneMode = (rule) => (rule && rule.mode === 'auto' ? 'auto' : 'observe');
+module.exports = { policy, gate, revalidate, assessment, assert, text, laneMode };
