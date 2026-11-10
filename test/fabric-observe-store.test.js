@@ -82,6 +82,7 @@ const policy = () => ({
             const out = await fabric.command(owner, agent, 'decide', { evaluation: state.threads[thread].evaluation.id, decision: 'accept', assessment });
             assert.equal(out.decision.decision, 'accept'); assert.ok(out.ticket);
             first = out.ticket;
+            assert.ok(Date.parse((await fabric.snapshot(owner, agent)).state.meta[first.id].created_at));
             const after = await fabric.observe(owner, agent, { lane: 'fix' });
             assert.equal(after[0].mode, 'auto'); assert.equal(after[0].decision, 'accept');
         });
@@ -107,8 +108,30 @@ const policy = () => ({
             assert.equal((await t.get(`/api/v1/fabric/${agent}/commands/demote`, { as: alice, json: { lane: 'fix', reason: 'Reading a few more observe records first.' }, headers: { Origin: 'https://openvibe.actor' } })).status, 200);
         });
 
+        await check('stored work API returns the durable mandate, evaluation, reports and run/artifact references', async () => {
+            const res = await t.get(`/api/v1/fabric/${agent}/reports?detail=work`, { as: alice });
+            assert.equal(res.status, 200);
+            const body = res.json();
+            assert.equal(body.tickets.length, 1);
+            assert.equal(body.tickets[0].ticket_id, first.id);
+            assert.equal(body.tickets[0].mandate.scope, first.mandate.scope);
+            assert.equal(body.tickets[0].evaluation[0].decision, 'accept');
+            assert.equal(body.tickets[0].reports[0].state, 'progress');
+            assert.ok(Array.isArray(body.tickets[0].runs));
+            assert.ok(Array.isArray(body.tickets[0].artifacts));
+        });
+
         await check('owner-only: another signed-in person gets 404 from every new read', async () => {
             for (const path of ['lanes', 'observe', 'reports']) assert.equal((await t.get(`/api/v1/fabric/${agent}/${path}`, { as: bob })).status, 404);
+        });
+        await check('the owner can delete ended stored work and active tickets are protected', async () => {
+            const active = await t.get(`/api/v1/fabric/${agent}/commands/deleteTicket`, { as: alice, json: { ticket_id: first.id }, headers: { Origin: 'https://openvibe.actor' } });
+            assert.equal(active.status, 409);
+            await t.get(`/api/v1/fabric/${agent}/commands/end`, { as: alice, json: { ticket_id: first.id, reason: 'owner_finished' }, headers: { Origin: 'https://openvibe.actor' } });
+            const deleted = await t.get(`/api/v1/fabric/${agent}/commands/deleteTicket`, { as: alice, json: { ticket_id: first.id }, headers: { Origin: 'https://openvibe.actor' } });
+            assert.equal(deleted.status, 200);
+            assert.equal(deleted.json().deleted, true);
+            assert.equal((await t.get(`/api/v1/fabric/${agent}/reports?detail=work`, { as: alice })).json().tickets.length, 0);
         });
     } finally { await t.close(); }
     done();

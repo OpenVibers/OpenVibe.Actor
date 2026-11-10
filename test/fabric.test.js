@@ -127,6 +127,13 @@ test('002 Release unread: read input stays accounted for; unread returns to rout
     const e = engine(), k = accept(e); e.receive(trigger('read')); e.receive(trigger('unread'));
     e.read({ ticket_id: k.id, trigger_ids: ['read'] }); e.end({ ticket_id: k.id }); assert.deepEqual(e.s.threads.room.pending, ['unread']);
 });
+test('002 A successful report atomically claims only inputs assigned to its run', () => {
+    const e = engine(), k = accept(e); e.receive(trigger('read')); e.receive(trigger('unread'));
+    e.report({ ticket_id: k.id, task_id: 'tsk_1', read_trigger_ids: ['read'], end: true,
+        report: { ticket_id: k.id, assignment_id: 'asg_1', state: 'ready', summary: 'Done', pr: null, tests_run: [], risks: [] } });
+    assert(e.s.meta[k.id].read.includes('read'));
+    assert.deepEqual(e.s.threads.room.pending, ['unread']);
+});
 test('002 Eval timeout: undelivered never expires; third delivered expiry is unavailable', () => {
     const e = engine(); e.receive(trigger('a')); let ev = e.start({ thread: 'room' }); e.now = 9999999; e.expire(); assert(e.s.threads.room.evaluation);
     for (let i = 0; i < 3; i++) { e.delivered({ evaluation: ev.id }); e.now += 300001; e.expire(); if (i < 2) ev = e.start({ thread: 'room' }); }

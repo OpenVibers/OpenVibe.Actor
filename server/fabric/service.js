@@ -7,6 +7,7 @@ const COMMANDS = new Set(['configure', 'start', 'decide', 'subscribe', 'attach',
 const round = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
 // The first promotion review needs a little history; a single run is not a basis for an estimate.
 const ESTIMATE_RUNS = 3;
+const WORK_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 function createFabric({ s, enabled = false, readMail, validate = (name, value) => {
     try { return contracts.assertValid(`${name}@1`, value); }
     catch (err) { if (err.code === 'contract.invalid') err.status = 422; throw err; }
@@ -61,10 +62,50 @@ function createFabric({ s, enabled = false, readMail, validate = (name, value) =
     }
     return {
         enabled,
+        async deleteTicket(owner, agent, ticketId) {
+            enabledCheck();
+            return s.db.tx(async db => {
+                const exists = await db.maybe('SELECT id FROM actor_agents WHERE id = $1 AND owner = $2 FOR UPDATE', [agent, owner]);
+                if (!exists) throw Object.assign(new Error('Agent not found'), { status: 404 });
+                const row = await db.maybe('SELECT state FROM actor_work_fabric WHERE agent_id = $1 AND owner = $2 FOR UPDATE', [agent, owner]);
+                if (!row) throw Object.assign(new Error('Fabric not found'), { status: 404 });
+                const state = typeof row.state === 'string' ? JSON.parse(row.state) : row.state;
+                const ticket = state.tickets && state.tickets[ticketId];
+                if (!ticket) throw Object.assign(new Error('Ticket not found'), { status: 404 });
+                if (ticket.state !== 'ended') throw Object.assign(new Error('Only ended work can be deleted'), { status: 409 });
+                const triggerIds = new Set([ticket.trigger_id]);
+                const tasks = await db.many('SELECT task_id FROM actor_fabric_tasks WHERE owner = $1 AND agent_id = $2 AND ticket_id = $3', [owner, agent, ticketId]);
+                for (const task of tasks) await db.query('DELETE FROM tasks WHERE id = $1 AND requester = $2', [task.task_id, owner]);
+                delete state.tickets[ticketId]; delete state.meta[ticketId];
+                state.work = (state.work || []).filter(w => w.conversation !== `worker:${ticketId}` && w.payload?.ticket_id !== ticketId);
+                for (const thread of Object.values(state.threads || {})) {
+                    delete thread.subscriptions?.[ticketId];
+                    thread.pending = (thread.pending || []).filter(id => !triggerIds.has(id));
+                    thread.triggers = (thread.triggers || []).filter(id => !triggerIds.has(id));
+                    if (thread.evaluation) thread.evaluation.ids = (thread.evaluation.ids || []).filter(id => !triggerIds.has(id));
+                }
+                for (const id of triggerIds) {
+                    const stillUsed = Object.values(state.tickets).some(t => t.trigger_id === id);
+                    if (stillUsed) continue;
+                    delete state.triggers[id]; delete state.accepted[id];
+                    state.decisions = (state.decisions || []).filter(d => !(d.trigger_ids || []).includes(id));
+                }
+                const decisionIds = new Set((state.decisions || []).map(d => d.id));
+                for (const thread of Object.values(state.threads || {})) thread.history = (thread.history || []).filter(id => decisionIds.has(id));
+                await db.query('UPDATE actor_work_fabric SET state = $3::jsonb, revision = revision + 1, updated_at = $4 WHERE agent_id = $1 AND owner = $2', [agent, owner, JSON.stringify(state), s.iso()]);
+                return { deleted: true, ticket_id: ticketId, tasks: tasks.length };
+            });
+        },
         async snapshot(owner, agent) {
             enabledCheck();
-            const row = await s.db.maybe('SELECT f.state, f.revision FROM actor_work_fabric f JOIN actor_agents a ON a.id = f.agent_id WHERE f.agent_id = $1 AND f.owner = $2 AND a.owner = $2', [agent, owner]);
+            let row = await s.db.maybe('SELECT f.state, f.revision FROM actor_work_fabric f JOIN actor_agents a ON a.id = f.agent_id WHERE f.agent_id = $1 AND f.owner = $2 AND a.owner = $2', [agent, owner]);
             if (!row) throw Object.assign(new Error('Fabric not found'), { status: 404 });
+            const state = typeof row.state === 'string' ? JSON.parse(row.state) : row.state;
+            const cutoff = Date.now() - WORK_RETENTION_MS;
+            const expired = Object.entries(state.tickets || {}).filter(([id, ticket]) => ticket.state === 'ended'
+                && Date.parse(state.meta?.[id]?.created_at || '') < cutoff).map(([id]) => id);
+            for (const id of expired) await this.deleteTicket(owner, agent, id);
+            if (expired.length) row = await s.db.maybe('SELECT f.state, f.revision FROM actor_work_fabric f JOIN actor_agents a ON a.id = f.agent_id WHERE f.agent_id = $1 AND f.owner = $2 AND a.owner = $2', [agent, owner]);
             return row;
         },
         async command(owner, agent, name, args = {}) {
