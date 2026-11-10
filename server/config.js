@@ -28,6 +28,7 @@ function load(env = process.env) {
 
     return {
         service: 'actor',
+        codesSessionBridge: env.ACTOR_CODES_SESSION_BRIDGE === '1' || env.ACTOR_CODES_SESSION_BRIDGE === 'true',
         fabric: { enabled: bool(env.ACTOR_WORK_FABRIC) },
         port,
         host: env.HOST || '127.0.0.1',
