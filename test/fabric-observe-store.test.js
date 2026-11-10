@@ -114,6 +114,7 @@ const policy = () => ({
             assert.equal(body.tickets.length, 1);
             assert.equal(body.tickets[0].ticket_id, first.id);
             assert.equal(body.tickets[0].mandate.scope, first.mandate.scope);
+            assert.equal(body.tickets[0].evaluation[0].decision, 'accept');
             assert.equal(body.tickets[0].reports[0].state, 'progress');
             assert.ok(Array.isArray(body.tickets[0].runs));
             assert.ok(Array.isArray(body.tickets[0].artifacts));

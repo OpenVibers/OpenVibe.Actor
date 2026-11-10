@@ -109,10 +109,9 @@ function createRoutes(ctx) {
         const tickets = Object.entries(state.tickets || {}).map(([id, ticket]) => {
             const meta = (state.meta || {})[id] || {};
             const trigger = (state.triggers || {})[ticket.trigger_id] || null;
-            const thread = trigger && (state.threads || {})[trigger.threads && trigger.threads[0]];
             const runs = byTicket.get(id) || [];
             return { ticket_id: id, state: ticket.state, stage: ticket.stage, mandate: ticket.mandate,
-                evaluation: thread && thread.history ? thread.history.filter(x => x.trigger_ids && x.trigger_ids.includes(ticket.trigger_id)) : [],
+                evaluation: (state.decisions || []).filter(x => x.trigger_ids && x.trigger_ids.includes(ticket.trigger_id)),
                 reports: meta.reports || [], runs: byTicket.get(id) || [],
                 artifacts: files.filter(x => runs.some(run => run.task_id === x.task_id)).map(x => ({
                     task_id: x.task_id, id: x.id, name: x.name, mime: x.mime, size: Number(x.size),
