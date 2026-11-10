@@ -19,6 +19,8 @@ const SAME = { 'sec-fetch-site':'same-origin' };
             else {assert.doesNotMatch(render({...base,actor}),/id="ay-screen"/);assert.match(render({...base,actor,session_id:'ses_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}),/id="ay-screen"/);}
         }
         assert.doesNotMatch(render(base),/Uncensored/);
+        assert.doesNotMatch(render({...base, actor:{...a, active_task:'tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}, model_switch_enabled:false}),/ay-run-model/);
+        assert.match(render({...base, actor:{...a, active_task:'tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}, active_run:{brain:'openvibe'}, model_switch_enabled:true}),/option value="openvibe" selected/);
         assert.match(render({...base,actor:{...a,adult_opt_in:true}}),/Uncensored/);
         assert.match(render({...base,actor:{...a,asks:[{id:'ask',kind:'sign_in',text:'Sign in to the site',options:['Sign in on its screen','Done']} ]}}),/Waiting for you/);
         const page=await t.get('/you',{as:user});assert.equal(page.status,200,page.text);assert.match(page.text,/ovt-composer/);
@@ -31,6 +33,7 @@ const SAME = { 'sec-fetch-site':'same-origin' };
         assert.equal((await api('/earnings',{text:'Paid project',usd:40,confirmed:false})).status,422);
         assert.equal((await api('/earnings',{text:'Paid project',usd:40,confirmed:true})).status,201);
         const data=(await api('/page')).json();assert.equal(data.messages[0].attachments[0].name,'notes.txt');assert.equal(data.earnings[0].usd,40);
+        assert.equal((await api('/runs/tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A/model',{model:'openvibe'})).status,404,'model switching stays off unless the owner enables its switch');
         assert.equal((await t.get('/api/v1/me/actor/page',{as:other})).json().earnings.length,0);
         const schedule=require('../server/day/schedule');assert.equal(schedule.open(g.schedule,Date.parse('2026-11-09T18:00:00Z')),true);assert.equal(schedule.open(g.schedule,Date.parse('2026-11-08T18:00:00Z')),false);
         const calls=[];
