@@ -233,7 +233,7 @@ ${robotsCard(rovers)}
         const busiest = used.reduce((b, d) => (!b || d.usd > b.usd ? d : b), null);
         page(req, res, {
             title: 'Spend', crumbs: [{ label: 'Console', href: '/console' }, { label: 'Spend' }],
-            body: html`<header class="cn-head"><p class="cn-eyebrow">OpenVibe.Actor · console</p><h1>Spend</h1>
+            body: html`<header class="cn-head"><h1>Spend</h1>
 <p class="cn-lede">What your tasks and agents cost, day by day, over the last ${String(store.RETENTION_DAYS)} days (Actor keeps no more).</p></header>
 <section class="cn-card" aria-labelledby="cn-spend-h"><h2 id="cn-spend-h">Last ${String(store.RETENTION_DAYS)} days</h2>
 ${spendChart(days, { caption: `Last ${store.RETENTION_DAYS} days`, month: true })}
