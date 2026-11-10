@@ -32,9 +32,20 @@ function fakeCodes({ start = 201, startBody = null, states = ['running', 'succee
     const fetchImpl = async (url, init = {}) => {
         const u = new URL(url);
         const headers = init.headers || {};
-        calls.push({ method: init.method || 'GET', path: u.pathname, subject: headers['X-OV-Subject'], auth: headers.Authorization, body: init.body ? JSON.parse(init.body) : null });
+        calls.push({ method: init.method || 'GET', path: u.pathname, query:u.searchParams.toString(), subject: headers['X-OV-Subject'], auth: headers.Authorization, body: init.body ? JSON.parse(init.body) : null });
         if (u.pathname === '/api/v1/tasks' && init.method === 'POST') return reply(start, startBody || { task: task('queued'), created: true });
         if (u.pathname === `/api/v1/tasks/${TASK}` && (init.method || 'GET') === 'GET') return reply(200, task(states[Math.min(reads++, states.length - 1)]));
+        if (u.pathname === `/run/tasks/${TASK}/session.json`) {
+            const all = [
+                { seq:1, kind:'step', body:{ t:'step', text:'Reading README' } },
+                { seq:2, kind:'tool', body:{ t:'tool', id:'tool-1', name:'Read', input:{ file_path:'README' } } },
+                { seq:3, kind:'tool_result', body:{ t:'tool_result', id:'tool-1', ok:true, output:'README contents' } },
+                { seq:4, kind:'done', body:{ t:'done', ok:true, text:'Finished the README edit.' } },
+            ];
+            const after = Number(u.searchParams.get('after') || 0), lines = all.filter(line => line.seq > after);
+            const page = lines.slice(0, after === 0 ? 3 : 500);
+            return reply(200, { task_id:TASK, source:'session', after, lines:page, next_after:page.at(-1)?.seq || after, has_more:page.at(-1)?.seq !== all.at(-1).seq, complete:true });
+        }
         if (u.pathname === `/api/v1/tasks/${TASK}/cancel`) return reply(200, task('cancelled'));
         return reply(404, { code: 'not_found' });
     };
@@ -63,7 +74,18 @@ const run = (codes, extra = {}) => {
         assert.strictEqual(start.body.idempotency_key, 'act_task_01');
         assert.ok(out.text.includes('Done on your machine') && out.text.includes('Appended the line.') && out.text.includes('`README` (+1 −0)') && out.text.includes('```diff'), out.text);
         assert.deepStrictEqual(out.sources, [`https://openvibe.codes/run/tasks/${TASK}`]);
+        assert.ok(!codes.calls.some(c=>c.path.endsWith('/session.json')), 'the session bridge is off unless the owner enables its flag');
         assert.ok(events.some((e) => e.text && e.text.startsWith('Your machine is working on it')));
+    });
+
+    await check('the default-off session bridge reads the Codes session and emits its tool calls and result as Actor steps', async () => {
+        const codes = fakeCodes();
+        const { out, events } = await run(createCodes({ config:{...config,codesSessionBridge:true}, fetchImpl:codes.fetchImpl, tokens, sleep:async()=>{}, pollMs:0 }));
+        assert.ok(codes.calls.some(c=>c.path===`/run/tasks/${TASK}/session.json` && c.subject===ME && c.auth==='Bearer svc-token'));
+        assert.ok(codes.calls.some(c=>c.path===`/run/tasks/${TASK}/session.json` && c.query==='after=3'), 'the client follows session pagination');
+        assert.ok(events.some(e=>e.tool==='codes.session.tool' && e.step==='tool_result'));
+        assert.ok(events.some(e=>e.tool==='codes.session.tool_result' && e.text.includes('README contents')));
+        assert.match(out.text,/Codes session result: Finished the README edit\./);
     });
 
     await check('signed out, no repository, or no /run task yet: a refusal that says what to do', async () => {

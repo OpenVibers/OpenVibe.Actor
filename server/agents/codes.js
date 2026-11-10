@@ -60,6 +60,15 @@ function answerOf(t) {
     return lines.join('\n');
 }
 
+/** Validate the Codes v1 session envelope before its untrusted harness output enters Actor's step stream. */
+function sessionEventsOf(page, taskId) {
+    if (!page || page.task_id !== taskId || !Array.isArray(page.lines)) return [];
+    const allowed = new Set(['step', 'tool', 'tool_result', 'done']);
+    return page.lines.filter(line => line && Number.isSafeInteger(line.seq) && line.seq > 0 && allowed.has(line.kind)
+        && line.body && typeof line.body === 'object' && !Array.isArray(line.body) && line.body.t === line.kind)
+        .sort((a,b) => a.seq - b.seq).slice(-500);
+}
+
 function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverride = null, sleep = (ms, signal) => new Promise((ok) => { const h = setTimeout(ok, ms); if (signal) signal.addEventListener('abort', () => { clearTimeout(h); ok(); }, { once: true }); }), pollMs = 3000, now = () => Date.now() }) {
     const base = config.services.codesUrl;
     const pages = config.services.codesPublicUrl || 'https://openvibe.codes';
@@ -78,6 +87,24 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         });
         const data = await res.json().catch(() => null);
         return { status: res.status, ok: res.ok, data };
+    }
+    async function sessionPage(taskId, subject, signal) {
+        const lines = [];
+        let after = 0, complete = false;
+        for (let pageN = 0; pageN < 20; pageN++) {
+            const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000);
+            const res = await fetchImpl(`${base}/run/tasks/${encodeURIComponent(taskId)}/session.json?after=${after}`, {
+                headers: { Accept: 'application/json', 'X-OV-Subject': subject, ...(await tokens.authHeaders()) }, signal: sig,
+            });
+            if (!res.ok) return null;
+            const page = await res.json().catch(() => null);
+            if (!page || page.task_id !== taskId || !Array.isArray(page.lines)) return null;
+            lines.push(...page.lines);
+            complete = page.complete === true;
+            if (!page.has_more || !Number.isSafeInteger(page.next_after) || page.next_after <= after) break;
+            after = page.next_after;
+        }
+        return { task_id: taskId, lines, complete };
     }
     const why = (r) => (r.data && (r.data.detail || r.data.title)) || `OpenVibe.Codes answered ${r.status}`;
 
@@ -125,10 +152,18 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         if (t.state === 'expired') throw new ProviderError(`No machine of yours took the task in time. Is it online at https://openvibe.link/machines, with the Codes job runner (install it with --worker)? The task: ${t.url}`, { code: 'actor.agent.failed' });
         if (t.state !== 'succeeded') throw new ProviderError(`The task ${t.state === 'cancelled' ? 'was cancelled' : 'failed'}${t.error ? `: ${t.error}` : ''}. ${t.url}`, { code: 'actor.agent.failed' });
         if (!t.result || !t.result.ok) throw new ProviderError(`The agents on your machine did not finish${t.result && t.result.error ? `: ${t.result.error}` : ''}. ${t.url}`, { code: 'actor.agent.failed' });
-        return { text: answerOf(t), sources, model: (t.result.agents || [])[0] || 'openvibe-codes' };
+        let text = answerOf(t);
+        if (config.codesSessionBridge === true) {
+            const page = await sessionPage(t.id, subject, signal).catch(() => null);
+            const lines = sessionEventsOf(page, t.id);
+            for (const line of lines) await emit({ step: 'tool_result', tool: `codes.session.${line.kind}`, text: JSON.stringify(line.body).slice(0, 3000) });
+            const done = [...lines].reverse().find(line => line.kind === 'done' && line.body.ok === true);
+            if (done && typeof done.body.text === 'string' && done.body.text.trim()) text += `\n\nCodes session result: ${done.body.text.trim().slice(0, 4000)}`;
+        }
+        return { text, sources, model: (t.result.agents || [])[0] || 'openvibe-codes' };
     }
 
     return { enabled, adapter };
 }
 
-module.exports = { createCodes, repoIn, answerOf, personOf };
+module.exports = { createCodes, repoIn, answerOf, personOf, sessionEventsOf };
