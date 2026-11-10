@@ -110,7 +110,6 @@ ${render(scripts)}
 <meta name="ov-boost" content="actor@${esc(RELEASE)}">
 <script src="${ovServe.url('boost.js')}" data-main="#main" defer></script>`,
         body: `<a class="skip" href="#main">Skip to content</a>
-<div id="navbar-mount"></div>
 <noscript><div class="account-bar" role="navigation" aria-label="Account">${render(account)}</div></noscript>
 <main id="main" class="page${o.app ? ' page-app' : ''}">
 ${o.app ? '' : render(crumbs)}

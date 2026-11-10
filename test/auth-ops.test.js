@@ -119,11 +119,14 @@ const cookieJar = (res) => res.headers.getSetCookie().map((c) => c.split(';')[0]
         assert.notStrictEqual(proxied.status, 200, 'a proxied request is not loopback');
     });
 
-    await check('public pages are complete without JavaScript (noscript nav, SSR footer)', async () => {
+    await check('public pages are complete without JavaScript (server-rendered nav, SSR footer)', async () => {
         for (const p of ['/', '/agents', '/docs', '/updates']) {
             const r = await t.get(p);
             assert.strictEqual(r.status, 200, p);
-            assert.match(r.text, /<noscript><nav/);
+            // openvibe-shared 4.184.0 moved the bar's links into the first HTML (frame.serverNav, inside
+            // #navbar-mount), so the no-JavaScript navigation is that server nav, not a <noscript> block.
+            assert.match(r.text, /<div id="navbar-mount"><nav class="openvibe-navbar"[^>]*data-ov-server-nav="true"/, `${p}: the server-rendered navbar is in the first HTML`);
+            assert.match(r.text, /<a data-ov-nav-link="true" href="[^"]+">/, `${p}: the bar's links are in the first HTML`);
             assert.match(r.text, /<footer id="ov-footer"/);
             assert.match(r.text, /<main id="main"/);
         }
