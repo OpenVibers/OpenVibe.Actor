@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use OpenVibe.Actor in research or a product, cite it as below."
+title: openvibe-actor
+type: software
+authors:
+  - name: OpenVibe
+    alias: OpenVibers
+    website: https://openvibe.network
+repository-code: https://github.com/OpenVibers/OpenVibe.Actor
+url: https://openvibe.actor
+license: AGPL-3.0-only
+abstract: "Route a task to the best AI agent, check the answer with a second model, and see the cost and the why, at openvibe.actor."
+keywords:
+  - openvibe
+  - agent-orchestration
+  - ai
+  - ai-agents
+  - automation

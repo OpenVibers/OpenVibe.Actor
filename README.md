@@ -2,6 +2,9 @@
 
 > Your agent for everything: give a task in plain words, and Actor sends it to the best agent for it — OpenVibe's own, acting through every OpenVibe service, or another platform's — has a second model check the answer, and shows you what it cost and why. Like OpenRouter, for agents.
 
+**Live site:** https://openvibe.actor · **API docs:** https://openvibe.services · **For AI:** https://openvibe.actor/llms.txt
+**Run it:** `npm ci && npm run dev` (Node 22 or newer) · **Tests:** `npm test`
+
 **Status:** alpha. Public at `https://openvibe.actor` (openvibe-ovh, unit `openvibe-actor` on 127.0.0.1:4950 behind nginx). See [STATUS.json](STATUS.json) for exactly what works and what does not.
 **Domain:** `openvibe.actor` · **Port:** 4950 · **Service id:** `actor`
 **Plan:** T17 (owner direction 2026-10-08: OpenVibe's own general agent, competing with the big labs' agents while able to use theirs; an OpenRouter for agents; cheap self-hosted browser and desktop agents). Decisions: [ADR-044](https://github.com/OpenVibers/OpenVibe.Contracts/blob/main/docs/adr/ADR-044-actor-runtime.md) (proposed).
