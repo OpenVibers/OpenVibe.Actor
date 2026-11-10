@@ -288,19 +288,17 @@ function createApi(ctx) {
     r.get('/agents/:id', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), async (req, res) => {
         const row = await contacts.get(s, req.principal.requester, req.params.id);
         if (!row) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        if (req.query.view === 'prompt-layers') {
+            const notes = await personal.memory(s, req.principal.requester, row.id);
+            const day = new Date().toISOString().slice(0, 10);
+            const { SYSTEM } = require('../runtime/loop');
+            res.set('Cache-Control', 'no-store');
+            return res.json({ agent: row.id, layers: [
+                { name: 'actor-system', layer: 'platform', source: 'server/runtime/loop.js', version: '1', text: SYSTEM({ date: day, plan: '(task plan is supplied at run time)' }) },
+                ...personal.promptLayers(row, notes, '(task input is supplied at run time)'),
+            ] });
+        }
         res.json(contacts.wire(row));
-    });
-    r.get('/agents/:id/prompt-layers', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), async (req, res) => {
-        const agent = await contacts.get(s, req.principal.requester, req.params.id);
-        if (!agent) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
-        const notes = await personal.memory(s, req.principal.requester, agent.id);
-        const day = new Date().toISOString().slice(0, 10);
-        const { SYSTEM } = require('../runtime/loop');
-        res.set('Cache-Control', 'no-store');
-        res.json({ agent: agent.id, layers: [
-            { name: 'actor-system', layer: 'platform', source: 'server/runtime/loop.js', version: '1', text: SYSTEM({ date: day, plan: '(task plan is supplied at run time)' }) },
-            ...personal.promptLayers(agent, notes, '(task input is supplied at run time)'),
-        ] });
     });
     r.patch('/agents/:id', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), async (req, res) => {
         const out = await contacts.update(s, config, req.principal.requester, req.params.id, req.body || {});
