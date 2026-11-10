@@ -41,6 +41,8 @@ if (!playwright || !fs.existsSync('/usr/bin/google-chrome') || process.env.OV_SK
             await page.waitForSelector('#ay-now');
             assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width,'no horizontal scroll');
             assert.equal(await page.locator('.ay-state').textContent(),'Working');
+            // The model is under More in the status bar (it was a chip on a row of its own).
+            await page.locator('.ay-more > summary').click();
             await page.locator('[data-ovk-sheet="#ay-brain"]').click();
             await page.waitForSelector('#ay-brain[open]');
             assert.ok(!(await page.locator('#ay-brain').innerText()).includes('Uncensored'));
@@ -57,6 +59,7 @@ if (!playwright || !fs.existsSync('/usr/bin/google-chrome') || process.env.OV_SK
             await page.evaluate(()=>window.scrollTo(0,0));
             assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width,'no overflow after updating goals');
             if(out)await page.screenshot({path:path.join(out,'actor-'+width+'-'+scheme+'.png'),fullPage:true});
+            await page.locator('.ay-more > summary').click();
             await page.locator('[data-ovk-sheet="#ay-brain"]').click();
             await page.waitForSelector('#ay-brain[open]');
             await page.locator('#ay-brain [data-ovk-close]').click();
