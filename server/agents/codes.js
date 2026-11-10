@@ -89,11 +89,22 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         return { status: res.status, ok: res.ok, data };
     }
     async function sessionPage(taskId, subject, signal) {
-        const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000);
-        const res = await fetchImpl(`${base}/run/tasks/${encodeURIComponent(taskId)}/session.json?after=0`, {
-            headers: { Accept: 'application/json', 'X-OV-Subject': subject, ...(await tokens.authHeaders()) }, signal: sig,
-        });
-        return res.ok ? res.json().catch(() => null) : null;
+        const lines = [];
+        let after = 0, complete = false;
+        for (let pageN = 0; pageN < 20; pageN++) {
+            const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000);
+            const res = await fetchImpl(`${base}/run/tasks/${encodeURIComponent(taskId)}/session.json?after=${after}`, {
+                headers: { Accept: 'application/json', 'X-OV-Subject': subject, ...(await tokens.authHeaders()) }, signal: sig,
+            });
+            if (!res.ok) return null;
+            const page = await res.json().catch(() => null);
+            if (!page || page.task_id !== taskId || !Array.isArray(page.lines)) return null;
+            lines.push(...page.lines);
+            complete = page.complete === true;
+            if (!page.has_more || !Number.isSafeInteger(page.next_after) || page.next_after <= after) break;
+            after = page.next_after;
+        }
+        return { task_id: taskId, lines, complete };
     }
     const why = (r) => (r.data && (r.data.detail || r.data.title)) || `OpenVibe.Codes answered ${r.status}`;
 
