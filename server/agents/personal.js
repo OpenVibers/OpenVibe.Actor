@@ -260,7 +260,7 @@ function personText(task) {
     return end < 0 ? t : t.slice(0, end);
 }
 
-async function run(ctx, agent, input = '', { origin = 'person', level = null, triggerId = null, goal = null, parentId = null, mailNote = '', afterInsert = null } = {}) {
+async function run(ctx, agent, input = '', { origin = 'person', level = null, triggerId = null, goal = null, parentId = null, mailNote = '', afterInsert = null, budgetUsd = null } = {}) {
     const { s, config, engine, webhooks } = ctx;
     if (typeof input !== 'string' || input.length > 8000) return { status: 422, code: 'actor.agent.invalid', detail: 'input must be at most 8000 characters.' };
     // A goal's run (plan HO3) does a piece of the work and then answers the goal's done-test, in one line
@@ -271,7 +271,9 @@ async function run(ctx, agent, input = '', { origin = 'person', level = null, tr
     // The skills this agent has installed (plan HO2): their name and description go in the prompt, never their
     // instructions. The agent loads a skill itself when one of them fits the job; a withdrawn one is not offered.
     const installed = (await skillsStore.forAgent(s, agent.owner, agent.id)).filter((k) => !k.withdrawn);
-    const out = await createTask({ s, config, engine, webhooks, principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null }, parentId, body: { task: prompt(agent, notes, runInput, installed, { mailNote }), mode: agent.mode, budget: { per_task_usd: Number(agent.budget_per_run_usd) }, ...(level ? { level } : {}) }, assignmentOrigin: origin, assignmentLevel: level, triggerId, afterInsert, beforeInsert: async () => {
+    // A work fabric mandate may cap the run below the agent's own budget; the lower of the two always wins.
+    const cap = Number.isFinite(Number(budgetUsd)) && Number(budgetUsd) >= 0 ? Math.min(Number(agent.budget_per_run_usd), Number(budgetUsd)) : Number(agent.budget_per_run_usd);
+    const out = await createTask({ s, config, engine, webhooks, principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null }, parentId, body: { task: prompt(agent, notes, runInput, installed, { mailNote }), mode: agent.mode, budget: { per_task_usd: cap }, ...(level ? { level } : {}) }, assignmentOrigin: origin, assignmentLevel: level, triggerId, afterInsert, beforeInsert: async () => {
         const current = await s.db.maybe('SELECT daily_runs_max FROM actor_agents WHERE id = $1 AND owner = $2 FOR UPDATE', [agent.id, agent.owner]);
         if (!current) return { status: 404, code: 'actor.agent.not_found', detail: 'No such agent.' };
         const count = Number(await s.db.value('SELECT count(*) FROM tasks WHERE via = $1 AND created_at >= $2', [`agent:${agent.id}`, `${s.iso().slice(0, 10)}T00:00:00.000Z`]));
