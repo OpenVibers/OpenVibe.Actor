@@ -95,7 +95,8 @@
         } else if (f.getAttribute('id') === 'ay-goal-form') {
             const id = fields.get('id'), body = { text:fields.get('text'),lane:fields.get('lane'),every_minutes:Math.round(Number(fields.get('hours'))*60),budget:{usd:Number(fields.get('usd')),minutes:Number(fields.get('minutes'))},asks_before:String(fields.get('asks_before')).split('\n').map(x=>x.trim()).filter(Boolean),schedule:{days:fields.getAll('day').map(Number),start:Number(fields.get('start')),end:Number(fields.get('end')),zone:fields.get('zone')} };
             await request('/goals' + (id ? '/' + id : ''),body,id?'PATCH':'POST'); $('#ay-goal-editor').close(); await refresh();
-        } else if (f.getAttribute('id') === 'ay-earn') { await request('/earnings',{text:fields.get('text'),usd:Number(fields.get('usd')),confirmed:fields.get('confirmed')==='on'}); f.reset(); notice('Earnings added.'); location.reload(); }
+        } else if (f.getAttribute('id') === 'ay-run-model') { await request('/runs/' + encodeURIComponent(f.dataset.task) + '/model',{model:fields.get('model')}); notice('The next step will use that model.'); await refresh(); }
+        else if (f.getAttribute('id') === 'ay-earn') { await request('/earnings',{text:fields.get('text'),usd:Number(fields.get('usd')),confirmed:fields.get('confirmed')==='on'}); f.reset(); notice('Earnings added.'); location.reload(); }
         else if (f.getAttribute('id') === 'ay-computer-form') { const kind=fields.get('kind'); await request('',{computer:{kind,...(kind==='link'?{machine_id:fields.get('machine_id')}:{})}},'PATCH'); notice('Computer saved.'); await refresh(); }
         else if (f.getAttribute('id') === 'ay-type' && controlling) { const text=fields.get('text'); f.reset(); await input({action:'type',text}); }
         else if (f.dataset.answerForm) { await request('/asks/' + f.dataset.answerForm + '/answer',{text:fields.get('text')}); await refresh(); }

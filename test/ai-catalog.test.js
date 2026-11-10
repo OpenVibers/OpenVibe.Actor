@@ -93,6 +93,7 @@ function answer({ status = 200, resolved = EXACT, cost = 0.0012, body = null } =
             assert.strictEqual(aiCatalog.priceDescription('1000000000000'), '$1000.00 per million output tokens');
             assert.strictEqual(aiCatalog.priceDescription(null), 'Output price not listed');
             assert.deepStrictEqual(entries.map((e) => e.state), ['ok', 'ok', 'ok', 'ok', 'off'], 'availability as the select state');
+            assert.strictEqual(entries.find(e => e.id === 'acme/m1:q4_k_m@rev1').tool_calls, true, 'tool support is retained for live Actor model switching');
             assert.strictEqual(entries[4].available, false, 'an unavailable exact id is not a choice');
 
             // The flag-off AI answer (one legacy model), an empty answer and rubbish are today's behaviour.

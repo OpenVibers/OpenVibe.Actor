@@ -65,6 +65,9 @@ function parse(body) {
             name: String(m.display_name || m.name || id),
             description: typeof m.description === 'string' ? m.description : null,
             policy: typeof m.policy === 'string' ? m.policy : null,
+            // The router's capability is the guardrail when a live task has tools. Unknown stays unknown; a model
+            // that explicitly refuses tool calls cannot be switched onto a tool-using Actor run.
+            tool_calls: m.capabilities && typeof m.capabilities.tools === 'boolean' ? m.capabilities.tools : undefined,
             output_nano_usd_per_m: typeof output === 'string' && /^\d+$/.test(output) ? output : null,
             availability,
             state: STATE[availability] || (dynamic ? 'ok' : 'off'),

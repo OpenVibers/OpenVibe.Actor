@@ -542,7 +542,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 if (dayRun) choice = await day.modelChoice(id);
                 // "Runs on: my computer": the model on the person's computer, whatever else they chose above it (a
                 // model id they gave for their computer is kept).
-                if (runsOn === 'computer' && !(choice && choice.provider === 'link')) choice = modelPrefs.computerChoice(row.requester);
+                if (runsOn === 'computer' && !(choice && choice.provider === 'link') && !(dayRun && dayRun.model_override)) choice = modelPrefs.computerChoice(row.requester);
                 // The person the task belongs to rides on every router call (on_behalf_of): their allowance pays,
                 // even when they chose no key. A task with no person (a watch, a webhook) names nobody, and AI
                 // serves it from free or untolled capacity only.
