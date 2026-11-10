@@ -30,7 +30,7 @@
         var send = chat.querySelector('[data-ovt-send]');
         var note = chat.querySelector('[data-cc-note]');
         var fine = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-        var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var reduce = document.documentElement.getAttribute('data-ov-motion') === 'off';
 
         // ── The canvas (plan HO9). The document rides in an inert template; openvibe-shared's ov-canvas.js draws it
         // into the wide panel and the phone fold from the same data. A button's label goes to the agent as the

@@ -107,7 +107,7 @@
       item.classList.add('is-flash', 'is-open');
       chip.classList.add('is-on');
       try { history.replaceState(null, '', '#ev-' + chip.getAttribute('data-ev')); } catch (err) { /* a sandboxed frame */ }
-      var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var still = document.documentElement.getAttribute('data-ov-motion') === 'off';
       item.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' });
       setTimeout(function () { item.classList.remove('is-flash'); chip.classList.remove('is-on'); }, 2400);
     });

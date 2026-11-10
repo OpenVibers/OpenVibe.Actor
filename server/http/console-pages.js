@@ -13,6 +13,7 @@
 const cache = require('openvibe-shared/cache-policy');
 const { asyncRouter } = require('./router');
 const { html, raw, time } = require('../render/html');
+const kit = require('openvibe-shared/kit');
 const { send } = require('../render/layout');
 const store = require('../tasks/store');
 const { leftLine } = require('../tasks/allowance');
@@ -39,7 +40,7 @@ function createConsolePages(ctx, { robots = null, computers = null } = {}) {
     const r = asyncRouter();
     const bot = { robots: robots || createRobots({ config }), computers: computers || createComputers({ config }) };
     const tier = config.allowance;
-    const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, css: ['css/console.css'], ...o });
+    const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, styles: ['kit.css'], css: ['css/console.css'], ...o });
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const pages = config.services.botPublicUrl || 'https://openvibe.bot';
     const linkPages = config.services.linkPublicUrl || 'https://openvibe.link';
@@ -115,7 +116,7 @@ ${today ? html`<p class="cn-note" data-allowance>${leftLine(tier, today)}</p>` :
     function computersCard(result) {
         const body = !bot.computers.enabled ? html`<p class="cn-empty">Not connected to OpenVibe.Bot on this server.</p>`
             : !result.ok ? html`<p class="cn-empty">${result.why}</p>`
-                : !result.value.computers.length ? html`<p class="cn-empty">No computer is open to your agent. Add one on <a href="${linkPages}/machines">openvibe.link/machines</a> with <code>--computer ask</code>, then turn on “Let my agent use this computer”.</p>`
+                : !result.value.computers.length ? raw(kit.empty({ icon: 'server', title: 'No computer is open to your agent', text: 'Add one on openvibe.link/machines with --computer ask, then turn on “Let my agent use this computer”.', action: { href: `${linkPages}/machines`, label: 'Add a computer', icon: 'plus' } }))
                     : html`<ul class="cn-list">${result.value.computers.map((c) => html`<li><span class="cn-dot${c.online ? ' on' : ''}" aria-hidden="true"></span><b>${c.name || c.id}</b>
 <span class="cn-meta">${c.online ? 'Online' : 'Offline'} · ${LEVEL_TEXT[c.level] || 'On'}${c.can.length ? html` · ${c.can.join(', ')}` : ''}</span>
 ${c.waiting_for_approval ? html`<span class="pill pill-running">${String(c.waiting_for_approval)} waiting on the machine</span>` : ''}
@@ -127,7 +128,7 @@ ${c.online && c.can.includes('screen') ? html`<a class="cn-link" href="${linkPag
     function robotsCard(result) {
         const body = !bot.robots.enabled ? html`<p class="cn-empty">Not connected to OpenVibe.Bot on this server.</p>`
             : !result.ok ? html`<p class="cn-empty">${result.why}</p>`
-                : !result.value.length ? html`<p class="cn-empty">No robot yet. <a href="${pages}/try">Try one in your browser</a> or add yours on <a href="${pages}">openvibe.bot</a>.</p>`
+                : !result.value.length ? raw(kit.empty({ icon: 'robot', title: 'No robot yet', text: 'Try one in your browser, or add your own on openvibe.bot.', action: { href: `${pages}/try`, label: 'Try one in your browser', icon: 'play' } }))
                     : html`<ul class="cn-list">${result.value.map((x) => html`<li><span class="cn-dot${x.online ? ' on' : ''}" aria-hidden="true"></span><a href="${x.panel}"><b>${x.name}</b></a>
 <span class="cn-meta">${x.agent_control ? (x.online ? 'Online' : 'Offline') : 'Not open to your agent'}${x.estop && x.estop.latched ? ' · e-stop on' : ''}${typeof x.battery === 'number' ? ` · battery ${Math.round(x.battery * 100)}%` : ''}</span></li>`)}</ul>`;
         return html`<section class="cn-card" aria-labelledby="cn-robots"><h2 id="cn-robots">Your robots</h2>${body}
@@ -187,11 +188,11 @@ ${previewGrid()}`,
 ${commandBox(prefill(req), today)}
 <div class="cn-grid">
 <section class="cn-card cn-wide" aria-labelledby="cn-now"><h2 id="cn-now">Now${live.length ? html` <span class="cn-count">${String(live.length)}</span>` : ''}</h2>
-${live.length ? html`<ul class="cn-tasks">${live.map(taskRow)}</ul><p class="cn-note">This page refreshes every 10 seconds while something runs.</p>` : html`<p class="cn-empty">Nothing is running.</p>`}</section>
+${live.length ? html`<ul class="cn-tasks">${live.map(taskRow)}</ul><p class="cn-note">This page refreshes every 10 seconds while something runs.</p>` : raw(kit.empty({ icon: 'play', title: 'Nothing is running', text: 'A task you give above appears here while it works.', action: { href: '#cn-task', label: 'Give Actor a task', icon: 'plus' } }))}</section>
 <section class="cn-card${nWaiting ? ' cn-attn' : ''}" aria-labelledby="cn-waiting"><h2 id="cn-waiting">Waiting for you${nWaiting ? html` <span class="cn-count">${String(nWaiting)}</span>` : ''}</h2>
 ${waiting.length ? html`<ul class="cn-list">${waiting.slice(0, 4).map((a) => html`<li><a href="/me/approvals/${a.id}"><b>${clip(a.summary, 80)}</b></a><span class="cn-meta">Asked ${time(a.created_at)}</span></li>`)}</ul>` : ''}
 ${onMachines ? html`<p class="cn-note">${String(onMachines)} on your computers: answer them there, in the Link's tray, with a notification's Approve button, or with <code>openvibe-link approvals</code>.</p>` : ''}
-${nWaiting ? '' : html`<p class="cn-empty">Nothing waits for you.</p>`}
+${nWaiting ? '' : raw(kit.empty({ icon: 'check', title: 'Nothing waits for you', text: 'An agent that needs your answer asks here first.' }))}
 <p class="cn-more"><a href="/me/approvals">All approvals</a></p></section>
 <section class="cn-card" aria-labelledby="cn-today"><h2 id="cn-today">Today</h2>
 <p class="cn-stat"><b>${String(today.tasks)}</b> of ${String(tier.tasksPerDay)} free tasks</p>
@@ -201,12 +202,12 @@ ${nWaiting ? '' : html`<p class="cn-empty">Nothing waits for you.</p>`}
 ${spendChart(week, { caption: 'Last 7 days' })}
 <p class="cn-more"><a href="/me/spend">Last 30 days</a> · <a href="/tasks">Your tasks</a></p></section>
 <section class="cn-card cn-wide" aria-labelledby="cn-lately"><h2 id="cn-lately">Lately</h2>
-${events.length ? html`<ul class="cn-events">${events.map(eventRow)}</ul>` : html`<p class="cn-empty">Nothing has happened yet. Give Actor a task above.</p>`}
+${events.length ? html`<ul class="cn-events">${events.map(eventRow)}</ul>` : raw(kit.empty({ icon: 'list', title: 'Nothing has happened yet', text: 'Your tasks and approvals appear here as they happen.', action: { href: '#cn-task', label: 'Give Actor a task', icon: 'plus' } }))}
 <p class="cn-more"><a href="/tasks">All your tasks</a> · <a href="/me/approvals">All approvals</a></p></section>
 <section class="cn-card" aria-labelledby="cn-agents"><h2 id="cn-agents">Your agents</h2>
 ${agents.length ? html`<ul class="cn-list">${agents.slice(0, 5).map((a) => html`<li><span class="cn-dot${a.status === 'paused' ? '' : ' on'}" aria-hidden="true"></span><a href="/me/agents/${a.id}"><b>${a.name}</b></a>
 <span class="cn-meta">${a.status === 'paused' ? 'Paused' : a.schedule === 'off' ? 'Runs when you run it' : `Every ${a.schedule === 'hourly' ? 'hour' : a.schedule === 'daily' ? 'day' : 'week'}`}${a.last_run_at ? html` · last ran ${time(a.last_run_at)}` : ''}</span></li>`)}</ul>`
-        : html`<p class="cn-empty">No agent yet. An agent is a task you set up once, with a memory and a schedule.</p>`}
+        : raw(kit.empty({ icon: 'robot', title: 'No agent yet', text: 'An agent is a task you set up once, with a memory and a schedule.', action: { href: '/me/agents', label: 'Create an agent', icon: 'plus' } }))}
 <p class="cn-more"><a href="/me/agents">${agents.length ? 'All your agents' : 'Create an agent'}</a></p></section>
 ${computersCard(pcs)}
 ${robotsCard(rovers)}
