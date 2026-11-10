@@ -272,7 +272,8 @@ async function run(ctx, agent, input = '', { origin = 'person', level = null, tr
     // instructions. The agent loads a skill itself when one of them fits the job; a withdrawn one is not offered.
     const installed = (await skillsStore.forAgent(s, agent.owner, agent.id)).filter((k) => !k.withdrawn);
     // A work fabric mandate may cap the run below the agent's own budget; the lower of the two always wins.
-    const cap = Number.isFinite(Number(budgetUsd)) && Number(budgetUsd) >= 0 ? Math.min(Number(agent.budget_per_run_usd), Number(budgetUsd)) : Number(agent.budget_per_run_usd);
+    const capped = budgetUsd == null ? null : Number(budgetUsd);
+    const cap = capped != null && Number.isFinite(capped) && capped >= 0 ? Math.min(Number(agent.budget_per_run_usd), capped) : Number(agent.budget_per_run_usd);
     const out = await createTask({ s, config, engine, webhooks, principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null }, parentId, body: { task: prompt(agent, notes, runInput, installed, { mailNote }), mode: agent.mode, budget: { per_task_usd: cap }, ...(level ? { level } : {}) }, assignmentOrigin: origin, assignmentLevel: level, triggerId, afterInsert, beforeInsert: async () => {
         const current = await s.db.maybe('SELECT daily_runs_max FROM actor_agents WHERE id = $1 AND owner = $2 FOR UPDATE', [agent.id, agent.owner]);
         if (!current) return { status: 404, code: 'actor.agent.not_found', detail: 'No such agent.' };
