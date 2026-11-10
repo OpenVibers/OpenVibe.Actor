@@ -102,10 +102,9 @@ const SAME = { origin: 'https://openvibe.actor' };
             const edited = await t.get(`/tasks/${id}/assumptions`, { as: bea, form: { assumptions: 'Use EUR\nAsk before booking' }, headers: SAME });
             assert.strictEqual(edited.status, 303);
             t.providers.state.runtime = 'tool';
-            // Up to 10 s: the follow-up turn runs after the hang is released, and a loaded CI runner took longer than
-            // the 2.5 s this waited before (Actor #384 failed on it three times on 2026-11-09; it passes locally in 9 s).
+            // Up to 30 s: the follow-up turn can wait behind the runtime queue on a loaded CI runner.
             let seen = false;
-            for (const until = Date.now() + 10000; !seen && Date.now() < until;) {
+            for (const until = Date.now() + 30000; !seen && Date.now() < until;) {
                 const events = await store.eventsAfter(s, id, 0);
                 seen = events.some((e) => e.step === 'plan' && /Assumptions: Use EUR; Ask before booking/.test(String(e.text)));
                 if (!seen) await new Promise((r) => setTimeout(r, 50));
