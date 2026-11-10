@@ -2,6 +2,12 @@
     'use strict';
     if (!document.querySelector('[data-actor-page]')) return;
     const $ = s => document.querySelector(s);
+    if (document.querySelector('[data-ov-machines]') && !window.OpenVibeMachines) {
+        const picker = document.createElement('script');
+        picker.src = '/shared/machines.js';
+        picker.defer = true;
+        document.head.append(picker);
+    }
     const api = '/api/v1/me/actor';
     let controlling = false, refreshing = false, oldFrame = null, cursor = null;
     function notice(text, error) { const n = $('#ay-notice'); if (n) { n.textContent = text; n.classList.toggle('ay-error', !!error); } }
