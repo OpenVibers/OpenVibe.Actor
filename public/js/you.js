@@ -120,3 +120,5 @@
         try { const r=await fetch(api+'/computer/still',{credentials:'same-origin'}); if(!r.ok)return; const next=URL.createObjectURL(await r.blob()); img.src=next; if(oldFrame)URL.revokeObjectURL(oldFrame); oldFrame=next; } catch {}
     },2000);
 })();
+// More (the status bar): it closes when one of its items is chosen, or on a press anywhere else.
+document.addEventListener('click', (e) => { const m = document.querySelector('.ay-more[open]'); if (m && (!m.contains(e.target) || (e.target.closest && e.target.closest('.ay-more-item')))) m.open = false; });

@@ -7,3 +7,70 @@
 .ay-run-model-row select{flex:1;min-width:0}
 .ay-run-model-row .ovk-btn{flex:none;min-height:44px}
 .ay-run-model-note{margin:0;font-size:.82rem;line-height:1.45;color:var(--text-secondary)}
+
+/* ── /you as an agent's home (2026-11-10). The status bar stays on screen; what needs the person is first; the composer
+   is docked at the bottom of the screen, above the app's bar; the page keeps room for it. ── */
+.ay-page{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+.ay-bar{position:sticky;top:calc(var(--ovnav-h,56px) + 6px);z-index:6;display:flex;align-items:center;gap:10px;min-width:0;margin:0 0 12px;padding:8px 8px 8px 10px;border-radius:20px;border:1px solid var(--border,rgba(255,255,255,.1));background:color-mix(in srgb,var(--bg-card,#131c2e) 90%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 10px 28px -18px rgba(0,0,0,.7)}
+.ay-bar .ay-avatar{width:40px;height:40px;border-radius:14px;flex:none}
+.ay-id{display:grid;gap:1px;min-width:0;flex:1}
+.ay-bar .ay-name-button{all:unset;cursor:pointer;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800;font-size:1rem;line-height:1.25;color:var(--text-primary,#e6edf7)}
+.ay-bar .ay-name-button:focus-visible{outline:2px solid var(--accent,#3b82f6);outline-offset:2px;border-radius:6px}
+.ay-bar .ay-state{display:inline-flex;align-items:center;gap:6px;min-width:0;font-size:.8rem;font-weight:650;line-height:1.25;color:var(--text-secondary,#96a7c2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ay-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--text-muted,#7386a3)}
+.ay-bar[data-state=working] .ay-state{color:var(--success-text,var(--success,#34d399))}
+.ay-bar[data-state=waiting] .ay-state{color:var(--warning-text,var(--warning,#fbbf24))}
+.ay-bar[data-state=waiting] .ay-dot{background:currentColor;animation:ay-wait 1.6s ease-in-out infinite}
+.ay-bar[data-state=waiting]{border-color:color-mix(in srgb,var(--warning,#fbbf24) 45%,transparent)}
+@keyframes ay-wait{50%{opacity:.35;transform:scale(.8)}}
+.ay-bar-spend{display:grid;justify-items:end;flex:none;line-height:1.15;text-decoration:none;color:var(--text-primary,#e6edf7);font-variant-numeric:tabular-nums}
+.ay-bar-spend strong{font-size:.95rem}
+.ay-bar-spend small{font-size:.68rem;color:var(--text-muted,#7386a3)}
+.ay-bar-btn{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;min-width:44px;height:44px;padding:0 12px;border-radius:14px;cursor:pointer;font-size:.86rem;font-weight:750;color:var(--text-primary,#e6edf7);background:color-mix(in srgb,var(--text-primary,#e6edf7) 8%,transparent);transition:background-color .15s ease,transform .12s ease}
+.ay-bar-btn .ovk-i{width:18px;height:18px}
+.ay-bar-btn:hover{background:color-mix(in srgb,var(--text-primary,#e6edf7) 14%,transparent)}
+.ay-bar-btn:active{transform:scale(.95)}
+.ay-bar-btn:focus-visible{outline:2px solid var(--accent,#3b82f6);outline-offset:2px}
+.ay-bar-btn.is-go{background:var(--accent-strong,var(--accent,#2563eb));color:var(--on-accent-strong,#fff)}
+.ay-bar-btn--icon{padding:0;width:44px}
+.ay-more{position:relative;flex:none}
+.ay-more>summary{list-style:none}.ay-more>summary::-webkit-details-marker{display:none}
+.ay-more-pop{position:absolute;right:0;top:calc(100% + 8px);z-index:8;display:grid;gap:2px;min-width:230px;padding:6px;border-radius:16px;border:1px solid var(--border,rgba(255,255,255,.1));background:var(--bg-card,#131c2e);box-shadow:0 18px 40px rgba(0,0,0,.5);animation:ay-pop .18s cubic-bezier(.2,.9,.3,1.1)}
+@keyframes ay-pop{from{opacity:0;transform:translateY(calc(-6px*var(--ov-move,1))) scale(.98)}}
+.ay-more-item{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;min-height:48px;padding:6px 10px;border-radius:11px;cursor:pointer;color:var(--text-primary,#e6edf7)}
+.ay-more-item:hover,.ay-more-item:focus-visible{background:color-mix(in srgb,var(--text-primary,#e6edf7) 8%,transparent)}
+.ay-more-item .ovk-i{width:20px;height:20px;color:var(--accent,#3b82f6);flex:none}
+.ay-more-item b{display:block;font-size:.9rem}.ay-more-item small{display:block;font-size:.78rem;color:var(--text-muted,#7386a3)}
+@media (max-width:420px){.ay-bar-btn:not(.ay-bar-btn--icon) span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.ay-bar-btn:not(.ay-bar-btn--icon){padding:0;width:44px}}
+/* What needs the person comes first and says so. */
+.ay-page[data-state=waiting] #ay-asks{border-color:color-mix(in srgb,var(--warning,#fbbf24) 50%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--warning,#fbbf24) 12%,transparent)}
+/* The chips that jump to the page's sections. */
+.ay-tabs{grid-column:1/-1;display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -2px;padding:2px}
+.ay-tabs::-webkit-scrollbar{display:none}
+.ay-tab{display:inline-flex;align-items:center;gap:7px;flex:none;min-height:44px;padding:0 14px;border-radius:999px;border:1px solid var(--border,rgba(255,255,255,.1));background:color-mix(in srgb,var(--text-primary,#e6edf7) 4%,transparent);color:var(--text-secondary,#96a7c2);font-size:.88rem;font-weight:700;text-decoration:none;transition:color .15s ease,border-color .15s ease}
+.ay-tab .ovk-i{width:16px;height:16px;color:var(--accent,#3b82f6)}
+.ay-tab:hover,.ay-tab:focus-visible{color:var(--text-primary,#e6edf7);border-color:color-mix(in srgb,var(--accent,#3b82f6) 50%,transparent)}
+.ay-card{scroll-margin-top:calc(var(--ovnav-h,56px) + 84px)}
+.ay-said{grid-column:1/-1}.ay-said[hidden]{display:none}
+/* Goals on the first day: three ways to start, each a sentence. */
+.ay-starters{display:grid;gap:10px}
+.ay-starters-lede{margin:0;color:var(--text-secondary,#96a7c2)}
+.ay-starter-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
+.ay-starter{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 12px;border-radius:16px;border:1px solid var(--border,rgba(255,255,255,.1));background:color-mix(in srgb,var(--accent,#3b82f6) 6%,transparent);cursor:pointer;color:var(--text-primary,#e6edf7);transition:border-color .15s ease,transform .12s ease,background-color .15s ease}
+.ay-starter:hover,.ay-starter:focus-visible{border-color:color-mix(in srgb,var(--accent,#3b82f6) 60%,transparent);background:color-mix(in srgb,var(--accent,#3b82f6) 12%,transparent)}
+.ay-starter:active{transform:scale(.985)}
+.ay-starter-i{display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:13px;background:color-mix(in srgb,var(--accent,#3b82f6) 16%,transparent);color:var(--accent,#3b82f6)}
+.ay-starter-i .ovk-i{width:20px;height:20px}
+.ay-starter b{display:block}.ay-starter small{display:block;margin-top:1px;font-size:.82rem;color:var(--text-secondary,#96a7c2)}
+/* The composer, docked. */
+.ay-dock{position:fixed;left:0;right:0;bottom:var(--ovnav-appbar-h,0px);z-index:7;padding:18px 10px calc(8px + max(0px,env(safe-area-inset-bottom,0px) - var(--ovnav-appbar-h,0px)));background:linear-gradient(to bottom,transparent,var(--bg-primary,#0a0f1c) 38%);pointer-events:none}
+.ay-dock .ay-thread{max-width:760px;margin:0 auto;pointer-events:auto}
+.ay-dock .ovt-composer,.ay-dock form{box-shadow:0 14px 36px -14px rgba(0,0,0,.75)}
+/* In the dock the composer is one line until the person writes more: Add, the text, Send in a row. */
+.ay-dock .ovt-composer{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:0 6px;padding:6px 6px 6px 14px;border-radius:26px}
+.ay-dock .ovt-composer textarea{grid-column:1;grid-row:1;min-height:44px;max-height:38vh;padding:11px 0;resize:none;field-sizing:content}
+.ay-dock .ovt-c-row{grid-column:2;grid-row:1;display:flex;align-items:center;gap:4px;margin:0;padding:0}
+.ay-dock .ovt-c-note{grid-column:1/-1;margin:0}
+.ay-dock .ovt-c-note:empty{display:none}
+.ay-dock .ovt-send{width:44px;height:44px;border-radius:50%}
+@media (max-width:420px){.ay-bar{gap:8px;padding:7px 7px 7px 9px}.ay-bar .ay-avatar{width:36px;height:36px}.ay-bar-spend small{display:none}}
