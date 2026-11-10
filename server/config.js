@@ -28,6 +28,7 @@ function load(env = process.env) {
 
     return {
         service: 'actor',
+        fabric: { enabled: bool(env.ACTOR_WORK_FABRIC) },
         port,
         host: env.HOST || '127.0.0.1',
         nodeEnv,

@@ -67,8 +67,11 @@ async function start() {
     // Subscribe to the two ADR-033 topics at OpenVibe.Events (idempotent; off without ACTOR_EVENTS_URL and
     // ACTOR_EVENTS_SECRET). The consumer itself is mounted in server/app.js.
     const subscriptions = require('./events-consumer').startSubscriptions({ config, port: config.port, secret: config.events.secrets[0] || '',
-        topics: config.chat.asks ? ['chat.message.created'] : [] });
+        topics: [...(config.chat.asks ? ['chat.message.created'] : []), ...(ctx.fabric.enabled ? require('./fabric/sources').TOPICS : [])] });
     const extra = [() => { if (subscriptions) subscriptions.stop(); }];
+    if (ctx.fabric.enabled && !config.drill) {
+        extra.push(require('./utils/jobs').every('actor-fabric-time', 1000, () => ctx.fabric.tick(), { initialDelayMs: 1000, log: console }));
+    }
     const dayJobs = ctx.day.startJobs();
     extra.push(() => { for (const stop of dayJobs) stop(); });
     // The waits (plan A2): the deadline loop fires the waits whose time is up, and the sweep reads the topics

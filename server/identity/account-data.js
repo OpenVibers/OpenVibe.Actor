@@ -101,6 +101,7 @@ const TABLES = [
     { table: 'actor_agent_proposals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-suggestions.json' },
     // Which of their agents' runs went to their Vibe chats (agents/vibe-deliver.js).
     { table: 'actor_vibe_deliveries', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-runs-sent-to-vibe.json' },
+    { table: 'actor_work_fabric', subject: 'owner', value: (usr) => `user:${usr}`, file: 'work-fabric.json', erase: 'delete' },
     { table: 'actor_agents', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agents.json' },
     // The voices they shared (agents/voice-shares.js): the public link, the document it holds and who shared it.
     // The document is their own text, and the link is theirs to stop sharing.
