@@ -154,8 +154,10 @@ const approvals = require('../server/agents/approvals');
             const cy = t.network.addUser('cy');
             const quiet = await t.get('/console', { as: cy });
             assert.doesNotMatch(quiet.text, /data-live=/);
-            assert.match(quiet.text, /Nothing is running\./);
+            assert.match(quiet.text, /Nothing is running/);
             assert.match(quiet.text, /No agent yet/);
+            assert.match(quiet.text, /class="ovk-empty"/, 'the empty console lists draw the kit empty state');
+            assert.match(quiet.text, /class="ovk-btn[^"]*" href="#cn-task"/, 'the empty state points at the task box');
         });
     } finally { await t.close(); }
     done();

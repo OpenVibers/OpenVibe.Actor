@@ -173,7 +173,6 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 
 @keyframes ct-breathe { 0%, 100% { opacity: .55; transform: scale(.94); } 50% { opacity: 1; transform: scale(1); } }
 @keyframes ct-shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
-@media (prefers-reduced-motion: reduce) { .ct-hello-mark, .ct-live::before { animation: none !important; } }
 
 /* ── The canvas (plan HO9, actor.canvas@1) ───────────────────────────────────────────────────────────────────────
    The same data document in two places: the thread's third column on a wide screen (thread.css's own panel, which is
