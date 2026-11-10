@@ -271,7 +271,7 @@ class Engine {
             this.validate('agent.ticket', ticket);
             this.s.tickets[ticket.id] = ticket;
             for (const id of e.ids) this.s.accepted[id] = ticket.id;
-            this.s.meta[ticket.id] = { basis: e.basis, owned: [], handbacks: [], read: [], reports: [], tasks: [] };
+            this.s.meta[ticket.id] = { basis: e.basis, created_at: this.iso(), owned: [], handbacks: [], read: [], reports: [], tasks: [] };
             for (const key of t.threads) this.thread(key).subscriptions[ticket.id] = 'origin';
             this.enqueue('launch', `launch:${ticket.id}`, { ticket, triggers: e.ids.map(id => this.s.triggers[id]) }, `worker:${ticket.id}`);
         }

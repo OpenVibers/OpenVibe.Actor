@@ -82,6 +82,7 @@ const policy = () => ({
             const out = await fabric.command(owner, agent, 'decide', { evaluation: state.threads[thread].evaluation.id, decision: 'accept', assessment });
             assert.equal(out.decision.decision, 'accept'); assert.ok(out.ticket);
             first = out.ticket;
+            assert.ok(Date.parse((await fabric.snapshot(owner, agent)).state.meta[first.id].created_at));
             const after = await fabric.observe(owner, agent, { lane: 'fix' });
             assert.equal(after[0].mode, 'auto'); assert.equal(after[0].decision, 'accept');
         });

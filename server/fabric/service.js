@@ -7,6 +7,7 @@ const COMMANDS = new Set(['configure', 'start', 'decide', 'subscribe', 'attach',
 const round = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
 // The first promotion review needs a little history; a single run is not a basis for an estimate.
 const ESTIMATE_RUNS = 3;
+const WORK_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 function createFabric({ s, enabled = false, readMail, validate = (name, value) => {
     try { return contracts.assertValid(`${name}@1`, value); }
     catch (err) { if (err.code === 'contract.invalid') err.status = 422; throw err; }
@@ -97,8 +98,14 @@ function createFabric({ s, enabled = false, readMail, validate = (name, value) =
         },
         async snapshot(owner, agent) {
             enabledCheck();
-            const row = await s.db.maybe('SELECT f.state, f.revision FROM actor_work_fabric f JOIN actor_agents a ON a.id = f.agent_id WHERE f.agent_id = $1 AND f.owner = $2 AND a.owner = $2', [agent, owner]);
+            let row = await s.db.maybe('SELECT f.state, f.revision FROM actor_work_fabric f JOIN actor_agents a ON a.id = f.agent_id WHERE f.agent_id = $1 AND f.owner = $2 AND a.owner = $2', [agent, owner]);
             if (!row) throw Object.assign(new Error('Fabric not found'), { status: 404 });
+            const state = typeof row.state === 'string' ? JSON.parse(row.state) : row.state;
+            const cutoff = Date.now() - WORK_RETENTION_MS;
+            const expired = Object.entries(state.tickets || {}).filter(([id, ticket]) => ticket.state === 'ended'
+                && Date.parse(state.meta?.[id]?.created_at || '') < cutoff).map(([id]) => id);
+            for (const id of expired) await this.deleteTicket(owner, agent, id);
+            if (expired.length) row = await s.db.maybe('SELECT f.state, f.revision FROM actor_work_fabric f JOIN actor_agents a ON a.id = f.agent_id WHERE f.agent_id = $1 AND f.owner = $2 AND a.owner = $2', [agent, owner]);
             return row;
         },
         async command(owner, agent, name, args = {}) {
