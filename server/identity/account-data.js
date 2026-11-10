@@ -104,6 +104,9 @@ const TABLES = [
     { table: 'actor_work_fabric', subject: 'owner', value: (usr) => `user:${usr}`, file: 'work-fabric.json', erase: 'delete' },
     // The Actor runtime task behind a fabric Ticket (S4 executor adapters); the task row itself is exported above.
     { table: 'actor_fabric_tasks', subject: 'owner', value: (usr) => `user:${usr}`, file: 'work-fabric-tasks.json', erase: 'delete' },
+    // What a lane in observe would have done and every promotion/demotion with its reason (S5).
+    { table: 'actor_fabric_observe', subject: 'owner', value: (usr) => `user:${usr}`, file: 'work-fabric-observe.json', erase: 'delete' },
+    { table: 'actor_fabric_lane_changes', subject: 'owner', value: (usr) => `user:${usr}`, file: 'work-fabric-lane-changes.json', erase: 'delete' },
     { table: 'actor_agents', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agents.json' },
     // The voices they shared (agents/voice-shares.js): the public link, the document it holds and who shared it.
     // The document is their own text, and the link is theirs to stop sharing.

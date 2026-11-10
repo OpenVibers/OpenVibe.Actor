@@ -273,7 +273,7 @@ function createFabricAdapters({ s, config, fabric, models, ctx: taskCtx = null, 
         const ticket = state.tickets[ticketId];
         if (ticket.state !== 'open') return;
         const report = reportFor(row, ticket);
-        await fabric.command(owner, agentId, 'report', { ticket_id: ticketId, report, end: true });
+        await fabric.command(owner, agentId, 'report', { ticket_id: ticketId, report, end: true, spent_usd: Number(row.cost_usd) || 0, task_id: row.id });
         // One confirmation to the person on the Source thread, not a stream of progress.
         const source = state.sources[ticket.mandate.actor.source];
         if (source) {

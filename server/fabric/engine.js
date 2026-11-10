@@ -1,18 +1,99 @@
 'use strict';
-const { policy, gate, revalidate, assessment, assert, text } = require('./policy');
+const { policy, gate, revalidate, assessment, assert, text, laneMode } = require('./policy');
+const { REPORT_STAGES } = require('./reports');
 const copy = structuredClone;
 const own = (map, key) => Object.hasOwn(map, key) ? map[key] : undefined;
 const emptyDirection = () => ({ implementation_requested: false, target_basis: 'undetermined', requires_design_decision: false, evidence: [] });
-// The six agent.report@1 states and the stage each one leaves on an open Ticket (agent.stage@1, first match).
-const REPORT_STAGES = Object.freeze({ ready: 'person/review', blocked: 'person/blocked', failed: 'person/failed', waiting: 'idle', progress: 'working', dropped: 'idle' });
+const NO_ESTIMATE = Object.freeze({ low_usd: null, high_usd: null, basis: 'no data yet' });
+const NOTHING_RUNS = Object.freeze({ low_usd: 0, high_usd: 0, basis: 'nothing would run' });
+const round = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+const clip = (s, n) => { const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 function initial() {
-    return { policy: policy(), sources: {}, triggers: {}, threads: {}, tickets: {}, meta: {}, decisions: [], work: [], schedules: {}, accepted: {}, seq: 0 };
+    return { policy: policy(), sources: {}, triggers: {}, threads: {}, tickets: {}, meta: {}, decisions: [], work: [], schedules: {}, accepted: {}, seq: 0,
+        // S5: what each lane would have done, and every promotion/demotion with its reason (mirrored to SQL by service.js).
+        observe: [], observe_seq: 0, lane_changes: [], lane_seq: 0 };
 }
 // All methods are synchronous. The repository loads and locks an agent's aggregate, invokes exactly one command,
 // then commits its state and outbox together. No model, timer, promise or network port is reachable here.
 class Engine {
-    constructor(state, { now = Date.now(), validate = () => {} } = {}) { this.s = state; this.now = now; this.validate = validate; }
+    constructor(state, { now = Date.now(), validate = () => {}, estimate = null } = {}) {
+        this.s = state; this.now = now; this.validate = validate;
+        this.estimate = typeof estimate === 'function' ? estimate : () => NO_ESTIMATE;
+        // Rows written before S5 have no observe state; they gain it on their next command.
+        this.s.observe ||= []; this.s.observe_seq ||= 0; this.s.lane_changes ||= []; this.s.lane_seq ||= 0;
+    }
     id(kind) { return `${kind}_${++this.s.seq}`; }
+    iso() { return new Date(this.now).toISOString(); }
+    lane(id) { return this.s.policy.rules.find(r => r.id === id) || null; }
+    laneModeOf(id) { return laneMode(this.lane(id)); }
+    /** The cost range the estimate port gives for this lane, or the honest "no data yet". */
+    estimateFor(lanes, triggers, scope) {
+        try {
+            const out = this.estimate({ lanes, triggers, scope, policy: this.s.policy });
+            return out && typeof out === 'object' ? { low_usd: out.low_usd == null ? null : round(out.low_usd), high_usd: out.high_usd == null ? null : round(out.high_usd), basis: String(out.basis || 'no data yet') } : { ...NO_ESTIMATE };
+        } catch { return { ...NO_ESTIMATE }; }
+    }
+    /** One observe record. The aggregate keeps the newest 500; service.js mirrors every row to SQL in the transaction. */
+    recordObserve(entry) {
+        const seq = ++this.s.observe_seq;
+        const record = { id: `observe_${seq}`, seq, at: this.iso(), ...entry };
+        this.s.observe.push(record);
+        if (this.s.observe.length > 500) this.s.observe.splice(0, this.s.observe.length - 500);
+        return record;
+    }
+    recordLaneChange(change) {
+        const seq = ++this.s.lane_seq;
+        this.s.lane_changes.push({ id: `lane_${seq}`, seq, at: this.iso(), ...change });
+        if (this.s.lane_changes.length > 200) this.s.lane_changes.splice(0, this.s.lane_changes.length - 200);
+    }
+    /** Take lanes out of auto with one policy version change; every lane that actually moved gets an audit row. */
+    demoteRules(ids, reason, actor = 'system') {
+        const why = text(reason) ? String(reason).trim() : 'This lane is back in observe.';
+        const wanted = [...new Set(ids || [])].filter(id => this.lane(id));
+        const changes = [];
+        if (!wanted.length) return changes;
+        const next = copy(this.s.policy);
+        for (const r of next.rules) {
+            if (!wanted.includes(r.id) || laneMode(r) === 'observe') continue;
+            r.mode = 'observe'; r.demoted_at = this.iso(); r.demote_reason = why; r.demoted_by = actor;
+            changes.push({ rule_id: r.id, from_mode: 'auto', to_mode: 'observe', reason: why, actor });
+        }
+        if (!changes.length) return changes;
+        if (!next.rules.some(r => laneMode(r) === 'auto')) next.mode = 'observe';
+        this.configure({ policy: next });
+        for (const c of changes) this.recordLaneChange(c);
+        return changes;
+    }
+    /** The owner moves one lane to auto after reading its observe records. */
+    promote({ lane }) {
+        assert(text(lane), 'Name the lane to promote');
+        const rule = this.lane(lane);
+        assert(rule, 'Unknown lane');
+        if (laneMode(rule) === 'auto') return { lane, mode: 'auto', policy_version: this.s.policy.version, changed: false };
+        const next = copy(this.s.policy);
+        next.mode = 'auto';
+        const target = next.rules.find(r => r.id === lane);
+        target.mode = 'auto'; target.promoted_at = this.iso(); target.promoted_by = 'owner';
+        delete target.demoted_at; delete target.demote_reason; delete target.demoted_by;
+        this.configure({ policy: next });
+        this.recordLaneChange({ rule_id: lane, from_mode: 'observe', to_mode: 'auto', reason: 'The owner promoted this lane after reviewing its observe records.', actor: 'owner' });
+        return { lane, mode: 'auto', policy_version: this.s.policy.version, changed: true };
+    }
+    /** The owner moves one lane (or the whole agent) back to observe; the reason is said in words. */
+    demote({ lane = null, reason = null }) {
+        assert(lane == null || text(lane), 'Name a lane or demote the whole agent');
+        assert(reason == null || text(reason), 'Say why in words');
+        if (lane != null) {
+            assert(this.lane(lane), 'Unknown lane');
+            const changes = this.demoteRules([lane], reason || 'The owner switched this lane back to observe.', 'owner');
+            return { lane, mode: this.laneModeOf(lane), policy_version: this.s.policy.version, changes };
+        }
+        const changes = this.demoteRules(this.s.policy.rules.map(r => r.id), reason || 'The owner switched the agent back to observe.', 'owner');
+        if (this.s.policy.mode !== 'observe') {
+            const next = copy(this.s.policy); next.mode = 'observe'; this.configure({ policy: next });
+        }
+        return { lane: null, mode: 'observe', policy_version: this.s.policy.version, changes };
+    }
     thread(key) { assert(text(key) && !['__proto__', 'constructor', 'prototype'].includes(key), 'Invalid Thread'); return this.s.threads[key] ||= { pending: [], subscriptions: {}, evaluation: null, history: [] }; }
     queue(t) {
         const th = this.thread(t.threads[0]);
@@ -100,7 +181,18 @@ class Engine {
         const best = candidates[0];
         th.pending = [];
         th.evaluation = { id: this.id('eval'), ids, primary: best?.id || ids[0], strength: best?.result.strength || 'inferred', basis: best?.result.basis, policy_version: this.s.policy.version, attempts: th.expiries || 0 };
-        if (!best) { this.finish(th, 'ignore', { reason: 'not_admitted' }); return null; }
+        if (!best) {
+            this.finish(th, 'ignore', { reason: 'not_admitted' });
+            // A gate that admits nothing is still a verdict the owner can read. It has no lane (first match decided
+            // nothing), so the record belongs to the Thread and says what would have happened: nothing.
+            if (this.s.policy.mode !== 'off') this.recordObserve({
+                thread, mode: 'observe', trigger_ids: ids, rule_ids: [], gate: { admitted: false, strength: 'inferred' },
+                decision: 'ignore', would_accept: false, scope: null,
+                would_do: { action: 'ignore', summary: 'The gate did not admit this message, so nothing would run.' },
+                estimate: { ...NOTHING_RUNS }, reason: 'Not admitted by the deterministic gate.',
+            });
+            return null;
+        }
         const e = copy(th.evaluation);
         // Explicit candidates go to the deterministic routing port, never the assessor.
         this.enqueue(e.strength === 'explicit' ? 'route' : 'assess', `candidate:${e.id}`, { evaluation: e, triggers: ids.map(id => this.s.triggers[id]), tickets: Object.values(this.s.tickets).filter(k => k.threads.includes(thread)), policy: this.s.policy, handbacks: Object.values(this.s.meta).flatMap(m => m.handbacks).filter(h => ids.includes(h.trigger_id)) }, `router:${thread}`);
@@ -131,7 +223,45 @@ class Engine {
             assert(e.strength === 'inferred' && decision === 'ignore' && text(reason), 'Card shortcut only ignores inferred work with a reason');
             audit.ignored_from_card = true;
         } else assert(!a, 'Explicit candidates do not use assessment');
-        if (decision === 'accept' && e.strength === 'inferred' && this.s.policy.mode !== 'auto') { decision = 'ignore'; audit.would_accept = true; }
+        const lanes = e.strength === 'inferred' ? matched.map(id => this.lane(id)).filter(Boolean) : [];
+        const anyObserve = lanes.some(r => laneMode(r) !== 'auto');
+        const preDecision = decision;
+        if (decision === 'accept' && e.strength === 'inferred' && (this.s.policy.mode !== 'auto' || anyObserve)) {
+            decision = 'ignore'; audit.would_accept = true;
+        }
+        let observe = null;
+        if (e.strength === 'inferred') {
+            const observing = decision === 'ignore' && audit.would_accept === true;
+            const accepted = decision === 'accept';
+            const scopeText = text(scope) ? scope : null;
+            // A gate that cannot decide must not keep an auto lane running on its own judgement. The demotion runs
+            // after this evaluation is finished: a policy change discards live evaluations by design.
+            const demote = decision === 'unavailable'
+                ? { ids: this.s.policy.rules.filter(r => laneMode(r) === 'auto').map(r => r.id), reason: `The gate could not decide: ${clip(audit.reason || 'the assessment was unavailable', 200)}. This lane is in observe until you promote it again.` }
+                : null;
+            const estimate = observing || accepted
+                ? this.estimateFor(lanes, e.ids.map(id => this.s.triggers[id]), scopeText)
+                : { ...NOTHING_RUNS };
+            const why = observing ? 'Observe: nothing was launched. Promote this lane to auto to let it act.'
+                : accepted ? 'Auto: the work was launched.'
+                    : decision === 'unavailable' ? clip(audit.reason || 'The gate could not decide, so nothing ran.', 400)
+                        : clip(audit.reason || 'No enabled rule matched, so nothing would run.', 400);
+            observe = this.recordObserve({
+                thread: Object.keys(this.s.threads).find(key => this.s.threads[key] === th) || null,
+                mode: lanes.length && lanes.every(r => laneMode(r) === 'auto') ? 'auto' : 'observe',
+                trigger_ids: e.ids,
+                rule_ids: lanes.map(r => r.id),
+                gate: { admitted: true, strength: e.strength, basis: e.basis || null, decision: preDecision },
+                decision, would_accept: audit.would_accept === true,
+                scope: scopeText, direction: audit.direction || emptyDirection(),
+                rule_assessments: audit.rule_assessments || [],
+                would_do: observing ? { action: 'launch', summary: `Would have started work: ${clip(scopeText || 'the matched work', 300)}` }
+                    : accepted ? { action: 'launch', summary: `Started work: ${clip(scopeText || 'the matched work', 300)}` }
+                        : { action: 'ignore', summary: why },
+                estimate, demoted_rules: [], reason: why,
+            });
+            observe.demote = demote;
+        }
         let ticket;
         if (decision === 'accept') {
             assert(text(scope), 'Acceptance needs a scope');
@@ -146,7 +276,12 @@ class Engine {
             this.enqueue('launch', `launch:${ticket.id}`, { ticket, triggers: e.ids.map(id => this.s.triggers[id]) }, `worker:${ticket.id}`);
         }
         th.expiries = 0;
-        return { decision: this.finish(th, decision, audit), ...(ticket ? { ticket } : {}) };
+        const finished = this.finish(th, decision, audit);
+        if (observe && observe.demote) {
+            observe.demoted_rules = this.demoteRules(observe.demote.ids, observe.demote.reason).map(c => c.rule_id);
+            delete observe.demote;
+        }
+        return { decision: finished, ...(ticket ? { ticket } : {}), ...(observe ? { observe } : {}) };
     }
     /** An executor port bound the Ticket to the task that runs it (the last run of a follow-up is the current one). */
     bind({ ticket_id, task_id }) {
@@ -158,17 +293,31 @@ class Engine {
         return k;
     }
     /** Record one agent.report@1 on the Ticket; a terminal report may end it. */
-    report({ ticket_id, report, end = false }) {
+    report({ ticket_id, report, end = false, spent_usd = 0, task_id = null }) {
         const k = own(this.s.tickets, ticket_id), m = own(this.s.meta, ticket_id);
         assert(k && m && report && typeof report === 'object' && !Array.isArray(report), 'Report needs an open Ticket');
         assert(k.state === 'open', 'Ticket has ended');
+        assert(Number.isFinite(Number(spent_usd)) && Number(spent_usd) >= 0, 'Invalid spend');
+        m.spent_tasks ||= [];
+        // A retried task end reports once: the spend stays the task's own, not a second copy.
+        if (task_id && m.spent_tasks.includes(task_id)) return { ticket: k, report: m.reports[m.reports.length - 1] || null, spent_usd: m.spent_usd, repeated: true };
+        if (task_id) m.spent_tasks.push(task_id);
         const r = copy({ ...report, ticket_id });
         this.validate('agent.report', r);
         m.reports ||= [];
         m.reports.push(r);
+        m.spent_usd = round(Number(m.spent_usd || 0) + Number(spent_usd || 0));
         if (REPORT_STAGES[r.state]) k.stage = REPORT_STAGES[r.state];
+        // The mandate's budget is a cap, not advice: a spent budget puts the lane that produced the Ticket back in
+        // observe, with the number said in words, and the owner decides whether to promote it again.
+        const budget = Number(k.mandate && k.mandate.budget && k.mandate.budget.usd) || 0;
+        if (budget > 0 && m.spent_usd >= budget - 1e-9) {
+            const why = `The job used its whole budget of $${budget.toFixed(2)}. This lane is in observe until you promote it again.`;
+            m.budget_stopped = { at: this.iso(), reason: why, spent_usd: m.spent_usd };
+            this.demoteRules(k.mandate.matched_rules || [], why, 'system');
+        }
         if (end) this.end({ ticket_id, reason: `report:${r.state}` });
-        return { ticket: k, report: r };
+        return { ticket: k, report: r, spent_usd: m.spent_usd };
     }
     subscribe({ ticket_id, thread, kind = 'context' }) {
         const k = own(this.s.tickets, ticket_id);
