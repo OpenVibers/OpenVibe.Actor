@@ -82,7 +82,6 @@
 .hm-now-dot { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: var(--success, #22c55e);
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--success, #22c55e) 22%, transparent); animation: hmNowPulse 1.8s ease-in-out infinite; }
 @keyframes hmNowPulse { 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .hm-now-dot { animation: none; } }
 .hm-now-done { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--text-secondary, #b6bdd2); font-size: .9rem; }
 .hm-now-ask { display: grid; gap: 4px; padding: 12px; border-radius: 12px; background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 35%, transparent); }

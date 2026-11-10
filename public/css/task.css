@@ -18,7 +18,6 @@
 .plan-assume { margin: .4rem 0 0 32px; font-size: .85rem; color: var(--text-muted, #7386a3); }
 .plan-assume[hidden] { display: none; }
 @keyframes ps-pulse { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #3b82f6) 50%, transparent); } to { box-shadow: 0 0 0 7px transparent; } }
-@media (prefers-reduced-motion: reduce) { .ps.is-active .ps-mark { animation: none; } }
 .tl-plan .tl-k { color: var(--accent-light, #60a5fa); }
 
 /* An answer's citations: a numbered chip per piece of evidence, opening what that tool returned. */
@@ -95,7 +94,6 @@
 .follow-form .sc-btn { flex: none; min-height: 40px; padding: 0 18px; border-radius: 12px; }
 .follow-hint { margin: .45rem 0 0 4px; font-size: .82rem; color: var(--text-muted, #7386a3); }
 
-@media (prefers-reduced-motion: reduce) { .ps, .ps.is-active .ps-mark { animation: none; } .ev, .ev-item { transition: none; } }
 
 /* A cited memory (Actor v2, stage V2-6): what the answer leaned on, opening the row on /memory with its source. */
 .ev-mem { margin: .5rem 0 0; padding: .5rem .65rem; border-left: 2px solid var(--accent); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--accent) 6%, transparent); }

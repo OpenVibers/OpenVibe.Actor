@@ -179,7 +179,7 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.match(js, /'\/chat\/' \+ encodeURIComponent\(w\.getAttribute\('data-task'\)\) \+ '\/steer'/, 'what you write while it works steers it');
             assert.match(js, /'\/tasks\/' \+ encodeURIComponent\(id\) \+ '\/look\?at='/, 'the screen refreshes from the last picture');
             assert.match(js, /\(hover: hover\) and \(pointer: fine\)/, 'Enter sends only with a keyboard and mouse; a phone\'s Enter is a new line');
-            assert.match(js, /prefers-reduced-motion: reduce/);
+            assert.match(js, /document\.documentElement\.getAttribute\('data-ov-motion'\) === 'off'/, 'only motion Off skips the glide');
             // The checked answer types in word by word, Copy leaves out the citation numbers, and reduced motion is
             // respected: the network's conversation UI does it (openvibe-shared/ov-thread.js, L55 C4); Actor swaps the
             // finished turn in through it and marks its citations whole and not for copying.
