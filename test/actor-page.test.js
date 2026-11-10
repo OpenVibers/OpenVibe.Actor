@@ -20,7 +20,7 @@ const SAME = { 'sec-fetch-site':'same-origin' };
         }
         assert.doesNotMatch(render(base),/Uncensored/);
         assert.doesNotMatch(render({...base, actor:{...a, active_task:'tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}, model_switch_enabled:false}),/ay-run-model/);
-        assert.match(render({...base, actor:{...a, active_task:'tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}, model_switch_enabled:true}),/Model for the next step/);
+        assert.match(render({...base, actor:{...a, active_task:'tsk_01J8Z4M2Q0R7T9YV3K6N8P1W2A'}, active_run:{brain:'openvibe'}, model_switch_enabled:true}),/option value="openvibe" selected/);
         assert.match(render({...base,actor:{...a,adult_opt_in:true}}),/Uncensored/);
         assert.match(render({...base,actor:{...a,asks:[{id:'ask',kind:'sign_in',text:'Sign in to the site',options:['Sign in on its screen','Done']} ]}}),/Waiting for you/);
         const page=await t.get('/you',{as:user});assert.equal(page.status,200,page.text);assert.match(page.text,/ovt-composer/);
