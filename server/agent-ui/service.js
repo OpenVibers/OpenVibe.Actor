@@ -9,17 +9,17 @@ function createRunStream({ store, product, read, clean, fallback, pollMs = 1000,
         const projectionId = row.run_id || row.id;
         return store.tx(async () => {
             await db.query('INSERT INTO agent_ui_runs (id, task_id, state) VALUES ($1, $2, $3::jsonb) ON CONFLICT DO NOTHING',
-                [projectionId, row.id, JSON.stringify({ ...initial(projectionId, product, row.created_at), source: row.run_after || 0 })]);
+                [projectionId, row.id, JSON.stringify({ ...initial(projectionId, product, row.started_at || row.created_at), source: row.run_after || 0 })]);
             const saved = await db.maybe('SELECT state FROM agent_ui_runs WHERE id = $1 FOR UPDATE', [projectionId]);
             const state = parse(saved.state);
             if (state.terminal) return state;
             let batch;
             const mapper = createMapper(state, { clean, fallback });
-            if (!state.seq) await mapper.push({ t: 'state', state: 'running' }, 0, row.created_at);
+            if (!state.seq) await mapper.push({ t: 'state', state: 'running' }, 0, row.started_at || row.created_at);
             do {
                 batch = await read(row.id, state.source, row);
                 for (const item of batch.items) {
-                await mapper.push(item.line, item.seq, item.at);
+                    await mapper.push(item.line, item.seq, item.at);
                     state.source = Number(item.seq);
                 }
             } while (!state.terminal && batch.items.length === 500);
@@ -33,7 +33,7 @@ function createRunStream({ store, product, read, clean, fallback, pollMs = 1000,
     }
     const snapshot = async (row) => {
         const s = await project(row);
-        const iso = (v) => new Date(typeof v === 'number' ? v : v || 0).toISOString();
+        const iso = (v) => new Date(typeof v === 'number' || /^\d+$/.test(String(v)) ? Number(v) : v || 0).toISOString();
         return clean({ id: s.id, product, title: oneLine(row.task || row.prompt || 'Agent run', 240), status: s.status === 'done' ? 'succeeded' : s.status,
             plan: s.plan.map((p) => ({ title: oneLine(p.title || p.content || 'Step', 240), status: ['todo', 'running', 'waiting', 'needs_you', 'done', 'failed', 'stopped'].includes(p.status) ? p.status : 'todo' })),
             steps: s.steps, sources: s.sources, result: s.result || parse(row.result) || null, started_at: iso(row.started_at || row.created_at), ended_at: s.terminal ? iso(s.endedAt || row.updated_at || row.ended_at || row.created_at) : null, cost_usd: s.cost_usd || Number(row.cost_usd) || null });

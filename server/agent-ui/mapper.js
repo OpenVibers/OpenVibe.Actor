@@ -59,8 +59,10 @@ function createMapper(state, { clean = (x) => x, fallback = async () => null } =
     const events = [];
     let at = state.at;
     const emit = (type, body = {}, ov = {}) => {
+        const { group, summary, status, ...display } = ov;
+        const detail = { ...(group ? { group } : {}), ...(summary != null ? { summary } : {}), ...(status ? { status } : {}) };
         const event = clean({ type, timestamp: Number.isFinite(Date.parse(at)) ? Date.parse(at) : Number(at) || 0, ...body,
-            metadata: { ov: { product: state.product, ref: state.id, ...ov } } });
+            metadata: { ov: { product: state.product, ref: state.id, ...display }, ...(Object.keys(detail).length ? { 'ov.step': detail } : {}) } });
         events.push({ seq: ++state.seq, event });
     };
     const text = (content) => {
@@ -151,11 +153,11 @@ function createMapper(state, { clean = (x) => x, fallback = async () => null } =
         } else if (l.t === 'think') {
             const messageId = `${state.id}:reasoning:${source}`;
             state.group = null;
-            emit('REASONING_START');
-            emit('REASONING_MESSAGE_START', { messageId, role: 'assistant' });
+            emit('REASONING_START', { messageId });
+            emit('REASONING_MESSAGE_START', { messageId, role: 'reasoning' });
             if (l.text) emit('REASONING_MESSAGE_CONTENT', { messageId, delta: l.text });
             emit('REASONING_MESSAGE_END', { messageId });
-            emit('REASONING_END');
+            emit('REASONING_END', { messageId });
         } else if (l.t === 'text' || l.t === 'note') text(l.text);
         else if (l.t === 'state') emit('ACTIVITY_SNAPSHOT', { messageId: state.id, activityType: 'status', content: { status: l.state } }, { title: oneLine(l.state), kind: 'note' });
     }

@@ -17,3 +17,6 @@ Tools use a title table first; unknown tools use a cached, bounded small-model r
 with only the redacted tool and target. If no small model or credentials are available the title is “Performed an action”.
 Result events retain full redacted output and carry a one-line summary. Web results provide deduplicated HTTPS sources
 with titles. Historical clipped outputs cannot be recovered. Approvals emit ov.approval with the existing review link.
+
+Grouping, one-line summaries and step status are carried in `metadata["ov.step"]`; the reserved `metadata.ov`
+contains the contract's title, kind, sources, attachments, cost, needs_you, product and ref fields.
