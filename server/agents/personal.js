@@ -272,7 +272,7 @@ function personText(task) {
     return end < 0 ? t : t.slice(0, end);
 }
 
-async function run(ctx, agent, input = '', { origin = 'person', level = null, triggerId = null, goal = null, parentId = null, mailNote = '', afterInsert = null, budgetUsd = null } = {}) {
+async function run(ctx, agent, input = '', { origin = 'person', level = null, triggerId = null, goal = null, parentId = null, mailNote = '', afterInsert = null, budgetUsd = null, idempotencyKey = null } = {}) {
     const { s, config, engine, webhooks } = ctx;
     if (typeof input !== 'string' || input.length > 8000) return { status: 422, code: 'actor.agent.invalid', detail: 'input must be at most 8000 characters.' };
     // A goal's run (plan HO3) does a piece of the work and then answers the goal's done-test, in one line
@@ -286,7 +286,7 @@ async function run(ctx, agent, input = '', { origin = 'person', level = null, tr
     // A work fabric mandate may cap the run below the agent's own budget; the lower of the two always wins.
     const capped = budgetUsd == null ? null : Number(budgetUsd);
     const cap = capped != null && Number.isFinite(capped) && capped >= 0 ? Math.min(Number(agent.budget_per_run_usd), capped) : Number(agent.budget_per_run_usd);
-    const out = await createTask({ s, config, engine, webhooks, principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null }, parentId, body: { task: prompt(agent, notes, runInput, installed, { mailNote }), mode: agent.mode, budget: { per_task_usd: cap }, ...(level ? { level } : {}) }, assignmentOrigin: origin, assignmentLevel: level, triggerId, afterInsert, beforeInsert: async () => {
+    const out = await createTask({ s, config, engine, webhooks, principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null }, parentId, body: { task: prompt(agent, notes, runInput, installed, { mailNote }), mode: agent.mode, budget: { per_task_usd: cap }, ...(level ? { level } : {}), ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}) }, assignmentOrigin: origin, assignmentLevel: level, triggerId, afterInsert, beforeInsert: async () => {
         const current = await s.db.maybe('SELECT daily_runs_max FROM actor_agents WHERE id = $1 AND owner = $2 FOR UPDATE', [agent.id, agent.owner]);
         if (!current) return { status: 404, code: 'actor.agent.not_found', detail: 'No such agent.' };
         const count = Number(await s.db.value('SELECT count(*) FROM tasks WHERE via = $1 AND created_at >= $2', [`agent:${agent.id}`, `${s.iso().slice(0, 10)}T00:00:00.000Z`]));
