@@ -505,6 +505,8 @@ function createApi(ctx) {
             level: trigger ? trigger.level : null,
             triggerId: trigger ? trigger.id : null,
             goal: trigger ? trigger.goal : null,
+            afterInsert: req.principal && req.principal.kind === 'app' && req.principal.via === 'service:chat'
+                ? async (task) => s.db.query('UPDATE tasks SET delegated_via = $1 WHERE id = $2', ['service:chat', task.id]) : null,
         });
         if (out.code) return problem(req, res, out.status, out.code, out.detail);
         res.set('Location', `/api/v1/tasks/${out.task.id}`);
@@ -611,7 +613,7 @@ function createApi(ctx) {
 
     // ── Tasks ────────────────────────────────────────────────
     // A delegated caller (a service acting for the person) owns only the person's tasks it started itself.
-    const owns = (p, row) => row && ((row.requester === p.requester && (!p.via || row.via === p.via)) || (p.project && row.project_id === p.project));
+    const owns = (p, row) => row && ((row.requester === p.requester && (!p.via || row.via === p.via || row.delegated_via === p.via)) || (p.project && row.project_id === p.project));
     async function load(req, res, { delegated = false } = {}) {
         if (!TASK_ID.test(req.params.id)) { problem(req, res, 404, 'actor.task.not_found', 'No such task.'); return null; }
         const row = await store.getTask(s, req.params.id);
