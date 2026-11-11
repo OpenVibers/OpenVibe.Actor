@@ -17,6 +17,46 @@
     return n;
   }
 
+  function agentRun(art, host, oldView) {
+    if (!window.EventSource || !window.OpenVibeAgentSession) return;
+    var id = art.getAttribute('data-task');
+    var url = '/api/v1/runs/' + encodeURIComponent(id);
+    fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (run) {
+      if (!run || !host.isConnected) return;
+      oldView.destroy();
+      host.textContent = '';
+      var state = run.status || 'running';
+      var view = window.OpenVibeAgentSession.mount(host, {
+        title: run.title || 'Task', status: state, follow: art.getAttribute('data-open') === '1', files: false,
+        onSend: art.getAttribute('data-owner') === '1' && ['queued', 'running', 'verifying', 'succeeded', 'needs_you'].indexOf(state) !== -1 ? function (text) {
+          var working = ['queued', 'running', 'verifying'].indexOf(state) !== -1;
+          var action = working ? '/chat/' + encodeURIComponent(id) + '/steer'
+            : '/tasks/' + encodeURIComponent(id) + '/' + (state === 'needs_you' ? 'answer' : 'follow-up');
+          var body = new URLSearchParams(); body.set(state === 'needs_you' ? 'answer' : 'task', text);
+          return fetch(action, {
+            method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: body.toString()
+          }).then(function (r) {
+            if (!r.ok) throw new Error('The message could not be sent.');
+            if (!working) window.location.assign(r.url);
+          });
+        } : undefined
+      });
+      art.dataset.agentUi = '1';
+      var source = new EventSource(url + '/events');
+      ['RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR', 'STEP_STARTED', 'STEP_FINISHED', 'TEXT_MESSAGE_START',
+        'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END', 'TOOL_CALL_START', 'TOOL_CALL_ARGS', 'TOOL_CALL_END',
+        'TOOL_CALL_RESULT', 'REASONING_START', 'REASONING_MESSAGE_START', 'REASONING_MESSAGE_CONTENT',
+        'REASONING_MESSAGE_END', 'REASONING_END', 'REASONING_ENCRYPTED_VALUE', 'STATE_SNAPSHOT', 'STATE_DELTA',
+        'ACTIVITY_SNAPSHOT', 'ACTIVITY_DELTA', 'CUSTOM'].forEach(function (type) {
+        source.addEventListener(type, function (e) {
+          try { view.push(JSON.parse(e.data)); } catch (err) { /* a malformed event is skipped */ }
+          if (type === 'RUN_FINISHED' || type === 'RUN_ERROR') source.close();
+        });
+      });
+      window.addEventListener('pagehide', function () { source.close(); }, { once: true });
+    }).catch(function () { /* the task event view stays usable */ });
+  }
+
   // The session view over How it went: the events the page carries, then (while open) the live ones.
   function session(art) {
     var data = document.getElementById('task-events');
@@ -40,6 +80,7 @@
     var startedAt = open && window.OpenVibeTaskEvents ? window.OpenVibeTaskEvents.firstAt(events) : 0;
     var view = window.OpenVibeAgentSession.mount(host, { title: (document.querySelector('.task-text') || {}).textContent || 'Task', status: open ? 'running' : state, startedAt: startedAt || undefined, follow: open, empty: 'Waiting for an agent to start…', link: function (u) { return ownDesk.test(u); } });
     view.pushAll(lines);
+    agentRun(art, host, view);
     return view;
   }
 
@@ -220,7 +261,7 @@
       onDesk(e);
       onLook(e);
       if (e.step === 'plan') paintPlan(e.text);
-      if (view) { view.push(attach(e)); return undefined; }
+      if (view) { if (art.dataset.agentUi !== '1') view.push(attach(e)); return undefined; }
       if ((e.step === 'plan' || e.step === 'handoff') && e.agent) return attempt((e.text || e.agent).replace(/ takes it.*$/, ''));
       if (e.step === 'plan') return undefined;
       if (e.step === 'check') {
@@ -238,7 +279,7 @@
     var src = new EventSource('/api/v1/tasks/' + encodeURIComponent(id) + '/events?after=' + encodeURIComponent(art.getAttribute('data-last') || '0'));
     src.addEventListener('output', function (m) { try { onOutput(JSON.parse(m.data)); } catch (err) { /* a malformed event is skipped */ } });
     src.addEventListener('state', function (m) {
-      try { var ev = JSON.parse(m.data), s = ev.state; if (liveState && STATE[s]) liveState.textContent = STATE[s] + '…'; if (view) view.push(ev); } catch (err) { /* ignore */ }
+      try { var ev = JSON.parse(m.data), s = ev.state; if (liveState && STATE[s]) liveState.textContent = STATE[s] + '…'; if (view && art.dataset.agentUi !== '1') view.push(ev); } catch (err) { /* ignore */ }
       fetch('/api/v1/tasks/' + encodeURIComponent(id), { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (t) {
         if (t && t.cost && cost) cost.textContent = cost.textContent.replace(/^\$[0-9.]+/, '$' + (t.cost.usd < 0.01 ? t.cost.usd.toFixed(4) : t.cost.usd.toFixed(2)));
       }).catch(function () {});
