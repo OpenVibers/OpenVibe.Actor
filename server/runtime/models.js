@@ -364,7 +364,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
      * (x-openvibe-credential: <provider>:<subject>, the bare usr_… id AI expects — never "user:usr_…"). AI answers
      * with that key, or refuses: the person has no key for that provider yet, and the message says where to add it.
      */
-    async function chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta = null }) {
+    async function chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta = null, policy = null }) {
         const tokens = aiTokenClient();
         if (!tokens) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
         const base = trimSlash(ai.url);
@@ -380,6 +380,12 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             temperature: 0.2,
             // L37: a wish, not a pin. The provider is the one the person's own key is for, so the wish holds.
             prefer: { provider, ...(choice.model ? { model: choice.model } : {}) },
+            // The content tier (the Exchange remake's "uncensored"). AI checks the named person's 18+ confirmation
+            // before it answers on that tier, and refuses the tier without one.
+            ...(policy === 'uncensored' ? { policy: 'uncensored' } : {}),
+            // The person the run is for (on_behalf_of): AI's content tier is decided about a person, never about a
+            // token, so the name travels with the request.
+            ...(choice.subject ? { on_behalf_of: { type: 'user', id: String(choice.subject) } } : {}),
             // The answer streams in (plan L55 C2): AI passes the upstream's pieces on as they arrive.
             ...(onDelta ? { stream: true, stream_options: { include_usage: true } } : {}),
         };
@@ -465,7 +471,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
      * class than the route's own; AI clamps a faster one and says so. The classes live on AI's router, so a call that
      * goes through the person's own key asks for none.
      */
-    async function chatViaRouter({ tier, messages = [], tools = null, json = false, maxTokens = 4000, signal, onDelta = null, subject = null, target = null, latency = null }) {
+    async function chatViaRouter({ tier, messages = [], tools = null, json = false, maxTokens = 4000, signal, onDelta = null, subject = null, target = null, latency = null, policy = null }) {
         const c = routerClient();
         if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
         const input = {
@@ -481,12 +487,18 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             workflow: 'ai.complete', input,
             ...(subject ? { on_behalf_of: { type: 'user', id: String(subject) } } : {}),
             ...(target ? { target } : {}),
+            // The content tier (the Exchange remake's "uncensored"): a control field on the run, never part of the
+            // workflow's input. AI checks the named person's 18+ confirmation before it answers on that tier, and
+            // refuses the tier without one. A run with no person never asks for it.
+            ...(policy === 'uncensored' ? { policy: 'uncensored' } : {}),
         };
         // A slow class may take minutes (background) or hours (batch): the wait and the deadline are longer, and the
         // answer is polled for until it is ready.
         const slow = latency === 'background' || latency === 'batch';
         const timeoutMs = slow ? Math.max(600_000, Number(ai.timeoutMs) || 180_000) : Math.max(5000, Number(ai.timeoutMs) || 180_000);
-        const options = { cache: false, ...(latency ? { latency } : {}) };
+        // The content tier rides in options.policy: AI reads it as a control field on the run (server/runs.js), the
+        // same place the streamed path below puts it on the body it posts itself.
+        const options = { cache: false, ...(latency ? { latency } : {}), ...(policy === 'uncensored' ? { policy: 'uncensored' } : {}) };
         body.options = options;   // the streamed path posts this body itself
         const sig = typeof AbortSignal.any === 'function'
             ? AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)])
@@ -567,20 +579,29 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     /** One model call. The caller checks the budget first and meters cost_usd after; this layer only prices it. */
-    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null, latency = null, subject = null } = {}) {
+    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null, latency = null, subject = null, policy = null } = {}) {
         // The person's own key (plan L55 C3): every model call of this run goes to OpenVibe.AI with it. That path has
         // no latency class: the classes live on AI's router.
         const choice = currentChoice();
+        // The content tier of the run (one-engine slice): it rides on the choice, so every call of the run answers on
+        // that tier. A caller may also name it directly.
+        const policyOf = policy || (choice && choice.policy) || null;
         if (choice && choice.provider) {
-            const r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta });
+            const r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta, policy: policyOf });
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER, latency_class: null };
         }
         // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
         if (routerOn() || (choice && choice.model && !choice.provider)) {
-            const r = await chatViaRouter({ tier, messages, tools, json, maxTokens, signal, onDelta, subject: subject || (choice && choice.subject), target: choice && choice.target, latency });
+            const r = await chatViaRouter({ tier, messages, tools, json, maxTokens, signal, onDelta, subject: subject || (choice && choice.subject), target: choice && choice.target, latency, policy: policyOf });
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }
         await warm();
+        // The content tier never reaches a provider directly: the adult tier is OpenVibe.AI's, and AI is the one that
+        // checks the person's 18+ confirmation and labels the answer. A run that asks for it and is not on AI is
+        // refused, never quietly answered on the standard tier.
+        if (policyOf === 'uncensored') {
+            throw new ModelError('the uncensored tier runs on OpenVibe.AI, which is not configured on this server', { code: 'actor.tier.unavailable' });
+        }
         if (provider && !PROVIDERS.includes(provider)) throw new ModelError(`unknown model provider "${provider}"`, { code: 'actor.model.provider' });
         const d = provider && model ? descriptor(tier, provider, model) : resolve(tier, { avoidFamily });
         if (!d.available) throw new ModelError(d.reason || `no model is available for the ${tier} tier`, { code: 'actor.model.unavailable' });

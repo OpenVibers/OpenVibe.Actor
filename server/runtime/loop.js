@@ -1047,7 +1047,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         }
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, allowedTools = null }) {
         if (resume || fork) {
             return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta, latency, spend, day });
         }
@@ -1143,6 +1143,17 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const subAgents = mode === 'best' && ordered.tools.length > 0 && !(config.loop && config.loop.subAgents === false);
             state.tools = subAgents ? ordered.tools.concat([DELEGATE]) : ordered.tools;
             state.allow = new Set(state.tools.map((t) => t.function.name));
+            // A product conversation turn names the registry tools the run may call (one-engine slice): intersect
+            // here, so the model is never offered — and act() never runs — anything wider. A name nothing offers
+            // is said aloud in the run's plan, never silently dropped. A resume or fork keeps the checkpoint's
+            // allow-list, which this already narrowed.
+            if (allowedTools) {
+                const turnAllowed = new Set(allowedTools);
+                const unknown = [...turnAllowed].filter((n) => !state.tools.some((t) => t.function.name === n));
+                state.tools = state.tools.filter((t) => turnAllowed.has(t.function.name));
+                state.allow = new Set(state.tools.map((t) => t.function.name));
+                if (unknown.length) await emit({ step: 'plan', text: `The caller allowed ${unknown.length === 1 ? 'a tool' : 'tools'} this run does not offer (${unknown.slice(0, 8).join(', ')}): it runs without ${unknown.length === 1 ? 'it' : 'them'}.` });
+            }
             state.messages.push({
                 role: 'system',
                 content: SYSTEM({
