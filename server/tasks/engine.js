@@ -514,10 +514,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // creation. A turn always runs in the loop below, the path that honors the list — a code-classified
             // turn must not escape to the Codes agent.
             const turnAllowed = parseTurnTools(row.tools);
-            // The owner can route direct coding tasks through the same loop that runs scheduled agents. The loop
-            // delegates the machine work through codes_task; it retains one model choice, task, budget and timeline.
-            // Until the owner enables this, direct coding tasks keep their existing Codes adapter path.
-            const unifiedCode = cls === 'code' && config.unifiedCodeRuns === true && !fromChat;
+            // A person's direct coding task uses the loop that already runs scheduled agents. The machine work goes
+            // through codes_task, on the same task, budget and timeline. Explicitly chosen legacy agents keep their
+            // route, and a service or personal agent run keeps its own tool policy.
+            const unifiedCode = cls === 'code' && config.unifiedCodeRuns === true && !fromChat && !dayRun
+                && !row.via && (!row.agent || row.agent === 'codes') && String(row.requester || '').startsWith('user:');
             if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy || dayRun || turnAllowed || unifiedCode)) {
                 const agentId = LOOP_AGENT;
                 // The person-authored part of the task (never a run input that may come from a watch or a webhook),
@@ -619,6 +620,17 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         await emit(id, { kind: 'output', step: 'text', agent: agentId, text: 'Waiting: ' + (wait ? wait.line : 'for something') + '. Nothing runs until it arrives or the deadline passes.' });
                         if (wait) await waits.setRemaining(wait.id, left);
                         return undefined;
+                    }
+                    if (unifiedCode) {
+                        const steps = out && out.state && out.state.brain && out.state.brain.steps
+                            || out && out.brain && out.brain.steps || [];
+                        if (!steps.some((step) => step.tool === 'codes_task' && step.ok === true)) {
+                            const detail = 'OpenVibe.Codes did not run this task. Connect your machine on openvibe.link/machines, or retry after Codes is available.';
+                            await emit(id, { kind: 'output', step: 'text', agent: agentId, text: detail, is_error: true });
+                            controls.delete(id);
+                            await loop.close(out && out.state).catch(() => {});
+                            return await setState(id, 'failed', { error_code: 'actor.codes.not_run', error_detail: detail, finished_at: iso() });
+                        }
                     }
                 } catch (err) {
                     if (signal && signal.aborted) throw err;
