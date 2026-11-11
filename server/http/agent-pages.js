@@ -61,7 +61,7 @@ function createAgentPages(ctx) {
     r.use(express.urlencoded({ extended: false, limit: '64kb' }));
     const signed = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const owner = (req) => `user:${req.viewer.subject}`;
-    const page = (req, res, title, body, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, title, body, css: ['css/agents.css', 'css/skill-draft.css'] });
+    const page = (req, res, title, body, status = 200, extra = {}) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, title, body, css: ['css/agents.css', 'css/skill-draft.css'], ...extra });
     const login = (req, res) => res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
     const write = (req, res) => {
         if (!signed(req)) { login(req, res); return false; }
@@ -208,7 +208,7 @@ ${rows.length ? html`<ul class="pa-cards">${rows.map((a) => html`<li class="pa-c
             : (a.state === 'declined' ? 'You declined this.' : 'Nobody answered this one in time.');
         const buttons = a.state === 'pending'
             ? device ? html`<div class="pa-actions" data-device-approval="${a.id}" data-kind="${a.kind}" data-precise="${p && p.precise === true ? 'true' : 'false'}">
-${a.kind === 'device.camera' ? html`<label class="pa-btn pa-primary">Take a photo <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-photo hidden></label>`
+${a.kind === 'device.camera' ? html`<div data-photo-picker></div><p class="pa-hint">JPEG, PNG or WebP · up to 10 MB.</p><p role="alert" data-photo-error hidden></p>`
     : html`<button type="button" class="pa-btn pa-primary" data-location="coarse">Share where I am once</button>${p && p.precise === true ? html`<button type="button" class="pa-btn" data-location="precise">Share precise location once</button>` : ''}`}
 <button type="button" class="pa-btn" data-decline>Decline</button><span role="status" data-status></span></div>
 <p class="pa-hint">${a.kind === 'device.camera' ? 'The photo is taken only when you tap and choose it. It is stripped of metadata.' : 'Your location is read once when you tap. Approximate sharing rounds it to two decimal places.'} This request can never be always allowed.</p><script src="/js/device-approval.js" defer></script>`
@@ -229,7 +229,7 @@ ${money ? moneyCard : (coding
             : html`<section class="pa-panel"><h2>${device ? 'Why your agent asks' : 'What it would do'}</h2><p>${device ? (p && p.why || a.summary) : a.summary}</p>
 ${cmd ? html`<p class="pa-cmd-where">${where ? html`On <b>${where}</b>, it runs:` : 'It runs:'}</p><pre class="pa-pre pa-cmd">${cmd}</pre>${p && p.cwd ? html`<p class="pa-hint">In ${String(p.cwd).slice(0, 300)}</p>` : ''}` : ''}
 <h3 class="pa-sub">The exact request</h3><pre class="pa-pre">${JSON.stringify(p, null, 2).slice(0, 8000)}</pre></section>`)}
-${buttons}`, status);
+${buttons}`, status, a.state === 'pending' && a.kind === 'device.camera' ? { styles: ['ov-upload.css'], sharedScripts: ['ov-upload.js'] } : {});
     };
     r.get('/me/approvals/:id', async (req, res) => {
         if (!signed(req)) return login(req, res);

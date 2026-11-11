@@ -87,6 +87,10 @@ const PHOTO = 'med_01JAB2C3D4E5F6G7H8J9K0MNPS';
         await check('a photo must be uploaded for its own approval before its media id is answered', async () => {
             const asked = await device.ask(run, 'device.camera', { why: 'Read the street sign' });
             const row = await approvals.get(t.ctx.s, owner, asked.data.approval_id);
+            const page = await t.get(`/me/approvals/${row.id}`, { as: ada });
+            assert.match(page.text, /data-photo-picker/);
+            assert.match(page.text, /ov-upload\.css/);
+            assert.match(page.text, /ov-upload\.js/);
             const path = `/api/v1/me/approvals/${row.id}`;
             const answer = { decision: 'answer', photo: { media_id: PHOTO } };
             assert.strictEqual((await t.get(`${path}/answer`, { as: ada, headers: SAME, json: answer })).status, 422);
