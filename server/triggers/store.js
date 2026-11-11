@@ -96,10 +96,10 @@ async function bumpCounters(s, id, { state = null, runs = 0, costUsd = 0, at = n
     return wire(row);
 }
 
-async function addRun(s, triggerId, taskId, state, at, costUsd = null) {
-    await s.db.query(`INSERT INTO actor_trigger_runs (trigger_id, task_id, state, cost_usd, created_at, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$5) ON CONFLICT (task_id) DO UPDATE SET state = EXCLUDED.state, cost_usd = COALESCE(EXCLUDED.cost_usd, actor_trigger_runs.cost_usd), updated_at = EXCLUDED.updated_at`,
-    [triggerId, taskId, state, costUsd, at]);
+async function addRun(s, triggerId, taskId, state, at, costUsd = null, why = null) {
+    await s.db.query(`INSERT INTO actor_trigger_runs (trigger_id, task_id, state, cost_usd, why, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$6) ON CONFLICT (task_id) DO UPDATE SET state = EXCLUDED.state, cost_usd = COALESCE(EXCLUDED.cost_usd, actor_trigger_runs.cost_usd), updated_at = EXCLUDED.updated_at`,
+    [triggerId, taskId, state, costUsd, why, at]);
 }
 const runForTask = (s, taskId) => s.db.maybe('SELECT * FROM actor_trigger_runs WHERE task_id = $1', [taskId]);
 const runs = (s, triggerId, limit = 20) => s.db.many('SELECT * FROM actor_trigger_runs WHERE trigger_id = $1 ORDER BY created_at DESC LIMIT $2', [triggerId, limit]);

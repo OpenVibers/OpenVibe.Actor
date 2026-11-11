@@ -277,7 +277,11 @@ async function watchStub() {
             const root = await s.db.maybe('SELECT * FROM actor_assignments WHERE task_id = $1 AND depth = 0', [task.id]);
             assert.deepStrictEqual([root.origin, root.effective_level], ['routine', 'ask']);
             const run = await s.db.maybe('SELECT * FROM actor_trigger_runs WHERE task_id = $1', [task.id]);
+            assert.match(run.why, /^Schedule:/);
             assert.strictEqual(run.trigger_id, trigger.id, 'the run is linked back to its card');
+            const history = await call('GET', `/api/v1/triggers/${trigger.id}/runs`);
+            assert.strictEqual(history.status, 200, history.text);
+            assert.match(history.json().runs[0].why, /^Schedule:/);
         });
 
     } finally {
