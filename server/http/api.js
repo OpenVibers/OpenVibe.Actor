@@ -393,13 +393,8 @@ function createApi(ctx) {
         res.set('Location', `/api/v1/me/agents/${out.row.id}`);
         res.status(201).json(out.row);
     });
-    r.get('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
-        const row = await loadAgent(req, res); if (row) res.json(row);
-    });
     // One owner-scoped read for the agent sheet. Keep each section sourced from Actor's existing records.
-    r.get('/me/agents/:id/sheet', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
-        const agent = await personal.get(s, req.principal.requester, req.params.id);
-        if (!agent) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+    const agentSheet = async (req, res, agent) => {
         const [tasks, asks, schedules, memory, timelineData] = await Promise.all([
             store.listTasks(s, agent.owner, { limit: 100, via: `agent:${agent.id}` }),
             s.db.many("SELECT id, kind, summary, payload, state, created_at, expires_at FROM actor_approvals WHERE owner = $1 AND agent_id = $2 ORDER BY (state = 'pending') DESC, created_at DESC LIMIT 50", [agent.owner, agent.id]),
@@ -432,13 +427,11 @@ function createApi(ctx) {
                 ...schedules.map((item) => ({ ...item, next_run_at: null, last_result: item.last_state || null }))],
             memory, activity: timelineData.entries.filter((entry) => tasks.rows.some((task) => entry.ref === task.id)),
         });
-    });
-    for (const action of ['pause', 'resume']) r.post(`/me/agents/:id/${action}`, principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
-        const agent = await personal.get(s, req.principal.requester, req.params.id);
-        if (!agent) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
-        const out = await personal.update(s, config, req.principal.requester, agent.id, { status: action === 'pause' ? 'paused' : 'active' });
-        if (!out || !out.row) return problem(req, res, 422, 'actor.agent.invalid', out && out.error || 'Could not change agent state.');
-        res.json({ id: agent.id, state: action === 'pause' ? 'paused' : 'active' });
+    };
+    r.get('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
+        const row = await loadAgent(req, res); if (!row) return;
+        if (req.query.view === 'sheet') return agentSheet(req, res, row);
+        res.json(row);
     });
     // The agent's voice as a file (actor.voice@1). Another person's agent is the same 404 as one that does not exist.
     r.get('/me/agents/:id/voice', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
