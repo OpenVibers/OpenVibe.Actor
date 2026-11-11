@@ -532,10 +532,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // turn must not escape to the Codes agent.
             const turnAllowed = parseTurnTools(row.tools);
             // A person's direct coding task uses the loop that already runs scheduled agents. The machine work goes
-            // through codes_task, on the same task, budget and timeline. Explicitly chosen legacy agents keep their
-            // route, and a service or personal agent run keeps its own tool policy.
+            // through codes_task, on the same task, budget and timeline. An approved or explicitly chosen Codes
+            // task follows that path too; service and personal agent runs keep their own tool policy.
             const unifiedCode = cls === 'code' && config.unifiedCodeRuns === true && !fromChat && !dayRun
-                && !row.via && !row.agent && String(row.requester || '').startsWith('user:');
+                && !row.via && (!row.agent || row.agent === 'codes') && String(row.requester || '').startsWith('user:');
             if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy || dayRun || turnAllowed || unifiedCode)) {
                 const agentId = LOOP_AGENT;
                 if (unifiedCode) {
