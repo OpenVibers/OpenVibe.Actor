@@ -18,6 +18,7 @@
  * unless the owner switch is on.
  */
 const contracts = require('openvibe-contracts');
+const { createHash } = require('node:crypto');
 const contacts = require('../agents/contacts');
 const personal = require('../agents/personal');
 
@@ -39,7 +40,7 @@ const clip = (value, n) => String(value == null ? '' : value).replace(/\s+/g, ' 
 const stripFences = (text) => String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
 
 /** The trigger text a run starts from, with the pointer rather than a pasted page (plan W6.7). */
-function inputFor(trigger, ticket) {
+function inputFor(trigger, ticket, recoveryNote = null) {
     const who = trigger.actor && trigger.actor.kind === 'person' ? 'A person' : trigger.actor && trigger.actor.kind === 'bot' ? 'A bot' : 'A system';
     const scope = clip(ticket && ticket.mandate && ticket.mandate.scope, 400);
     const budget = ticket && ticket.mandate && ticket.mandate.budget ? ticket.mandate.budget : {};
@@ -48,6 +49,7 @@ function inputFor(trigger, ticket) {
         clip(trigger.text, 4000),
         trigger.read_pointer ? `Original: ${trigger.read_pointer}` : '',
         scope ? `The mandate covers: ${scope}` : '',
+        recoveryNote ? `Recovery after an earlier run: ${clip(recoveryNote, 300)}` : '',
         `Budget for this work: ${Number(budget.usd) || 0} USD, ${Number(budget.tokens) || 0} tokens, ${Number(budget.wall_minutes) || 0} wall minutes. Stay inside it.`,
     ].filter(Boolean).join('\n');
 }
@@ -94,14 +96,28 @@ function createFabricAdapters({ s, config, fabric, models, ctx: taskCtx = null, 
     function sourceOf(state, id) { return state.sources[id] || null; }
 
     /** The executor port: one run of the owner's agent for the Ticket, its task id bound to the Ticket. */
-    async function assign(owner, agentId, ticket, trigger, parentId = null) {
+    async function assign(owner, agentId, ticket, trigger, parentId = null, workKey = null, recoveryNote = null) {
+        // A lease can expire after the task committed but before its work item settled. Replaying the
+        // same stored work must recover that task, including after a process restart.
+        const idempotencyKey = workKey ? `fabric:${createHash('sha256').update(`${agentId}\0${workKey}`).digest('hex')}` : null;
+        const existing = async () => idempotencyKey ? s.db.maybe(`SELECT t.* FROM tasks t JOIN actor_fabric_tasks ft ON ft.task_id = t.id
+            WHERE t.requester = $1 AND t.idem_key = $2 AND ft.agent_id = $3 AND ft.ticket_id = $4`, [owner, idempotencyKey, agentId, ticket.id]) : null;
+        const bind = async (task) => {
+            await fabric.command(owner, agentId, 'bind', { ticket_id: ticket.id, task_id: task.id })
+                .catch((err) => log.warn && log.warn('[Actor] fabric bind:', ticket.id, (err && err.message) || err));
+            return task;
+        };
+        const prior = await existing();
+        if (prior) return bind(prior);
         const agent = await agentOf(owner, agentId);
         const budgetUsd = ticket.mandate && ticket.mandate.budget ? Number(ticket.mandate.budget.usd) : null;
         if (budgetUsd != null && budgetUsd <= 0) {
             throw Object.assign(new Error('The mandate has a zero budget, so nothing was run.'), { permanent: true });
         }
-        const out = await run(ctx, agent, inputFor(trigger, ticket), {
+        let out;
+        try { out = await run(ctx, agent, inputFor(trigger, ticket, recoveryNote), {
             budgetUsd,
+            idempotencyKey,
             origin: trigger.actor && trigger.actor.kind === 'person' ? 'person' : 'routine',
             assignmentLevel: 'ask',
             parentId,
@@ -110,15 +126,17 @@ function createFabricAdapters({ s, config, fabric, models, ctx: taskCtx = null, 
                 await s.db.query(`INSERT INTO actor_fabric_tasks (task_id, agent_id, owner, ticket_id, created_at, trigger_ids)
                     VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (task_id) DO NOTHING`, [task.id, agentId, owner, ticket.id, s.iso(), [trigger.id]]);
             },
-        });
-        if (!out || out.status !== 201 || !out.task) {
+        }); } catch (err) {
+            // A concurrent worker may have committed this key while this worker still had a lease.
+            const committed = await existing();
+            if (committed) return bind(committed);
+            throw err;
+        }
+        if ((!out || ![200, 201].includes(out.status) || !out.task) && !(await existing())) {
             const why = out && (out.detail || out.code) ? `${out.code || 'actor.fabric.assign'}: ${out.detail}` : 'The agent could not start';
             throw Object.assign(new Error(why), { permanent: true });
         }
-        // The binding already committed with the task; this also records the current task for follow-ups.
-        await fabric.command(owner, agentId, 'bind', { ticket_id: ticket.id, task_id: out.task.id })
-            .catch((err) => log.warn && log.warn('[Actor] fabric bind:', ticket.id, (err && err.message) || err));
-        return out.task;
+        return bind(out.task || await existing());
     }
 
     /** A permanent assignment failure is a failed report, not an endless retry. */
@@ -180,16 +198,16 @@ function createFabricAdapters({ s, config, fabric, models, ctx: taskCtx = null, 
             }
         },
 
-        async launch(payload) {
+        async launch(payload, { idempotency_key: workKey } = {}) {
             const ticket = payload.ticket;
             const state = await snapshot(owner, agentId);
             const trigger = state.triggers[ticket.trigger_id];
             if (!trigger) throw new Error('The Ticket has no originating Trigger');
-            try { await assign(owner, agentId, ticket, trigger); }
+            try { await assign(owner, agentId, ticket, trigger, null, workKey, payload.recovery); }
             catch (err) { await reportFailure(owner, agentId, { ticket }, (err && err.message) || String(err)); }
         },
 
-        async input(payload) {
+        async input(payload, { idempotency_key: workKey } = {}) {
             if (payload.context_only) return;
             const state = await snapshot(owner, agentId);
             const ticket = state.tickets[payload.ticket_id];
@@ -197,7 +215,7 @@ function createFabricAdapters({ s, config, fabric, models, ctx: taskCtx = null, 
             if (!ticket || !trigger) return;
             const meta = state.meta[ticket.id] || {};
             const parentId = meta.task_id || null;
-            try { await assign(owner, agentId, ticket, trigger, parentId); }
+            try { await assign(owner, agentId, ticket, trigger, parentId, workKey); }
             catch (err) { await reportFailure(owner, agentId, { ticket }, (err && err.message) || String(err)); }
         },
 

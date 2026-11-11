@@ -43,6 +43,10 @@ const A = 'usr_01JZ0000000000000000000AAA';
             assert.equal(state.meta[ticket.id].tasks.length, 1, 'one task was bound to the Ticket');
             const linked = await t.ctx.s.db.many('SELECT task_id FROM actor_fabric_tasks WHERE ticket_id = $1', [ticket.id]);
             assert.equal(linked.length, 1, 'the binding committed with the task');
+            const launch = state.work.find(w => w.kind === 'launch' && w.payload.ticket.id === ticket.id);
+            await t.ctx.fabricAdapters.handlers(owner, agent).launch(launch.payload, { idempotency_key: launch.key });
+            const recovered = await t.ctx.s.db.many('SELECT task_id FROM actor_fabric_tasks WHERE ticket_id = $1', [ticket.id]);
+            assert.deepEqual(recovered, linked, 'replaying committed work after a lost settle recovers its task');
 
             const until = Date.now() + 20_000;
             while (Date.now() < until) {
