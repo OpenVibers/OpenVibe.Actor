@@ -813,6 +813,30 @@ function createApi(ctx) {
         });
     });
 
+    const agentRuns = require('../agent-ui/actor').createActorRuns({ s, fallback: require('../agent-ui/titles').createTitleFallback({ config, clean: require('../runtime/checkpoints').stripSecrets }) });
+    r.get('/runs/:id', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
+        const match = /^(tsk_[0-9A-HJKMNP-TV-Z]{26})(?:~([1-9][0-9]*))?$/.exec(req.params.id);
+        const start = match && match[2] ? Number(match[2]) : null;
+        if (match) req.params.id = match[1];
+        const task = await load(req, res);
+        if (!task) return;
+        const row = await agentRuns.resolve(task, start);
+        if (!row) return problem(req, res, 404, 'actor.task.not_found', 'No such run.');
+        if (!(config.agentUiSetting ? config.agentUiSetting() : config.agentUi)) return problem(req, res, 404, 'actor.runs_disabled', 'Run streams are disabled.');
+        res.json(await agentRuns.snapshot(row));
+    });
+    r.get('/runs/:id/events', principal.requireCapability('actor.task.read'), limits.budget('actor.task.stream'), async (req, res) => {
+        const match = /^(tsk_[0-9A-HJKMNP-TV-Z]{26})(?:~([1-9][0-9]*))?$/.exec(req.params.id);
+        const start = match && match[2] ? Number(match[2]) : null;
+        if (match) req.params.id = match[1];
+        const task = await load(req, res);
+        if (!task) return;
+        const row = await agentRuns.resolve(task, start);
+        if (!row) return problem(req, res, 404, 'actor.task.not_found', 'No such run.');
+        if (!(config.agentUiSetting ? config.agentUiSetting() : config.agentUi)) return problem(req, res, 404, 'actor.runs_disabled', 'Run streams are disabled.');
+        await agentRuns.stream(req, res, row);
+    });
+
     r.post('/tasks/:id/cancel', principal.requireCapability('actor.task.create'), async (req, res) => {
         // The Action Center's Cancel comes from OpenVibe.Network acting for the person: the delegated case. Only
         // Network: any other first-party service acting for a person still cancels only the tasks it started itself

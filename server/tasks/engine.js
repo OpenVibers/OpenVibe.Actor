@@ -444,7 +444,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary: money ? money.summary : summary, payload: money ? money.payload : payload, target: scopedTarget, categories });
             const url = `${config.baseUrl}/me/approvals/${ask.id}`;
             const shown = money ? money.summary : summary;
-            await emit(id, { kind: 'output', step: 'text', agent, text: `Your agent wants to ${String(shown).toLowerCase()} Nothing runs until you approve it: ${url}` });
+            await emit(id, { kind: 'output', step: 'text', agent, ui_approval: { id: ask.id, question: String(shown), actions: [{ id: 'review', label: 'Review approval', url }] }, text: `Your agent wants to ${String(shown).toLowerCase()} Nothing runs until you approve it: ${url}` });
             await tellPerson(row, 'needs_you', { what: String(shown), kind: 'approve', url });
             return { asked: true, decision, ask, url };
         };

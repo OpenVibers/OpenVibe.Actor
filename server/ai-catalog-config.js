@@ -24,13 +24,14 @@ const SCHEMA = {
     additionalProperties: false,
     required: ['catalog'],
     properties: {
+        agentRuns: { type: 'boolean', title: 'Agent run streams', 'x-group': 'Agent activity', 'x-env': 'ACTOR_AGENT_UI', description: 'Serve authorized AG-UI run snapshots and resumable events. Enable after the production check.' },
         catalog: {
             type: 'boolean', title: 'AI model catalog', 'x-group': 'AI Exchange', 'x-env': 'ACTOR_AI_CATALOG',
             description: 'Read GET /v1/models with Actor\'s own service token and cache the answer about five minutes. Off, the model field is the plain one it was before.',
         },
     },
 };
-const DEFAULTS = Object.freeze({ catalog: false });
+const DEFAULTS = Object.freeze({ catalog: false, agentRuns: false });
 
 function bearer(req) {
     const h = String((req.headers && req.headers.authorization) || '');
