@@ -106,6 +106,33 @@ const ok = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`);
         await assert.rejects(() => models.chat({ tier: 'smart', messages: [{ role: 'user', content: 'x' }] }), /model|provider/i);
     });
 
+    await ok('the content tier rides the run to AI: uncensored reaches it with the person, standard never asks', async () => {
+        const { fetchImpl, calls } = fakeAi();
+        const models = createModels({ config: configLib.load(env), fetchImpl, log: quiet });
+        await models.withChoice({ subject: USR, policy: 'uncensored' }, () => models.chat({ tier: 'smart', messages: [{ role: 'user', content: 'Say hello' }] }));
+        const run = calls.find((c) => c.url.includes('/api/v1/runs'));
+        assert.ok(run, 'a run was made');
+        // AI reads the tier as a control field on the run, and decides about the person it names.
+        assert.strictEqual(run.body.options && run.body.options.policy, 'uncensored', 'the tier reaches AI');
+        assert.deepStrictEqual(run.body.on_behalf_of, { type: 'user', id: USR }, 'and the person it is for');
+
+        const plain = fakeAi();
+        const models2 = createModels({ config: configLib.load(env), fetchImpl: plain.fetchImpl, log: quiet });
+        await models2.withChoice({ subject: USR }, () => models2.chat({ tier: 'smart', messages: [{ role: 'user', content: 'Say hello' }] }));
+        const run2 = plain.calls.find((c) => c.url.includes('/api/v1/runs'));
+        assert.ok(!run2.body.options || run2.body.options.policy === undefined, 'a standard run never asks for the adult tier');
+    });
+
+    await ok('the content tier never reaches a provider directly: without AI it is refused, not downgraded', async () => {
+        const env2 = { ...env, ACTOR_AI_ROUTER: '0', ACTOR_DEEPSEEK_API_KEY: 'sk-test', ACTOR_LOCAL_LLM_URL: '' };
+        const models = createModels({ config: configLib.load(env2), fetchImpl: fakeAi().fetchImpl, log: quiet });
+        await assert.rejects(
+            () => models.withChoice({ subject: USR, policy: 'uncensored' }, () => models.chat({ tier: 'smart', messages: [{ role: 'user', content: 'x' }] })),
+            /uncensored|AI/i,
+            'the adult tier is OpenVibe.AI\'s, and it is said so'
+        );
+    });
+
     if (results.length) { console.error(`${results.length} failed`); process.exit(1); }
     console.log('ai-router: all passed');
 })();
