@@ -101,6 +101,7 @@ const SAME = { origin: 'https://openvibe.actor' };
             assert.match(page.text, new RegExp(`action="/tasks/${id}/assumptions"`), 'the live plan has an editable assumptions form');
             const edited = await t.get(`/tasks/${id}/assumptions`, { as: bea, form: { assumptions: 'Use EUR\nAsk before booking' }, headers: SAME });
             assert.strictEqual(edited.status, 303);
+            assert.ok(!String(edited.headers.get('location')).includes('assume=gone'), 'the visible plan accepts an immediate edit');
             t.providers.state.runtime = 'tool';
             // Up to 30 s: the follow-up turn can wait behind the runtime queue on a loaded CI runner.
             let seen = false;

@@ -531,6 +531,15 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                             : `the one agent loop (${row.mode === 'best' ? 'best' : 'smart'} tier)`;
                 explanation.push({ selected: agentId, objective: row.mode === 'best' ? 'correctness' : 'balanced', reasons: [why], candidates: [], decided_at: iso() });
                 await store.updateTask(s, id, { explanation });
+                // The plan event makes the assumptions form visible. Install its control first so an edit sent
+                // immediately after the page appears is queued even while the loop is still being prepared.
+                const control = { pending: [] };
+                control.assume = async (text) => {
+                    control.pending.push(String(text == null ? '' : text).slice(0, 2000));
+                    if (control.pending.length > 5) control.pending.shift();
+                    return { ok: true, queued: true };
+                };
+                controls.set(id, control);
                 if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: 'The agent starts with a plan, then works through it.' });
                 // A task that would start coding work on the person's machine asks through the same gate (levels.js):
                 // the level first, then the always-ask floor. Full access or auto-edits may let an edit through; a
@@ -546,8 +555,6 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 const wakePayload = wakes.get(id) || (dayRun ? await day.wakePayload(id) : null);
                 if (wakePayload) wakes.delete(id);
                 let out = null;
-                const control = {};
-                controls.set(id, control);
                 // The files attached to this message in the chat (plan L55 C2): text as data; images described first.
                 const attachments = await inputs.forRun(s, id, { models, meter, signal, log }).catch((err) => { log.warn('[Actor] attachments:', err && err.message); return []; });
                 // The person's own model choice for this run (plan L55 C3): their own key, through OpenVibe.AI.
