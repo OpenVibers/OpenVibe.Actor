@@ -27,17 +27,33 @@
         finally { busy = false; }
     };
     root.querySelector('[data-decline]').addEventListener('click', () => work(() => finish({ decision: 'decline' })));
-    const photo = root.querySelector('[data-photo]');
-    if (photo) photo.addEventListener('change', () => work(async () => {
-        const file = photo.files && photo.files[0];
-        if (!file) return;
-        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024) {
-            throw new Error('Choose one JPEG, PNG or WebP photo of at most 10 MB.');
-        }
-        say('Sending your photo…');
-        const uploaded = await send('/photo', file, file.type);
-        await finish({ decision: 'answer', photo: { media_id: uploaded.media_id } });
-    }));
+    const photo = root.querySelector('[data-photo-picker]');
+    if (photo && window.OVUpload) {
+        const queue = OVUpload.queue(photo, {
+            label: 'Take or choose a photo', accept: 'image/jpeg,image/png,image/webp', multiple: false,
+            upload: (file, { onProgress, signal }) => new Promise((resolve, reject) => {
+                if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024) {
+                    reject(new Error('Choose one JPEG, PNG or WebP photo of at most 10 MB.'));
+                    return;
+                }
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', `${base}/photo`);
+                xhr.setRequestHeader('Content-Type', file.type);
+                xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress({ uploadedBytes: event.loaded }); };
+                xhr.onload = () => {
+                    let data;
+                    try { data = JSON.parse(xhr.responseText); } catch (_) { data = {}; }
+                    if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+                    else reject(new Error(data.detail || 'The photo could not be sent. Try again.'));
+                };
+                xhr.onerror = () => reject(new Error('The connection stopped. Try again.'));
+                signal.addEventListener('abort', () => xhr.abort(), { once: true });
+                xhr.send(file);
+            }),
+            onDone: (_file, uploaded) => work(() => finish({ decision: 'answer', photo: { media_id: uploaded.media_id } })),
+        });
+        queue.picker.input.setAttribute('capture', 'environment');
+    }
     root.querySelectorAll('[data-location]').forEach((button) => button.addEventListener('click', () => work(async () => {
         if (!navigator.geolocation) throw new Error('This browser cannot read your location.');
         const precise = button.dataset.location === 'precise';

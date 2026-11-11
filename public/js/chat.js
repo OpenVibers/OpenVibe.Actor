@@ -137,39 +137,42 @@
         // this file changes the words.
         function grow() { if (text) text.dispatchEvent(new Event('input')); }
         if (text) text.addEventListener('input', function () { syncSend(); });
-        // ── Files: the paperclip opens the picker; each file is a chip until it is sent (at most 4, 6 MB each).
-        var attachBtn = chat.querySelector('[data-cc-attach]');
-        var fileInput = chat.querySelector('[data-cc-files]');
-        var chips = chat.querySelector('[data-cc-chips]');
+        // ── Files: the shared picker owns the drop zone, chips and removal.
+        var uploadRoot = chat.querySelector('[data-cc-upload]');
         var picked = [];
-        function drawChips() {
-            if (!chips) return;
-            chips.textContent = '';
-            chips.hidden = !picked.length;
-            picked.forEach(function (f, i) {
-                var li = document.createElement('li');
-                if (/^image\//.test(f.type)) {   // a data: URL: the page's CSP allows data: images, not blob:
-                    var im = document.createElement('img'); im.alt = ''; li.appendChild(im);
-                    var rd = new FileReader(); rd.onload = function () { im.src = String(rd.result); }; rd.readAsDataURL(f);
+        var meters = new Map();
+        var picker = uploadRoot && window.OVUpload && OVUpload.picker(uploadRoot, {
+            label: 'Attach files', accept: uploadRoot.dataset.accept, multiple: true,
+            onFile: function (file, row) {
+                var allowed = /^text\//.test(file.type) || /^application\/(pdf|json|xml|x-yaml|yaml|javascript|sql)$/.test(file.type) ||
+                    /^image\/(png|jpeg|webp|gif)$/.test(file.type) ||
+                    /\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|kt|c|h|cpp|hpp|cs|php|sh|sql|log|ini|env\.example|srt|vtt|pdf)$/i.test(file.name);
+                var total = picked.reduce(function (sum, item) { return sum + item.size; }, 0) + file.size;
+                if (!allowed || picked.length >= 4 || file.size > 6 * 1048576 || total > 12 * 1048576) {
+                    row.dispatchEvent(new Event('remove')); row.remove();
+                    problem(!allowed ? 'Actor reads text, code, CSV, JSON, PDFs and PNG, JPEG, WebP or GIF images.' :
+                        picked.length >= 4 ? 'Attach at most 4 files to one message.' :
+                            file.size > 6 * 1048576 ? file.name + ' is over 6 MB.' : 'The files together are over 12 MB.');
+                    return;
                 }
-                var name = document.createElement('span'); name.textContent = f.name; li.appendChild(name);
-                var x = document.createElement('button'); x.type = 'button'; x.setAttribute('aria-label', 'Remove ' + f.name); x.textContent = '\u00d7';
-                x.addEventListener('click', function () { picked.splice(i, 1); drawChips(); syncSend(); });
-                li.appendChild(x); chips.appendChild(li);
-            });
-        }
-        if (attachBtn && fileInput && window.FileReader) {
-            attachBtn.hidden = false;
-            attachBtn.addEventListener('click', function () { fileInput.click(); });
-            fileInput.addEventListener('change', function () {
-                Array.prototype.forEach.call(fileInput.files || [], function (f) {
-                    if (picked.length >= 4) { problem('Attach at most 4 files to one message.'); return; }
-                    if (f.size > 6 * 1048576) { problem(f.name + ' is over 6 MB.'); return; }
-                    picked.push(f);
-                });
-                fileInput.value = '';
-                drawChips(); syncSend();
-            });
+                problem(null);
+                picked.push(file);
+                var meterRoot = document.createElement('div'); row.append(meterRoot);
+                var meter = OVUpload.progress(meterRoot, { compact: true, onRetry: function () { form.requestSubmit(); } });
+                meter.update({ state: 'waiting', total: file.size });
+                meters.set(file, meter);
+                syncSend();
+            },
+            onRemove: function (file) {
+                picked = picked.filter(function (item) { return item !== file; });
+                if (meters.has(file)) { meters.get(file).destroy(); meters.delete(file); }
+                syncSend();
+            }
+        });
+        function clearPicked() {
+            picked = [];
+            meters.forEach(function (meter) { meter.destroy(); }); meters.clear();
+            if (picker) picker.rows.replaceChildren();
         }
         function readAll(files) {
             return Promise.all(files.map(function (f) {
@@ -192,7 +195,7 @@
             form.setAttribute('action', w ? '/chat/' + w.getAttribute('data-task') + '/steer' : '/chat');
             if (text) text.placeholder = w ? 'Tell Actor something while it works' : (form.querySelector('input[name=parent]') ? 'Reply to Actor' : 'Ask Actor to do something');
             send.disabled = !(text && text.value.trim());
-            if (attachBtn) attachBtn.disabled = !!w;
+            if (picker) { picker.input.disabled = !!w; uploadRoot.querySelector('.ov-upload__picker').disabled = !!w; }
         }
         syncSend();
 
@@ -207,6 +210,34 @@
             if (!input) { input = document.createElement('input'); input.type = 'hidden'; input.name = 'parent'; form.appendChild(input); }
             input.value = id;
             if (text) text.placeholder = 'Reply to Actor';
+        }
+
+        function sendChat(fields) {
+            return new Promise(function (resolve, reject) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', '/chat');
+                xhr.setRequestHeader('accept', 'application/json');
+                xhr.setRequestHeader('content-type', 'application/json');
+                xhr.upload.onprogress = function (event) {
+                    if (!event.lengthComputable) return;
+                    var fraction = event.total ? event.loaded / event.total : 0;
+                    meters.forEach(function (meter, file) {
+                        meter.update({ state: 'sending', done: Math.round(file.size * fraction), total: file.size });
+                    });
+                };
+                xhr.upload.onload = function () {
+                    meters.forEach(function (meter, file) { meter.update({ state: 'processing', done: file.size, total: file.size, message: 'Actor is reading the file' }); });
+                };
+                xhr.onload = function () {
+                    var data;
+                    try { data = JSON.parse(xhr.responseText); } catch (e) { data = { error: 'That could not be sent. Try again.' }; }
+                    if (xhr.status >= 200 && xhr.status < 300) meters.forEach(function (meter, file) { meter.update({ state: 'done', done: file.size, total: file.size }); });
+                    else meters.forEach(function (meter) { meter.update({ state: 'failed', message: data.error || 'That could not be sent. Try again.' }); });
+                    resolve({ ok: xhr.status >= 200 && xhr.status < 300, j: data });
+                };
+                xhr.onerror = function () { meters.forEach(function (meter) { meter.update({ state: 'failed', message: 'No connection. Try again.' }); }); reject(new Error('No connection')); };
+                xhr.send(JSON.stringify(fields));
+            });
         }
 
         if (stopBtn) stopBtn.addEventListener('click', function () {
@@ -248,9 +279,8 @@
             (picked.length ? readAll(picked) : Promise.resolve([]))
                 .then(function (files) {
                     if (files.length) fields.files = files;
-                    return fetch('/chat', { method: 'POST', credentials: 'same-origin', headers: { accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify(fields) });
+                    return sendChat(fields);
                 })
-                .then(function (r) { return r.json().catch(function () { return { error: 'That could not be sent. Try again.' }; }).then(function (j) { return { ok: r.ok, j: j }; }); })
                 .then(function (res) {
                     if (!res.ok || !res.j.turn) { problem(res.j.error || 'That could not be sent. Try again.'); syncSend(); return; }
                     var thread = chat.querySelector('[data-ovt-thread]');
@@ -261,7 +291,7 @@
                     }
                     var turn = window.OVThread ? window.OVThread.add(res.j.turn) : null;
                     text.value = ''; grow();
-                    picked = []; drawChips();
+                    clearPicked();
                     setParent(res.j.id);
                     if (turn) follow(turn);
                     syncSend();

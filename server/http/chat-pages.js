@@ -548,11 +548,9 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
 </select></label>`;
     }
 
-    const ATTACH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5 12.4 19a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4L15 7"/></svg>';
     const ATTACH_ACCEPT = '.txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,.pdf,application/pdf,image/png,image/jpeg,image/webp,image/gif';
     function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '', model = null, allowance = null } = {}) {
-        const tools = html`<button type="button" class="cc-attach" data-cc-attach aria-label="Attach files" title="Attach text, code, CSV, JSON, PDFs or images" hidden>${raw(ATTACH_ICON)}</button><input type="file" multiple hidden data-cc-files accept="${ATTACH_ACCEPT}">
-${modelChip(model)}
+        const tools = html`${modelChip(model)}
 <label class="cc-mode" title="How Actor picks the agent"><span class="sr-only">Mode</span><select name="mode" data-cc-mode>${MODES.map((m) => html`<option value="${m}" title="${MODE_HINT[m] || ''}"${m === mode ? raw(' selected') : ''}>${MODE_LABEL[m] || m}</option>`)}</select></label>
 <span class="cc-note" data-cc-note></span>`;
         return raw(thread.composer({
@@ -565,7 +563,7 @@ ${modelChip(model)}
             busy,
             stopAction: working ? `/tasks/${working}/cancel` : '',
             hidden: { parent },
-            top: String(html`${problem ? html`<p class="cc-problem" role="alert">${problem}</p>` : ''}<ul class="cc-files" data-cc-chips hidden></ul>`),
+            top: String(html`${problem ? html`<p class="cc-problem" role="alert">${problem}</p>` : ''}<div data-cc-upload data-accept="${ATTACH_ACCEPT}"></div><p class="cc-note">Text, code, CSV, JSON, PDF or PNG, JPEG, WebP, GIF images · up to 4 files, 6 MB each, 12 MB total.</p>`),
             tools: String(tools),
             note: `Actor checks each answer with a second model.${allowance ? ` ${allowance}` : ''}`,
         }));
@@ -612,8 +610,8 @@ ${modelChip(model)}
         return send(res, status, {
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
             // The network's sidebar (kit.css, kit-web.js) and its conversation UI (thread.css, ov-thread.js).
-            css: ['css/chat.css', 'css/skill-draft.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css'],
-            sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-share.js', 'ov-canvas.js'],
+            css: ['css/chat.css', 'css/skill-draft.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css', 'ov-upload.css'],
+            sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-share.js', 'ov-canvas.js', 'ov-upload.js'],
             body: html`${busy && !shared ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
 <div class="chat" data-chat="${first ? first.id : ''}">${raw(thread.page({
                 sidebar: shared ? '' : String(sidebar(chats, first ? first.id : null)),
