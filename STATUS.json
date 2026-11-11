@@ -8,11 +8,11 @@
   "port": 4950,
   "domain": "openvibe.actor",
   "contracts": "openvibe-contracts v0.399.0",
-  "sdk": "openvibe-sdk v0.146.0",
+  "sdk": "openvibe-sdk v0.147.0",
   "shared": "openvibe-shared v4.200.0",
   "packages": [
     "openvibe-contracts v0.399.0",
-    "openvibe-sdk v0.146.0",
+    "openvibe-sdk v0.147.0",
     "openvibe-shared v4.200.0"
   ],
   "summary": "Public at https://openvibe.actor (sudo ovhost deploy actor; unit openvibe-actor on 127.0.0.1:4950). A task in plain words is classified, routed by openvibe-sdk/placement to the agent system that can do it (the OpenVibe runtime acting through OpenVibe.Search and OpenVibe.Tools, OpenAI's web agent, an open model on OpenVibe's server for private mode), run with its steps streamed live, checked by a model of another family, and delivered as platform.task@1 with its cost to a fraction of a cent and the explanation; a failed agent or check hands it to the next agent. Free tier per person with an operator ceiling.",
@@ -60,5 +60,5 @@
     "reach from Chat (A4; chat apps' agent, approvals and group policy)",
     "agents as contacts and approval levels (A-1; actor.agent@1, actor.agent-list@1, actor.level-change@1)"
   ],
-  "updated": "2026-11-10"
+  "updated": "2026-11-11"
 }
