@@ -5,7 +5,7 @@ const { boot, done } = require('./helpers/boot');
 const { render } = require('../server/day/page');
 const SAME = { 'sec-fetch-site':'same-origin' };
 (async()=>{
-    const t = await boot({env:{ACTOR_CHECKPOINT_KEY:crypto.randomBytes(32).toString('hex')}});
+    const t = await boot({env:{ACTOR_CHECKPOINT_KEY:crypto.randomBytes(32).toString('hex'),ACTOR_A4_MODEL_SWITCH:'0'}});
     try {
         const user=t.network.addUser('you'), other=t.network.addUser('other');
         const api=(path='',json,method)=>t.get('/api/v1/me/actor'+path,{as:user,json,method,headers:SAME});

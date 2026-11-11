@@ -448,6 +448,23 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             await tellPerson(row, 'needs_you', { what: String(shown), kind: 'approve', url });
             return { asked: true, decision, ask, url };
         };
+        const askBeforeCodesTask = async (agentId, cls) => {
+            const repo = codesRepoIn(row.task);
+            if (!taskAgent || !repo) return null;
+            const asked = await askForApproval({
+                kind: 'codes.task', summary: `Start a coding task on your machine in ${repo}`,
+                payload: { task: row.task }, act: 'edit', agent: agentId,
+                target: require('../agents/actions').repoTarget(repo),
+            });
+            if (!asked.asked) return null;
+            const result = {
+                answer: `Your agent asked to start a coding task on your own machine (OpenVibe.Codes) in ${repo}. Nothing has run: approve or decline it at ${asked.url}. The request expires in ${approvals.EXPIRES_DAYS} days.`,
+                sources: [asked.url], agent: agentId, model: null, class: cls,
+                approval: { id: asked.ask.id, url: asked.url },
+                checked: { by: 'none', cross_family: false, reason: 'Nothing was run: its owner decides first.' },
+            };
+            return await setState(id, 'succeeded', { result, finished_at: iso() });
+        };
         // A child hand-off (a sub-agent's consult, a Codes task, a Space action) is one node below this task's.
         // The root's budget decides whether it may start at all: when it is spent, nothing below it starts.
         assign = assignment ? async (spec = {}) => {
@@ -518,9 +535,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // through codes_task, on the same task, budget and timeline. Explicitly chosen legacy agents keep their
             // route, and a service or personal agent run keeps its own tool policy.
             const unifiedCode = cls === 'code' && config.unifiedCodeRuns === true && !fromChat && !dayRun
-                && !row.via && (!row.agent || row.agent === 'codes') && String(row.requester || '').startsWith('user:');
+                && !row.via && !row.agent && String(row.requester || '').startsWith('user:');
             if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy || dayRun || turnAllowed || unifiedCode)) {
                 const agentId = LOOP_AGENT;
+                if (unifiedCode) {
+                    const paused = await askBeforeCodesTask('codes', cls);
+                    if (paused) return paused;
+                }
                 // The person-authored part of the task (never a run input that may come from a watch or a webhook),
                 // and the personal agent this run is for, so the memory tools scope their writes.
                 const ownAgent = chatContext && chatPolicy === 'dm' ? chatContext.agent_id : /^agent:agt_/.test(String(row.via || '')) ? row.via.slice(6) : null;
@@ -804,19 +825,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // The approval gate (levels.js + agents/approvals.js): a coding task on the person's machine asks at ask
                 // and for the always-ask floor; auto-edits lets the edit through, full access skips the gate, and
                 // approve-for-me asks a reviewer of another family first.
-                if (agentId === 'codes' && taskAgent && codesRepoIn(row.task)) {
-                    const asked = await askForApproval({
-                        kind: 'codes.task', summary: `Start a coding task on your machine in ${codesRepoIn(row.task)}`,
-                        payload: { task: row.task }, act: 'edit', agent: agentId, target: require('../agents/actions').repoTarget(codesRepoIn(row.task)),
-                    });
-                    if (asked.asked) {
-                        const result = {
-                            answer: `Your agent asked to start a coding task on your own machine (OpenVibe.Codes) in ${codesRepoIn(row.task)}. Nothing has run: approve or decline it at ${asked.url}. The request expires in ${approvals.EXPIRES_DAYS} days.`,
-                            sources: [asked.url], agent: agentId, model: null, class: cls, approval: { id: asked.ask.id, url: asked.url },
-                            checked: { by: 'none', cross_family: false, reason: 'Nothing was run: its owner decides first.' },
-                        };
-                        return await setState(id, 'succeeded', { result, finished_at: iso() });
-                    }
+                if (agentId === 'codes') {
+                    const paused = await askBeforeCodesTask(agentId, cls);
+                    if (paused) return paused;
                 }
                 await emit(id, { kind: 'output', step: attempt > 1 ? 'handoff' : 'plan', agent: agentId, text: `${agent.name} takes it${placement.reasons && placement.reasons[0] ? `: ${placement.reasons[0]}` : ''}.` });
                 let out;

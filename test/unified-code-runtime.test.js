@@ -20,8 +20,16 @@ const { boot, check, done } = require('./helpers/boot');
     try {
         const person = t.network.addUser('code-owner');
         t.providers.state.cls = 'code';
-        await check('a direct coding task cannot claim success without a Codes handoff', async () => {
+        await check('a direct coding task at ask level waits for approval before Codes runs', async () => {
             const r = await t.get('/api/v1/tasks', { as: person, headers: { 'sec-fetch-site': 'same-origin' }, json: { task: 'Edit the README in https://github.com/octocat/Hello-World' } });
+            assert.strictEqual(r.status, 201, r.text);
+            const row = await t.waitFor(r.json().id);
+            assert.strictEqual(row.state, 'succeeded');
+            assert.ok(row.result.approval && row.result.approval.id);
+            assert.strictEqual(calls.length, 0, 'the loop must wait for approval too');
+        });
+        await check('a direct coding task cannot claim success without a Codes handoff', async () => {
+            const r = await t.get('/api/v1/tasks', { as: person, headers: { 'sec-fetch-site': 'same-origin' }, json: { task: 'Edit the README in https://github.com/octocat/Hello-World', level: 'full' } });
             assert.strictEqual(r.status, 201, r.text);
             const row = await t.waitFor(r.json().id);
             assert.deepStrictEqual([row.state, row.error_code], ['failed', 'actor.codes.not_run']);
@@ -32,7 +40,7 @@ const { boot, check, done } = require('./helpers/boot');
         });
         await check('the same runtime accepts a successful Codes handoff', async () => {
             ranCodes = true;
-            const r = await t.get('/api/v1/tasks', { as: person, headers: { 'sec-fetch-site': 'same-origin' }, json: { task: 'Edit the docs in https://github.com/octocat/Hello-World' } });
+            const r = await t.get('/api/v1/tasks', { as: person, headers: { 'sec-fetch-site': 'same-origin' }, json: { task: 'Edit the docs in https://github.com/octocat/Hello-World', level: 'full' } });
             assert.strictEqual(r.status, 201, r.text);
             const row = await t.waitFor(r.json().id);
             assert.strictEqual(row.state, 'succeeded', row.error_detail || row.error_code);
