@@ -191,7 +191,12 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         // its first step; an older task without one gets it lazily (assignments.ensureForTask).
         const node = await assignments.ensureForTask(s, config, row, { origin: assignmentOrigin, level: assignmentLevel });
         const task = node ? { ...row, assignment_id: node.id } : row;
-        if (trigger) await triggerStore.addRun(s, trigger.id, task.id, 'queued', s.now());
+        if (trigger) {
+            const why = trigger.kind === 'event' ? `Watch event: ${trigger.event && trigger.event.pattern || 'matched'}`
+                : trigger.kind === 'schedule' || trigger.kind === 'goal' ? `Schedule: ${trigger.schedule && trigger.schedule.cron || 'due'}`
+                    : trigger.kind === 'mention' ? 'Conversation mention' : 'Trigger';
+            await triggerStore.addRun(s, trigger.id, task.id, 'queued', s.now(), null, why.slice(0, 300));
+        }
         if (afterInsert) await afterInsert(task);
         if (chatContext) await s.db.query('INSERT INTO actor_chat_tasks (task_id, agent_id, policy, conversation) VALUES ($1, $2, $3, $4)', [task.id, chatContext.agentId, chatContext.policy, chatContext.conversation]);
         return { status: 201, task };

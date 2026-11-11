@@ -960,7 +960,11 @@ function createApi(ctx) {
     r.get('/triggers/:id', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
         const card = await triggers.get(triggerOwner(req), req.params.id, { token: watchToken(req), live: true });
         if (!card) return problem(req, res, 404, 'actor.trigger.not_found', 'No such trigger.');
-        res.json({ trigger: card });
+        if (req.query.runs !== '1') return res.json({ trigger: card });
+        const rows = await require('../triggers/store').runs(s, card.id, 20);
+        res.json({ trigger: card, runs: rows.map((row) => ({ task_id: row.task_id, state: row.state, why: row.why || null,
+            cost_usd: row.cost_usd == null ? null : Number(row.cost_usd), created_at: new Date(Number(row.created_at)).toISOString(),
+            updated_at: new Date(Number(row.updated_at)).toISOString() })) });
     });
     r.post('/triggers', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), personOnly, async (req, res) => {
         const b = req.body || {};

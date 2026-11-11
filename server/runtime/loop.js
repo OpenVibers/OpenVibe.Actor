@@ -1000,7 +1000,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                     await emitPlan(state, ctx);
                     return { ok: true, assumptions: state.plan.assumptions };
                 };
-                control.pending = [];
+                control.pending = Array.isArray(control.pending) ? control.pending : [];
                 control.assume = applyAssumptions;
                 control.steer = steerOf(state, ctx);
                 control.plan = () => state.plan;
@@ -1094,7 +1094,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // An assumption edit can arrive while the understand and plan calls are still running (the page already shows
         // the plan of a previous turn). Hold it here and apply it as soon as the run's own handler exists.
         if (control && typeof control === 'object') {
-            control.pending = [];
+            control.pending = Array.isArray(control.pending) ? control.pending : [];
             control.assume = async (text) => { control.pending.push(String(text == null ? '' : text)); return { ok: true, queued: true }; };
             control.steer = steerOf(state, ctx);
         }
