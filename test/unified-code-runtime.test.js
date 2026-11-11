@@ -38,7 +38,11 @@ const { boot, check, done } = require('./helpers/boot');
             assert.strictEqual(row.state, 'succeeded', row.error_detail || row.error_code);
             assert.strictEqual(row.result.agent, 'openvibe-runtime');
         });
-        assert.strictEqual(require('../server/config').load({ ACTOR_UNIFIED_CODE_RUNS: '0' }).unifiedCodeRuns, false);
+        const load = require('../server/config').load;
+        const defaults = load({});
+        assert.deepStrictEqual([defaults.unifiedCodeRuns, defaults.a4ModelSwitch, defaults.codesSessionBridge], [true, true, true]);
+        const rollback = load({ ACTOR_UNIFIED_CODE_RUNS: '0', ACTOR_A4_MODEL_SWITCH: '0', ACTOR_CODES_SESSION_BRIDGE: '0' });
+        assert.deepStrictEqual([rollback.unifiedCodeRuns, rollback.a4ModelSwitch, rollback.codesSessionBridge], [false, false, false]);
     } finally { await t.close(); }
     done();
 })().catch((err) => { console.error(err); process.exit(1); });

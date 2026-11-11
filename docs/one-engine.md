@@ -93,6 +93,8 @@ answer.
 
 A person's direct coding task uses Actor's shared loop and `codes_task` by default. Codes still executes file changes on the person's machine. The task fails with `actor.codes.not_run` unless that tool reports a successful run, so a model cannot claim code was changed without a Codes handoff. Scheduled personal agents already use the shared loop; service turns and explicitly chosen legacy agents keep their own routing. The owner can set `ACTOR_UNIFIED_CODE_RUNS=0` to use the old direct Codes adapter.
 
+A running personal Actor can switch models mid-run. The Codes session bridge also shows the coding job's tool steps and final result in Actor's timeline when Codes provides them. `ACTOR_A4_MODEL_SWITCH=0` and `ACTOR_CODES_SESSION_BRIDGE=0` turn these paths off separately.
+
 ## Next slices
 
 1. Move Vibe room conversations onto Actor tasks, retaining the room UI and its authorization rules.
