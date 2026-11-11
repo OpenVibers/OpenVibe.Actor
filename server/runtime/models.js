@@ -543,6 +543,56 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         };
     }
 
+    /** A normal hosted turn through Exchange, with the same service token and person attribution. */
+    async function chatViaExchange({ tier, messages, tools, json, maxTokens, signal, onDelta, subject, policy }) {
+        const c = routerClient();
+        if (!c) throw new ModelError('OpenVibe.Exchange is not configured on this server', { code: 'actor.model.unavailable' });
+        const body = {
+            model: (currentChoice() && currentChoice().model) || routerModel(tier),
+            messages,
+            ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {}),
+            ...(json ? { response_format: { type: 'json_object' } } : {}),
+            max_tokens: Math.max(1, Math.min(Number(maxTokens) || 1500, 16000)),
+            temperature: 0.2,
+            ...(ai.maxCostUsd != null ? { max_cost_usd: ai.maxCostUsd } : {}),
+            ...(subject ? { on_behalf_of: { type: 'user', id: String(subject) } } : {}),
+            ...(policy === 'uncensored' ? { policy: 'uncensored' } : {}),
+            ...(onDelta ? { stream: true, stream_options: { include_usage: true } } : {}),
+        };
+        const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(ai.timeoutMs || 180_000)]) : AbortSignal.timeout(ai.timeoutMs || 180_000);
+        let res;
+        try {
+            res = await fetchImpl(`${trimSlash(ai.exchangeUrl || 'https://api.openvibe.exchange')}/v1/chat/completions`, {
+                method: 'POST',
+                headers: { authorization: `Bearer ${await c.tokens.getToken()}`, 'content-type': 'application/json', accept: onDelta ? 'text/event-stream' : 'application/json' },
+                body: JSON.stringify(body), signal: sig,
+            });
+        } catch (err) {
+            if (signal && signal.aborted) throw new ProviderError('cancelled', { code: 'actor.task.cancelled' });
+            throw new ProviderError(err && err.name === 'TimeoutError' ? 'OpenVibe.Exchange did not answer in time' : 'OpenVibe.Exchange could not be reached', { code: 'actor.provider.unreachable' });
+        }
+        if (!res.ok) {
+            const answer = await res.json().catch(() => null);
+            const err = (answer && answer.error) || {};
+            throw new ProviderError(`OpenVibe.Exchange HTTP ${res.status}: ${clip(err.message || err.code || 'request failed', 300)}`, { status: res.status, code: res.status === 429 ? 'actor.provider.rate_limited' : 'actor.provider.error' });
+        }
+        const answer = onDelta ? await readStream(res, onDelta, { signal, who: 'OpenVibe.Exchange' }) : await res.json().catch(() => null);
+        if (!answer || !Array.isArray(answer.choices)) throw new ProviderError('OpenVibe.Exchange answered without a completion');
+        const first = answer.choices[0] || {};
+        const message = first.message || { role: 'assistant', content: '' };
+        const u = answer.usage || {};
+        const x = answer.x_openvibe || {};
+        return {
+            message, text: typeof message.content === 'string' ? message.content : '',
+            toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [],
+            finish: first.finish_reason || null,
+            model: x.resolved_model || answer.model || body.model,
+            usage: { input: u.prompt_tokens || 0, cached: 0, output: u.completion_tokens || 0 },
+            cost_usd: Number(x.cost_usd) || 0,
+            latency_class: null,
+        };
+    }
+
     /** The router's streamed run (POST /api/v1/runs?stream=1): `delta` events as they come, then the run. */
     async function routerStream(c, body, { onDelta, signal }) {
         const { response } = await c.client.request({
@@ -592,7 +642,10 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         }
         // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
         if (routerOn() || (choice && choice.model && !choice.provider)) {
-            const r = await chatViaRouter({ tier, messages, tools, json, maxTokens, signal, onDelta, subject: subject || (choice && choice.subject), target: choice && choice.target, latency, policy: policyOf });
+            const args = { tier, messages, tools, json, maxTokens, signal, onDelta, subject: subject || (choice && choice.subject), target: choice && choice.target, latency, policy: policyOf };
+            const r = routerOn() && ai.exchangeRouter && !args.target && !args.latency
+                ? await chatViaExchange(args)
+                : await chatViaRouter(args);
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }
         await warm();
