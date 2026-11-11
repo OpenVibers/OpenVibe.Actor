@@ -24,15 +24,22 @@ function fakeCodes({ start = 201, startBody = null, states = ['running', 'succee
     const calls = [];
     let reads = 0;
     const page = `https://openvibe.codes/run/tasks/${TASK}`;
-    const task = (state) => ({
-        id: TASK, state, repo: 'https://github.com/octocat/Hello-World', url: page, created_at: '2026-10-14T15:00:00.000Z', updated_at: '2026-10-14T15:00:00.000Z',
-        ...(state === 'succeeded' ? { result: { ok: true, agents: ['deepseek'], summary: 'Appended the line.', files: [{ path: 'README', added: 1, removed: 0 }], patch: 'diff --git a/README b/README\n+Edited.\n', duration_ms: 4200 } } : {}),
-    });
+    const task = (s) => {
+        const state = typeof s === 'string' ? s : s.state;
+        return {
+            id: TASK, state, repo: 'https://github.com/octocat/Hello-World', url: page, created_at: '2026-10-14T15:00:00.000Z', updated_at: '2026-10-14T15:00:00.000Z',
+            ...(typeof s === 'object' && s.error ? { error: s.error } : {}),
+            ...(state === 'succeeded' ? { result: { ok: true, agents: ['deepseek'], summary: 'Appended the line.', files: [{ path: 'README', added: 1, removed: 0 }], patch: 'diff --git a/README b/README\n+Edited.\n', duration_ms: 4200 } } : {}),
+        };
+    };
     const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
     const fetchImpl = async (url, init = {}) => {
         const u = new URL(url);
         const headers = init.headers || {};
-        calls.push({ method: init.method || 'GET', path: u.pathname, query:u.searchParams.toString(), subject: headers['X-OV-Subject'], auth: headers.Authorization, body: init.body ? JSON.parse(init.body) : null });
+        let parsed = null;
+        try { parsed = init.body ? JSON.parse(init.body) : null; } catch { parsed = init.body || null; }
+        calls.push({ method: init.method || 'GET', path: u.pathname, query:u.searchParams.toString(), subject: headers['X-OV-Subject'], auth: headers.Authorization, body: parsed });
+        if (u.pathname === '/oauth/token') return reply(200, { access_token: 'tok', token_type: 'Bearer', expires_in: 3600 });
         if (u.pathname === '/api/v1/tasks' && init.method === 'POST') return reply(start, startBody || { task: task('queued'), created: true });
         if (u.pathname === `/api/v1/tasks/${TASK}` && (init.method || 'GET') === 'GET') return reply(200, task(states[Math.min(reads++, states.length - 1)]));
         if (u.pathname === `/run/tasks/${TASK}/session.json`) {
@@ -112,6 +119,42 @@ const run = (codes, extra = {}) => {
         const sleep = async () => { ac.abort(); };
         await assert.rejects(run(createCodes({ config, fetchImpl: codes.fetchImpl, tokens, sleep, pollMs: 0 }), { signal: ac.signal }), (e) => e.code === 'actor.task.cancelled');
         assert.ok(codes.calls.some((c) => c.method === 'POST' && c.path === `/api/v1/tasks/${TASK}/cancel` && c.subject === ME));
+    });
+
+    await check('a named harness rides to Codes; a bad name is refused here', async () => {
+        const codes = fakeCodes();
+        await run(createCodes({ config, fetchImpl: codes.fetchImpl, tokens, sleep: async () => {}, pollMs: 0 }), { agent: 'muse' });
+        assert.strictEqual(codes.calls[0].body.agent, 'muse');
+        const plain = fakeCodes();
+        await run(createCodes({ config, fetchImpl: plain.fetchImpl, tokens, sleep: async () => {}, pollMs: 0 }));
+        assert.ok(!('agent' in plain.calls[0].body), 'absent, Codes routes it');
+        const fresh = createCodes({ config, fetchImpl: fakeCodes().fetchImpl, tokens, sleep: async () => {}, pollMs: 0 });
+        await assert.rejects(run(fresh, { agent: 'Muse Code!' }), (e) => e.code === 'actor.task.bad_agent');
+    });
+
+    await check('a harness the machine cannot run answers with its setup, not the runner\u2019s words', async () => {
+        const unknown = fakeCodes({ start: 422, startBody: { code: 'codes.agent_unknown', detail: 'no such harness' } });
+        await assert.rejects(run(createCodes({ config, fetchImpl: unknown.fetchImpl, tokens, sleep: async () => {}, pollMs: 0 }), { agent: 'muse' }),
+            /Muse Code cannot run on your machine yet.*muse login.*--plan-logins.*--worker/s);
+        const other = fakeCodes({ start: 422, startBody: { code: 'codes.agent_unknown', detail: 'no such harness' } });
+        await assert.rejects(run(createCodes({ config, fetchImpl: other.fetchImpl, tokens, sleep: async () => {}, pollMs: 0 }), { agent: 'someday' }),
+            /no such harness.*openvibe\.codes\/run/s);
+        const old = fakeCodes({ states: [{ state: 'failed', error: 'muse is not available here: unknown agent' }] });
+        await assert.rejects(run(createCodes({ config, fetchImpl: old.fetchImpl, tokens, sleep: async () => {}, pollMs: 0 }), { agent: 'muse' }),
+            /Muse Code cannot run on your machine yet/);
+    });
+
+    await check('the one loop\u2019s codes_task passes the agent choice through to Codes', async () => {
+        const codesTask = require('../server/runtime/tools/codes_task');
+        const codes = fakeCodes();
+        const out = await codesTask.run(
+            { instruction: 'Add a line to the README.', repo: 'https://github.com/octocat/Hello-World', agent: 'muse' },
+            { config, fetch: codes.fetchImpl, requester: `user:${ME}`, taskId: TASK, emit: async () => {} });
+        const start = codes.calls.find((c) => c.method === 'POST' && c.path === '/api/v1/tasks');
+        assert.strictEqual(start.body.agent, 'muse');
+        assert.ok(out.text.includes('Done on your machine'), out.text);
+        assert.strictEqual(codesTask.available({ config, requester: `user:${ME}` }), true);
+        assert.strictEqual(codesTask.available({ config, requester: 'ip:1.2.3.4' }), false);
     });
 
     await check('the catalog lists the agent once Codes is connected, at no cost to Actor; either family checks its answers', async () => {

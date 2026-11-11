@@ -49,6 +49,8 @@ const EXPECTED = {
     wait_for: false,
     make_chart: true,
     make_file: true,
+    // A Muse step runs an agent on the person's computer, which reads, changes and runs things there.
+    muse_run: true,
     notify_phone: true,
     remember: true,
     robot_steps: true,
