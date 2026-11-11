@@ -99,9 +99,13 @@ function load(env = process.env) {
             timeoutMs: Math.max(5000, int(env.ACTOR_AI_TIMEOUT_MS, 180_000)),
             waitMs: Math.max(1000, int(env.ACTOR_AI_WAIT_MS, 120_000)),
             // The AI layer of every product: with this on, the tiers below run on AI's router and the operator's
-            // provider keys (ACTOR_DEEPSEEK_API_KEY, ACTOR_OPENAI_API_KEY, …) are not used. Off by default so a
-            // self-hosted Actor keeps its own model choices; production sets ACTOR_AI_ROUTER=1.
-            router: bool(env.ACTOR_AI_ROUTER),
+            // provider keys (ACTOR_DEEPSEEK_API_KEY, ACTOR_OPENAI_API_KEY, …) are not used. Hosted
+            // Actor uses this by default; self-hosted Actor keeps its own model choices.
+            router: env.ACTOR_AI_ROUTER == null ? isProduction && !selfHosted : bool(env.ACTOR_AI_ROUTER),
+            // Hosted chat completions use Exchange's compatible API. Slow classes and targeted runs
+            // keep the runs API, which carries their extra controls. Set 0 to use the runs API for all.
+            exchangeRouter: env.ACTOR_EXCHANGE_ROUTER == null ? isProduction && !selfHosted : bool(env.ACTOR_EXCHANGE_ROUTER),
+            exchangeUrl: trim(env.ACTOR_EXCHANGE_URL || 'https://api.openvibe.exchange'),
             // Each tier's policy on the router: floor and ceiling in one name (economy = cheapest healthy, fast =
             // quickest, balanced = price and latency, auto = the router's own, private = OpenVibe-run/local only).
             // An exact id (<org>/<model>@<revision>) pins a model when AI's catalog is on.
