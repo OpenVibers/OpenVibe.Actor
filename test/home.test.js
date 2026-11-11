@@ -7,6 +7,7 @@
  * are only the callable ones; the FAQPage JSON-LD holds exactly the questions the page shows.
  */
 const assert = require('assert');
+const showcase = require('openvibe-shared/showcase');
 const { boot, check, done } = require('./helpers/boot');
 
 (async () => {
@@ -51,7 +52,10 @@ const { boot, check, done } = require('./helpers/boot');
         const page = await t.get('/agents');
         assert.match(page.text, /<p class="agent-blurb">/, 'what each agent is now lives on /agents');
         const launcher = (/<section class="sc-sec sc-apps-sec" id="network"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
-        for (const host of ['openvibe.tools', 'openvibe.watch', 'openvibe.bot', 'openvibe.codes']) assert.ok(launcher.includes(`<a href="https://${host}/?ov_from=actor">`), `the launcher links ${host}`);
+        // The launcher is the shared neighbourhood for Actor, whatever the library currently lists there.
+        const related = showcase.RELATED.actor || [];
+        assert.ok(related.length >= 3, 'the shared launcher names its neighbours');
+        for (const [, , href] of related) assert.ok(launcher.includes(`<a href="${href}?ov_from=actor">`), `the launcher links ${href}`);
         assert.ok(!/class="(hm-template|hm-tgroup|agent-card|hm-qa)\b/.test(r.text), 'no hand-built card stacks are left');
     });
 
