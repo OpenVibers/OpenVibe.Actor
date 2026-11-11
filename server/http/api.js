@@ -396,6 +396,50 @@ function createApi(ctx) {
     r.get('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (row) res.json(row);
     });
+    // One owner-scoped read for the agent sheet. Keep each section sourced from Actor's existing records.
+    r.get('/me/agents/:id/sheet', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
+        const agent = await personal.get(s, req.principal.requester, req.params.id);
+        if (!agent) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        const [tasks, asks, schedules, memory, timelineData] = await Promise.all([
+            store.listTasks(s, agent.owner, { limit: 100, via: `agent:${agent.id}` }),
+            s.db.many("SELECT id, kind, summary, payload, state, created_at, expires_at FROM actor_approvals WHERE owner = $1 AND agent_id = $2 ORDER BY (state = 'pending') DESC, created_at DESC LIMIT 50", [agent.owner, agent.id]),
+            s.db.many('SELECT id, task, kind, schedule, state, last_run_at, last_state FROM actor_triggers WHERE owner = $1 AND agent_id = $2 AND deleted_at IS NULL ORDER BY created_at DESC', [agent.owner, agent.id]),
+            personal.memory(s, agent.owner, agent.id),
+            timeline.list(s, agent.owner, { limit: 100 }),
+        ]);
+        const runs = await Promise.all(tasks.rows.map(async (task) => ({ id: task.id, task: task.task, state: task.state,
+            created_at: task.created_at, finished_at: task.finished_at, result: task.result || null, cost_usd: Number(task.cost_usd) || 0,
+            computer: await store.taskComputer(s, task) })));
+        const computerRun = runs.find((run) => run.computer);
+        const approvalsForAgent = asks.map((ask) => {
+            const payload = typeof ask.payload === 'string' ? JSON.parse(ask.payload) : ask.payload;
+            return { id: ask.id, kind: ask.kind, state: ask.state, what: ask.summary,
+                why: payload && payload.why || null, touch: payload && (payload.target || payload.resource) || null,
+                created_at: ask.created_at, expires_at: ask.expires_at };
+        });
+        res.set('Cache-Control', 'no-store').json({
+            agent: { id: agent.id, name: agent.name, face: agent.face || null,
+                state: agent.status === 'paused' ? 'paused' : (runs[0] && ['running', 'verifying'].includes(runs[0].state) ? 'working' : 'idle'),
+                instructions: agent.instructions, voice: agent.voice || null },
+            now: runs.find((run) => ['running', 'verifying'].includes(run.state)) || null,
+            work: runs, asks: approvalsForAgent,
+            asks_empty: approvalsForAgent.some((ask) => ask.state === 'pending') ? null : 'Requests to approve or decline will appear here.',
+            computer: computerRun ? { ...computerRun.computer, open: computerRun.computer.url || null } : null,
+            schedules: [{ schedule: agent.schedule, schedule_at: agent.schedule_at || null,
+                schedule_dow: agent.schedule_dow == null ? null : agent.schedule_dow,
+                next_run_at: agent.next_run_at || null, last_run_at: agent.last_run_at || null,
+                last_result: agent.last_skip_reason || runs.find((run) => run.finished_at)?.state || null },
+                ...schedules.map((item) => ({ ...item, next_run_at: null, last_result: item.last_state || null }))],
+            memory, activity: timelineData.entries.filter((entry) => tasks.rows.some((task) => entry.ref === task.id)),
+        });
+    });
+    for (const action of ['pause', 'resume']) r.post(`/me/agents/:id/${action}`, principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
+        const agent = await personal.get(s, req.principal.requester, req.params.id);
+        if (!agent) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        const out = await personal.update(s, config, req.principal.requester, agent.id, { status: action === 'pause' ? 'paused' : 'active' });
+        if (!out || !out.row) return problem(req, res, 422, 'actor.agent.invalid', out && out.error || 'Could not change agent state.');
+        res.json({ id: agent.id, state: action === 'pause' ? 'paused' : 'active' });
+    });
     // The agent's voice as a file (actor.voice@1). Another person's agent is the same 404 as one that does not exist.
     r.get('/me/agents/:id/voice', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (!row) return;
