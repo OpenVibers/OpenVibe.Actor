@@ -4,7 +4,7 @@ const READ = ['calculate', 'convert_time', 'currency_convert', 'geocode', 'marke
     'read_page', 'recall', 'search_openvibe', 'search_web', 'sports_scores', 'time_in', 'weather_now', 'wikipedia'];
 const WORK = [...READ, 'make_file', 'make_chart', 'remember', 'ask_person', 'wait_for'];
 const DESK = ['computer_desk', 'computer_browser', 'computer_input', 'computer_screen', 'computer_list',
-    'computer_read', 'computer_write', 'computer_run', 'list_my_computers', 'hand_to_person'];
+    'computer_read', 'computer_write', 'computer_run', 'muse_run', 'list_my_computers', 'hand_to_person'];
 const lane = (asks, tools, minutes = 20) => ({ asks_before: asks, tools, budget: { usd: 0.25, minutes } });
 const LANES = Object.freeze({
     find_work: lane(['applying', 'answering_employers', 'signing_up'], [...WORK, ...DESK]),

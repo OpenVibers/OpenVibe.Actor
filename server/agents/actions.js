@@ -208,12 +208,27 @@ function stepFor(name, input) {
         // ── Coding on the person's machine ──
         case 'codes_task': {
             const repo = text(a.repo, 300);
+            const agent = text(a.agent, 40);
             return {
                 act: 'edit',
                 kind: 'codes.task',
-                summary: `Start a coding task on your machine${repo ? ` in ${repo}` : ''}`,
+                summary: `Start a coding task on your machine${repo ? ` in ${repo}` : ''}${agent ? ` (${agent})` : ''}`,
                 target: repoTarget(a.repo),
-                payload: safeInput({ instruction: a.instruction, repo }),
+                payload: safeInput({ instruction: a.instruction, repo, ...(a.agent ? { agent: a.agent } : {}) }),
+            };
+        }
+        case 'muse_run': {
+            // One agentic step through Muse Code on the person's computer: the approval names the instruction
+            // exactly (like a routine's task), so allowing it always covers that instruction on that machine only.
+            const prompt = text(a.prompt, 300);
+            return {
+                act: 'act',
+                kind: 'computer.run',
+                summary: `Run Muse Code on your computer: ${quoted(prompt, 220) || 'a step'}`,
+                target: typeof a.prompt === 'string' && a.prompt
+                    ? exactTarget(`muse ${word(a.prompt)}${raw(a.cwd) ? ` in ${word(a.cwd)}` : ''} on ${machineWord(a)}`)
+                    : null,
+                payload: safeInput({ machine: a.machine, prompt: a.prompt, cwd: a.cwd, model: a.model, effort: a.effort, desk: a.desk }),
             };
         }
 

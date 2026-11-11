@@ -24,7 +24,7 @@ function codesFor(ctx) {
 module.exports = {
     name: 'codes_task',
     description: 'Hand a coding task to OpenVibe.Codes, which runs it on the person\'s own machine (it needs them signed in and a machine connected). Name the repository as its https address and say what to change. Answers the summary, the changed files and the patch, or a link to follow the task while the machine is still working.',
-    input: { type: 'object', properties: { instruction: { type: 'string', description: 'what to change, in plain words' }, repo: { type: 'string', description: 'the repository as its https address, if the instruction does not already name it' } }, required: ['instruction'] },
+    input: { type: 'object', properties: { instruction: { type: 'string', description: 'what to change, in plain words' }, repo: { type: 'string', description: 'the repository as its https address, if the instruction does not already name it' }, agent: { type: 'string', description: 'which coding agent runs it (omit it and Codes picks; "muse" runs it through Muse Code on the person\'s own Muse sign-in, with contributor mode off)' } }, required: ['instruction'] },
     scope: 'person',
     acts: true,
     costUsd: 0,
@@ -41,7 +41,7 @@ module.exports = {
         const node = typeof ctx.assign === 'function' ? await ctx.assign({ mode: 'work', reply: 'poll', agentId: ctx.agentId || null, state: 'running' }) : null;
         if (node && node.error) return { text: JSON.stringify({ error: `not started: ${node.error}` }), isError: true, data: node };
         try {
-            const out = await codes.adapter({ task, requester: ctx.requester, signal: ctx.signal, emit: ctx.emit, taskId: ctx.taskId || null });
+            const out = await codes.adapter({ task, requester: ctx.requester, signal: ctx.signal, emit: ctx.emit, taskId: ctx.taskId || null, ...(typeof input.agent === 'string' && input.agent ? { agent: input.agent } : {}) });
             if (node && typeof ctx.closeAssignment === 'function') await ctx.closeAssignment(node.id, 'succeeded');
             return { text: out.text, data: { sources: out.sources, model: out.model }, sources: (out.sources || []).map((url) => ({ url })) };
         } catch (err) {

@@ -8,11 +8,13 @@
  * the machine's own keys, so Actor meters nothing for it.
  *
  *   createCodes({ config, fetchImpl, tokens?, sleep?, pollMs?, now? }) → { enabled, adapter }
- *     adapter({ task, requester, signal, emit, meter, budgetLeft, taskId }) → { text, sources, model }
+ *     adapter({ task, requester, signal, emit, meter, budgetLeft, taskId, agent? }) → { text, sources, model }
  *
  * The adapter starts the task (the Actor task id is its idempotency key, so a retry never starts a second one),
  * reports each state change, and waits for the end. When the machine is still working as Actor's own task time runs
  * out, the answer says so and links the task's live page; when the task is cancelled, the Codes task is cancelled too.
+ * `agent` names the harness that runs it (Codes validates it; absent, Codes' router picks). 'muse' runs it through
+ * Muse Code on the person's own machine, on their own Muse sign-in with contributor mode off.
  * Off (enabled false) without ACTOR_CODES_URL or without Actor's client secret.
  */
 const { serviceAuth } = require('openvibe-contracts');
@@ -27,6 +29,10 @@ const LABEL = {
 };
 // A repository the task names: an https URL with an owner and a name (GitHub, GitLab, Codeberg, a Forgejo …).
 const REPO = /https:\/\/[a-z0-9.-]+\.[a-z]{2,}\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/;
+// A harness id, as Codes' job input reads it (harness/job.js parseArgs).
+const HARNESS = /^[a-z0-9-]{1,40}$/;
+// What a machine answers when the named harness cannot run there (an old job runner, a missing CLI or sign-in).
+const NOT_AVAILABLE = /not available here|unknown agent|no agent|not installed|not signed in|sign in/i;
 
 const personOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
 
@@ -58,6 +64,20 @@ function answerOf(t) {
     if (r.push && r.push.pushed) lines.push('', `Pushed to the branch [${r.push.branch}](${r.push.branch_url})${r.push.pull_request ? ` · [pull request](${r.push.pull_request})` : ''}.`);
     lines.push('', `[The task on OpenVibe.Codes](${t.url})`);
     return lines.join('\n');
+}
+
+/**
+ * What the person does when the named harness cannot run: Muse Code means their own Muse sign-in on their own
+ * machine (installed, signed in, and the job runner new enough to know it). Other harnesses keep Codes' own words.
+ */
+function harnessSetup(harness, pages, detail) {
+    if (harness === 'muse') {
+        return 'Muse Code cannot run on your machine yet. On it: install it (`curl -fsSL https://dev.meta.ai/install.sh | sh`), '
+            + 'sign in with your own Muse plan (`muse login`), name its login for your jobs (run the Link installer again with '
+            + '--plan-logins), and update the Codes job runner there (run the installer again with --worker). Link\u2019s window '
+            + `shows whether it is ready (its Codes section). Then send the task again, or start one at ${pages}/run.`;
+    }
+    return (detail ? `${detail} ` : '') + `The coding agent "${harness}" cannot run right now. You can also start the task yourself at ${pages}/run.`;
 }
 
 /** Validate the Codes v1 session envelope before its untrusted harness output enters Actor's step stream. */
@@ -108,7 +128,7 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
     }
     const why = (r) => (r.data && (r.data.detail || r.data.title)) || `OpenVibe.Codes answered ${r.status}`;
 
-    async function adapter({ task, requester, signal, emit, taskId = null }) {
+    async function adapter({ task, requester, signal, emit, taskId = null, agent = null }) {
         if (!enabled) throw new ProviderError('OpenVibe.Codes is not connected to this server', { code: 'actor.agent.unavailable' });
         const subject = personOf(requester);
         if (!subject || !USER_SUBJECT.test(subject)) {
@@ -116,10 +136,15 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         }
         const repo = repoIn(task);
         if (!repo) throw new ProviderError('Name the repository to work on, as its https address (for example https://github.com/you/project), and say what to change.', { code: 'actor.task.no_repo' });
+        const harness = typeof agent === 'string' && HARNESS.test(agent) ? agent : null;
+        if (agent != null && !harness) throw new ProviderError(`No coding agent is called "${String(agent).slice(0, 40)}".`, { code: 'actor.task.bad_agent' });
         await emit({ step: 'tool_call', tool: 'codes.task.start', input: repo });
-        const started = await call('POST', '/tasks', subject, { body: { repo, prompt: String(task).slice(0, 8000), ...(taskId ? { idempotency_key: String(taskId).slice(0, 128) } : {}) }, signal });
+        const started = await call('POST', '/tasks', subject, { body: { repo, prompt: String(task).slice(0, 8000), ...(harness ? { agent: harness } : {}), ...(taskId ? { idempotency_key: String(taskId).slice(0, 128) } : {}) }, signal });
         if (started.status === 409 && started.data && started.data.code === 'codes.no_project') {
             throw new ProviderError(`Before Actor can send coding work to your machine: add the machine at https://openvibe.link/machines, then start one task yourself at ${pages}/run (it picks the project your tasks run in).`, { code: 'actor.agent.unavailable' });
+        }
+        if (started.status === 422 && started.data && started.data.code === 'codes.agent_unknown') {
+            throw new ProviderError(harnessSetup(harness, pages, started.data.detail), { code: 'actor.agent.unavailable' });
         }
         if (!started.ok || !started.data || !started.data.task) throw new ProviderError(why(started), { code: 'actor.agent.failed' });
         if (!TASK_ID.test(String(started.data.task.id))) throw new ProviderError('OpenVibe.Codes answered with no task id', { code: 'actor.agent.failed' });
@@ -150,8 +175,14 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
             return { text: `${LABEL[t.state] || t.state}, and it is not done yet. Follow it live, and see the change when it ends: [the task on OpenVibe.Codes](${t.url})`, sources, model: 'openvibe-codes' };
         }
         if (t.state === 'expired') throw new ProviderError(`No machine of yours took the task in time. Is it online at https://openvibe.link/machines, with the Codes job runner (install it with --worker)? The task: ${t.url}`, { code: 'actor.agent.failed' });
-        if (t.state !== 'succeeded') throw new ProviderError(`The task ${t.state === 'cancelled' ? 'was cancelled' : 'failed'}${t.error ? `: ${t.error}` : ''}. ${t.url}`, { code: 'actor.agent.failed' });
-        if (!t.result || !t.result.ok) throw new ProviderError(`The agents on your machine did not finish${t.result && t.result.error ? `: ${t.result.error}` : ''}. ${t.url}`, { code: 'actor.agent.failed' });
+        const failure = t.state !== 'succeeded' ? (t.error || '') : (!t.result || !t.result.ok ? ((t.result && t.result.error) || '') : null);
+        if (failure != null) {
+            // The machine could not run the named harness (an old runner, a missing CLI or sign-in): say how to set
+            // it up instead of repeating the runner's words.
+            if (harness && NOT_AVAILABLE.test(failure)) throw new ProviderError(harnessSetup(harness, pages, failure), { code: 'actor.agent.unavailable' });
+            if (t.state !== 'succeeded') throw new ProviderError(`The task ${t.state === 'cancelled' ? 'was cancelled' : 'failed'}${t.error ? `: ${t.error}` : ''}. ${t.url}`, { code: 'actor.agent.failed' });
+            throw new ProviderError(`The agents on your machine did not finish${t.result && t.result.error ? `: ${t.result.error}` : ''}. ${t.url}`, { code: 'actor.agent.failed' });
+        }
         let text = answerOf(t);
         if (config.codesSessionBridge === true) {
             const page = await sessionPage(t.id, subject, signal).catch(() => null);
@@ -166,4 +197,4 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
     return { enabled, adapter };
 }
 
-module.exports = { createCodes, repoIn, answerOf, personOf, sessionEventsOf };
+module.exports = { createCodes, repoIn, answerOf, personOf, sessionEventsOf, harnessSetup };

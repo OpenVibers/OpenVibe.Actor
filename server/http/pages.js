@@ -110,7 +110,7 @@ const TOOL_LABEL = {
     calculate: 'Calculator', make_file: 'File', make_chart: 'Chart', run_tool: 'OpenVibe tool', find_tools: 'Find a tool',
     recall: 'Memory', remember: 'Memory',
     codes_task: 'Coding task', robot_steps: 'Robot', list_my_robots: 'Your robots', list_my_computers: 'Your computers',
-    delegate: 'Sub-agent',
+    muse_run: 'Muse Code', delegate: 'Sub-agent',
 };
 const toolLabel = (name) => TOOL_LABEL[name] || String(name || 'tool').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 // The trace fold (stage V2-10): one line per span, at most this many on the page (a phone screen); the API has all.
