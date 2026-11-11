@@ -85,7 +85,9 @@ const TABLES = [
             'conversation', 'tools', 'model',
             // The content tier the turn answered under: the person's own export says which of their turns were on
             // the adult tier.
-            'tier'],
+            'tier',
+            // The first-party service permitted to read a personal agent run on the person's behalf.
+            'delegated_via'],
     },
     // The person's own per-UTC-day spend accounting. Deleted: nothing in Actor keeps a person's spend record for a
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is
