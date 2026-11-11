@@ -16,7 +16,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
 (async () => {
     const codesCalls = [];
     const t = await boot({
-        env: { ACTOR_CODES_URL: 'http://127.0.0.1:9' },
+        env: { ACTOR_CODES_URL: 'http://127.0.0.1:9', ACTOR_UNIFIED_CODE_RUNS: '0' },
         adapters: {
             // No deepseek checker: classification is the heuristic, which reads "repository … bug" as code.
             checkers: { openai: async () => ({ text: '{"ok":true,"reason":"reports the change"}', cost_usd: 0 }) },

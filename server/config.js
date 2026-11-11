@@ -29,9 +29,10 @@ function load(env = process.env) {
     return {
         service: 'actor',
         agentUi: bool(env.ACTOR_AGENT_UI),
-        codesSessionBridge: env.ACTOR_CODES_SESSION_BRIDGE === '1' || env.ACTOR_CODES_SESSION_BRIDGE === 'true',
-        unifiedCodeRuns: bool(env.ACTOR_UNIFIED_CODE_RUNS),
-        a4ModelSwitch: env.ACTOR_A4_MODEL_SWITCH === '1' || env.ACTOR_A4_MODEL_SWITCH === 'true',
+        codesSessionBridge: env.ACTOR_CODES_SESSION_BRIDGE == null ? !selfHosted : bool(env.ACTOR_CODES_SESSION_BRIDGE),
+        // Hosted direct coding tasks use the shared runtime; the self-hosted build has no Codes service.
+        unifiedCodeRuns: env.ACTOR_UNIFIED_CODE_RUNS == null ? !selfHosted : bool(env.ACTOR_UNIFIED_CODE_RUNS),
+        a4ModelSwitch: env.ACTOR_A4_MODEL_SWITCH == null ? !selfHosted : bool(env.ACTOR_A4_MODEL_SWITCH),
         fabric: { enabled: bool(env.ACTOR_WORK_FABRIC) },
         port,
         host: env.HOST || '127.0.0.1',
