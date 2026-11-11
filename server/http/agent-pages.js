@@ -19,6 +19,7 @@ const kinds = require('../agents/kinds');
 const spend = require('../agents/spend');
 const skills = require('../skills');
 const skillDraftCard = require('./skill-draft-card');
+const kit = require('openvibe-shared/kit');
 
 /** "22 minutes ago", "in 6 days": a person reads this, the exact UTC instant stays in the <time> element's title. */
 function ago(iso, now = Date.now()) {
@@ -61,7 +62,7 @@ function createAgentPages(ctx) {
     r.use(express.urlencoded({ extended: false, limit: '64kb' }));
     const signed = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const owner = (req) => `user:${req.viewer.subject}`;
-    const page = (req, res, title, body, status = 200, extra = {}) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, title, body, css: ['css/agents.css', 'css/skill-draft.css'], ...extra });
+    const page = (req, res, title, body, status = 200, extra = {}) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, title, body, styles: ['kit.css'], css: ['css/agents.css', 'css/skill-draft.css'], ...extra });
     const login = (req, res) => res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
     const write = (req, res) => {
         if (!signed(req)) { login(req, res); return false; }
@@ -302,7 +303,7 @@ ${address ? html`<p class="pa-mail-address"><code>${address}</code> <button type
 <p class="pa-hint">Mail sent to this address lands in your own mailbox. The agent named under Where it listens may answer it. Answering is <strong>${on ? 'on' : 'off'}</strong>: ${on ? (bound ? 'the bound agent reads the letters and replies.' : 'no agent is bound to answer these letters.') : 'no agent reads or answers them until you turn this on.'}</p>
 ${address ? html`<form method="post" action="/me/agents/${a.id}/mail"><label class="pa-check"><input type="checkbox" name="enabled" value="on" ${on ? 'checked' : ''}> Answer mail sent to this address</label><button type="submit" class="pa-btn pa-primary">${on ? 'Save' : 'Turn answering on'}</button></form>` : ''}
 <p class="pa-hint">A reply to one of your own addresses (your mailbox, a mask, a burner) is sent as it is. A reply to anyone else waits for your yes, in your approvals. OpenVibe Mail cannot send outside OpenVibe yet, so such a reply stays pending there until sending is turned on.</p>
-${answered.length ? html`<h3 class="pa-sub">The last letters it answered</h3><ul class="pa-notes">${answered.map((m) => html`<li><p class="pa-note-text">${m.subject || '(no subject)'}${m.peer ? html` <span class="muted">from ${m.peer}</span>` : ''}</p><p class="pa-note-meta">${m.reply_state === 'sent' ? 'Answered' : m.reply_state === 'awaiting_person' ? 'Waiting for your yes' : m.reply_state === 'refused' ? 'Not answered' : m.reply_state === 'failed' ? 'Could not answer' : 'Answering'} · ${time(m.created_at)}${m.task_id ? html` · <a href="/tasks/${m.task_id}">the thread</a>` : ''}${m.approval_id ? html` · <a href="/me/approvals/${m.approval_id}">your decision</a>` : ''}${m.reason ? html` · ${m.reason}` : ''}</p></li>`)}</ul>` : html`<p class="muted">No letter answered yet.</p>`}</section>`;
+${answered.length ? html`<h3 class="pa-sub">The last letters it answered</h3><ul class="pa-notes">${answered.map((m) => html`<li><p class="pa-note-text">${m.subject || '(no subject)'}${m.peer ? html` <span class="muted">from ${m.peer}</span>` : ''}</p><p class="pa-note-meta">${m.reply_state === 'sent' ? 'Answered' : m.reply_state === 'awaiting_person' ? 'Waiting for your yes' : m.reply_state === 'refused' ? 'Not answered' : m.reply_state === 'failed' ? 'Could not answer' : 'Answering'} · ${time(m.created_at)}${m.task_id ? html` · <a href="/tasks/${m.task_id}">the thread</a>` : ''}${m.approval_id ? html` · <a href="/me/approvals/${m.approval_id}">your decision</a>` : ''}${m.reason ? html` · ${m.reason}` : ''}</p></li>`)}</ul>` : raw(kit.empty({ icon: 'mail', title: 'No letter answered yet', text: 'Letters this agent answers appear here.' }))}</section>`;
     };
 
     const importPanel = () => html`<section class="pa-panel" id="import" aria-labelledby="ac-import-h"><h2 id="ac-import-h">Import an agent's voice</h2>
@@ -508,7 +509,7 @@ ${decisions.length ? html`<ul class="pa-notes">${decisions.map((d) => html`<li><
 <p>Left this week: <strong>${allowance.left} of ${allowance.weekly} Vibes</strong> (${allowance.start} to ${allowance.end} UTC). The week starts on Monday.</p>
 <h3 class="pa-sub">What it spent</h3>
 ${payments.length ? html`<ul class="pa-notes">${payments.map((p2) => html`<li><p class="pa-note-text">${p2.state === 'paid' ? html`${p2.amount} Vibes to ${p2.to_label || p2.to_subject}` : html`${p2.amount} Vibes to ${p2.to_label || p2.to_subject} — not paid`}</p>
-<p class="pa-note-meta">${p2.reason ? html`${p2.reason} · ` : ''}${p2.state === 'paid' ? 'Paid' : html`Refused: ${p2.error || 'Tips did not pay it'}`} · ${time(p2.created_at)}</p></li>`)}</ul>` : html`<p class="muted">It has not spent anything yet.</p>`}
+<p class="pa-note-meta">${p2.reason ? html`${p2.reason} · ` : ''}${p2.state === 'paid' ? 'Paid' : html`Refused: ${p2.error || 'Tips did not pay it'}`} · ${time(p2.created_at)}</p></li>`)}</ul>` : raw(kit.empty({ icon: 'coin', title: 'Nothing spent yet', text: 'What it pays for appears here.' }))}
 </section>
 
 ${skillDrafts.map((p) => skillDraftCard.card(a.id, p))}
@@ -522,12 +523,12 @@ ${channelSection.panel(a, channels.accounts, channels.agents, req.query.channel 
 <p class="pa-hint">Small how-to documents it reads for one kind of job. It grants nothing: every step still goes through its level and your approvals.</p>
 ${installed.length ? html`<ul class="pa-notes">${installed.map((k) => html`<li><p class="pa-note-text">${k.name}</p><p class="pa-note-meta">${k.description}</p>
 ${k.withdrawn ? html`<p class="pa-note-meta">${k.withdrawn}</p>` : ''}
-<form method="post" action="/me/agents/${a.id}/skills/${k.listing_id}/remove" class="pa-actions"><button type="submit" class="pa-danger-link">Remove</button></form></li>`)}</ul>` : html`<p class="muted">No skills on this agent yet.</p>`}
+<form method="post" action="/me/agents/${a.id}/skills/${k.listing_id}/remove" class="pa-actions"><button type="submit" class="pa-danger-link">Remove</button></form></li>`)}</ul>` : raw(kit.empty({ icon: 'grid', title: 'No skills yet', text: 'Add a how-to from the skills registry.', action: { href: '/skills', label: 'Browse the skills registry', icon: 'grid' } }))}
 <p class="pa-hint"><a href="/skills">The skills registry</a></p></section><section class="pa-panel" id="memory" aria-labelledby="pa-mem-h"><h2 id="pa-mem-h">Memory</h2><p class="pa-hint">Newest first; only active notes go into a run. It adds at most one note per good run, as a suggestion you accept on <a href="/memory">Memory</a>. Your own notes are never dropped (50 notes at most).</p>
 ${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta"><span class="pill ${n.status === 'suggested' ? 'pill-running' : n.status === 'archived' ? 'pill-failed' : 'pill-succeeded'}">${n.status === 'suggested' ? 'Suggested' : n.status === 'archived' ? 'Archived' : 'Active'}</span> ${n.source === 'agent' ? 'Written by the agent' : 'Written by you'} · ${n.kind} · ${time(n.created_at)}${n.last_used_at ? html` · last used ${time(n.last_used_at)}` : ''}${n.pinned ? ' · pinned' : ''}${n.merged_into ? ' · merged away' : ''}${n.retired_at ? ' · retired' : ''}</p>${n.status === 'suggested' ? html`<form method="post" action="/memory/${n.id}/accept" class="pa-actions"><button type="submit" class="pa-btn pa-primary">Accept</button> <button type="submit" class="pa-btn" formaction="/memory/${n.id}/decline">Decline</button></form>` : ''}
 <form method="post" action="/me/agents/${a.id}/memory/${n.id}/${n.pinned ? 'unpin' : 'pin'}" class="pa-actions"><button type="submit" class="pa-btn">${n.pinned ? 'Unpin' : 'Pin'}</button></form>
 <details><summary>Edit or delete</summary><form method="post" action="/me/agents/${a.id}/memory/${n.id}/edit"><label>Note <input name="text" maxlength="${require('../memory').MAX_TEXT}" value="${n.text}"></label><button type="submit" class="pa-btn">Save</button></form>
-<form method="post" action="/me/agents/${a.id}/memory/${n.id}/delete"><button type="submit" class="pa-danger-link">Delete note</button></form></details></li>`)}</ul>` : html`<p class="muted">Nothing remembered yet.</p>`}
+<form method="post" action="/me/agents/${a.id}/memory/${n.id}/delete"><button type="submit" class="pa-danger-link">Delete note</button></form></details></li>`)}</ul>` : raw(kit.empty({ icon: 'list', title: 'Nothing remembered yet', text: 'A good run may suggest a note; your own notes and its suggestions appear here.' }))}
 <form method="post" action="/me/agents/${a.id}/memory"><label>Add a note <textarea name="text" maxlength="${require('../memory').MAX_TEXT}" required rows="2" placeholder="I prefer answers in bullet points."></textarea></label><button type="submit" class="pa-btn">Add note</button></form>
 ${notes.length ? html`<p><a href="/memory">See all your memory</a> · <a href="/me/agents/${a.id}/forget" class="pa-danger-link">Forget everything</a></p>` : html`<p class="pa-hint"><a href="/memory">Memory</a> · <a href="/me/agents/${a.id}/forget">Forget everything</a></p>`}</section>
 ${diaries.length || tidyChanges.length ? html`<section class="pa-panel"><h2>Its diary</h2>

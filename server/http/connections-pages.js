@@ -15,6 +15,7 @@ const { sameOrigin } = require("./principal");
 const { html, raw, notice } = require("../render/html");
 const { send } = require("../render/layout");
 const connStore = require("../connections/store");
+const kit = require("openvibe-shared/kit");
 
 const KIND_LABEL = { mcp: "MCP server", a2a: "A2A agent" };
 
@@ -55,7 +56,7 @@ function createConnectionsPages(ctx) {
             : (conn.lastOk ? "works" : "did not answer: " + (conn.lastError || "unknown error"));
         const chips = tools.length
             ? html`<ul class="ovk-chips">${tools.map((t) => chip(conn, t))}</ul>`
-            : html`<p class="ovk-muted">No tools yet. Check this server to read what it offers.</p>`;
+            : raw(kit.empty({ icon: "server", title: "No tools yet", text: "Check this server to read what it offers." }));
         return html`<li class="ovk-row ovk-row--static cnx-row" id="${conn.id}">
 <span class="ovk-row-main">
 <span class="ovk-row-top"><span class="cnx-name">${conn.name}</span></span>

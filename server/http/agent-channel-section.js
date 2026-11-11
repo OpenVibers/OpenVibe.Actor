@@ -1,6 +1,7 @@
 'use strict';
 
-const { html } = require('../render/html');
+const { html, raw } = require('../render/html');
+const kit = require('openvibe-shared/kit');
 const bindings = require('../agents/channel-bindings');
 const personal = require('../agents/personal');
 
@@ -38,7 +39,7 @@ function panel(agent, accounts, agents, moved = false) {
 ${moved ? html`<p class="notice" role="status">This account now goes to ${agent.name}.</p>` : ''}
 ${own.length ? html`<ul class="pa-notes">${own.map(row => html`<li><p class="pa-note-text">${title(row)}</p>${mailState(row, names)}
 <form method="post" action="${action(agent.id, row, 'unbind')}" class="pa-actions"><button type="submit" class="pa-danger-link">Unbind</button></form></li>`)}</ul>`
-    : html`<p class="muted">No channel accounts are bound to this agent yet.</p>`}
+    : raw(kit.empty({ icon: 'mail', title: 'No channel accounts yet', text: 'Bind an address or a chat account below and this agent listens there.' }))}
 ${available.length ? html`<h3 class="pa-sub">Other accounts you can bind here</h3><ul class="pa-notes">${available.map(row => html`<li><p class="pa-note-text">${title(row)}</p>
 <p class="pa-note-meta">${row.agent_id ? `Currently on ${names.get(row.agent_id) || 'another agent'}. Moving it stops that agent listening here.` : 'Unbound.'}</p>${mailState(row, names)}
 <form method="post" action="${action(agent.id, row, 'bind')}" class="pa-actions"><button type="submit" class="pa-btn">${row.agent_id ? 'Move here' : 'Bind here'}</button></form></li>`)}</ul>` : ''}
