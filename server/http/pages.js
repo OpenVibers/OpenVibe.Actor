@@ -1100,13 +1100,13 @@ ${existing ? html`<div class="notice" role="status">Already offered ${time(exist
             crumbs: [{ label: 'Your tasks', href: '/tasks' }, { label: 'Task' }],
             // How it went is the agents' session (openvibe-shared/agent-session.js, js/task.js mounts it from the events
             // below and, while the task runs, from its live stream); the attempts drawn here stay for a page without scripts.
-            scripts: waiting ? [] : ['js/task-events.js', 'js/task.js'],
-            sharedScripts: [...(waiting ? [] : ['agent-session.js']), 'ov-share.js'],
+            scripts: ['js/task-events.js', 'js/task.js'],
+            sharedScripts: ['agent-session.js', 'ov-share.js'],
             styles: [showcase.STYLESHEET, 'ov-share.css'],
             css: ['css/task.css'],
             noReferrer: true,
             body: html`${live ? raw('<noscript><meta http-equiv="refresh" content="4"></noscript>') : ''}
-<article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${live ? '1' : ''}" data-bot="${botPages}">
+<article class="task state-${t.state}" data-task="${row.id}" data-last="${row.last_seq}" data-open="${live ? '1' : ''}" data-owner="${shared ? '0' : '1'}" data-bot="${botPages}">
 <header class="task-head">
 <p class="task-status"><span class="pill pill-${t.state}">${STATE_TEXT[t.state]}</span>${kind ? html`<span class="chip">${kind}</span>` : ''}<span class="chip">${MODE_LABEL[t.mode]}</span><span class="chip" id="task-cost">${t.cost ? usd(t.cost.usd) : '$0'} of ${usd(t.budget.per_task_usd)}</span>${time(t.created_at)}</p>
 ${parentTask ? html`<p class="follows-on">${row.fork_of_step != null
@@ -1134,7 +1134,8 @@ ${open || look ? html`<figure class="last-look" id="last-look"${look ? '' : raw(
 <a id="last-look-link" href="${look ? `/tasks/${row.id}/look?at=${look.at}` : '#'}" target="_blank" rel="noopener" title="Open it full size"><img id="last-look-img" src="${look ? `/tasks/${row.id}/look?at=${look.at}` : ''}" alt="The screen your agent last looked at"${look && look.width ? raw(` width="${Number(look.width)}" height="${Number(look.height)}"`) : ''} loading="lazy"></a>
 <figcaption class="muted small">What your agent last saw on the screen${look ? html` · ${time(new Date(look.at).toISOString())}` : ''}</figcaption>
 </figure>` : ''}
-${waiting ? html`<p class="muted small live-note" id="waiting-note">Waiting for your answer.${actingCard ? '' : ' The task keeps its place and its budget while you decide.'}</p>` : html`<section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
+${waiting ? html`<p class="muted small live-note" id="waiting-note">Waiting for your answer.${actingCard ? '' : ' The task keeps its place and its budget while you decide.'}</p>
+<section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2><div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div><script type="application/json" id="task-events">${raw(JSON.stringify(events.slice(-3000)).replace(/</g, '\\u003c'))}</script></section>` : html`<section class="how" aria-labelledby="h-how"><h2 id="h-how">How it went</h2>
 ${!open && plan ? planCard(plan) : ''}
 <div class="attempts" id="attempts">${attemptsOf(events).map(attemptBlock)}</div>
 ${traceBlock(spans, row.id)}
