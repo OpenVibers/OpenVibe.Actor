@@ -30,6 +30,7 @@ function load(env = process.env) {
         service: 'actor',
         agentUi: bool(env.ACTOR_AGENT_UI),
         codesSessionBridge: env.ACTOR_CODES_SESSION_BRIDGE === '1' || env.ACTOR_CODES_SESSION_BRIDGE === 'true',
+        unifiedCodeRuns: bool(env.ACTOR_UNIFIED_CODE_RUNS),
         a4ModelSwitch: env.ACTOR_A4_MODEL_SWITCH === '1' || env.ACTOR_A4_MODEL_SWITCH === 'true',
         fabric: { enabled: bool(env.ACTOR_WORK_FABRIC) },
         port,

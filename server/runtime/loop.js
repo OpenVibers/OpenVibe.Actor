@@ -1159,7 +1159,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 content: SYSTEM({
                     date: today(now), plan: planText(state.plan, state.brain), maxCalls,
                     note: ordered.note, ledger: ledgerText(state.brain.ledger, state.brain.progress),
-                }),
+                }) + (allowedTools && allowedTools.length === 1 && allowedTools[0] === 'codes_task'
+                    ? '\n\nThis task changes code on the person\'s machine. Use codes_task with the repository URL and the requested change. If the tool is unavailable, say what setup is missing; do not claim a code change happened.' : ''),
             });
             // A follow-up (stage V2-5b): the conversation it continues, as it went, then the new question.
             for (const c of state.context) state.messages.push({ role: 'user', content: c.task }, { role: 'assistant', content: c.answer });

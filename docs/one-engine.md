@@ -92,5 +92,5 @@ answer.
 ## Next slices
 
 1. Move Vibe room conversations onto Actor tasks, retaining the room UI and its authorization rules.
-2. Move Codes placement behind Actor while Codes continues to run work on the person's machine.
+2. Direct coding tasks can use Actor's shared loop and `codes_task` when the owner sets `ACTOR_UNIFIED_CODE_RUNS=1`. Codes still executes the file changes on the person's machine. Scheduled personal agents already use the shared loop. The switch defaults off while the owner checks the new path in production.
 3. Let the inbox's actions ride a turn, so a visitor's order question is answered by the owner's own system.
