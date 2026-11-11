@@ -36,6 +36,13 @@ const SCAN_WORDS = {
 const SEVERITY_WORDS = { block: 'Stops it', warn: 'Worth reading', info: 'For information' };
 // The scan on a catalogue card, as a chip: one or two words (the sentence is on the skill's own page).
 const SCAN_CHIP = { passed: 'Scanned: clear', flagged: 'Scanned: read first', failed: 'Scanned: refused', pending: 'Not scanned yet' };
+// A flagged skill's chip says how much there is to read: "Scanned: 2 findings to read" (Opus, 2026-11-11).
+const scanChip = (scan) => {
+    const state = scan && scan.state;
+    const n = scan && Array.isArray(scan.findings) ? scan.findings.length : 0;
+    if (state === 'flagged' && n) return `Scanned: ${n} finding${n === 1 ? '' : 's'} to read`;
+    return SCAN_CHIP[state] || SCAN_CHIP.pending;
+};
 // A tool's network, in plain words (ADR-060): what the person reads before they install code.
 const NET_WORDS = { deny: 'no internet', 'openvibe-only': 'OpenVibe sites only', public: 'the internet' };
 const netWords = (net) => NET_WORDS[net] || NET_WORDS.deny;
@@ -79,7 +86,7 @@ function createSkillPages(ctx) {
         return html`<li class="ovk-row ovk-row--static sk-card">
 <span class="ovk-row-main"><span class="ovk-row-top"><a class="sk-name" href="/skills/${skill.slug}">${skill.name}</a></span>
 <span class="ovk-row-sub"><span class="sk-desc">${skill.description}</span></span>
-<span class="sk-chips"><span class="sk-chip sk-chip--${state || 'pending'}">${SCAN_CHIP[state] || SCAN_CHIP.pending}</span>${listing.visibility === 'private' ? html`<span class="sk-chip">Private</span>` : ''}${skill.runs === 'sandbox' ? html`<span class="sk-chip">Runs code in a sandbox</span>` : ''}</span></span>
+<span class="sk-chips"><span class="sk-chip sk-chip--${state || 'pending'}">${scanChip(listing.scan)}</span>${listing.visibility === 'private' ? html`<span class="sk-chip">Private</span>` : ''}${skill.runs === 'sandbox' ? html`<span class="sk-chip">Runs code in a sandbox</span>` : ''}</span></span>
 </li>`;
     };
 
