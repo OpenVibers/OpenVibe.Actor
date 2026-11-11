@@ -92,8 +92,10 @@ async function updateTask(s, id, patch) {
 async function appendEvent(s, taskId, body) {
     return s.tx(async () => {
         const seq = await s.db.value('UPDATE tasks SET last_seq = last_seq + 1 WHERE id = $1 RETURNING last_seq', [taskId]);
-        const event = { task_id: taskId, seq: Number(seq), ...body };
-        await s.db.query('INSERT INTO task_events (task_id, seq, body) VALUES ($1, $2, $3::jsonb)', [taskId, event.seq, JSON.stringify(event)]);
+        const { args, call_id, full_output, ui_sources, ui_approval, ...publicBody } = require('../agent-ui/redact').clean(body);
+        const detail = { args, call_id, full_output, ui_sources, ui_approval };
+        const event = { task_id: taskId, seq: Number(seq), ...publicBody };
+        await s.db.query('INSERT INTO task_events (task_id, seq, body, ui_detail) VALUES ($1, $2, $3::jsonb, $4::jsonb)', [taskId, event.seq, JSON.stringify(event), JSON.stringify(detail)]);
         return event;
     });
 }

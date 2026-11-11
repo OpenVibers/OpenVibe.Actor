@@ -20,6 +20,8 @@ const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 // answer names and aggregate numbers only (never a person or a task), so they need no grant; a later release may add
 // actor.stats.read.
 const ROUTE_EXTENSIONS = new Map([
+    ['GET /api/v1/runs/:id', 'actor.task.read'],
+    ['GET /api/v1/runs/:id/events', 'actor.task.read'],
     ['GET /api/v1/tasks/:id/trace', 'actor.task.read'],
     ['GET /api/v1/stats/tools', null],
     ['GET /api/v1/stats/models', null],

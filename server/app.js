@@ -96,6 +96,7 @@ async function createApp(opts = {}) {
     // D11 owner settings (actor.ai): the catalog switch reads through the store, env pins winning.
     const aiCatalogConfig = await createAiCatalogConfig({ db: s.db, keys, config, env: opts.env || process.env, log });
     Object.defineProperty(config.ai, 'catalog', { enumerable: true, configurable: true, get: () => aiCatalogConfig.get('catalog') });
+    config.agentUiSetting = () => aiCatalogConfig.get('agentRuns');
     // A self-hosted Actor signs its one owner in itself (auth/local.js); otherwise OpenVibe.Network does (auth/sso.js).
     if (config.selfHosted.on) checkSelfHosted(config);
     const sso = config.selfHosted.on ? createLocalSignIn({ config, now: s.now }) : createSso({ config, keys, fetchImpl, now: s.now, log });

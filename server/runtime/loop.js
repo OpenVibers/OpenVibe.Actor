@@ -410,7 +410,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         let i = 0;
         for (const p of planned) {
             if (p.skipped) {
-                await ctx.emit({ step: 'tool_call', tool: p.name, input: summarize(p.args) });
+                await ctx.emit({ step: 'tool_call', tool: p.name, call_id: p.call.id, args: stripSecrets(p.args), input: summarize(p.args) });
                 state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ error: p.skipped, tool: p.name }) });
                 await ctx.emit({ step: 'tool_result', tool: p.name, text: p.skipped, is_error: true });
                 errorResults += 1;
@@ -420,7 +420,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // A tool that parks the run (plan A2): the wait is written and the loop stops here.
             // No model runs until the event or the deadline; the run's place is its checkpoint.
             if (out && out.park) state.parked = out.park;
-            await ctx.emit({ step: 'tool_call', tool: p.name, input: summarize(p.args) });
+            await ctx.emit({ step: 'tool_call', tool: p.name, call_id: p.call.id, args: stripSecrets(p.args), input: summarize(p.args) });
             if (out && out.delegate) {
                 // A sub-agent's report: its answer and the evidence ids it brought into this run's ledger. The report
                 // itself is not evidence (it is a model's words), so the parent cites the ids, never the report.
@@ -437,7 +437,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const shown = displayName(p.name, ctx);
             const item = state.ledger.add({ tool: shown, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
             state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: shown, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
-            await ctx.emit({ step: 'tool_result', tool: shown, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}), ...(out.computer !== undefined ? { computer: out.computer } : {}) });
+            await ctx.emit({ step: 'tool_result', tool: shown, call_id: p.call.id, full_output: out.secret ? '[redacted]' : out.text, ui_sources: out.secret ? [] : out.sources, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}), ...(out.computer !== undefined ? { computer: out.computer } : {}) });
             if (out.isError) { errorResults += 1; lastTool = p.name; } else okResults += 1;
             if (state.brain) {
                 state.brain.toolRuns = (state.brain.toolRuns || 0) + 1;
@@ -820,7 +820,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const shown = displayName(name, ctx);
             const item = state.ledger.add({ tool: shown, input: args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
             state.messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify({ evidence: item.id, tool: shown, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
-            await ctx.emit({ step: 'tool_result', tool: shown, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}), ...(out.computer !== undefined ? { computer: out.computer } : {}) });
+            await ctx.emit({ step: 'tool_result', tool: shown, call_id: id, full_output: out.secret ? '[redacted]' : out.text, ui_sources: out.secret ? [] : out.sources, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}), ...(out.computer !== undefined ? { computer: out.computer } : {}) });
             await spanCall(ctx.trace, { kind: 'tool', name, startedAt, ms: now() - startedAt, ok: !(out && out.isError), errorCode: out && out.isError ? 'actor.tool.failed' : null, step: state.calls });
             note(name, !(out && out.isError));
         };
