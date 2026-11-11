@@ -52,6 +52,29 @@ const data = (name) => ({ name, instructions: `Help with ${name}.`, mode: 'balan
             const run = await t.get('/api/v1/me/agents/agt_01JZ0000000000000000000AAA/run', { bearer: mint(['actor.agent.manage']), headers, json: {} });
             assert.strictEqual(run.status, 403);
         });
+        await check('Chat can follow only the personal agent run it started for its owner', async () => {
+            const person = t.network.addUser('channel-agent-owner');
+            const created = await post('/api/v1/me/agents', data('Researcher'), person);
+            assert.strictEqual(created.status, 201, created.text);
+            const id = created.json().id;
+            const now = Math.floor(Date.now() / 1000);
+            const mint = (sub, cap) => serviceAuth.signServiceToken({ iss: t.network.url, sub, actor_type: 'service', aud: ['openvibe.actor'], cap,
+                iat: now, exp: now + 300, jti: crypto.randomUUID() }, t.network.privatePem);
+            const chat = mint('svc:chat', ['actor.agent.run', 'actor.task.read']);
+            const other = mint('svc:watch', ['actor.task.read']);
+            const headers = { 'X-OV-Subject': person.subject };
+            const started = await t.get(`/api/v1/me/agents/${id}/run`, { bearer: chat, headers, json: { input: 'Say hello to the channel.' } });
+            assert.strictEqual(started.status, 201, started.text);
+            const taskId = started.json().id;
+            const row = await require('../server/tasks/store').getTask(t.ctx.s, taskId);
+            assert.deepStrictEqual([row.via, row.delegated_via], [`agent:${id}`, 'service:chat']);
+            assert.strictEqual((await t.get(`/api/v1/tasks/${taskId}`, { bearer: chat, headers })).status, 200);
+            assert.strictEqual((await t.get(`/api/v1/tasks/${taskId}`, { bearer: other, headers })).status, 404);
+            assert.strictEqual((await t.get(`/api/v1/tasks/${taskId}`, { as: person })).status, 200);
+            const ownRun = await post(`/api/v1/me/agents/${id}/run`, { input: 'Private work.' }, person);
+            assert.strictEqual(ownRun.status, 201, ownRun.text);
+            assert.strictEqual((await t.get(`/api/v1/tasks/${ownRun.json().id}`, { bearer: chat, headers })).status, 404);
+        });
     } finally { await t.close(); }
     done();
 })();

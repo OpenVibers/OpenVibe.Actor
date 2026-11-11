@@ -514,10 +514,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // creation. A turn always runs in the loop below, the path that honors the list — a code-classified
             // turn must not escape to the Codes agent.
             const turnAllowed = parseTurnTools(row.tools);
-            // Actor v2: every non-private task that is not code-only runs through the one loop. Private mode keeps
-            // the local model with no network tools, and a coding task keeps the Codes agent (which the loop can also
-            // reach as codes_task). Approval inbox, budgets, cancel, webhooks and the event stream are unchanged.
-            if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy || dayRun || turnAllowed)) {
+            // The owner can route direct coding tasks through the same loop that runs scheduled agents. The loop
+            // delegates the machine work through codes_task; it retains one model choice, task, budget and timeline.
+            // Until the owner enables this, direct coding tasks keep their existing Codes adapter path.
+            const unifiedCode = cls === 'code' && config.unifiedCodeRuns === true && !fromChat;
+            if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy || dayRun || turnAllowed || unifiedCode)) {
                 const agentId = LOOP_AGENT;
                 // The person-authored part of the task (never a run input that may come from a watch or a webhook),
                 // and the personal agent this run is for, so the memory tools scope their writes.
@@ -604,7 +605,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         // A routine's or a goal's run may wait (plan BA/HO): the class it asks AI's router for.
                         latency: await latencyClass(id),
                         // A product conversation turn (one-engine slice): the tools this run may call.
-                        allowedTools: turnAllowed,
+                        allowedTools: unifiedCode && !turnAllowed ? ['codes_task'] : turnAllowed,
                     }));
                     // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
                     // ('running' is the closest state there is today), its wall clock waits with it, and its
