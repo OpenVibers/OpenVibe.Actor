@@ -97,6 +97,14 @@ const SAME = { origin: 'https://openvibe.actor' };
             const created = await t.get('/tasks', { as: bea, form: { task: 'Find three offers under ten euros', mode: 'balanced' }, headers: SAME });
             const id = taskIdOf(created);
             await t.waitFor(id, ['running']);
+            // A running task may still be preparing its first plan. Wait for the visible plan event, rather than
+            // posting to the form while its section is hidden and the loop has no edit handler yet.
+            let planned = false;
+            for (const until = Date.now() + 60000; !planned && Date.now() < until;) {
+                planned = (await store.eventsAfter(s, id, 0)).some((e) => e.step === 'plan' && taskEvents.plan(e.text));
+                if (!planned) await new Promise((r) => setTimeout(r, 50));
+            }
+            assert.ok(planned, 'the live plan is visible before it is edited');
             const page = await t.get(`/tasks/${id}`, { as: bea });
             assert.match(page.text, new RegExp(`action="/tasks/${id}/assumptions"`), 'the live plan has an editable assumptions form');
             const edited = await t.get(`/tasks/${id}/assumptions`, { as: bea, form: { assumptions: 'Use EUR\nAsk before booking' }, headers: SAME });
