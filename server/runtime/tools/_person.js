@@ -20,7 +20,7 @@ const PERSON_QUIET_MS = 20_000;
 const AGENT_PROFILE = 'agent';
 
 function deskRun(taskId = null) {
-    return { name: `desk-${crypto.randomBytes(5).toString('hex')}`, taskId, named: null, kinds: new Map(), keeps: new Set(), used: new Set(), placed: null, names: new Map() };
+    return { name: `desk-${crypto.randomBytes(5).toString('hex')}`, taskId, named: null, kinds: new Map(), keeps: new Set(), used: new Set(), placed: null, names: new Map(), streams: new Map() };
 }
 
 /** The person's own word for their machine (their name for it), remembered from list_my_computers. */
@@ -72,9 +72,44 @@ async function closeDesks(run, requester, core) {
         await core.pcs.endSession(person, run.placed).catch(() => null);   // the task's desk on a desk host ends with it
         run.placed = null;
     }
-    if (!run || !person || !run.used.size) return;
+    if (!run || !person) return;
+    // The Live stream goes before the desk it shows (See it work, W1): the desk's WHIP session ends with it, and the
+    // private stream is ended, not left publishing a screen nobody owns.
+    if (run.streams && run.streams.size && typeof core.pcs.deskStream === 'function') {
+        await Promise.all([...run.streams.entries()].map(([machine, s]) => core.pcs.deskStream(person, machine, { action: 'stop', desk: s.desk }).catch(() => null)));
+        run.streams.clear();
+    }
+    if (!run.used.size) return;
     await Promise.all([...run.used].map((machine) => core.pcs.desk(person, machine, { action: 'stop', desk: run.name }).catch(() => null)));
     run.used.clear();
+}
+
+/**
+ * Start the task's private Live stream for the desk it just started (See it work, W1). The stream is the same desk the
+ * agent works on, private to the person, and its id/page travel in the computer_desk result; closeDesks ends it when the
+ * task does. A refusal leaves the desk working and the tile falls back to the still.
+ */
+async function startDeskStream(run, person, core, ctx, machine, desk, out) {
+    if (!run || !out || out.error || !person || !ctx || !ctx.taskId) return null;
+    if (core.pcs.isSession && core.pcs.isSession(machine)) return null;   // a Run desk has its still, no Link stream
+    if (typeof core.pcs.deskStream !== 'function') return null;
+    const title = String(ctx.personText || 'Actor task').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Actor task';
+    const stream = await core.pcs.deskStream(person, machine, {
+        action: 'start', desk, title, visibility: 'private',
+        task: { source: 'actor', ref: ctx.taskId, title, url: `${(ctx.config && ctx.config.baseUrl) || 'https://openvibe.actor'}/chat/${ctx.taskId}` },
+        signal: ctx.signal,
+    }).catch((err) => ({ error: (err && err.message) || 'the stream did not start' }));
+    if (!stream || stream.error) return null;
+    run.streams.set(machine, { desk, id: stream.id });
+    return stream;
+}
+
+async function stopDeskStream(run, person, core, machine, desk) {
+    if (!run || !person || !core.pcs || typeof core.pcs.deskStream !== 'function') return null;
+    const kept = run.streams && run.streams.get(machine);
+    if (!kept || (desk && kept.desk !== desk)) return null;
+    run.streams.delete(machine);
+    return core.pcs.deskStream(person, machine, { action: 'stop', desk: kept.desk }).catch(() => null);
 }
 
 /** A look at a computer's screen: the picture to the vision tier with the question, its answer back. */
@@ -158,6 +193,6 @@ async function prepareDesk(tool, a, person, core, ctx) {
 }
 
 module.exports = {
-    personOf, deskRun, deskFor, deskKind, placementOrder, closeDesks, lookAtScreen, handToPerson, prepareDesk, SCREEN_SYSTEM,
+    personOf, deskRun, deskFor, deskKind, placementOrder, closeDesks, startDeskStream, stopDeskStream, lookAtScreen, handToPerson, prepareDesk, SCREEN_SYSTEM,
     PERSON_WAIT_MS, PERSON_POLL_MS, PERSON_QUIET_MS, AGENT_PROFILE, DESK_TOOLS, rememberMachines, machineWord,
 };

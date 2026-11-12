@@ -46,6 +46,8 @@ const timeline = require('../agents/timeline');
 const assignments = require('../agents/assignments');
 const modelPrefs = require('../runtime/model-prefs');
 const driving = require('../agents/driving');
+const stills = require('../tasks/stills');
+const replay = require('../tasks/replay');
 const canvases = require('../canvases');
 const skills = require('../skills');
 
@@ -68,6 +70,13 @@ function createApi(ctx) {
     };
     const triggerFail = (req, res, out) => problem(req, res, (out.error && out.error.status) || 502, (out.error && out.error.code) || 'actor.trigger.failed', (out.error && out.error.detail) || 'The trigger could not be saved.');
     const triggerOwner = (req) => String(req.principal.requester || '').replace(/^user:/, '');
+    // The person's own token, for the calls only they may make: Live's view ticket and Bot's own input route.
+    const personToken = (req) => {
+        if (!req.principal || req.principal.kind !== 'user') return null;
+        const h = String(req.headers.authorization || '');
+        if (h.startsWith('Bearer ')) return h.slice(7).trim();
+        return req.token || (req.viewer && req.viewer.token) || null;
+    };
 
     r.use(express.json({ limit: '64kb' }));
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -720,10 +729,141 @@ function createApi(ctx) {
         } catch { ctx.log.warn('[Actor] task view issue failed', req.params.id); res.sendStatus(503); }
     });
 
-    // Take over / Give it back (plan 2026-11-07), built on the hand_to_person machinery: the person drives the desk
-    // they were handed, the agent's input is refused while they do, and the task's timeline gets one hand-off step.
-    // Only the task's own people (load()), and only while it runs on a Computer.
-    async function handoff(req, res, { take }) {
+    // A still is its task's person's, and nobody else's: a signed-out visitor and an app token get the same 404 as a
+    // task that does not exist (never a 401 that would confirm one).
+    const stillPerson = (req, res, next) => ((req.principal && req.principal.kind === 'user') ? next() : problem(req, res, 404, 'actor.task.not_found', 'No such task.'));
+
+    // ── See it work (W1): the task's desk, its private Live stream, the person's control, and the replay ─────────
+    // One description of where a task's desk is, from its own steps: a Link desk on the person's machine, or a Run
+    // session on a desk host. Nothing here trusts the model; the desk and the Computer are read from tool events.
+    async function deskTarget(row) {
+        const computer = await store.taskComputer(s, row);
+        const desk = await store.taskDesk(s, row);
+        if (computer && computer.session_id) {
+            return { id: `run:${computer.session_id}`, where: 'run', session_id: computer.session_id,
+                machine: null, desk: null, kind: 'browser', computer, label: computer.where === 'yours' ? `${computer.machine || 'Your computer'} · a desk host` : 'OpenVibe computer' };
+        }
+        const place = desk && store.deskPlace(desk.url);
+        if (!place) return null;
+        return { id: `link:${place.machine}:${place.desk}`, where: 'link', session_id: null, machine: place.machine,
+            desk: place.desk, kind: desk.kind || 'desktop', computer, label: `${(computer && computer.machine) || 'Your PC'} · ${place.desk === 'main' ? 'your screen' : 'its own desk'}` };
+    }
+    async function browserUrlOf(row) {
+        const events = await store.eventsAfter(s, row.id, 0);
+        for (let i = events.length - 1; i >= 0; i--) {
+            const e = events[i];
+            if (e && e.kind === 'output' && e.step === 'tool_result' && e.tool === 'computer_browser' && !e.is_error) {
+                try { const d = JSON.parse(e.text || '{}'); if (d && typeof d.url === 'string' && /^https?:\/\//.test(d.url)) return d.url.slice(0, 500); } catch { /* not JSON */ }
+            }
+        }
+        return null;
+    }
+    async function deskView(row, req, target) {
+        const token = personToken(req);
+        const desk = await store.taskDesk(s, row);
+        let live = null;
+        if (target.where === 'link' && desk && desk.stream && desk.stream.id && token && ctx.live && ctx.live.enabled) {
+            const view = await ctx.live.viewTicket(token, desk.stream.id).catch(() => null);
+            // The embed must be Live's own, never an address another service convinced it to return.
+            let embed = null;
+            try {
+                const u = new URL(String(view && view.page_url || ''));
+                const expected = new URL(String(ctx.live.publicBase || 'https://openvibe.live'));
+                if (/^https?:$/.test(u.protocol) && u.origin === expected.origin) embed = u.href;
+            } catch { embed = null; }
+            if (view && !view.error && embed) {
+                live = { stream_id: desk.stream.id, embed_url: embed, page_url: embed, visibility: desk.stream.visibility || 'private', expires_at: view.expires_at || null };
+            }
+        }
+        const pictures = await stills.list(s, row.id).catch(() => []);
+        const last = pictures.length ? pictures[pictures.length - 1] : null;
+        return {
+            id: target.id, where: target.where, machine: target.machine, desk: target.desk, kind: target.kind,
+            label: target.label, browser_url: target.where === 'link' ? await browserUrlOf(row) : null,
+            width: (last && last.width) || 1280, height: (last && last.height) || 800,
+            live,
+            still: target.where === 'run' ? `${config.baseUrl}/api/v1/tasks/${row.id}/still` : `${config.baseUrl}/api/v1/tasks/${row.id}/desk-still?desk=${encodeURIComponent(target.desk || 'private')}`,
+            driving: driving.is(row.id, s.now()),
+        };
+    }
+    r.get('/tasks/:id/desks', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        const target = await deskTarget(row);
+        res.json({ desks: target ? [await deskView(row, req, target)] : [] });
+    });
+
+    // The still fallback: Link's screen through Bot (at most once a second, served from a one-frame cache), or Run's
+    // session still. Only the task's own person; a picture must never confirm a task or a desk exists.
+    const stillFrame = new Map();   // task id -> { at, type, bytes }
+    r.get('/tasks/:id/desk-still', stillPerson, principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        const target = await deskTarget(row);
+        if (!target) return problem(req, res, 404, 'actor.task.no_still', 'This task has no desk picture.');
+        if (target.where === 'run') return problem(req, res, 404, 'actor.task.no_still', 'Use the session still.');
+        const key = `${row.id}:${target.desk}`;
+        const kept = stillFrame.get(key);
+        const at = Date.now();
+        if (kept && at - kept.at < 1000) {
+            res.set('Cache-Control', 'private, no-store'); res.set('X-Content-Type-Options', 'nosniff'); res.type(kept.type).send(kept.bytes); return;
+        }
+        const shot = await ctx.computers.screen(row.requester.slice(5), target.machine, { desk: target.desk, maxWidth: 640 });
+        if (!shot || shot.error) return problem(req, res, 502, 'actor.task.no_still', (shot && shot.error) || 'The desk sent no picture.');
+        const type = shot.format === 'png' ? 'image/png' : 'image/jpeg';
+        const bytes = Buffer.from(String(shot.content_b64 || ''), 'base64');
+        if (!bytes.length) return problem(req, res, 502, 'actor.task.no_still', 'The desk sent no picture.');
+        stillFrame.set(key, { at, type, bytes });
+        while (stillFrame.size > 500) stillFrame.delete(stillFrame.keys().next().value);
+        res.set('Cache-Control', 'private, no-store'); res.set('X-Content-Type-Options', 'nosniff'); res.type(type).send(bytes);
+    });
+
+    // The person's own input on the picture (Link: their token at Bot; Run: the session's person-commands route).
+    r.post('/tasks/:id/desks/:desk/input', principal.requireCapability('actor.task.create'), async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        if (!store.OPEN.includes(row.state)) return problem(req, res, 409, 'actor.task.ended', 'This task has ended: its desk is gone.');
+        if (!driving.is(row.id, s.now())) return problem(req, res, 409, 'actor.task.not_driving', 'Take over the desk before using it.');
+        const target = await deskTarget(row);
+        if (!target || target.id !== String(req.params.desk || '')) return problem(req, res, 404, 'actor.task.no_computer', 'This task has no such desk.');
+        const subject = row.requester.slice(5);
+        const body = req.body && typeof req.body === 'object' ? req.body : {};
+        let out;
+        if (target.where === 'run') out = await ctx.computers.personSession(subject, target.session_id, 'input', { kind: 'input', value: body }).catch((err) => ({ error: (err && err.message) || 'the session refused it' }));
+        else {
+            const token = personToken(req);
+            if (!token) return problem(req, res, 401, 'actor.task.sign_in', 'Sign in again: your own session is needed to use the desk.');
+            out = await ctx.computers.personInput(subject, token, target.machine, { ...body, desk: target.desk });
+        }
+        if (!out || out.error) return problem(req, res, 502, 'actor.task.input_failed', (out && out.error) || 'The desk did not take that.');
+        return res.json({ done: true, action: out.action || body.action || null });
+    });
+
+    r.get('/tasks/:id/replay', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        res.json({ task_id: row.id, steps: await replay.steps(s, row, { baseUrl: config.baseUrl }) });
+    });
+    r.get('/tasks/:id/replay/:seq/still', stillPerson, principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        const seq = Number.parseInt(req.params.seq, 10);
+        if (!Number.isInteger(seq) || seq < 1) return problem(req, res, 404, 'actor.task.no_still', 'No such picture.');
+        const shot = await stills.get(s, row.id, seq);
+        if (!shot || !shot.bytes) return problem(req, res, 404, 'actor.task.no_still', 'No such picture.');
+        const bytes = Buffer.isBuffer(shot.bytes) ? shot.bytes : Buffer.from(shot.bytes);
+        res.set('Cache-Control', 'private, no-store');
+        res.set('X-Content-Type-Options', 'nosniff');
+        res.set('Content-Type', shot.mime);
+        res.set('Content-Length', String(bytes.length));
+        return res.status(200).end(bytes);
+    });
+
+    // Take over / Give it back (plan 2026-11-07; See it work, W1): the person drives the desk they were handed, the
+    // agent's input is refused while they do, and the task's timeline gets one hand-off step. A Run desk's lease is
+    // really taken and given back; a Link desk's input is the person's own (their token at Bot). A note handed back is
+    // the person's own message to the run.
+    async function handoff(req, res, { take, deskId = null, note = null }) {
         const row = await load(req, res);
         if (!row) return;
         if (!store.OPEN.includes(row.state)) return problem(req, res, 409, 'actor.task.ended', 'This task has ended: its Computer is gone.');
@@ -731,16 +871,26 @@ function createApi(ctx) {
         const desk = await store.taskDesk(s, row);
         if (!computer && !desk) return problem(req, res, 409, 'actor.task.no_computer', 'This task has no Computer to hand over.');
         if (!String(row.requester).startsWith('user:')) return problem(req, res, 409, 'actor.task.no_person', 'A Computer is a person\'s: sign in as the task\'s own person to take it.');
+        const target = await deskTarget(row);
+        if (deskId && (!target || target.id !== deskId)) return problem(req, res, 404, 'actor.task.no_computer', 'This task has no such desk.');
+        const subject = row.requester.slice(5);
+        if (target && target.where === 'run' && ctx.computers.personSession) {
+            const lease = take
+                ? await ctx.computers.personSession(subject, target.session_id, 'take').catch((err) => ({ error: err.message }))
+                : await ctx.computers.personSession(subject, target.session_id, 'back').catch((err) => ({ error: err.message }));
+            if (lease && lease.error) return problem(req, res, 502, 'actor.session.control_failed', lease.error);
+        }
         const at = s.iso();
         const now = take ? (driving.take(row.id, s.now()), true) : (driving.give(row.id), false);
-        // The step in the task's own timeline (the same events /events streams), carrying the Computer.
+        if (!take && typeof note === 'string' && note.trim()) {
+            await engine.steer(row.id, note.trim().slice(0, 1000)).catch(() => null);
+        }
         const event = await store.appendEvent(s, row.id, {
             at, kind: 'output', step: 'handoff',
             text: now ? 'You took over the desk. The agent waits until you give it back.' : 'You gave the desk back. The agent goes on.',
             ...(computer ? { computer } : {}),
         });
         stream.publish(row.id, event);
-        // And one step in the one timeline behind the Dock (agent.timeline-entry@1), the same Computer.
         try {
             await timeline.upsert(s, row.requester, {
                 step_id: `${row.id}:takeover`, mode: 'browse', product: 'actor', ref: row.id,
@@ -756,14 +906,15 @@ function createApi(ctx) {
         res.json(out);
     }
     r.post('/tasks/:id/takeover', principal.requireCapability('actor.task.create'), async (req, res) => handoff(req, res, { take: true }));
-    r.post('/tasks/:id/giveback', principal.requireCapability('actor.task.create'), async (req, res) => handoff(req, res, { take: false }));
+    r.post('/tasks/:id/giveback', principal.requireCapability('actor.task.create'), async (req, res) => handoff(req, res, { take: false, note: req.body && typeof req.body.note === 'string' ? req.body.note : null }));
+    r.post('/tasks/:id/desks/:desk/take-over', principal.requireCapability('actor.task.create'), async (req, res) => handoff(req, res, { take: true, deskId: String(req.params.desk || '') }));
+    r.post('/tasks/:id/desks/:desk/hand-back', principal.requireCapability('actor.task.create'), async (req, res) => handoff(req, res, { take: false, deskId: String(req.params.desk || ''), note: req.body && typeof req.body.note === 'string' ? req.body.note : null }));
 
     // The Computer's newest frame, fetched from the session's own service (Run) as Actor, acting for the task's
     // person: the person's own token would have to cross an origin, and the picture is theirs. Owner/project only
     // (load()); a task with no Run session has no picture, and neither has anyone asking for another person's task.
     // A still is its task's person's, and nobody else's: a signed-out visitor and an app token get the same 404 as a
     // task that does not exist (never a 401 that would confirm one).
-    const stillPerson = (req, res, next) => ((req.principal && req.principal.kind === 'user') ? next() : problem(req, res, 404, 'actor.task.not_found', 'No such task.'));
     r.get('/tasks/:id/still', stillPerson, principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
         const row = await load(req, res);
         if (!row) return;

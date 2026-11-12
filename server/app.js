@@ -23,6 +23,7 @@ const { createKeyStore } = require('./auth/keys');
 const { createSso } = require('./auth/sso');
 const catalog = require('./agents/catalog');
 const { createAdapters } = require('./agents/adapters');
+const { createLive } = require('./agents/live');
 const { createModels } = require('./runtime/models');
 const createAiCatalogConfig = require('./ai-catalog-config').create;
 const { createRegistry } = require('./runtime/tools');
@@ -163,9 +164,11 @@ async function createApp(opts = {}) {
     const computers = (opts.bot && opts.bot.computers) || require('./agents/computers').createComputers({ config, fetchImpl: providerFetch, log });
     // An agent's money (plan HO7): the client that pays a tip through OpenVibe.Tips with the person's own token.
     const tips = require('./agents/spend').createTips({ config, fetchImpl });
+    // OpenVibe.Live: a view ticket for an agent desk's private stream, minted with the person's own token.
+    const live = opts.live || createLive({ config, fetchImpl });
     // An agent answers the mail sent to its own address (track HO6): the consumer below takes the event, the engine
     // reports each run's end back here, and the approvals decide() asks it to send an approved draft.
-    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, triggers, skillRun, media, tips };
+    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, live, triggers, skillRun, media, tips };
     const fabricMail = require('./mail/client').createMailClient({ config, fetchImpl: opts.mailFetch || fetchImpl, tokens: opts.mailTokens || null });
     ctx.fabric = require('./fabric/service').createFabric({ s, enabled: !!config.fabric?.enabled, readMail: async (args) => {
         const out = await fabricMail.getMessage(args);
@@ -247,7 +250,7 @@ async function createApp(opts = {}) {
                 // The navbar's Messages count asks Chat (openvibe-shared 4.130.0).
                 connectSrc: ["'self'", 'https://openvibe.chat', 'https://openvibe.network', 'https://cloudflareinsights.com', 'https://openvibe.events'],
                 // Bot's watch links: a chat turn frames the desk the agent works on, live (plan L55 C1b).
-                frameSrc: ["'self'", 'https://openvibe.network', ...(() => { try { return [new URL(config.services.botPublicUrl).origin]; } catch { return []; } })()],
+                frameSrc: ["'self'", 'https://openvibe.network', ...(() => { try { return [new URL(config.services.botPublicUrl).origin]; } catch { return []; } })(), ...(() => { try { return [new URL(config.services.livePublicUrl).origin]; } catch { return []; } })()],
                 frameAncestors: ["'none'"],
                 objectSrc: ["'none'"],
                 baseUri: ["'self'"],

@@ -2,6 +2,22 @@
 
 What changed in OpenVibe.Actor, newest first. Each site also publishes its patch notes at /updates.
 
+## Unreleased — See it work (W1): the desk, the viewer and the replay
+
+- **The desk tile** in a running task's card: the desk's private Live stream (started with the task's desk through Link's
+  `desk.stream` and stopped with the task), with the still at 1/s when no stream is up. Under it the latest step in
+  plain words, a ring where it last clicked, the browser page's address and where it is ("Your PC · its own desk",
+  "OpenVibe computer"). The tile pauses its stream while off screen.
+- **The viewer** (a tap on the tile): the desk fills a phone and sits beside the steps from 900 px, with Take over,
+  Pause, Stop and Hand back. Take over takes a Run desk's live lease or makes Bot take the person's own input on a Link
+  desk (their token, mapped to desk coordinates); the agent's input is refused while they drive. Hand back takes an
+  optional note that reaches the run as the person's message. A `hand_to_person` step is an Ask that opens the viewer
+  in control.
+- **Replay**: every computer step keeps its still and its action. A finished task's card has a timeline to scrub, and
+  each step opens the picture it saw. Typed text is never stored in a replay; a click keeps only its x,y.
+- Migration 0070 (task stills); `GET /api/v1/tasks/:id/desks`, `/desk-still`, `/replay`, the desk take-over/hand-back
+  and the person's input. Tests: `test/see-it-work.test.js`; screenshots: `test/see-it-work-shots.js`.
+
 ## Unreleased — the chat is the one place you use Actor (one agent system, stage 1)
 
 - **Composer v2** (openvibe-shared 4.215.0, the `agent` preset): the chat mounts `OpenVibeComposer.mount` with Attach,

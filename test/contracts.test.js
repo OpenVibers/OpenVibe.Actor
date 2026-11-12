@@ -30,6 +30,15 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/agent/timeline/:id', 'actor.timeline.read'],
     ['POST /api/v1/agent/approvals/:product/:id/decide', 'actor.approval.decide'],
     ['POST /api/v1/agent/kill-switch', 'actor.resource.control'],
+    // See it work (W1): the desk, its still, the person's control and the replay. They are read/create on the task
+    // the person already holds; Contracts lists them after this stage (the same pattern as the trigger routes).
+    ['GET /api/v1/tasks/:id/desks', 'actor.task.read'],
+    ['GET /api/v1/tasks/:id/desk-still', 'actor.task.read'],
+    ['POST /api/v1/tasks/:id/desks/:desk/input', 'actor.task.create'],
+    ['POST /api/v1/tasks/:id/desks/:desk/take-over', 'actor.task.create'],
+    ['POST /api/v1/tasks/:id/desks/:desk/hand-back', 'actor.task.create'],
+    ['GET /api/v1/tasks/:id/replay', 'actor.task.read'],
+    ['GET /api/v1/tasks/:id/replay/:seq/still', 'actor.task.read'],
     // Triggers made in a conversation (plan §12 A-4). The routes exist before Contracts lists actor.trigger.*; a
     // trigger is the person's own work record, so the task capabilities the person already holds guard it.
     ['GET /api/v1/triggers', 'actor.task.read'],

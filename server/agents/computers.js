@@ -316,9 +316,8 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
      * Mouse, scroll, typing or one key on the machine (contracts 0.171.0 `input`): an acting command, so at level "ask"
      * it waits for the owner's approval there. x, y are measured in a screen picture of width × height (computer_screen's).
      */
-    async function input(subject, machine, args, { signal } = {}) {
-        const bad = guard(subject, machine);
-        if (bad) return bad;
+    /** A validated `input` value for a person's own mouse and keyboard, or { error }. */
+    function inputValue(args) {
         const a = args && typeof args === 'object' ? args : {};
         if (!INPUT_ACTIONS.has(a.action)) return { error: `action is one of ${[...INPUT_ACTIONS].join(', ')}` };
         const value = { action: a.action, ...onDesk(a) };
@@ -343,9 +342,69 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             if (typeof a.keys !== 'string' || !/^[A-Za-z0-9_+-]{1,64}$/.test(a.keys) || a.keys.startsWith('-')) return { error: 'key needs keys: one key or chord, for example Return, Escape, ctrl+s' };
             value.keys = a.keys;
         }
-        const r = await command(subject, machine, 'input', value, { signal, windowMs: ACT_WINDOW_MS });
+        return { value };
+    }
+    async function input(subject, machine, args, { signal } = {}) {
+        const bad = guard(subject, machine);
+        if (bad) return bad;
+        const made = inputValue(args);
+        if (made.error) return made;
+        const r = await command(subject, machine, 'input', made.value, { signal, windowMs: ACT_WINDOW_MS });
         if (r.error) return r;
-        return { done: !!r.data.done, action: r.data.action || a.action, ...(r.data.x != null ? { x: r.data.x, y: r.data.y } : {}) };
+        return { done: !!r.data.done, action: r.data.action || made.value.action, ...(r.data.x != null ? { x: r.data.x, y: r.data.y } : {}) };
+    }
+
+    /**
+     * The person's own mouse and keyboard on their Link desk (See it work, W1: "their taps and keys on the picture map
+     * to desk coordinates"). Actor passes the person's own Network token to Bot, never its service token: it is their
+     * input, at their own level, so Bot's "ask" does not ask them to approve themselves. A Run desk uses the session's
+     * person-commands route instead.
+     */
+    async function personInput(subject, token, machine, args, { signal } = {}) {
+        const bad = guard(subject, machine);
+        if (bad) return bad;
+        if (SESSION_MACHINE.test(String(machine || ''))) return { error: 'a Run desk takes the person\'s input through its own session' };
+        if (!token) return { error: 'sign in again: your own session is needed to use the desk' };
+        const made = inputValue(args);
+        if (made.error) return made;
+        const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(ACT_WINDOW_MS + 10_000)]) : AbortSignal.timeout(ACT_WINDOW_MS + 10_000);
+        let res;
+        try {
+            res = await fetchImpl(`${base}/api/v1/machines/${encodeURIComponent(machine)}/commands`, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ kind: 'input', value: made.value, ms: ACT_WINDOW_MS }), signal: sig,
+            });
+        } catch { return { error: 'Bot did not answer' }; }
+        const data = await res.json().catch(() => null);
+        if (!res.ok) return problem({ status: res.status, data }, 'your input');
+        if (!data || data.result !== 'ack') return { error: (data && (data.reason || (data.result === 'expired' ? 'the machine did not answer in time' : null))) || 'the machine refused it' };
+        return { done: true, action: (data.data && data.data.action) || made.value.action };
+    }
+
+    /** A private agent stream for the task's desk on Link (See it work, W1; Link docs/stream.md). */
+    const DESK_STREAM_ACTIONS = new Set(['start', 'stop', 'status']);
+    async function deskStream(subject, machine, args, { signal } = {}) {
+        const bad = guard(subject, machine);
+        if (bad) return bad;
+        if (SESSION_MACHINE.test(String(machine || ''))) return { error: 'a Run desk has no Link stream: use its still' };
+        const a = args && typeof args === 'object' ? args : {};
+        if (!DESK_STREAM_ACTIONS.has(a.action)) return { error: 'action is start, stop or status' };
+        const value = { action: a.action };
+        if (a.desk != null) value.desk = String(a.desk).slice(0, 40);
+        if (a.action === 'start') {
+            if (a.title != null) value.title = String(a.title).replace(/\s+/g, ' ').trim().slice(0, 120);
+            if (a.task && typeof a.task === 'object') value.task = { source: ['codes', 'actor', 'desk', 'node'].includes(a.task.source) ? a.task.source : 'actor', ref: String(a.task.ref || '').slice(0, 100), title: String(a.task.title || '').slice(0, 120), ...(typeof a.task.url === 'string' && /^https:\/\//.test(a.task.url) ? { url: a.task.url.slice(0, 300) } : {}) };
+            value.visibility = ['private', 'unlisted', 'public'].includes(a.visibility) ? a.visibility : 'private';
+            if (Array.isArray(a.allow_sites)) value.allow_sites = a.allow_sites.filter((u) => typeof u === 'string' && /^https:\/\//.test(u)).slice(0, 20);
+        }
+        const r = await command(subject, machine, 'desk.stream', value, { signal, windowMs: a.action === 'status' ? READ_WINDOW_MS : 120_000 });
+        if (r.error) return r;
+        const d = r.data || {};
+        if (a.action === 'stop') return { stopped: !!d.stopped, ...(d.id ? { id: d.id } : {}) };
+        if (a.action === 'status') return { streaming: !!d.streaming, ...(d.id ? { id: d.id } : {}), ...(d.page_url ? { page_url: d.page_url } : {}) };
+        if (!d.id || !/^ags_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(d.id))) return { error: 'the machine did not start a stream' };
+        return { streaming: !!d.streaming, id: d.id, page_url: d.page_url || null, visibility: d.visibility || 'private', expires_at: d.expires_at || null, capture: d.capture || null };
     }
 
     /**
@@ -476,7 +535,7 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         return { url: data.url, expires_at: data.expires_at || null, control: !!data.control, desk: data.desk || desk };
     }
 
-    return { enabled, mine, list, read, run, write, screen, input, browser, desk, deskTurn, watchUrl, watchLink, sessionList, profileSites, personSession, openSession, endSession, fillLogin, still, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
+    return { enabled, mine, list, read, run, write, screen, input, personInput, browser, desk, deskStream, deskTurn, watchUrl, watchLink, sessionList, profileSites, personSession, openSession, endSession, fillLogin, still, sessionsOn, isSession: (m) => SESSION_MACHINE.test(String(m || '')) };
 }
 
 module.exports = { createComputers };
