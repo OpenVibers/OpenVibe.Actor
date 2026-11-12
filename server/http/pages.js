@@ -471,7 +471,7 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
             eyebrow: 'OpenVibe.Actor · alpha',
             title: 'Your own AI.', accent: 'It works for you while you watch.',
             lede: 'Tell it what you want: find you work, earn from a gig, grow your channel, brief you every morning, build something. It works on a screen you can watch from any OpenVibe page, uses your own accounts, asks before it spends, posts or applies, and runs on the model you pick.',
-            actions: signed ? [{ label: 'Give it a job', href: '#task', primary: true }, { label: 'Your Actor', href: '/console' }] : [{ label: 'Start your Actor', href: '/auth/login?next=%2F', primary: true }, { label: 'What it can do', href: '#templates' }],
+            actions: signed ? [{ label: 'Give it a job', href: '#task', primary: true }, { label: 'Your Actor', href: '/chat' }] : [{ label: 'Start your Actor', href: '/auth/login?next=%2F', primary: true }, { label: 'What it can do', href: '#templates' }],
             note: `Open source (AGPL-3.0). Free: ${tier.tasksPerDay} tasks a day and ${usd(tier.perDayUsd)} of model use, no card.`,
             aside: { html: String(nowCard()) },
         });
@@ -504,7 +504,7 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
             [html`Your own robots on <a href="https://openvibe.bot">OpenVibe.Bot</a>: see them and drive the ones you opened to your agent, through Bot's limits and e-stop`, 'Live: turn on "Let my OpenVibe.Actor agent drive this robot" on the robot\'s panel.'],
             [html`Coding tasks on your own machine, through <a href="https://openvibe.codes/run">OpenVibe.Codes</a>: name the repository and what to change, and get the summary, the files and the patch`, html`Live: add the machine on <a href="https://openvibe.link/machines">openvibe.link/machines</a> and start one task on openvibe.codes/run first. The model use is on your machine's own keys.`],
             [html`Your own computers, through <a href="https://openvibe.bot/docs/computers">OpenVibe.Bot</a>: list and read files, run programs and write files there, as you, at the level you set on the computer`, html`Live: install OpenVibe Link with <code>--computer ask</code> and turn on "Let my agent use this computer" on <a href="https://openvibe.link/machines">openvibe.link/machines</a>. At <code>ask</code>, you approve each run or write on the computer.`],
-            [html`<a href="/console">The Console</a>: what runs now, what waits for you, today's spend, your agents, computers and robots, and one box to start a task`, 'Live, for signed-in people.'],
+            [html`<a href="/chat">The chat</a>: what runs now in a "Now" strip, your conversations, your agents, and one composer to tell them what to do next`, 'Live, for signed-in people.'],
             [html`Ask in chat: write <code>@actor</code> and your question in OpenVibe's global chat or your own channel, and the answer comes back in the room`, 'Live: public tools only (never your computers, robots or code), 5 an hour, on your free tier.'],
             [html`Run your own: Actor on your server with your own model (<a href="https://github.com/OpenVibers/OpenVibe.Actor/blob/main/docs/self-host.md">how</a>), signed in with your password, data on your disk`, 'Live: Docker or plain Node, Ollama or any OpenAI-compatible model.'],
         ];

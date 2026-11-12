@@ -49,22 +49,26 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.match(r.headers.get('location'), /^\/auth\/login\?next=%2Fchat/);
         });
 
-        await check('a new chat: one question, eight starters from what people use agents for, the composer, an empty list', async () => {
+        await check('a new chat: one question, four compact suggestion chips, the composer v2 host, an empty list', async () => {
             const r = await t.get('/chat', { as: kim });
             assert.strictEqual(r.status, 200);
             assert.match(r.text, /<h2>What should Actor do\?<\/h2>/);
-            // The new runs' share default is a form on the page, never its markup printed as text (11-08, the owner's screenshot).
-            assert.match(r.text, /<form class="ct-share-defaults" method="post" action="\/chat\/defaults">/);
-            assert.ok(!/&lt;form class=&quot;ct-share-defaults/.test(r.text), 'the share-defaults form is not escaped into text');
-            assert.strictEqual((r.text.match(/data-ovt-starter="/g) || []).length, 8, 'the starters fill the kit\'s composer');
-            ['Find a flight', 'Is this true?', 'Best deal', 'Watch for it', 'Plan a trip', 'Make a list'].forEach((k) => assert.ok(r.text.includes(`<b>${k}</b>`), k));
+            // The run defaults moved to Settings (one-agent system, stage 1): nothing of them under the composer.
+            assert.ok(!/ct-share-defaults/.test(r.text), 'the run settings are not on the chat');
+            assert.strictEqual((r.text.match(/data-ovt-starter="/g) || []).length, 4, 'four suggestion chips, not the card grid');
+            assert.strictEqual((r.text.match(/class="ct-suggest-chip"/g) || []).length, 4, 'one line each');
+            ['Find a flight', 'Is this true?', 'Best deal', 'Watch for it'].forEach((k) => assert.ok(r.text.includes(`<span>${k}</span>`), k));
+            assert.ok(!/class="ct-starters"/.test(r.text), 'not the wall of starter cards');
             assert.ok(!/Who handles the mail/.test(r.text), 'not the old DNS example (the owner: "people aren\'t gonna use it for that")');
-            assert.match(r.text, /<form class="ovt-composer" method="post" action="\/chat" data-ovt-composer>/);
+            assert.match(r.text, /<div class="cc-composer" id="cc-composer" data-cc-composer data-action="\/chat"/);
+            assert.match(r.text, /<form class="ct-composer-fallback" method="post" action="\/chat">/, 'a browser without script still sends');
+            assert.match(r.text, /<script src="\/shared\/ov-composer\.js(\?v=[0-9a-f]+)?" defer><\/script>/, 'composer v2 (4.215.0) is loaded');
             assert.match(r.text, /<link rel="stylesheet" href="\/shared\/thread\.css(\?v=[0-9a-f]+)?">/, 'the network\'s conversation UI (L55 C4)');
             assert.match(r.text, /<script src="\/shared\/ov-thread\.js(\?v=[0-9a-f]+)?" defer><\/script>/);
-            assert.match(r.text, /\/shared\/ov-upload\.css/);
-            assert.match(r.text, /\/shared\/ov-upload\.js/);
-            assert.match(r.text, /data-cc-upload data-accept=/);
+            assert.ok(!/data-cc-upload data-accept=/.test(r.text), 'the dashed "Attach files" box is gone (the composer attaches)');
+            assert.ok(!/data-cc-model/.test(r.text) && !/data-cc-mode/.test(r.text), 'no separate model or mode control');
+            assert.match(r.text, /<p class="cc-allowance">Actor checks each answer with a second model\./, 'one quiet allowance line under the composer');
+            assert.match(r.text, /href="\/chat\/settings" title="Settings"/, 'Settings is in the chat head');
             assert.match(r.text, /Your chats show here\./);
             assert.match(r.text, /<main id="main" class="page page-app">/, 'the app layout: the whole width, no crumbs');
             assert.ok(!/name="parent"/.test(r.text), 'a new chat follows nothing');
@@ -86,7 +90,8 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             assert.match(page.text, /<div class="ovt-meta"><span>Balanced/);
             assert.match(page.text, new RegExp(`<input type="hidden" name="parent" value="${first}">`), 'the composer replies to the last turn');
             assert.match(page.text, new RegExp(`<a class="ovk-sidebar-item is-here" href="/chat/${first}" aria-current="page"`), 'the chat is in the list (the network\'s sidebar), marked as the one open');
-            assert.match(page.text, /<nav class="ovk-sidebar-nav"[^>]*>[\s\S]*Console[\s\S]*Your agents[\s\S]*Memory/, 'Actor\'s places as rows, as Codes\' are');
+            assert.match(page.text, /<nav class="ovk-sidebar-nav"[^>]*>[\s\S]*Settings[\s\S]*Your agents[\s\S]*Memory/, 'Actor\'s places as rows, as Codes\' are; the Console is gone');
+            assert.ok(!/href="\/console"/.test(page.text), 'no Console row or link');
         });
 
         await check('a reply continues the chat: both turns, in order, one chat in the list, with the turn before in mind', async () => {
@@ -248,9 +253,12 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             await s.db.query("UPDATE tasks SET state = 'running' WHERE id = $1", [last]);
             const page = await t.get(`/chat/${last}`, { as: kim });
             await s.db.query("UPDATE tasks SET state = 'succeeded' WHERE id = $1", [last]);
-            assert.match(page.text, new RegExp(`<form class="ovt-composer is-busy" method="post" action="/chat/${last}/steer" data-ovt-composer>`));
+            assert.match(page.text, new RegExp(`<div class="cc-composer" id="cc-composer" data-cc-composer data-action="/chat/${last}/steer"`), 'the mounted composer steers the open turn');
+            assert.match(page.text, new RegExp(`data-working="${last}"`), 'the composer knows which turn is open');
             assert.match(page.text, /placeholder="Tell Actor something while it works"/);
-            assert.match(page.text, new RegExp(`<button type="submit" class="ovt-stop" formaction="/tasks/${last}/cancel" formnovalidate data-ovt-stop>`));
+            assert.match(page.text, new RegExp(`<article class="ovt-card ct-run" data-ct-run="${last}">`), 'the running task is a card in the conversation');
+            assert.match(page.text, /data-ct-run-state>Working…</);
+            assert.match(page.text, new RegExp(`<form class="ct-run-stop" method="post" action="/chat/${last}/cancel"><button class="ovt-card-btn is-quiet" type="submit">Stop</button></form>`), 'Stop is on the card');
             assert.match(page.text, /<figure class="ct-screen" data-screen hidden><\/figure>/, 'no picture yet: the screen is there, hidden, for the script to fill');
         });
 

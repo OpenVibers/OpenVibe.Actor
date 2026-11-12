@@ -38,11 +38,10 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         await store.insertTask(t.ctx.s, { id: t.ctx.s.newId('tsk'), requester: who, task: 'open', mode: 'balanced', budget_task: 0.02, budget_day: 0.05, created_at: t.ctx.s.iso() });
         today = await store.spendToday(t.ctx.s, who);
         assert.strictEqual(today.reserved, 0.02);
-        // The console is where a person starts a run: $0.05 - $0.01 spent - $0.02 held = $0.02 left.
-        assert.strictEqual(typeof require('../server/http/console-pages').createConsolePages, 'function');
-        const consolePage = await t.get('/console', { as: u });
-        assert.strictEqual(consolePage.status, 200);
-        assert.match(consolePage.text, /\$0\.02 of the \$0\.05 free allowance left today \(\$0\.02 held by runs in progress\)/);
+        // The chat composer is where a person starts a run: $0.05 - $0.01 spent - $0.02 held = $0.02 left.
+        const chatPage = await t.get('/chat', { as: u });
+        assert.strictEqual(chatPage.status, 200);
+        assert.match(chatPage.text, /\$0\.02 of the \$0\.05 free allowance left today \(\$0\.02 held by runs in progress\)/);
         await t.ctx.s.db.query("UPDATE tasks SET state = 'cancelled' WHERE requester = $1", [who]);
     });
 

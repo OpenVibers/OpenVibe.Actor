@@ -25,12 +25,22 @@
         var chat = document.querySelector('.chat');
         if (!chat || chat.dataset.ready) return;
         chat.dataset.ready = '1';
-        var form = chat.querySelector('[data-ovt-composer]');
-        var text = chat.querySelector('[data-ovt-text]');
-        var send = chat.querySelector('[data-ovt-send]');
-        var note = chat.querySelector('[data-cc-note]');
+        // Composer v2 (openvibe-shared 4.215.0, the agent preset): the server renders a plain form for a browser without
+        // script; with script it is replaced by the mounted composer, whose chips show each file's progress as Actor's
+        // own file path reads it. The mount happens here, before ov-thread.js's DOMContentLoaded start, so the shared
+        // thread binds to it too.
+        var host = chat.querySelector('[data-cc-composer]');
+        var form = null, text = null, send = null, note = null, composer = null;
+        var uploaded = new Map();
+        var uploadSeq = 0;
         var fine = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
         var reduce = document.documentElement.getAttribute('data-ov-motion') === 'off';
+        if (host) mountComposer();
+        else {
+            form = chat.querySelector('[data-ovt-composer]');
+            text = chat.querySelector('[data-ovt-text]');
+            send = chat.querySelector('[data-ovt-send]');
+        }
 
         // ── The canvas (plan HO9). The document rides in an inert template; openvibe-shared's ov-canvas.js draws it
         // into the wide panel and the phone fold from the same data. A button's label goes to the agent as the
@@ -131,84 +141,116 @@
 
         // ── The thread stays at the bottom while you are there.
         function nearBottom() { return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 220; }
-        function toBottom(smooth) { window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth && !reduce ? 'smooth' : 'auto' }); }
+        function toBottom(smooth) {
+            // A short chat has nothing to scroll: don't hide the Now strip (or the start of the thread) for no reason.
+            if (document.documentElement.scrollHeight <= window.innerHeight + 2) return;
+            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth && !reduce ? 'smooth' : 'auto' });
+        }
 
         // ── The composer: ov-thread.js grows it, sends on Enter and fills starters. An input event lets it re-measure after
         // this file changes the words.
         function grow() { if (text) text.dispatchEvent(new Event('input')); }
         if (text) text.addEventListener('input', function () { syncSend(); });
-        // ── Files: the shared picker owns the drop zone, chips and removal.
-        var uploadRoot = chat.querySelector('[data-cc-upload]');
-        var picked = [];
-        var meters = new Map();
-        var picker = uploadRoot && window.OVUpload && OVUpload.picker(uploadRoot, {
-            label: 'Attach files', accept: uploadRoot.dataset.accept, multiple: true,
-            onFile: function (file, row) {
-                var allowed = /^text\//.test(file.type) || /^application\/(pdf|json|xml|x-yaml|yaml|javascript|sql)$/.test(file.type) ||
-                    /^image\/(png|jpeg|webp|gif)$/.test(file.type) ||
-                    /\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|kt|c|h|cpp|hpp|cs|php|sh|sql|log|ini|env\.example|srt|vtt|pdf)$/i.test(file.name);
-                var total = picked.reduce(function (sum, item) { return sum + item.size; }, 0) + file.size;
-                if (!allowed || picked.length >= 4 || file.size > 6 * 1048576 || total > 12 * 1048576) {
-                    row.dispatchEvent(new Event('remove')); row.remove();
-                    problem(!allowed ? 'Actor reads text, code, CSV, JSON, PDFs and PNG, JPEG, WebP or GIF images.' :
-                        picked.length >= 4 ? 'Attach at most 4 files to one message.' :
-                            file.size > 6 * 1048576 ? file.name + ' is over 6 MB.' : 'The files together are over 12 MB.');
-                    return;
-                }
-                problem(null);
-                picked.push(file);
-                var meterRoot = document.createElement('div'); row.append(meterRoot);
-                var meter = OVUpload.progress(meterRoot, { compact: true, onRetry: function () { form.requestSubmit(); } });
-                meter.update({ state: 'waiting', total: file.size });
-                meters.set(file, meter);
-                syncSend();
-            },
-            onRemove: function (file) {
-                picked = picked.filter(function (item) { return item !== file; });
-                if (meters.has(file)) { meters.get(file).destroy(); meters.delete(file); }
-                syncSend();
+        // ── Composer v2: mount the agent preset (Attach, Speak, the mode chip, the round send) and wire it to Actor's
+        // own send: JSON with the files as data URLs (server/tasks/inputs.js), and while Actor works, its steer route.
+        function mountComposer() {
+            if (!window.OpenVibeComposer) return;
+            host.replaceChildren();
+            var parent = host.getAttribute('data-parent') || '';
+            var workingId = host.getAttribute('data-working') || '';
+            var mode = host.getAttribute('data-mode') || 'balanced';
+            composer = window.OpenVibeComposer.mount(host, {
+                preset: 'agent', id: 'cc-composer',
+                placeholder: workingId ? 'Tell Actor something while it works' : parent ? 'Reply to Actor' : 'Ask Actor to do something',
+                label: 'Message Actor', maxLength: 20000,
+                maxFiles: Number(host.getAttribute('data-max-files')) || 4,
+                maxMb: Number(host.getAttribute('data-max-mb')) || 6,
+                accept: host.getAttribute('data-accept') || '',
+                mode: { name: 'mode', label: 'How Actor works', value: mode,
+                    options: [['fastest', 'Fast'], ['balanced', 'Balanced'], ['best', 'Best'], ['cheapest', 'Cheapest'], ['private', 'Private']] },
+                upload: function (file, onProgress) {
+                    return new Promise(function (ok, no) {
+                        var rd = new FileReader();
+                        rd.onprogress = function (e) { if (e.lengthComputable) onProgress(e.total ? e.loaded / e.total : 0); };
+                        rd.onload = function () {
+                            var data = String(rd.result || '').split(',')[1] || '';
+                            if (!data) { no(new Error('Could not read ' + file.name)); return; }
+                            uploaded.set(file, { name: file.name, type: file.type || '', data: data });
+                            ok({ id: 'up_' + (++uploadSeq) });
+                        };
+                        rd.onerror = function () { no(new Error('Could not read ' + file.name)); };
+                        rd.readAsDataURL(file);
+                    });
+                },
+                beforeSend: function (ctx) {
+                    var bad = (ctx.files() || []).find(function (f) { return !allowedFile(f); });
+                    if (bad) { problem('Actor reads text, code, CSV, JSON, PDFs and PNG, JPEG, WebP or GIF images.'); return false; }
+                    return true;
+                },
+                onSubmit: function (v) { return submit(v); },
+            });
+            form = composer.form; text = composer.text; send = composer.send; note = composer.note;
+            // The mode select lives under the chip's own look: keep the browser's select (hidden behind the chip), never
+            // ov-forms' box, which would draw a second pill inside it.
+            var modeSelect = form.querySelector('select[name="mode"]');
+            if (modeSelect) modeSelect.setAttribute('data-ov-native', '');
+            var parentInput = document.createElement('input');
+            parentInput.type = 'hidden'; parentInput.name = 'parent'; parentInput.value = parent;
+            form.appendChild(parentInput);
+            if (host.getAttribute('data-text')) {
+                text.value = host.getAttribute('data-text');
+                text.dispatchEvent(new Event('input'));
             }
-        });
-        function clearPicked() {
-            picked = [];
-            meters.forEach(function (meter) { meter.destroy(); }); meters.clear();
-            if (picker) picker.rows.replaceChildren();
-        }
-        function readAll(files) {
-            return Promise.all(files.map(function (f) {
-                return new Promise(function (ok, no) {
-                    var rd = new FileReader();
-                    rd.onload = function () { ok({ name: f.name, type: f.type || '', data: String(rd.result).split(',')[1] || '' }); };
-                    rd.onerror = function () { no(new Error('read')); };
-                    rd.readAsDataURL(f);
+            if (host.getAttribute('data-busy')) text.placeholder = 'Tell Actor something while it works';
+            // A starter chip fills the mounted box (ov-thread.js bound the plain one before this existed).
+            chat.querySelectorAll('[data-ovt-starter]').forEach(function (b) {
+                b.addEventListener('click', function () {
+                    text.value = b.getAttribute('data-ovt-starter') || '';
+                    text.dispatchEvent(new Event('input'));
+                    text.focus();
                 });
-            }));
+            });
         }
-
+        function allowedFile(file) {
+            return /^text\//.test(file.type) || /^application\/(pdf|json|xml|x-yaml|yaml|javascript|sql)$/.test(file.type) ||
+                /^image\/(png|jpeg|webp|gif)$/.test(file.type) ||
+                /\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|kt|c|h|cpp|hpp|cs|php|sh|sql|log|ini|env\.example|srt|vtt|pdf)$/i.test(file.name);
+        }
+        // The file's data, read once by the composer's upload (for its progress chip) or here when a browser had none.
+        function filePayload(file) {
+            var ready = uploaded.get(file);
+            if (ready) return Promise.resolve(ready);
+            return new Promise(function (ok, no) {
+                var rd = new FileReader();
+                rd.onload = function () { ok({ name: file.name, type: file.type || '', data: String(rd.result || '').split(',')[1] || '' }); };
+                rd.onerror = function () { no(new Error('Could not read ' + file.name)); };
+                rd.readAsDataURL(file);
+            });
+        }
         function openTurn() { var t = chat.querySelectorAll('.ovt-turn'); var last = t[t.length - 1]; return last && (last.hasAttribute('data-open') || last.getAttribute('data-state') === 'needs_you') ? last : null; }
         var stopBtn = chat.querySelector('[data-ovt-stop]');
         function working() { var t = openTurn(); return t && t.hasAttribute('data-open') ? t : null; }
         function syncSend() {
-            if (!send) return;
+            if (!send || !text) return;
             var w = working();
             if (stopBtn) { stopBtn.hidden = !w; stopBtn.type = 'button'; stopBtn.removeAttribute('formaction'); }
-            form.setAttribute('action', w ? '/chat/' + w.getAttribute('data-task') + '/steer' : '/chat');
-            if (text) text.placeholder = w ? 'Tell Actor something while it works' : (form.querySelector('input[name=parent]') ? 'Reply to Actor' : 'Ask Actor to do something');
-            send.disabled = !(text && text.value.trim());
-            if (picker) { picker.input.disabled = !!w; uploadRoot.querySelector('.ov-upload__picker').disabled = !!w; }
+            text.placeholder = w ? 'Tell Actor something while it works' : (host && host.getAttribute('data-parent') ? 'Reply to Actor' : 'Ask Actor to do something');
         }
         syncSend();
 
         function problem(msg) {
-            var p = form.querySelector('.cc-problem');
+            var root = form || host;
+            if (!root) return;
+            var p = root.querySelector('.cc-problem');
             if (!msg) { if (p) p.remove(); return; }
-            if (!p) { p = document.createElement('p'); p.className = 'cc-problem'; p.setAttribute('role', 'alert'); form.insertBefore(p, form.firstChild); }
+            if (!p) { p = document.createElement('p'); p.className = 'cc-problem'; p.setAttribute('role', 'alert'); root.insertBefore(p, root.firstChild); }
             p.textContent = msg;
         }
         function setParent(id) {
-            var input = form.querySelector('input[name=parent]');
-            if (!input) { input = document.createElement('input'); input.type = 'hidden'; input.name = 'parent'; form.appendChild(input); }
-            input.value = id;
+            if (host) host.setAttribute('data-parent', id);
+            var input = form && form.querySelector('input[name=parent]');
+            if (!input && form) { input = document.createElement('input'); input.type = 'hidden'; input.name = 'parent'; form.appendChild(input); }
+            if (input) input.value = id;
             if (text) text.placeholder = 'Reply to Actor';
         }
 
@@ -219,25 +261,62 @@
                 xhr.setRequestHeader('accept', 'application/json');
                 xhr.setRequestHeader('content-type', 'application/json');
                 xhr.upload.onprogress = function (event) {
-                    if (!event.lengthComputable) return;
-                    var fraction = event.total ? event.loaded / event.total : 0;
-                    meters.forEach(function (meter, file) {
-                        meter.update({ state: 'sending', done: Math.round(file.size * fraction), total: file.size });
-                    });
+                    if (!event.lengthComputable || !note) return;
+                    note.textContent = 'Sending… ' + Math.round((event.total ? event.loaded / event.total : 0) * 100) + '%';
                 };
-                xhr.upload.onload = function () {
-                    meters.forEach(function (meter, file) { meter.update({ state: 'processing', done: file.size, total: file.size, message: 'Actor is reading the file' }); });
-                };
+                xhr.upload.onload = function () { if (note) note.textContent = 'Actor is reading the file…'; };
                 xhr.onload = function () {
                     var data;
                     try { data = JSON.parse(xhr.responseText); } catch (e) { data = { error: 'That could not be sent. Try again.' }; }
-                    if (xhr.status >= 200 && xhr.status < 300) meters.forEach(function (meter, file) { meter.update({ state: 'done', done: file.size, total: file.size }); });
-                    else meters.forEach(function (meter) { meter.update({ state: 'failed', message: data.error || 'That could not be sent. Try again.' }); });
                     resolve({ ok: xhr.status >= 200 && xhr.status < 300, j: data });
                 };
-                xhr.onerror = function () { meters.forEach(function (meter) { meter.update({ state: 'failed', message: 'No connection. Try again.' }); }); reject(new Error('No connection')); };
+                xhr.onerror = function () { reject(new Error('No connection')); };
                 xhr.send(JSON.stringify(fields));
             });
+        }
+
+        // What composer v2's submit calls: steer the open turn, or send a new message (files and all) and draw its turn.
+        function submit(v) {
+            problem(null);
+            if (!v.text) return false;
+            var w = working();
+            if (w) {
+                return steer(w, v.text).then(function () { return undefined; }, function () { return false; });
+            }
+            var fields = { task: v.text, mode: v.mode || 'balanced' };
+            var parent = host && host.getAttribute('data-parent');
+            if (parent) fields.parent = parent;
+            return Promise.all((v.files || []).map(filePayload))
+                .then(function (files) {
+                    if (files.length) fields.files = files;
+                    return sendChat(fields);
+                })
+                .then(function (res) {
+                    if (!res.ok || !res.j.turn) {
+                        problem(res.j.error || 'That could not be sent. Try again.');
+                        if (note) note.textContent = '';
+                        return false;
+                    }
+                    if (note) note.textContent = '';
+                    uploaded.clear();
+                    var thread = chat.querySelector('[data-ovt-thread]');
+                    if (thread && !thread.querySelector(':scope > li')) {
+                        var title = chat.querySelector('.ovt-title'); if (title) title.textContent = v.text.slice(0, 60);
+                        try { history.pushState({}, '', res.j.url); } catch (err) { /* */ }
+                        addChat(res.j.id, v.text);
+                    }
+                    var turn = window.OVThread ? window.OVThread.add(res.j.turn) : null;
+                    setParent(res.j.id);
+                    if (turn) follow(turn);
+                    syncSend();
+                    refreshNow();
+                    return undefined;
+                })
+                .catch(function () {
+                    problem('No connection. Your message is still in the box.');
+                    if (note) note.textContent = '';
+                    return false;
+                });
         }
 
         if (stopBtn) stopBtn.addEventListener('click', function () {
@@ -248,56 +327,25 @@
             fetch('/tasks/' + encodeURIComponent(w.getAttribute('data-task')) + '/cancel', { method: 'POST', credentials: 'same-origin', redirect: 'manual' })
                 .catch(function () {}).then(function () { stopBtn.disabled = false; });
         });
-        // Steering: the words join the working turn's list at once, and the run hears them at its next step.
-        function steer(w) {
-            var said = text.value.trim();
+        // Steering: the words join the working card at once, and the run hears them at its next step.
+        function steer(w, said) {
             var row = document.createElement('li'); row.className = 'ovt-w-you is-sending';
             row.innerHTML = '<svg class="ovt-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20a8 8 0 0 1 16 0"/></svg><p></p>';
             row.querySelector('p').textContent = said;
             var list = w.querySelector('[data-ovt-work]');
             if (list) { var fold = list.closest('details'); if (fold) fold.open = true; list.appendChild(row); }
-            text.value = ''; grow(); syncSend();
-            var body = new URLSearchParams({ task: said });
-            fetch('/chat/' + encodeURIComponent(w.getAttribute('data-task')) + '/steer', { method: 'POST', credentials: 'same-origin', headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, body: body.toString() })
+            return fetch('/chat/' + encodeURIComponent(w.getAttribute('data-task')) + '/steer', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ task: said }).toString(),
+            })
                 .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
                 .then(function (res) {
                     row.classList.remove('is-sending');
-                    if (!res.ok) { row.remove(); text.value = said; grow(); syncSend(); problem(res.j.error || 'Actor could not take that just now.'); }
+                    if (!res.ok) { row.remove(); problem(res.j.error || 'Actor could not take that just now.'); throw new Error('steer'); }
                 })
-                .catch(function () { row.remove(); text.value = said; grow(); syncSend(); problem('No connection. Your message is still in the box.'); });
+                .catch(function () { row.remove(); problem('No connection. Your message is still in the box.'); throw new Error('steer'); });
         }
-
-        if (form) form.addEventListener('submit', function (e) {
-            if (!window.fetch || !text || !text.value.trim()) return;
-            var w = working();
-            if (w) { e.preventDefault(); problem(null); steer(w); return; }
-            e.preventDefault();
-            problem(null);
-            send.disabled = true;
-            var fields = {};
-            new FormData(form).forEach(function (v, k) { if (typeof v === 'string') fields[k] = v; });
-            (picked.length ? readAll(picked) : Promise.resolve([]))
-                .then(function (files) {
-                    if (files.length) fields.files = files;
-                    return sendChat(fields);
-                })
-                .then(function (res) {
-                    if (!res.ok || !res.j.turn) { problem(res.j.error || 'That could not be sent. Try again.'); syncSend(); return; }
-                    var thread = chat.querySelector('[data-ovt-thread]');
-                    if (thread && !thread.querySelector(':scope > li')) {
-                        var title = chat.querySelector('.ovt-title'); if (title) title.textContent = text.value.trim().slice(0, 60);
-                        try { history.pushState({}, '', res.j.url); } catch (err) { /* */ }
-                        addChat(res.j.id, text.value.trim());
-                    }
-                    var turn = window.OVThread ? window.OVThread.add(res.j.turn) : null;
-                    text.value = ''; grow();
-                    clearPicked();
-                    setParent(res.j.id);
-                    if (turn) follow(turn);
-                    syncSend();
-                })
-                .catch(function () { problem('No connection. Your message is still in the box.'); syncSend(); });
-        });
 
         // A new chat joins the top of the list.
         function addChat(id, title) {
@@ -443,6 +491,9 @@
                             list.innerHTML = fresh.innerHTML;
                             sending.forEach(function (r) { list.appendChild(r); });
                         } else if (fresh) turn.querySelector('.ovt-reply').innerHTML = next.querySelector('.ovt-reply').innerHTML;
+                        // The card's state (Starting → Working → Checking) updates in place too.
+                        var stateNow = turn.querySelector('[data-ct-run-state]'), stateFresh = next.querySelector('[data-ct-run-state]');
+                        if (stateNow && stateFresh && stateNow.outerHTML !== stateFresh.outerHTML) stateNow.replaceWith(stateFresh);
                         // The screen appears (or its live link changes) when the run opens a desk.
                         var scr = turn.querySelector('[data-screen]'), scr2 = next.querySelector('[data-screen]');
                         if (scr && scr2 && (scr.hidden !== scr2.hidden || scr.getAttribute('data-desk') !== scr2.getAttribute('data-desk'))) { scr.replaceWith(scr2); screen(turn); }
@@ -459,6 +510,7 @@
                         var dot = chat.querySelector('.ovt-list a[aria-current] .ovt-dot'); if (dot) dot.remove();
                         if (note) note.textContent = '';
                         syncSend();
+                        refreshNow();
                         if (text && fine) text.focus();
                     }
                     if (stay) toBottom(true);
@@ -466,6 +518,27 @@
                 })
                 .catch(function () {});
         }
+        // The "Now" strip (the Console's Now card, in the chat): refreshed from GET /chat/now while something runs.
+        var nowTimer = 0;
+        function paintNow() {
+            return fetch('/chat/now', { credentials: 'same-origin' })
+                .then(function (r) { return r.ok ? r.text() : null; })
+                .then(function (h) {
+                    if (h == null) return;
+                    var box = chat.querySelector('[data-ct-now]');
+                    if (!box) return;
+                    var tmp = document.createElement('div'); tmp.innerHTML = h;
+                    var fresh = tmp.firstElementChild;
+                    if (fresh) box.replaceWith(fresh);
+                })
+                .catch(function () {});
+        }
+        function refreshNow() { if (nowTimer) return; nowTimer = setTimeout(function () { nowTimer = 0; paintNow(); }, 350); }
+        setInterval(function () {
+            if (document.hidden) return;
+            if (chat.querySelector('[data-ct-run]') || chat.querySelector('[data-ct-now]:not([hidden])')) paintNow();
+        }, 5000);
+
         // What Actor sees: the last picture, fetched every two seconds while the turn works (only when it changed).
         var screens = {};
         // The live desk (plan L55 C1b): when the turn works on one of the person's own desks, the server asks Bot for a
@@ -507,7 +580,9 @@
             var framed = turn.querySelector('[data-screen][data-framed="yes"]');
             if (framed) return;
             var fig = turn.querySelector('[data-screen]');
-            if (!fig) return;
+            // Nothing to look at yet: the hidden placeholder is filled by a later turn refresh, and only then is there a
+            // picture to fetch (no request every two seconds for a run that never shows a screen).
+            if (!fig || fig.hidden) return;
             var busyLoad = false;
             screens[id] = setInterval(function () {
                 if (busyLoad || document.hidden) return;
@@ -563,66 +638,6 @@
         }
         chat.querySelectorAll('.ovt-turn[data-open]').forEach(function (t) { follow(t); });
 
-        modelChip();
-    }
-
-    // ── The model chip (plan L55 C3): what this person's tasks run on. Opening it asks which of their own keys Actor
-    // may use (names only, from OpenVibe.AI); a choice saves at once. Escape or a click elsewhere closes it.
-    function modelChip() {
-        var box = document.querySelector('[data-cc-model]');
-        if (!box || box.dataset.wired) return;
-        box.dataset.wired = '1';
-        var label = box.querySelector('[data-ccm-label]');
-        var fine = box.querySelector('[data-ccm-fine]');
-        var ready = null;
-        function mark() {
-            box.querySelectorAll('[data-ccm-provider]').forEach(function (li) {
-                var ok = !!(ready && ready.indexOf(li.getAttribute('data-ccm-provider')) !== -1);
-                li.classList.toggle('is-ready', ok);
-                var setup = li.querySelector('[data-ccm-setup]');
-                if (setup) setup.hidden = ok;
-            });
-        }
-        box.addEventListener('toggle', function () {
-            if (!box.open) return;
-            fetch('/api/v1/me/model', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
-                .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (j) { if (j) { ready = Array.isArray(j.keys) ? j.keys : []; mark(); } })
-                .catch(function () {});
-        });
-        box.addEventListener('click', function (e) {
-            var b = e.target.closest('[data-ccm-choice]');
-            if (!b) return;
-            var choice = b.getAttribute('data-ccm-choice');
-            b.disabled = true;
-            fetch('/api/v1/me/model', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ choice: choice }) })
-                .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error((j && j.detail) || 'not saved'); }, function () { throw new Error('not saved'); }); })
-                .then(function (j) {
-                    box.querySelectorAll('[data-ccm-choice]').forEach(function (x) {
-                        var on = x.getAttribute('data-ccm-choice') === choice;
-                        x.classList.toggle('is-on', on);
-                        x.setAttribute('aria-pressed', on ? 'true' : 'false');
-                    });
-                    var p = j && j.provider;
-                    var name = p ? (b.querySelector('b') || {}).textContent : '';
-                    if (label) label.textContent = p === 'node' ? 'Your computer' : p ? 'Your ' + name + ' key' : 'Auto';
-                    // Chosen but not allowed yet: say what is left to do instead of letting the next task fail.
-                    if (p && ready && ready.indexOf(p) === -1 && fine) {
-                        fine.textContent = '';
-                        fine.append(p === 'node' ? 'Your next task runs on your computer once you add its model and allow Actor: ' : 'Your next task runs on your ' + name + ' key once you allow Actor to use it: ');
-                        var a = document.createElement('a');
-                        a.href = 'https://ai.openvibe.services/you?allow=actor&provider=' + encodeURIComponent(p);
-                        a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'allow it at OpenVibe.AI';
-                        fine.append(a, '.');
-                    } else {
-                        box.open = false;
-                    }
-                })
-                .catch(function (err) { if (fine) fine.textContent = 'That did not save: ' + err.message; })
-                .then(function () { b.disabled = false; });
-        });
-        document.addEventListener('click', function (e) { if (box.open && !box.contains(e.target)) box.open = false; });
-        document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && box.open) { box.open = false; box.querySelector('summary').focus(); } });
     }
 
     function stop() { streams.forEach(function (s) { try { s.close(); } catch (e) { /* */ } }); streams = []; }

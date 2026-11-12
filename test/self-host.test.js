@@ -38,22 +38,22 @@ const SECRET = 's'.repeat(43);
     const t = await boot({ env: { ...base, ACTOR_RUNTIME_URL: runtimeUrl, ACTOR_RUNTIME_MODEL: 'local-model', ACTOR_DEEPSEEK_API_KEY: null, ACTOR_OPENAI_API_KEY: null, ACTOR_LOCAL_LLM_URL: null, ACTOR_LOCAL_LLM_MODEL: null, ACTOR_MODEL_FAST: null, ACTOR_MODEL_SMART: null, ACTOR_MODEL_BEST: null, ACTOR_MODEL_CHECK: null, ACTOR_MODEL_VISION: null } });
 
     await check('the owner signs in with the password; a wrong one is refused', async () => {
-        const form = await t.get('/auth/login?next=/console');
+        const form = await t.get('/auth/login?next=/chat');
         assert.strictEqual(form.status, 200);
         assert.match(form.text, /Sign in to your Actor/);
-        assert.match(form.text, /name="next" value="\/console"/);
-        const wrong = await t.get('/auth/login', { form: { password: 'nope', next: '/console' } });
+        assert.match(form.text, /name="next" value="\/chat"/);
+        const wrong = await t.get('/auth/login', { form: { password: 'nope', next: '/chat' } });
         assert.strictEqual(wrong.status, 401);
         assert.ok(!wrong.headers.get('set-cookie'));
-        const ok = await t.get('/auth/login', { form: { password: PASSWORD, next: '/console' } });
-        assert.deepStrictEqual([ok.status, ok.headers.get('location')], [303, '/console']);
+        const ok = await t.get('/auth/login', { form: { password: PASSWORD, next: '/chat' } });
+        assert.deepStrictEqual([ok.status, ok.headers.get('location')], [303, '/chat']);
         const cookie = ok.headers.get('set-cookie').split(';')[0];
         assert.match(cookie, /^actor_local=\d{13}\.[A-Za-z0-9_-]{43}$/);
         const me = await t.get('/auth/me', { cookie });
         assert.deepStrictEqual(me.json().user, { username: 'kai', display_name: 'kai', subject_id: SUBJECT });
         const forged = await t.get('/auth/me', { cookie: `actor_local=9999999999999.${'A'.repeat(43)}` });
         assert.strictEqual(forged.json().user, null, 'a cookie not signed with the session secret is nobody');
-        assert.strictEqual((await t.get('/console', { cookie })).status, 200);
+        assert.strictEqual((await t.get('/chat', { cookie })).status, 200);
     });
 
     await check('the API takes the owner\'s token only: never a Network token, never a wrong one', async () => {

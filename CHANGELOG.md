@@ -2,6 +2,24 @@
 
 What changed in OpenVibe.Actor, newest first. Each site also publishes its patch notes at /updates.
 
+## Unreleased — the chat is the one place you use Actor (one agent system, stage 1)
+
+- **Composer v2** (openvibe-shared 4.215.0, the `agent` preset): the chat mounts `OpenVibeComposer.mount` with Attach,
+  Speak, the mode chip (Fast, Balanced, Best, Cheapest, Private) and the round send; files go through Actor's existing
+  path (`POST /chat` with the file as data) and their chips show the read's progress. The dashed "Attach files" box and
+  the separate model/mode controls are gone; the model lives at `/chat/model`.
+- **Settings** (`/chat/settings`): the run defaults ("New runs: Only me … Apply to all my existing runs") moved off the
+  chat. The route (`POST /chat/defaults`) and its behaviour are unchanged.
+- **Four suggestion chips** on an empty chat, one line each, instead of the wall of starter cards; a chat with messages
+  shows none.
+- **The Console is folded in**: `/console` answers 301 to `/chat` (carrying `?ask=`/`?from=`), the bottom tab bar is
+  Home, Chat, Agents, and the running tasks the Console listed are the chat's "Now" strip — one line each, Stop on each,
+  hidden when nothing runs. `/me/spend` and the approvals, agents, computers and robots APIs and pages stay.
+- **A running task is a card in the conversation** (title, state, the last steps, Stop), refreshed in place from
+  `GET /chat/turn/:id`; stopping goes through `POST /chat/:id/cancel` and returns to the chat.
+- Migration-free. Tests: `test/one-page.test.js`, plus the updated chat, console, model, sharing, allowance and
+  self-host suites; screenshots at 390 and 1280: `test/one-page-shots.js`.
+
 ## Unreleased — skills that run code, sandboxed (HO8 step 3)
 
 - **`actor.skill@2`: code in a sandbox** (plan HO8, ADR-060; contracts 0.343.0): a sandbox skill carries one to five
