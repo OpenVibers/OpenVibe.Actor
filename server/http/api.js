@@ -39,6 +39,7 @@ const { findArtifact, sendArtifact } = require('../runtime/artifacts');
 const trace = require('../runtime/trace');
 const personal = require('../agents/personal');
 const contacts = require('../agents/contacts');
+const blueprints = require('../agents/blueprints');
 const voice = require('../agents/voice');
 const memoryStore = require('../memory');
 const approvals = require('../agents/approvals');
@@ -292,6 +293,71 @@ function createApi(ctx) {
         if (out.error) return problem(req, res, out.status, 'actor.approval.invalid', out.error);
         res.json({ id: out.row.id, state: out.row.state });
     });
+
+    // ── Make your own agent: blueprints (agents.blueprint@1, agents.install@1; 2026-11-12) ──
+    // A person's blueprints, the public gallery's, one version, the draft, publish, remix, the install screen, install,
+    // and moving an installed agent to another version. Everything is the person's own session or an app they allowed
+    // (actor.agent.manage); a blueprint they may not see is 404.
+    const bpFail = (req, res, e) => {
+        if (e instanceof blueprints.BlueprintError) return problem(req, res, e.status, e.code, e.message, e.errors ? { errors: e.errors.slice(0, 50) } : undefined);
+        throw e;
+    };
+    const bpRoute = (fn) => async (req, res) => { try { await fn(req, res); } catch (e) { bpFail(req, res, e); } };
+    const bpVersion = (req) => (req.query.version != null && /^[1-9][0-9]{0,5}$/.test(String(req.query.version)) ? Number(req.query.version) : null);
+    r.get('/blueprints', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), bpRoute(async (req, res) => {
+        const scope = req.query.scope === 'public' ? 'public' : 'mine';
+        const rows = await blueprints.list(s, req.principal.requester, { scope, limit: req.query.limit });
+        res.set('Cache-Control', 'private, no-store');
+        res.json({ scope, blueprints: rows.map((row) => blueprints.wire(row)) });
+    }));
+    r.post('/blueprints', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), bpRoute(async (req, res) => {
+        const row = await blueprints.create(s, req.principal.requester, req.body || {});
+        res.set('Location', `/api/v1/blueprints/${row.id}`);
+        res.status(201).json(blueprints.wire(row, row.draft));
+    }));
+    r.get('/blueprints/:id', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), bpRoute(async (req, res) => {
+        const got = await blueprints.get(s, req.principal.requester, req.params.id, { version: bpVersion(req), draft: req.query.draft === '1' });
+        if (!got) return problem(req, res, 404, 'actor.blueprint.not_found', 'No such blueprint.');
+        res.set('Cache-Control', 'private, no-store');
+        res.json(blueprints.wire(got.row, got.doc));
+    }));
+    r.put('/blueprints/:id/draft', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), bpRoute(async (req, res) => {
+        const row = await blueprints.saveDraft(s, req.principal.requester, req.params.id, req.body || {});
+        if (!row) return problem(req, res, 404, 'actor.blueprint.not_found', 'No such blueprint of yours.');
+        res.json(blueprints.wire(row, row.draft));
+    }));
+    r.post('/blueprints/:id/publish', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), bpRoute(async (req, res) => {
+        const out = await blueprints.publish(s, req.principal.requester, req.params.id);
+        if (!out) return problem(req, res, 404, 'actor.blueprint.not_found', 'No such blueprint of yours.');
+        res.json(blueprints.wire(out.row, out.doc));
+    }));
+    r.post('/blueprints/:id/remix', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), bpRoute(async (req, res) => {
+        const row = await blueprints.remix(s, req.principal.requester, req.params.id, { version: bpVersion(req) });
+        if (!row) return problem(req, res, 404, 'actor.blueprint.not_found', 'No such blueprint.');
+        res.set('Location', `/api/v1/blueprints/${row.id}`);
+        res.status(201).json(blueprints.wire(row, row.draft));
+    }));
+    r.get('/blueprints/:id/asks', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), bpRoute(async (req, res) => {
+        const out = await blueprints.asks(s, req.principal.requester, req.params.id, { version: bpVersion(req) });
+        if (!out) return problem(req, res, 404, 'actor.blueprint.not_found', 'No such blueprint.');
+        res.json(out);
+    }));
+    r.post('/blueprints/:id/install', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), bpRoute(async (req, res) => {
+        const out = await blueprints.install(s, config, req.principal.requester, req.params.id, req.body || {});
+        if (!out) return problem(req, res, 404, 'actor.blueprint.not_found', 'No such published blueprint.');
+        res.set('Location', `/api/v1/agents/${out.agent.id}`);
+        res.status(201).json({ agent: contacts.wire(out.agent), install: blueprints.installWire(out.install) });
+    }));
+    r.get('/agents/:id/install', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), bpRoute(async (req, res) => {
+        const inst = await blueprints.installOf(s, req.principal.requester, req.params.id);
+        if (!inst) return problem(req, res, 404, 'actor.install.not_found', 'That agent was not made from a blueprint.');
+        res.json(blueprints.installWire(inst));
+    }));
+    r.post('/agents/:id/install/update', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), bpRoute(async (req, res) => {
+        const inst = await blueprints.update(s, config, req.principal.requester, req.params.id, req.body || {});
+        if (!inst) return problem(req, res, 404, 'actor.install.not_found', 'That agent was not made from a blueprint.');
+        res.json(blueprints.installWire(inst));
+    }));
 
     // ── Agents as contacts (A-1) ─────────────────────────────
     // The person's own agents: list (Vibe first, created on this first read), read, create (optionally from a preset),
