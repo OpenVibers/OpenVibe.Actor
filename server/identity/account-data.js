@@ -116,6 +116,11 @@ const TABLES = [
     { table: 'actor_fabric_observe', subject: 'owner', value: (usr) => `user:${usr}`, file: 'work-fabric-observe.json', erase: 'delete' },
     { table: 'actor_fabric_lane_changes', subject: 'owner', value: (usr) => `user:${usr}`, file: 'work-fabric-lane-changes.json', erase: 'delete' },
     { table: 'actor_agents', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agents.json' },
+    // The agents they made as blueprints (agents.blueprint@1, migration 0071): their drafts and how they are shared. The
+    // published versions go with the blueprint (ON DELETE CASCADE); an install of someone else's keeps its agent.
+    { table: 'agent_blueprints', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-blueprints.json', erase: 'delete' },
+    // The agents they installed from a blueprint (agents.install@1): the version, the inputs and the asks they agreed to.
+    { table: 'agent_installs', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-installs.json', erase: 'delete' },
     // The voices they shared (agents/voice-shares.js): the public link, the document it holds and who shared it.
     // The document is their own text, and the link is theirs to stop sharing.
     { table: 'actor_shared_voices', subject: 'owner', value: (usr) => `user:${usr}`, file: 'shared-voices.json',

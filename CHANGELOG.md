@@ -20,7 +20,7 @@
   - `POST /api/v1/agents/:id/install/update` takes the new version once its new asks are agreed.
 - Migration 0071 adds the blueprint, version and install tables and lets an agent's instructions run to 20,000
   characters.
-- Pins: openvibe-contracts v0.419.0, openvibe-sdk v0.162.0.
+- Pins: openvibe-contracts v0.419.1, openvibe-sdk v0.162.0.
 
 ## Unreleased — Stop, not E-STOP
 
