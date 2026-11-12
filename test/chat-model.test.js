@@ -15,31 +15,29 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
     const kim = t.network.addUser('kim');
     const bo = t.network.addUser('bo');
     try {
-        await check('the chip says Auto by default, and its menu offers OpenVibe\'s and each provider\'s own key', async () => {
+        await check('the model control is in Settings now, not a chip under the composer', async () => {
             const page = await t.get('/chat', { as: kim });
             assert.strictEqual(page.status, 200);
-            assert.match(page.text, /<details class="cc-model" data-cc-model>/);
-            assert.match(page.text, /<span data-ccm-label>Auto<\/span>/);
-            assert.match(page.text, /data-ccm-choice="auto" aria-pressed="true"/);
+            assert.ok(!/data-cc-model/.test(page.text), 'no model chip on the chat');
+            const settings = await t.get('/chat/settings', { as: kim });
+            assert.match(settings.text, /href="\/chat\/model"/, 'Settings links the model form');
+            const model = await t.get('/chat/model', { as: kim });
+            assert.match(model.text, /<input type="radio" name="choice" value="auto" checked>/);
             ['openai', 'anthropic', 'deepseek', 'google', 'openrouter', 'mistral'].forEach((p) => {
-                assert.ok(page.text.includes(`data-ccm-choice="own:${p}" aria-pressed="false"`), p);
-                assert.ok(page.text.includes(`https://ai.openvibe.services/you?allow=actor&amp;provider=${p}`), `${p}: set up at OpenVibe.AI`);
+                assert.ok(model.text.includes(`value="own:${p}"`), p);
+                assert.ok(model.text.includes(`https://ai.openvibe.services/you?allow=actor&amp;provider=${p}`), `${p}: set up at OpenVibe.AI`);
             });
-            assert.ok(page.text.includes('href="/chat/model"'), 'the plain form, for no script');
-            // Their own computer (L55 C3): its own group, set up and allowed at OpenVibe.AI.
-            assert.ok(page.text.includes('<p class="ccm-head">Your computer</p>'));
-            assert.ok(page.text.includes('data-ccm-choice="own:link" aria-pressed="false"'));
-            assert.ok(page.text.includes('https://ai.openvibe.services/you?allow=actor&amp;provider=link'));
+            assert.ok(model.text.includes('value="own:link"'), 'their own computer');
+            assert.ok(model.text.includes('https://ai.openvibe.services/you?allow=actor&amp;provider=link'));
         });
 
-        await check('a tap saves through the API from the page; the chip says the person\'s own key after', async () => {
+        await check('the API saves the choice; the model form shows it, and another person keeps Auto', async () => {
             const put = await t.get('/api/v1/me/model', { as: kim, method: 'PUT', json: { choice: 'own:openai' }, headers: SAME });
             assert.strictEqual(put.status, 200, put.text);
             assert.strictEqual(put.json().provider, 'openai');
-            const page = await t.get('/chat', { as: kim });
-            assert.match(page.text, /<span data-ccm-label>Your OpenAI key<\/span>/);
-            assert.match(page.text, /data-ccm-choice="own:openai" aria-pressed="true"/);
-            assert.match((await t.get('/chat', { as: bo })).text, /<span data-ccm-label>Auto<\/span>/, 'another person\'s choice is theirs');
+            const page = await t.get('/chat/model', { as: kim });
+            assert.match(page.text, /<input type="radio" name="choice" value="own:openai" checked>/);
+            assert.match((await t.get('/chat/model', { as: bo })).text, /<input type="radio" name="choice" value="auto" checked>/, 'another person\'s choice is theirs');
             assert.strictEqual((await t.get('/api/v1/me/model', { as: kim, method: 'PUT', json: { choice: 'own:nope' }, headers: SAME })).status, 422);
         });
 
@@ -62,15 +60,14 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const pcPage = await t.get('/chat/model?saved=1', { as: kim });
             assert.match(pcPage.text, /Saved\. Your next task runs on Your computer\./);
             assert.match(pcPage.text, /<input type="radio" name="choice" value="own:link" checked>/);
-            assert.match((await t.get('/chat', { as: kim })).text, /<span data-ccm-label>Your computer<\/span>/);
+            assert.match((await t.get('/chat/model?saved=1', { as: kim })).text, /<input type="radio" name="choice" value="own:link" checked>/);
         });
 
-        await check('the script: the menu asks which keys are ready, saves in one request, closes on Escape', async () => {
+        await check('the chat no longer mounts a model control; the model page keeps the API', async () => {
             const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'chat.js'), 'utf8');
-            assert.match(js, /fetch\('\/api\/v1\/me\/model', \{ credentials: 'same-origin'/);
-            assert.match(js, /fetch\('\/api\/v1\/me\/model', \{ method: 'PUT', credentials: 'same-origin'/);
-            assert.match(js, /e\.key === 'Escape' && box\.open/);
-            assert.match(js, /allow it at OpenVibe\.AI/, 'chosen but not allowed: it says what is left to do');
+            assert.ok(!/data-cc-model|modelChip/.test(js), 'no model chip in the chat script');
+            assert.match(js, /data-cc-composer/, 'the chat script mounts composer v2');
+            assert.strictEqual((await t.get('/api/v1/me/model', { as: kim })).status, 200, 'the model API is still there');
         });
     } finally {
         await done(t);

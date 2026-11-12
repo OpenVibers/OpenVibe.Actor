@@ -198,7 +198,7 @@ ${diaries.length ? html`<section class="mem-diaries" aria-labelledby="h-diary"><
 <ul class="mem-list">${diaries.map((d) => diaryEntry(d, nameOf(d.agent_id), '/memory'))}</ul></section>` : ''}
 ${changes.length ? html`<section class="mem-changes" aria-labelledby="h-changes"><h2 id="h-changes">What the last nights changed</h2>
 <ul class="mem-list">${changes.map((c) => changeRow(c, nameOf(c.agent_id)))}</ul></section>` : ''}
-<p class="mem-foot"><a href="/me/agents">Your agents</a> · <a href="/tasks">Your tasks</a> · <a href="/console">Console</a></p>`);
+<p class="mem-foot"><a href="/me/agents">Your agents</a> · <a href="/tasks">Your tasks</a> · <a href="/chat/settings">Settings</a></p>`);
     });
 
     r.post('/memory', async (req, res) => {

@@ -19,7 +19,7 @@
 const express = require('express');
 const cache = require('openvibe-shared/cache-policy');
 const { asyncRouter } = require('./router');
-const { html, raw } = require('../render/html');
+const { html, raw, esc } = require('../render/html');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
 const store = require('../tasks/store');
@@ -50,8 +50,11 @@ const TRIGGER_ID = /^trg_[0-9A-HJKMNP-TV-Z]{26}$/;
 const LAST_RUN = { ok: 'went fine', failed: 'failed', needs_you: 'needs you', running: 'is running' };
 const OPEN = ['queued', 'running', 'verifying'];
 const MODE_LABEL = { cheapest: 'Cheapest', balanced: 'Balanced', best: 'Best', fastest: 'Fastest', private: 'Private' };
-const MODE_HINT = { cheapest: 'the lowest price that can do it', balanced: 'good and cheap', best: 'the strongest agent', fastest: 'the quickest answer', private: 'open model, nothing leaves OpenVibe' };
 const LIVE_TEXT = { queued: 'Starting', running: 'Working', verifying: 'Checking the answer' };
+// The Now strip is what is running (a queued task is not yet; it has no steps).
+const NOW_STATES = ['running', 'verifying'];
+// Composer v2's mode chip: the same modes as the router, in the owner's words (11-12: "Fast/Balanced/Best").
+const MODE_CHOICES = [['fastest', 'Fast'], ['balanced', 'Balanced'], ['best', 'Best'], ['cheapest', 'Cheapest'], ['private', 'Private']];
 const SIDEBAR_ROWS = 400;     // the person's newest tasks the sidebar groups into chats
 const CHAIN_MAX = 60;         // turns one conversation shows
 const EVENTS_MAX = 600;       // events per turn the work fold reads
@@ -134,13 +137,13 @@ function createChatPages(ctx, { computers = null } = {}) {
      * "New runs: Only me", with "Apply to all my existing runs" (design rule 1 and 2). The Share button on a run
      * changes just that one; this is only what the next one starts as.
      */
-    async function defaultsHtml(requester) {
+    async function defaultsHtml(requester, { from = '' } = {}) {
         if (!sharing) return '';
         const current = await sharing.defaultOf(requester).catch(() => 'private');
         const options = ['private', 'people', 'link', 'public']
             .map((a) => html`<option value="${a}"${a === current ? raw(' selected') : ''}>${AUDIENCE_TEXT[a]}</option>`);
         return html`<form class="ct-share-defaults" method="post" action="/chat/defaults">
-<label for="ct-share-default">New runs</label><select id="ct-share-default" name="audience">${options}</select>
+${from ? html`<input type="hidden" name="from" value="${from}">` : ''}<label for="ct-share-default">New runs</label><select id="ct-share-default" name="audience">${options}</select>
 <label class="ct-check"><input type="checkbox" name="apply_all" value="1"> Apply to all my existing runs</label>
 <button class="sc-btn" type="submit">Save</button>
 <span class="muted small">Only me unless you choose otherwise. Each run's Share button changes just that run.</span>
@@ -235,6 +238,59 @@ function createChatPages(ctx, { computers = null } = {}) {
     function workBlock(row, events, open) {
         const lines = taskEvents.lines(events.slice(-EVENTS_MAX), { final: !open, state: row.state });
         return raw(thread.work({ open, live: LIVE_TEXT[row.state] || 'Working', took: tookOf(row) || null, rows: workRows(lines) }));
+    }
+
+    /**
+     * A turn that is running is a card in the conversation (one-agent system, stage 1: the owner, 11-12, "a more
+     * modular system… reused in a shared modular way"), not a separate console panel: its title, its state, the last
+     * steps it took and Stop. js/chat.js refreshes the card in place from GET /chat/turn/:id; the finished turn becomes
+     * the ordinary work fold and answer.
+     */
+    function runCard(row, events, readOnly = false) {
+        const rows = workRows(taskEvents.lines(events.slice(-EVENTS_MAX), { final: false, state: row.state })).slice(-5);
+        const last = [...rows].reverse().find((r) => r.kind === 'tool' || r.kind === 'step' || r.kind === 'note');
+        const live = !last ? `${LIVE_TEXT[row.state] || 'Working'}…`
+            : last.kind === 'tool' ? `Using ${last.name}${last.input ? `: ${clip(last.input, 90)}` : ''}…`
+                : clip(last.text, 120);
+        const item = (r) => {
+            if (r.kind === 'tool') {
+                const st = r.running ? 'is-run' : r.ok === false ? 'is-bad' : 'is-ok';
+                return `<li class="ovt-w-tool ${st}"><div class="ovt-w-row"><b>${esc(r.name)}</b>${r.input ? `<span class="ovt-w-in">${esc(clip(r.input, 90))}</span>` : ''}<span class="ovt-w-st">${r.running ? '<span class="ovt-dot" aria-hidden="true"></span>' : ''}</span></div></li>`;
+            }
+            if (r.kind === 'you') return `<li class="ovt-w-you"><p>${esc(clip(r.text, 300))}</p></li>`;
+            if (r.kind === 'note') return `<li class="ovt-w-note"><p>${esc(clip(r.text, 300))}</p></li>`;
+            return `<li class="ovt-w-step"><span>${esc(clip(r.text, 200))}</span></li>`;
+        };
+        return html`<article class="ovt-card ct-run" data-ct-run="${row.id}">
+<p class="ovt-card-h"><span class="ct-run-title">${clip(row.task, 160)}</span><span class="ct-run-state" data-ct-run-state>${LIVE_TEXT[row.state] || 'Working'}…</span></p>
+<p class="ct-run-live" data-ovt-live>${live}</p>
+<ol class="ct-run-steps" data-ovt-work>${raw(rows.map(item).join(''))}</ol>
+${readOnly ? '' : html`<form class="ct-run-stop" method="post" action="/chat/${row.id}/cancel"><button class="ovt-card-btn is-quiet" type="submit">Stop</button></form>`}
+</article>`;
+    }
+
+    /**
+     * The "Now" strip at the top of the chat (the Console's "Now" card, folded in): one row for each task running for
+     * this person, with the last thing it did and Stop. Hidden when nothing runs; js/chat.js refreshes it from
+     * GET /chat/now while a turn is open.
+     */
+    function nowStrip(live) {
+        if (!live.length) return html`<section class="ct-now" data-ct-now hidden></section>`;
+        const stepOf = (row, event) => {
+            if (!event) return '';
+            const rows = workRows(taskEvents.lines([event], { final: false, state: row.state }));
+            const r = [...rows].reverse().find((x) => x.kind === 'tool' || x.kind === 'step' || x.kind === 'note');
+            if (!r) return '';
+            return r.kind === 'tool' ? `Using ${r.name}${r.input ? `: ${clip(r.input, 80)}` : ''}` : clip(r.text, 100);
+        };
+        return html`<section class="ct-now" data-ct-now aria-label="Now">
+<ul class="ct-now-list">${live.map(({ row, event }) => html`<li class="ct-now-item">
+<span class="ct-now-dot" aria-hidden="true"></span>
+<a class="ct-now-task" href="/chat/${row.id}"><b>${clip(row.task, 120)}</b></a>
+<span class="ct-now-step">${stepOf(row, event)}</span>
+<span class="ct-now-state">${LIVE_TEXT[row.state] || 'Working'}…</span>
+<form class="ct-now-stop" method="post" action="/chat/${row.id}/cancel"><button type="submit">Stop</button></form>
+</li>`)}</ul></section>`;
     }
 
     function answerBlock(row, t) {
@@ -475,9 +531,10 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
         else if (row.state === 'failed') reply = html`${workBlock(row, evs, false)}${failedBlock(row, t, readOnly)}`;
         else if (row.state === 'cancelled') reply = html`${workBlock(row, evs, false)}<p class="ct-stopped">Stopped. What it spent before stopping stays spent.</p>`;
         else {
-            // A turn parked on a wait says what it waits for (plan A2); otherwise it is working.
+            // A running turn is a card in the conversation (one-agent system, stage 1). A turn parked on a wait still
+            // says what it waits for (plan A2).
             const parked = ctx.waits && typeof ctx.waits.listForTask === 'function' ? (await ctx.waits.listForTask(row.id).catch(() => [])).find((w) => w.status === 'waiting') : null;
-            reply = html`${workBlock(row, evs, true)}${screenBlock(row, evs, true)}${waitBlock(row, parked, readOnly)}`;
+            reply = html`${runCard(row, evs, readOnly)}${screenBlock(row, evs, true)}${waitBlock(row, parked, readOnly)}`;
         }
         // A routine the turn made is its card, after whatever the turn said (plan §12 A-4).
         const routines = await triggerBlocks(row, evs, readOnly);
@@ -491,7 +548,7 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
     }
 
     // ── The page ───────────────────────────────────────────────────────────────────────────────────────────────────
-    function sidebar(chats, currentId) {
+    function sidebar(chats, currentId, { settings = false } = {}) {
         return raw(thread.sidebar({
             newHref: '/chat',
             groups: thread.group(chats, (c) => c.last, now()).map((g) => ({
@@ -499,8 +556,9 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
                 items: g.items.map((c) => ({ href: `/chat/${c.id}`, title: c.title, current: c.id === currentId, live: c.open })),
             })),
             findAction: '/chat',
-            // Actor's places as the network sidebar's rows, as Codes' are (kit.sidebar, plan L35).
-            nav: [{ href: '/console', label: 'Console', icon: 'grid' }, { href: '/me/agents', label: 'Your agents', icon: 'robot' }, { href: '/memory', label: 'Memory', icon: 'book' }],
+            // Actor's places as the network sidebar's rows, as Codes' are (kit.sidebar, plan L35). The Console is
+            // folded into this chat (one-agent system, stage 1), so Settings takes its row.
+            nav: [{ href: '/chat/settings', label: 'Settings', icon: 'sliders', here: settings }, { href: '/me/agents', label: 'Your agents', icon: 'robot' }, { href: '/memory', label: 'Memory', icon: 'book' }],
         }));
     }
 
@@ -549,24 +607,23 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
     }
 
     const ATTACH_ACCEPT = '.txt,.md,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.rb,.go,.rs,.java,.c,.cpp,.cs,.php,.sh,.sql,.log,.srt,.vtt,text/*,.pdf,application/pdf,image/png,image/jpeg,image/webp,image/gif';
-    function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '', model = null, allowance = null } = {}) {
-        const tools = html`${modelChip(model)}
-<label class="cc-mode" title="How Actor picks the agent"><span class="sr-only">Mode</span><select name="mode" data-cc-mode>${MODES.map((m) => html`<option value="${m}" title="${MODE_HINT[m] || ''}"${m === mode ? raw(' selected') : ''}>${MODE_LABEL[m] || m}</option>`)}</select></label>
-<span class="cc-note" data-cc-note></span>`;
-        return raw(thread.composer({
-            action: working ? `/chat/${working}/steer` : '/chat',
-            name: 'task',
-            maxlength: 20000,
-            label: 'Message Actor',
-            placeholder: working ? 'Tell Actor something while it works' : parent ? 'Reply to Actor' : 'Ask Actor to do something',
-            value: text,
-            busy,
-            stopAction: working ? `/tasks/${working}/cancel` : '',
-            hidden: { parent },
-            top: String(html`${problem ? html`<p class="cc-problem" role="alert">${problem}</p>` : ''}<div data-cc-upload data-accept="${ATTACH_ACCEPT}"></div><p class="cc-note">Text, code, CSV, JSON, PDF or PNG, JPEG, WebP, GIF images · up to 4 files, 6 MB each, 12 MB total.</p>`),
-            tools: String(tools),
-            note: `Actor checks each answer with a second model.${allowance ? ` ${allowance}` : ''}`,
-        }));
+
+    /**
+     * The composer, on openvibe-shared's composer v2 (4.215.0) with the agent preset: Attach and Speak on the left, the
+     * mode chip and the round send on the right, the files above the box with their progress. js/chat.js mounts it; this
+     * server-rendered form is what a browser without script gets, and the host it is replaced in.
+     *
+     * The mode chip is the router's modes (11-12: "the current Fast/Balanced/Best modes"); the model is no longer a
+     * second control here, it is in Settings (/chat/model). The allowance is one quiet line under the box.
+     */
+    function composer({ parent = null, mode = 'balanced', busy = false, working = null, problem = null, text = '', allowance = null } = {}) {
+        const placeholder = working ? 'Tell Actor something while it works' : parent ? 'Reply to Actor' : 'Ask Actor to do something';
+        const fallback = html`<form class="ct-composer-fallback" method="post" action="${working ? `/chat/${working}/steer` : '/chat'}">
+${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}<textarea name="task" rows="2" maxlength="20000" required placeholder="${placeholder}" aria-label="Message Actor">${text}</textarea>
+<div class="ct-composer-fallback-row"><label class="ct-composer-mode">Mode <select name="mode">${MODE_CHOICES.map(([v, label]) => html`<option value="${v}"${v === mode ? raw(' selected') : ''}>${label}</option>`)}</select></label><button type="submit">Send</button></div>
+</form>`;
+        return raw(`<div class="ct-composer-wrap">${problem ? String(html`<p class="cc-problem" role="alert">${problem}</p>`) : ''}<div class="cc-composer" id="cc-composer" data-cc-composer data-action="${working ? `/chat/${working}/steer` : '/chat'}" data-parent="${parent || ''}" data-mode="${mode}" data-working="${working || ''}" data-max-files="4" data-max-mb="6" data-accept="${ATTACH_ACCEPT}"${text ? ` data-text="${esc(text)}"` : ''}${busy ? ' data-busy="1"' : ''}>${String(fallback)}</div>
+<p class="cc-allowance">Actor checks each answer with a second model.${allowance ? ` ${allowance}` : ''}</p></div>`);
     }
 
     // What people really hand agents like this (the owner, 2026-11-01: "I hate the current examples… search what
@@ -584,16 +641,24 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
         ['globe', 'Use a website', 'Open openvibe.live, find a channel that is live right now, and tell me what is happening on it.'],
     ];
 
+    /** The tasks running for this person, with their newest event (the "Now" strip's last step). */
+    async function liveFor(requester) {
+        const rows = await s.db.many('SELECT * FROM tasks WHERE requester = $1 AND state = ANY($2) ORDER BY id DESC LIMIT 20', [requester, NOW_STATES]);
+        const events = await Promise.all(rows.map((row) => store.lastEvent(s, row.id).catch(() => null)));
+        return rows.map((row, i) => ({ row, event: events[i] }));
+    }
+
     /**
      * A run's page, or the same conversation read-only for somebody it was shared with: no sidebar, no composer and
      * no turn that asks or retries. The Share button is its owner's; a reader gets Send it only.
      */
     async function render(req, res, { row = null, problem = null, text = '', status = 200, shared = false } = {}) {
         const requester = requesterOf(req);
-        const [chats, turns, today] = await Promise.all([
+        const [chats, turns, today, live] = await Promise.all([
             shared ? Promise.resolve([]) : chatsFor(requester),
             row ? chainOf(row) : [],
             shared ? Promise.resolve({ usd: 0 }) : store.spendToday(s, requester),
+            shared ? Promise.resolve([]) : liveFor(requester),
         ]);
         const first = turns[0] || null;
         const lastTurn = turns[turns.length - 1] || null;
@@ -601,28 +666,27 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
         const fileMap = await inputs.list(s, turns.map((t) => t.id));
         const canvasRow = row && !shared && first ? await canvases.forThread(s, first.id) : null;
         const canvasDoc = canvasRow ? canvases.docOf(canvasRow) : null;
-        const model = shared ? null : modelPrefs.wire(await modelPrefs.get(s, requester).catch(() => null));
         const turnHtmls = await Promise.all(turns.map((t) => turnHtml(t, { files: fileMap.get(t.id) || [], readOnly: shared })));
         const title = first ? clip(first.task, 60) : 'New chat';
-        const actions = row ? String(shareButton(row, !shared)) : '';
-        // Our own markup (its values escaped by html``): drawn with raw(), never printed as text (11-08: it was).
-        const defaults = !shared && !row ? String(await defaultsHtml(requester)) : '';
+        // The run settings are in Settings now (one-agent system, stage 1); the chat only carries the model in its head.
+        const actions = `${row ? String(shareButton(row, !shared)) : ''}${shared ? '' : `<a class="ovt-btn" href="/chat/settings" title="Settings" aria-label="Settings">${glyphs.svg('gear', { size: 18 })}</a>`}`;
         return send(res, status, {
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
-            // The network's sidebar (kit.css, kit-web.js) and its conversation UI (thread.css, ov-thread.js).
+            // The network's sidebar (kit.css, kit-web.js) and its conversation UI (thread.css, ov-thread.js); composer
+            // v2 draws the box (ov-composer.js, 4.215.0).
             css: ['css/chat.css', 'css/skill-draft.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css', 'ov-upload.css'],
-            sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-share.js', 'ov-canvas.js', 'ov-upload.js'],
+            sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-composer.js', 'ov-share.js', 'ov-canvas.js', 'ov-upload.js'],
             body: html`${busy && !shared ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
 <div class="chat" data-chat="${first ? first.id : ''}">${raw(thread.page({
                 sidebar: shared ? '' : String(sidebar(chats, first ? first.id : null)),
-                head: thread.head({ title, newHref: shared ? null : (first ? '/chat' : null), actions }),
+                head: String(thread.head({ title, newHref: shared ? null : (first ? '/chat' : null), actions })) + (shared ? '' : String(nowStrip(live))),
                 turns: turnHtmls.map(String),
                 empty: first ? '' : String(html`<div class="ct-hello"><span class="ct-hello-mark" aria-hidden="true"></span><h2>What should Actor do?</h2><p>It browses, clicks and types for you. Watch it work, steer it, or go do something else.</p>
-<ul class="ct-starters">${STARTERS.map(([icon, k, v]) => html`<li><button type="button" data-ovt-starter="${v}">${raw(glyphs.svg(icon, { size: 20 }))}<b>${k}</b><span>${v}</span></button></li>`)}</ul></div>`),
-                composer: shared ? '' : String(html`${canvasDoc ? canvasPhone(canvasDoc) : ''}${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, model, allowance: leftLine(config.allowance, today) })}`),
+<ul class="ct-suggest">${STARTERS.slice(0, 4).map(([icon, k, v]) => html`<li><button type="button" class="ct-suggest-chip" data-ovt-starter="${v}">${raw(glyphs.svg(icon, { size: 16 }))}<span>${k}</span></button></li>`)}</ul></div>`),
+                composer: shared ? '' : String(html`${canvasDoc ? canvasPhone(canvasDoc) : ''}${composer({ parent: lastTurn ? lastTurn.id : null, mode: lastTurn ? lastTurn.mode : 'balanced', busy, working: lastTurn && OPEN.includes(lastTurn.state) ? lastTurn.id : null, problem, text, allowance: leftLine(config.allowance, today) })}`),
                 panel: canvasDoc ? String(canvasWide(canvasDoc)) : '',
                 label: first ? 'Conversation' : 'New chat',
-            }))}${raw(defaults)}${shared ? html`<p class="ct-shared-note">This run was shared with you. Only its owner can carry it on.</p>` : ''}</div>`,
+            }))}${shared ? html`<p class="ct-shared-note">This run was shared with you. Only its owner can carry it on.</p>` : ''}</div>`,
         });
     }
 
@@ -637,7 +701,50 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
         const audience = ['private', 'people', 'link', 'public'].includes(body.audience) ? body.audience : 'private';
         await sharing.setDefault(requesterOf(req), audience, { applyAll: String(body.apply_all || '') === '1' })
             .catch((e) => ctx.log.warn('[Actor] the run default was not saved:', e.message));
-        return res.redirect(303, '/chat');
+        return res.redirect(303, body.from === 'settings' ? '/chat/settings?saved=1' : '/chat');
+    });
+
+    /**
+     * Actor's Settings (one-agent system, stage 1): the run defaults moved off the chat ("New runs: Only me … Apply to
+     * all my existing runs"), the model and where it runs, and what has been spent. The same route (/chat/defaults)
+     * and the same behaviour; it is simply a page of its own now, reached from the chat's head and its sidebar.
+     */
+    r.get('/chat/settings', async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req)) return res.redirect(303, loginTo(req));
+        const requester = requesterOf(req);
+        const chats = await chatsFor(requester);
+        const current = sharing ? await sharing.defaultOf(requester).catch(() => 'private') : 'private';
+        const saved = req.query.saved === '1';
+        const body = html`<div class="ct-settings">
+<h1>Settings</h1>
+<p class="ct-settings-lede">How your runs start and what they run on. Every run's own Share button still changes just that run.</p>
+${saved ? html`<p class="cm-ok" role="status">Saved. Your next run starts as ${AUDIENCE_TEXT[current] || 'Only me'}.</p>` : ''}
+<section class="ct-settings-card" aria-labelledby="ct-set-runs"><h2 id="ct-set-runs">Your runs</h2>
+<p>Who can see the runs you start from now on. "Apply to all my existing runs" moves the ones you already have.</p>
+${raw(await defaultsHtml(requester, { from: 'settings' }))}
+<p class="ct-settings-foot"><a href="/me/spend">What you have spent</a> · <a href="/tasks">Your tasks</a></p></section>
+<section class="ct-settings-card" aria-labelledby="ct-set-model"><h2 id="ct-set-model">The model your tasks run on</h2>
+<p>OpenVibe's own keys, your own key for a provider, or a model you run on your own computer. The model and where it runs are one page.</p>
+<p><a class="sc-btn" href="/chat/model">Open the model settings</a></p></section>
+</div>`;
+        return send(res, 200, {
+            viewer: req.viewer, config, path: req.originalUrl, title: 'Settings', app: true, noReferrer: true,
+            css: ['css/chat.css'], scripts: [], styles: ['kit.css', 'thread.css'],
+            body: raw(thread.page({
+                sidebar: String(sidebar(chats, null, { settings: true })),
+                head: thread.head({ title: 'Settings', newHref: '/chat' }),
+                main: String(body),
+                label: 'Settings',
+            })),
+        });
+    });
+
+    // The "Now" strip, refreshed in place by js/chat.js while a turn is open. Its owner only; empty when nothing runs.
+    r.get('/chat/now', async (req, res) => {
+        res.set('Cache-Control', 'private, no-store');
+        if (!signedIn(req)) return res.status(401).type('text/html').send('');
+        return res.type('text/html').send(String(nowStrip(await liveFor(requesterOf(req)))));
     });
 
     r.get('/chat/model', async (req, res) => {
@@ -762,6 +869,20 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
             return render(req, res, { status: 404, problem: 'That chat is not here: it may have expired (tasks are kept 30 days) or belong to someone else.' });
         }
         return render(req, res, { row });
+    });
+
+    // Stop a running turn from its card in the conversation (or the Now strip), and come back to the chat. The task
+    // page keeps its own /tasks/:id/cancel; this is the same cancel with the chat as where you were.
+    r.post('/chat/:id/cancel', async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        const wantsJson = String(req.get('accept') || '').includes('application/json');
+        if (!signedIn(req) || !TASK_ID.test(req.params.id)) return wantsJson ? res.status(401).json({ error: 'Sign in first.' }) : res.redirect(303, '/auth/login?next=%2Fchat');
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('A cancel must come from openvibe.actor itself.');
+        const row = await store.getTask(s, req.params.id);
+        if (!row || row.requester !== requesterOf(req)) return wantsJson ? res.status(404).json({ error: 'That chat is not here.' }) : res.redirect(303, '/chat');
+        if (OPEN.includes(row.state)) await engine.cancel(row.id, requesterOf(req));
+        if (wantsJson) return res.json({ ok: true });
+        return res.redirect(303, `/chat/${row.id}`);
     });
 
     // Words for the turn that is working (the composer while Actor works): the run hears them at its next step.

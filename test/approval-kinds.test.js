@@ -314,10 +314,16 @@ const SAMPLE = {
             assert.strictEqual(decision.ask, true, 'the floor asks whatever the rules say');
         });
 
-        await check('the decision is in the person\'s feed too', async () => {
-            const feed = await t.get('/console', { as: ada });
-            assert.strictEqual(feed.status, 200);
-            assert.match(feed.text, /You approved/, 'the person sees what they approved');
+        await check('the decision is on the person\'s approvals page too (the Console is folded into the chat)', async () => {
+            const rows = await approvals.list(t.ctx.s, owner);
+            const approved = rows.find((r) => r.state === 'approved');
+            assert.ok(approved, 'an approved request is kept for the person to read');
+            const card = await t.get(`/me/approvals/${approved.id}`, { as: ada });
+            assert.strictEqual(card.status, 200);
+            assert.match(card.text, /You approved/, 'the person sees what they approved');
+            const inbox = await t.get('/me/approvals', { as: ada });
+            assert.strictEqual(inbox.status, 200);
+            assert.match(inbox.text, /Approved/);
         });
     } finally {
         await t.close();

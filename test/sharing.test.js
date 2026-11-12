@@ -101,8 +101,9 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const next = await say('And the second cheapest?');
             const nextId = /^\/chat\/(tsk_[0-9A-Z]{26})/.exec(next.headers.get('location'))[1];
             assert.deepStrictEqual(await audienceRow(nextId), { audience: 'public' });
-            const start = await t.get('/chat', { as: kim });
-            assert.ok(start.text.includes('New runs'), 'the default is on the product page');
+            const settings = await t.get('/chat/settings', { as: kim });
+            assert.ok(settings.text.includes('New runs'), 'the default is in Settings now');
+            assert.ok(!(await t.get('/chat', { as: kim })).text.includes('New runs'), 'not under the composer');
         });
     } finally {
         await t.close();

@@ -16,7 +16,7 @@ docker compose -f docker-compose.selfhost.yml exec ollama ollama pull qwen2.5:7b
 ```
 
 Open http://localhost:4950/auth/login and sign in with the password `selfhost:init` printed. It is shown only once.
-Then give Actor a task on `/console`, or call the API with your token:
+Then give Actor a task on `/chat`, or call the API with your token:
 
 ```sh
 curl -s http://localhost:4950/api/v1/tasks -H "Authorization: Bearer $ACTOR_OWNER_TOKEN" \
