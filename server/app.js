@@ -103,9 +103,12 @@ async function createApp(opts = {}) {
     const sso = config.selfHosted.on ? createLocalSignIn({ config, now: s.now }) : createSso({ config, keys, fetchImpl, now: s.now, log });
     const stream = createTaskStream({ log });
     const providerFetch = opts.providerFetch || globalThis.fetch;
+    // One AI meter for the process (ai-metrics.md): Actor's own model calls are sent to AI's usage route; it is off
+    // in a drill and in tests, and without a Network client secret. It never fails or blocks a model call.
+    const aiMeter = opts.aiMeter !== undefined ? opts.aiMeter : require('./runtime/ai-meter').createAiMeter({ config, fetchImpl: providerFetch, log });
     // Actor v2: one model layer (tiers), one tool registry (every module in runtime/tools) and one loop. The tools
     // are validated strictly in tests, leniently in production; the model lists are read once at boot.
-    const models = opts.models || createModels({ config, rates: catalog.RATES, fetchImpl: providerFetch, log });
+    const models = opts.models || createModels({ config, rates: catalog.RATES, fetchImpl: providerFetch, log, meter: aiMeter });
     const registry = opts.registry || createRegistry({ log, strict: config.nodeEnv === 'test', fetchImpl: providerFetch });
     await models.warm().catch((err) => log.warn('[Actor] model listing failed:', err && err.message));
     // Live per-tool/per-model numbers (stage V2-10), one aggregate over actor_spans cached for 5 minutes: the brain's
@@ -168,7 +171,7 @@ async function createApp(opts = {}) {
     const live = opts.live || createLive({ config, fetchImpl });
     // An agent answers the mail sent to its own address (track HO6): the consumer below takes the event, the engine
     // reports each run's end back here, and the approvals decide() asks it to send an approved draft.
-    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, live, triggers, skillRun, media, tips };
+    const ctx = { config, s, keys, aiCatalogConfig, sso, stream, adapters, engine, webhooks, principal, projects, log, chatAsks, vibeDelivery, models, aiMeter, registry, loop, notifier, stats, checkpoints, connectors, waits, sharing, computers, live, triggers, skillRun, media, tips };
     const fabricMail = require('./mail/client').createMailClient({ config, fetchImpl: opts.mailFetch || fetchImpl, tokens: opts.mailTokens || null });
     ctx.fabric = require('./fabric/service').createFabric({ s, enabled: !!config.fabric?.enabled, readMail: async (args) => {
         const out = await fabricMail.getMessage(args);

@@ -37,6 +37,10 @@ const { createClient: createSdkClient } = require('openvibe-sdk/core');
 const { createAiClient } = require('openvibe-sdk/ai');
 const { createServiceTokenClient } = require('openvibe-sdk/auth');
 const { chatClient, priceUsage, readStream, ProviderError } = require('../agents/providers');
+
+// openvibe-sdk/ai-meter (0.164.0+) is required when the process has a meter, so a build without it still boots.
+let meterLib = null;
+const meterLibOf = () => (meterLib || (meterLib = require('openvibe-sdk/ai-meter')));
 const aiCatalogLib = require('./ai-catalog');
 
 class ModelError extends Error {
@@ -85,7 +89,7 @@ function parsePin(value) {
 const trimSlash = (s) => String(s || '').replace(/\/+$/, '');
 const clip = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n - 1)}…` : String(s || ''));
 
-function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = console, now = () => Date.now() } = {}) {
+function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = console, now = () => Date.now(), meter = null } = {}) {
     const cfg = config.models || { tiers: {}, providerOrder: [], listTimeoutMs: 5000 };
     const p = config.providers || {};
     const ai = config.ai || {};
@@ -283,6 +287,110 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     // the loop's own, the plan's, the check's — reads it, and no other run's does.
     const choiceStore = new AsyncLocalStorage();
     let aiTokens = null;
+
+    // ── The AI meter (ai-metrics.md) ──────────────────────────────────────────────────────────────
+    // The task a model call belongs to rides in an async store set by the task's engine: the id, the task's wall
+    // clock and the call number. A call outside a task (a title, a page) is not metered; a call inside one always
+    // is, and nothing here may delay or fail it. The client itself lives in server/runtime/ai-meter.js.
+    const meterStore = new AsyncLocalStorage();
+
+    /** Run the rest of the work as one task's model calls (the engine wraps a task in this). */
+    function withMetering(meta, fn) {
+        return meterStore.run({ ...(meta || {}) }, fn);
+    }
+
+    function currentMetering() {
+        return meterStore.getStore() || null;
+    }
+
+    /** Start one call's record; null (never a throw) when there is no meter, no task or a bad shape. */
+    function startMetered({ provider, model, place, streamed }) {
+        if (!meter) return null;
+        const m = currentMetering();
+        if (!m || !m.taskId) return null;
+        try {
+            m.seq = (Number(m.seq) || 0) + 1;
+            return meterLibOf().startCall({
+                system: 'actor',
+                turn_id: `${m.taskId}:${m.seq}`,
+                provider: String(provider || 'unknown').slice(0, 120),
+                model: String(model || 'unknown').slice(0, 200),
+                operation: 'chat',
+                task: m.task || 'actor.task',
+                task_id: m.taskId,
+                harness: 'openvibe',
+                place: place === 'machine' ? 'machine' : 'provider',
+                streamed: streamed === true,
+                now,
+            });
+        } catch (err) {
+            if (log && log.warn) log.warn('[Actor] AI meter call not started:', (err && err.message) || err);
+            return null;
+        }
+    }
+
+    /** The caller's onDelta, with the first piece of the answer marked on the call (TTFT). */
+    function watchFirstToken(call, onDelta) {
+        if (!call || typeof onDelta !== 'function') return onDelta;
+        let first = false;
+        return (text) => {
+            if (!first) {
+                first = true;
+                try { call.firstToken(); } catch { /* a meter never drops a token */ }
+            }
+            return onDelta(text);
+        };
+    }
+
+    /** The usage Actor keeps ({ input total, cached, output }) as the meter's uncached-input shape. */
+    function meterUsage(usage) {
+        const u = usage || {};
+        const input = Math.max(0, Number(u.input) || 0);
+        const cached = Math.max(0, Number(u.cached) || 0);
+        return {
+            input: Math.max(0, input - cached),
+            output: Math.max(0, Number(u.output) || 0),
+            reasoning: Math.max(0, Number(u.reasoning) || 0),
+            cache_read: cached,
+            cache_write: Math.max(0, Number(u.cache_write) || 0),
+        };
+    }
+
+    /** End and record a succeeded call: its tools, its tokens, and on the task's last step its whole wall time. */
+    function endMetered(call, { usage, toolCalls, taskEnd = false } = {}) {
+        if (!call) return;
+        try {
+            const calls = Array.isArray(toolCalls) ? toolCalls.length : 0;
+            for (let i = 0; i < calls; i++) call.tool();
+            const m = currentMetering();
+            const taskMs = taskEnd && calls === 0 && m && m.startedAt ? Math.max(0, now() - m.startedAt) : null;
+            const record = call.end({
+                usage: meterUsage(usage),
+                outcome: 'succeeded',
+                fallbacks: 0,
+                ...(taskMs != null ? { task_ms: taskMs } : {}),
+            });
+            meter.record(record);
+        } catch (err) {
+            if (log && log.warn) log.warn('[Actor] AI meter record not written:', (err && err.message) || err);
+        }
+    }
+
+    /** End and record a failed or cancelled call, with its class and never a message. */
+    function failMetered(call, err, signal) {
+        if (!call) return;
+        try {
+            const cancelled = Boolean((signal && signal.aborted) || (err && err.code === 'actor.task.cancelled'));
+            const record = call.end({
+                usage: null,
+                outcome: cancelled ? 'cancelled' : 'failed',
+                error_class: String((err && err.code) || 'actor.model.failed').slice(0, 60),
+            });
+            meter.record(record);
+        } catch (e) {
+            if (log && log.warn) log.warn('[Actor] AI meter record not written:', (e && e.message) || e);
+        }
+    }
 
     /** Actor's service token for OpenVibe.AI (audience openvibe.ai). Never a provider key. */
     function aiTokenClient() {
@@ -629,7 +737,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     /** One model call. The caller checks the budget first and meters cost_usd after; this layer only prices it. */
-    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null, latency = null, subject = null, policy = null } = {}) {
+    async function chat({ tier = 'smart', messages = null, tools = null, json = false, maxTokens = 4000, signal, avoidFamily = null, provider = null, model = null, onDelta = null, latency = null, subject = null, policy = null, taskEnd = false } = {}) {
         // The person's own key (plan L55 C3): every model call of this run goes to OpenVibe.AI with it. That path has
         // no latency class: the classes live on AI's router.
         const choice = currentChoice();
@@ -637,15 +745,32 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         // that tier. A caller may also name it directly.
         const policyOf = policy || (choice && choice.policy) || null;
         if (choice && choice.provider) {
-            const r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta, policy: policyOf });
+            const call = startMetered({ provider: AI_PROVIDER, model: choice.model || 'openvibe', place: choice.provider === 'link' ? 'machine' : 'provider', streamed: Boolean(onDelta) });
+            let r;
+            try {
+                r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta: watchFirstToken(call, onDelta), policy: policyOf });
+            } catch (err) {
+                failMetered(call, err, signal);
+                throw err;
+            }
+            endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER, latency_class: null };
         }
         // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
         if (routerOn() || (choice && choice.model && !choice.provider)) {
             const args = { tier, messages, tools, json, maxTokens, signal, onDelta, subject: subject || (choice && choice.subject), target: choice && choice.target, latency, policy: policyOf };
-            const r = routerOn() && ai.exchangeRouter && !args.target && !args.latency
-                ? await chatViaExchange(args)
-                : await chatViaRouter(args);
+            const call = startMetered({ provider: AI_PROVIDER, model: (choice && choice.model) || routerModel(tier), place: 'provider', streamed: Boolean(onDelta) });
+            args.onDelta = watchFirstToken(call, onDelta);
+            let r;
+            try {
+                r = routerOn() && ai.exchangeRouter && !args.target && !args.latency
+                    ? await chatViaExchange(args)
+                    : await chatViaRouter(args);
+            } catch (err) {
+                failMetered(call, err, signal);
+                throw err;
+            }
+            endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }
         await warm();
@@ -662,7 +787,15 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         // The check is a short structured call, so its thinking is off; the loop keeps it on.
         const extraBody = d.provider === 'deepseek' && tier === 'check' ? { thinking: { type: 'disabled' } } : null;
         const client = chatClient({ baseUrl: endpoints[d.provider].baseUrl, apiKey: endpoints[d.provider].apiKey, model: d.model, rates: d.rates, fetchImpl, timeoutMs: 180_000, extraBody });
-        const r = await client({ messages, tools, json, maxTokens, signal, onDelta });
+        const call = startMetered({ provider: d.provider, model: d.model, place: 'provider', streamed: Boolean(onDelta) });
+        let r;
+        try {
+            r = await client({ messages, tools, json, maxTokens, signal, onDelta: watchFirstToken(call, onDelta) });
+        } catch (err) {
+            failMetered(call, err, signal);
+            throw err;
+        }
+        endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
         return { ...r, cost_usd: r.cost_usd || priceUsage(d.rates, r.usage || {}), tier, provider: d.provider, family: d.family };
     }
 
@@ -710,6 +843,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
 
     return {
         warm, chat, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog, latencyClass,
+        withMetering, currentMetering,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },
         listErrors: () => ({ ...listErrors }),

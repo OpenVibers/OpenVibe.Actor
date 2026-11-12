@@ -586,8 +586,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 const wakePayload = wakes.get(id) || (dayRun ? await day.wakePayload(id) : null);
                 if (wakePayload) wakes.delete(id);
                 let out = null;
+                // The AI meter (ai-metrics.md): every model call of this task carries its id and wall clock, wherever
+                // the call is made — the run, its plan, its check, its revision. A product without a model layer or
+                // a process without a meter simply runs the call.
+                const aiMetering = { taskId: id, task: 'actor.task', startedAt: now(), seq: 0 };
+                const metered = (fn) => (typeof models.withMetering === 'function' ? models.withMetering(aiMetering, fn) : fn());
                 // The files attached to this message in the chat (plan L55 C2): text as data; images described first.
-                const attachments = await inputs.forRun(s, id, { models, meter, signal, log }).catch((err) => { log.warn('[Actor] attachments:', err && err.message); return []; });
+                const attachments = await metered(() => inputs.forRun(s, id, { models, meter, signal, log }).catch((err) => { log.warn('[Actor] attachments:', (err && err.message) || err); return []; }));
                 // The person's own model choice for this run (plan L55 C3): their own key, through OpenVibe.AI.
                 // Every model call of the run — the loop's, the plan's, the check's — reads it, and no other run's does.
                 let choice = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
@@ -616,7 +621,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     // tick starts no turn by itself, so the next run is told which item changed.
                     const context = row.parent_id && row.fork_of_step == null && !resume ? await store.followContext(s, row) : [];
                     if (!resume && !fork) context.push(...await canvases.takeNoticesForTask(s, row));
-                    out = await withChoice(models, choice, async () => loop.run({
+                    out = await metered(() => withChoice(models, choice, async () => loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
                         // A fork carries its parent's state in the checkpoint, not as a follow-up conversation.
                         context,
@@ -636,7 +641,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         latency: await latencyClass(id),
                         // A product conversation turn (one-engine slice): the tools this run may call.
                         allowedTools: unifiedCode && !turnAllowed ? ['codes_task'] : turnAllowed,
-                    }));
+                    })));
                     // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
                     // ('running' is the closest state there is today), its wall clock waits with it, and its
                     // budget clock stops because no model runs while it waits. The desk is closed with the run.
@@ -677,11 +682,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 }
                 try {
                     await setState(id, 'verifying', { agentForEvent: agentId });
-                    const verify = async (current) => withChoice(models, choice, () => checkClaims({
+                    const verify = async (current) => metered(() => withChoice(models, choice, () => checkClaims({
                         task: row.task, answer: current.text, evidence: current.evidence, models,
                         writerFamily: current.family || null, signal, now: () => now(),
                         trace: current.state && current.state.ctx && current.state.ctx.trace,
-                    }));
+                    })));
                     let verdict = await verify(out);
                     await meter(verdict.cost_usd);
                     const showCheck = (v) => emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${v.ok ? 'Checked' : 'Check failed'}${v.by ? ` by ${v.by}${v.cross ? '' : ' (same family)'}` : ''}: ${v.reason || ''}`.slice(0, 2000), is_error: !v.ok });
@@ -707,9 +712,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         let revised = null;
                         if (!escalated) {
                             escalated = true;
-                            revised = await loop.escalate(out, verdict.unsupported);
+                            revised = await metered(() => loop.escalate(out, verdict.unsupported));
                         }
-                        if (!revised || revised === out || !revised.text || revised.text === out.text) revised = await loop.revise(out, verdict.unsupported);
+                        if (!revised || revised === out || !revised.text || revised.text === out.text) revised = await metered(() => loop.revise(out, verdict.unsupported));
                         if (!revised || revised === out || !revised.text || revised.text === out.text) break;
                         out = revised;
                         verdict = await verify(out);
@@ -724,7 +729,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         for (const c of verdict.contested.slice(0, 2)) {
                             if (budgetLeft() <= 0) break;
                             try {
-                                const j = await withChoice(models, choice, () => adjudicate({ claim: c, evidence: out.evidence, task: row.task, models, writerFamily: out.family || null, signal, now: () => now(), trace: out.state && out.state.ctx && out.state.ctx.trace }));
+                                const j = await metered(() => withChoice(models, choice, () => adjudicate({ claim: c, evidence: out.evidence, task: row.task, models, writerFamily: out.family || null, signal, now: () => now(), trace: out.state && out.state.ctx && out.state.ctx.trace })));
                                 if (j) { await meter(j.cost_usd); if (!j.failed) contested.push({ claim: j.claim, sides: j.sides, pick: j.pick, reason: j.reason, by: j.by }); }
                             } catch (err) {
                                 if (signal && signal.aborted) throw err;
@@ -740,14 +745,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         if (Array.isArray(verdict.claims) && verdict.claims.length) {
                             const outward = !!(out.state && out.state.brain && out.state.brain.understanding && out.state.brain.understanding.outward);
                             try {
-                                review = await withChoice(models, choice, () => confidence.review({
+                                review = await metered(() => withChoice(models, choice, () => confidence.review({
                                     claims: verdict.claims, evidence: out.evidence, task: row.task, mode: row.mode, models,
                                     outward, signal, trace: out.state && out.state.ctx && out.state.ctx.trace,
                                     budgetLeft, writerFamily: out.family || null, now: () => now(),
                                     search: async (query) => (registry
                                         ? registry.run('search_web', { query }, { config, log, signal, requester: row.requester, now })
                                         : { text: 'no search is configured', isError: true }),
-                                }));
+                                })));
                                 await meter(review.cost_usd);
                                 if (review.challenged) await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `Challenged ${review.challenged} high-stakes claim${review.challenged === 1 ? '' : 's'} with a counter-evidence search; ${review.unsure} could not be confirmed.`.slice(0, 2000) });
                             } catch (err) {
