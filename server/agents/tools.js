@@ -413,7 +413,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
 }
 
 const ROBOT_DEFS = [
-    { type: 'function', function: { name: 'list_my_robots', description: 'List the robots the person owns on OpenVibe.Bot. For each robot they opened to their agent: whether it is online, the e-stop, battery, sensor readings and the step lines it accepts. A robot not opened to the agent says how the person can open it.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'list_my_robots', description: 'List the robots the person owns on OpenVibe.Bot. For each robot they opened to their agent: whether it is online, battery, sensor readings and the step lines it accepts. A robot not opened to the agent says how the person can open it.', parameters: { type: 'object', properties: {} } } },
     { type: 'function', function: { name: 'robot_steps', description: 'Make one of the person\'s robots act, by step lines it accepts (from list_my_robots), for example ["forward 1", "left 0.5", "say Hello", "headlights #00ff00", "wait 1", "stop"]. At most 20 steps and 30 seconds per call. Answers "done" or "stopped: <why>" once they end.', parameters: { type: 'object', properties: { robot: { type: 'string', description: 'the robot id (rob_…)' }, steps: { type: 'array', items: { type: 'string' } } }, required: ['robot', 'steps'] } } },
 ];
 

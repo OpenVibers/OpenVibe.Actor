@@ -1,5 +1,10 @@
 # Changelog
 
+
+## Unreleased — Stop, not E-STOP
+
+- The robot tools and page copy say Stop; `list_my_robots` no longer reads a latch field.
+
 What changed in OpenVibe.Actor, newest first. Each site also publishes its patch notes at /updates.
 
 ## Unreleased — the same run shape as Codes and Run (`agents.run@1`, `agents.step@1`)

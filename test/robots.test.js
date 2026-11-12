@@ -26,7 +26,7 @@ function fakeBot() {
         calls.push({ method: init.method || 'GET', path: u.pathname + u.search, subject: headers['X-OV-Subject'], auth: headers.Authorization, body: init.body ? JSON.parse(init.body) : null });
         if (u.host === 'tools.test') return reply(200, { tools: [] });
         if (u.pathname === '/api/v1/robots') return reply(200, { robots: [{ id: OPEN, name: 'Desk rover', profile_id: 'sim.rover', agent_control: true }, { id: CLOSED, name: 'Cozmo', profile_id: 'cozmo', agent_control: false }] });
-        if (u.pathname === `/api/v1/robots/${OPEN}/steps` && (init.method || 'GET') === 'GET') return reply(200, { robot_id: OPEN, online: true, estop: { latched: false }, battery: 0.8, sensors: { distance_cm: 42 }, steps: ['forward 2', 'stop'], max_steps: 20, max_seconds: 30 });
+        if (u.pathname === `/api/v1/robots/${OPEN}/steps` && (init.method || 'GET') === 'GET') return reply(200, { robot_id: OPEN, online: true, battery: 0.8, sensors: { distance_cm: 42 }, steps: ['forward 2', 'stop'], max_steps: 20, max_seconds: 30 });
         if (u.pathname === `/api/v1/robots/${OPEN}/steps`) return reply(200, { robot_id: OPEN, result: 'done', steps: 2 });
         if (u.pathname === `/api/v1/robots/${CLOSED}/steps`) return reply(403, { code: 'bot.agent_not_allowed', detail: 'the owner has not let their agent drive this robot' });
         return reply(404, { code: 'not_found' });

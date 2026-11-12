@@ -5,10 +5,10 @@
  * owner's grant, always through Bot). Actor calls Bot's public API with its own service token (audience openvibe.bot,
  * bot.robot.read + bot.robot.control) and X-OV-Subject naming the person the task is for. Bot answers only for the
  * robot's owner, and only where that owner turned on "Let my OpenVibe.Actor agent drive this robot"; its gate, limits,
- * cooldowns and e-stop judge every step, and its audit records each one as svc:actor.
+ * cooldowns judge every step, and its audit records each one as svc:actor.
  *
  *   createRobots({ config, fetchImpl, tokens? }) → { enabled, mine(subject), steps(subject, robotId, lines) }
- *     mine     → [{ id, name, model, agent_control, online?, estop?, battery?, sensors?, steps?[], panel }]
+ *     mine     → [{ id, name, model, agent_control, online?, battery?, sensors?, steps?[], panel }]
  *     steps    → { result: 'done' | 'stopped: …', steps } or { error }
  *
  * Off (enabled false) without ACTOR_BOT_URL or without Actor's client secret.
@@ -50,7 +50,7 @@ function createRobots({ config, fetchImpl = globalThis.fetch, tokens: tokensOver
                 item.note = `Not open to the agent. The owner can turn on "Let my OpenVibe.Actor agent drive this robot" at ${pages}/panel/${robot.id}#agent`;
             } else {
                 const s = await call('GET', `/robots/${robot.id}/steps`, subject, { signal });
-                if (s.ok && s.data) Object.assign(item, { online: s.data.online, estop: s.data.estop, battery: s.data.battery, sensors: s.data.sensors, steps: s.data.steps, max_steps: s.data.max_steps, max_seconds: s.data.max_seconds });
+                if (s.ok && s.data) Object.assign(item, { online: s.data.online, battery: s.data.battery, sensors: s.data.sensors, steps: s.data.steps, max_steps: s.data.max_steps, max_seconds: s.data.max_seconds });
                 else item.note = problem(s, 'the robot').error;
             }
             out.push(item);
