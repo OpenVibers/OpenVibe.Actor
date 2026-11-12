@@ -20,7 +20,9 @@ const INDEX_ROUTES = ['GET /api/v1/resources', 'GET /api/v1/resources/:ovrn'];
 // answer names and aggregate numbers only (never a person or a task), so they need no grant; a later release may add
 // actor.stats.read.
 const ROUTE_EXTENSIONS = new Map([
+    ['GET /api/v1/runs', 'actor.task.list'],
     ['GET /api/v1/runs/:id', 'actor.task.read'],
+    ['GET /api/v1/runs/:id/steps', 'actor.task.read'],
     ['GET /api/v1/runs/:id/events', 'actor.task.read'],
     ['GET /api/v1/tasks/:id/trace', 'actor.task.read'],
     ['GET /api/v1/stats/tools', null],
@@ -72,6 +74,7 @@ const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'ap
 const A2A_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'a2a-pages.js'), 'utf8');
 const INDEX_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-index.js'), 'utf8');
 const CONTROL_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'registry', 'resource-control.js'), 'utf8');
+const RUNS_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'runs-api.js'), 'utf8');
 
 /** `METHOD /api/v1/path` for every API and resource index route, with its capability guard (null: public). */
 function codeRoutes() {
@@ -82,6 +85,12 @@ function codeRoutes() {
             const read = m[3].match(/limits\.reads\('([a-z0-9._]+)'\)/);
             out.set(`${m[1].toUpperCase()} ${prefix}${m[2] === '/' ? '' : m[2]}`, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });
         }
+    }
+    // The runs router is mounted at /api/v1/runs (the one agent system's read-only shape).
+    for (const m of RUNS_SRC.matchAll(/^\s*r\.(get|post|put|patch|delete)\('([^']+)'(.*)$/gm)) {
+        const guard = m[3].match(/requireCapability\('([a-z0-9._]+)'\)/);
+        const read = m[3].match(/limits\.reads\('([a-z0-9._]+)'\)/);
+        out.set(`${m[1].toUpperCase()} /api/v1/runs${m[2] === '/' ? '' : m[2]}`, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });
     }
     return out;
 }

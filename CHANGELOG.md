@@ -2,6 +2,21 @@
 
 What changed in OpenVibe.Actor, newest first. Each site also publishes its patch notes at /updates.
 
+## Unreleased — the same run shape as Codes and Run (`agents.run@1`, `agents.step@1`)
+
+- **`GET /api/v1/runs`** lists the person's own runs newest first (`limit`, `before`, `status`, `agent`) in the one
+  agent system's `agents.run@1` shape: owner, agent and product, parent run, budget, status, timestamps, result
+  summary and cost. A task is the run; nothing new is stored.
+- **`GET /api/v1/runs/:id/steps?after=`** reads the task's own event log as `agents.step@1`, one entry per output
+  event, with the task event's seq as the cursor. `GET /api/v1/runs/:id` answers the same run shape when the reader
+  asks for it with `Accept: application/vnd.openvibe.agents.run+json` (what `openvibe-sdk/agents` sends) or
+  `?shape=agents.run@1`; the existing `agent.run@1` snapshot stays the default for its callers.
+- Read-only and behind the existing `actor.task.read`/`actor.task.list`: only the person's own Network token or
+  session, and another person's run is the same 404 as one that does not exist. Actor's tables are unchanged.
+- The field map and what does not fit (per-step cost, Actor's `needs_you`, a tool call and its result as two log
+  entries) are in OpenVibe.Contracts `docs/agents-runs.md`; the routes are in [docs/agent-runs.md](docs/agent-runs.md).
+  Tests: `test/runs-api.test.js`.
+
 ## Unreleased — See it work (W1): the desk, the viewer and the replay
 
 - **The desk tile** in a running task's card: the desk's private Live stream (started with the task's desk through Link's
