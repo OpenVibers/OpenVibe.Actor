@@ -14,7 +14,8 @@ What changed in OpenVibe.Actor, newest first. Each site also publishes its patch
   optional note that reaches the run as the person's message. A `hand_to_person` step is an Ask that opens the viewer
   in control.
 - **Replay**: every computer step keeps its still and its action. A finished task's card has a timeline to scrub, and
-  each step opens the picture it saw. Typed text is never stored in a replay; a click keeps only its x,y.
+  each step opens the picture it saw. Typed text is redacted before it reaches the task's events, so neither the replay
+  nor the task log carries it; a click keeps only its x,y.
 - Migration 0070 (task stills); `GET /api/v1/tasks/:id/desks`, `/desk-still`, `/replay`, the desk take-over/hand-back
   and the person's input. Tests: `test/see-it-work.test.js`; screenshots: `test/see-it-work-shots.js`.
 

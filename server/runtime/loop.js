@@ -171,6 +171,16 @@ function planText(plan, brain = null) {
 
 const clip = (s, n) => (String(s == null ? '' : s).length > n ? `${String(s).slice(0, n - 1)}…` : String(s == null ? '' : s));
 
+/** The args an event may carry: credentials stripped, and what a person or agent typed never stored verbatim. */
+function eventArgs(name, args) {
+    const safe = stripSecrets(args);
+    if (safe && typeof safe === 'object' && !Array.isArray(safe)) {
+        if (name === 'computer_input' && safe.action === 'type') safe.text = '[redacted: typed on the desk]';
+        if (name === 'computer_browser' && safe.action === 'fill') safe.text = '[redacted: typed on the desk]';
+    }
+    return safe;
+}
+
 function summarize(args) {
     const a = args || {};
     const v = a.query || a.need || a.goal || a.url || a.instruction || (a.tool ? `${a.tool} ${JSON.stringify(a.input || {})}` : a.robot ? `${a.robot}: ${[].concat(a.steps || []).join(', ')}`
@@ -410,7 +420,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         let i = 0;
         for (const p of planned) {
             if (p.skipped) {
-                await ctx.emit({ step: 'tool_call', tool: p.name, call_id: p.call.id, args: stripSecrets(p.args), input: summarize(p.args) });
+                const skippedArgs = eventArgs(p.name, p.args);
+                await ctx.emit({ step: 'tool_call', tool: p.name, call_id: p.call.id, args: skippedArgs, input: summarize(skippedArgs) });
                 state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ error: p.skipped, tool: p.name }) });
                 await ctx.emit({ step: 'tool_result', tool: p.name, text: p.skipped, is_error: true });
                 errorResults += 1;
@@ -420,7 +431,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // A tool that parks the run (plan A2): the wait is written and the loop stops here.
             // No model runs until the event or the deadline; the run's place is its checkpoint.
             if (out && out.park) state.parked = out.park;
-            await ctx.emit({ step: 'tool_call', tool: p.name, call_id: p.call.id, args: stripSecrets(p.args), input: summarize(p.args) });
+            const calledArgs = eventArgs(p.name, p.args);
+            await ctx.emit({ step: 'tool_call', tool: p.name, call_id: p.call.id, args: calledArgs, input: summarize(calledArgs) });
             if (out && out.delegate) {
                 // A sub-agent's report: its answer and the evidence ids it brought into this run's ledger. The report
                 // itself is not evidence (it is a model's words), so the parent cites the ids, never the report.
@@ -839,7 +851,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const name = (call.function && call.function.name) || 'tool';
             let args = {};
             try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { args = {}; }
-            await ctx.emit({ step: 'tool_call', tool: name, input: summarize(args) });
+            await ctx.emit({ step: 'tool_call', tool: name, input: summarize(eventArgs(name, args)) });
             const choice = choices.get(id);
             const redacted = /\[redacted|\[not stored/.test(JSON.stringify(args));
             const startedAt = now();
