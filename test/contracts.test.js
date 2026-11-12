@@ -184,7 +184,11 @@ function codeRoutes() {
     });
 
     await check('events: the manifest registers the network agent namespace (agent.step.*: one producer for the family) and consumes the account events, chat messages and the steps of the agent itself', () => {
-        assert.deepStrictEqual([...manifest.eventsProduced].sort(), ['agent.step.ended', 'agent.step.started', 'agent.step.updated']);
+        // The manifest is the released one (OpenVibe.Contracts), so it grows as the one agent system adds events:
+        // Actor publishes the three steps, and the network's agent namespace (agent.*, agents.*) carries the rest.
+        const produced = [...manifest.eventsProduced].sort();
+        for (const topic of ['agent.step.ended', 'agent.step.started', 'agent.step.updated']) assert.ok(produced.includes(topic), topic);
+        for (const topic of produced) assert.match(topic, /^agents?\./, `${topic} is not in the network agent namespace`);
         assert.deepStrictEqual([...manifest.eventsConsumed].sort(), ['agent.step.ended', 'agent.step.started', 'agent.step.updated', 'chat.message.created', 'network.account.deleted', 'network.account.export_requested']);
         for (const id of CAPS) assert.deepStrictEqual(contracts.capabilities.get(id).events, [], id);
     });
