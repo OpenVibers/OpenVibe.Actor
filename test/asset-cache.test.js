@@ -3,7 +3,7 @@
  * The one cache rule Actor serves assets with (openvibe-shared/cache-policy, plan T11): a URL
  * whose ?v= is the asset's current hash is immutable for a year, because those bytes can never
  * change under the same URL; a wrong or missing ?v= may change at any moment, so it gets the
- * short public window with a day of stale-while-revalidate. The values are pinned here against
+ * short public window with five minutes of stale-while-revalidate. The values are pinned here against
  * the module, not re-stated: the site never picks its own numbers.
  */
 const assert = require('assert');
@@ -12,7 +12,7 @@ const { assetVersion } = require('../server/render/layout');
 const { boot, check, done } = require('./helpers/boot');
 
 const ASSET = 'css/actor.css';
-const SHORT = 'public, max-age=300, stale-while-revalidate=86400';
+const SHORT = 'public, max-age=300, stale-while-revalidate=300';
 
 (async () => {
     const t = await boot();
