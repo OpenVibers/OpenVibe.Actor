@@ -187,6 +187,8 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwA
             assert.match(js, /stopStream\(st\)/);
             assert.match(js, /setInterval\(function \(\) \{ show\(img, tile\.getAttribute\('data-still'\)\); \}, 1000\)/);
             assert.match(js, /data-ct-replay-step/);
+            const loop = require('fs').readFileSync(require('path').join(__dirname, '..', 'server', 'runtime', 'loop.js'), 'utf8');
+            assert.match(loop, /computer_input.*type.*\[redacted: typed on the desk\]/, 'typed desk text never reaches an event');
             const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'css', 'chat.css'), 'utf8');
             assert.match(css, /\.ct-desk-frame \{[^}]*aspect-ratio: 16 \/ 9/);
             assert.match(css, /@media \(min-width: 900px\)[\s\S]*\.ct-viewer-side \{/);
