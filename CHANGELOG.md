@@ -1,6 +1,27 @@
 # Changelog
 
 
+## Unreleased — make your own agent (blueprints)
+
+- **Blueprints** (`agents.blueprint@1`, Contracts 0.419.0): a person's agent as one document of ten parts.
+  - `POST /api/v1/blueprints` makes a draft, checked against the schema and `openvibe-sdk/agents/blueprint`'s rules;
+    a blueprint carries no secret.
+  - `PUT …/:id/draft` edits it, and `POST …/:id/publish` freezes it as version N. A published version never
+    changes.
+  - `GET /api/v1/blueprints` lists mine (`?scope=public` lists the gallery), and `GET …/:id?version=N` reads one
+    version.
+  - `POST …/:id/remix` makes a private copy that credits its source, only when the author named a licence.
+- **Installs** (`agents.install@1`):
+  - `GET …/:id/asks` is the install screen in words.
+  - `POST …/:id/install` makes the person's own agent once every ask is agreed and the inputs are filled. Its
+    instructions carry the inputs and the floor in words.
+  - When a version is published, an install set to `same-or-less` takes it if it asks for no more. Any other install
+    keeps it `pending`.
+  - `POST /api/v1/agents/:id/install/update` takes the new version once its new asks are agreed.
+- Migration 0071 adds the blueprint, version and install tables and lets an agent's instructions run to 20,000
+  characters.
+- Pins: openvibe-contracts v0.419.1, openvibe-sdk v0.162.0.
+
 ## Unreleased — Stop, not E-STOP
 
 - The robot tools and page copy say Stop; `list_my_robots` no longer reads a latch field.

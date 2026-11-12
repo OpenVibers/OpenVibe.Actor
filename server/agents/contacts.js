@@ -142,7 +142,9 @@ async function create(s, config, owner, input, extra = null) {
     const invalid = validate(next);
     if (invalid) return { error: invalid };
     const instructions = body.instructions != null ? body.instructions : (base.instructions || `You are ${next.name}, one of this person's agents.`);
-    if (typeof instructions !== 'string' || !instructions.trim() || instructions.length > 4000) return { error: 'instructions must be 1–4000 characters.' };
+    // An agent made from a blueprint keeps its instructions whole (agents.blueprint@1 allows 20,000; migration 0071).
+    const maxInstructions = extra && extra.fromBlueprint ? 20000 : 4000;
+    if (typeof instructions !== 'string' || !instructions.trim() || instructions.length > maxInstructions) return { error: `instructions must be 1–${maxInstructions} characters.` };
     // Vibe comes first even when the first thing a person does is create another contact.
     await ensureVibe(s, config, owner);
     const count = Number(await s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1', [owner]));
