@@ -28,6 +28,7 @@
 const express = require('express');
 const contracts = require('openvibe-contracts');
 const { asyncRouter } = require('./router');
+const runsApi = require('./runs-api');
 const store = require('../tasks/store');
 const tickets = require('../task-view/tickets');
 const catalog = require('../agents/catalog');
@@ -58,6 +59,11 @@ function createApi(ctx) {
     const { config, s, engine, stream, principal, limits, webhooks, triggers } = ctx;
     const r = asyncRouter();
     const problem = (req, res, status, code, detail, extra) => contracts.http.sendProblem(res, status, code, { detail, ctx: req.ov, extra });
+    // The one agent system's run shape (agents.run@1) and the older run card's agent.run@1 share GET /runs/:id:
+    // a reader asks for the new shape with this media type (the SDK's runs.get does) or ?shape=agents.run@1, and
+    // every existing caller keeps the snapshot it knows.
+    const wantsAgentsRun = (req) => String(req.query.shape || req.query.contract || '') === 'agents.run@1'
+        || /application\/vnd\.openvibe\.agents\.run\+json/i.test(String(req.get('accept') || ''));
     // A trigger belongs to the person in the request, and its Watch calls use that person's own token: the
     // Bearer the API was called with, or this site's session token. A service acting for a person is not it.
     const watchToken = (req) => {
@@ -116,6 +122,8 @@ function createApi(ctx) {
     });
     r.use('/me/actor', require('../day/cors').cors(ctx.config));
     r.use(principal.middleware);
+    // GET /runs and /runs/:id/steps: the one agent system's read-only view (agents.run@1, agents.step@1).
+    r.use('/runs', runsApi.createRunsRoutes(ctx));
     r.use('/me/actor', require('../day/routes').router(ctx));
     r.use('/chat-apps', require('../chat-apps/routes').router(ctx));
 
@@ -973,6 +981,12 @@ function createApi(ctx) {
         if (match) req.params.id = match[1];
         const task = await load(req, res);
         if (!task) return;
+        if (wantsAgentsRun(req)) {
+            if (!req.principal || req.principal.kind !== 'user') return problem(req, res, 404, 'agents.run.not_found', 'No such run.');
+            const run = await runsApi.loadRunRow(s, task.id, req.principal.requester);
+            if (!run) return problem(req, res, 404, 'agents.run.not_found', 'No such run.');
+            return res.json(await runsApi.viewOf(s, run, s.now()));
+        }
         const row = await agentRuns.resolve(task, start);
         if (!row) return problem(req, res, 404, 'actor.task.not_found', 'No such run.');
         if (!(config.agentUiSetting ? config.agentUiSetting() : config.agentUi)) return problem(req, res, 404, 'actor.runs_disabled', 'Run streams are disabled.');
