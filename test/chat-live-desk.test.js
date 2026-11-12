@@ -37,10 +37,11 @@ const MACHINE = 'dev_01JZ0000000000000000000000';
             await s.db.query("UPDATE tasks SET state = 'running' WHERE id = $1", [id]);
             await deskEvent(`https://openvibe.link/machines/${MACHINE}/screen?desk=desk-trains`);
             let page = await t.get(`/chat/${id}`, { as: kim });
-            assert.match(page.text, new RegExp(`data-watch="/chat/${id}/watch"`), 'the figure says where to ask');
+            assert.match(page.text, new RegExp(`<figure class="ct-desk-tile" data-ct-desk data-task="${id}" data-desk="link:${MACHINE}:desk-trains"`), 'the desk tile says where the desk is and opens the viewer');
+            assert.match(page.text, /data-ct-desk-open/, 'the tile opens the viewer');
             await deskEvent(`https://openvibe.link/machines/${MACHINE}/screen`);
             page = await t.get(`/chat/${id}`, { as: kim });
-            assert.ok(!page.text.includes('data-watch='), 'the owner\'s own screen is never framed');
+            assert.ok(!page.text.includes('data-ct-desk'), 'the owner\'s own screen is never framed');
             await deskEvent(`https://openvibe.link/machines/${MACHINE}/screen?desk=desk-trains`);
         });
 

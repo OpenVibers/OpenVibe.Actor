@@ -1,7 +1,7 @@
 'use strict';
 
 const { serviceFor, json, personOf } = require('./_openvibe');
-const { prepareDesk, deskKind, placementOrder, AGENT_PROFILE, machineWord } = require('./_person');
+const { prepareDesk, deskKind, placementOrder, AGENT_PROFILE, machineWord, startDeskStream, stopDeskStream } = require('./_person');
 
 /**
  * The Computer this task opened, as platform.task@1 carries it (plan 2026-11-07): the one id every surface reads.
@@ -39,7 +39,8 @@ async function startDesk(a, person, core, ctx) {
     // kept for their agent on that machine, and saves it back when it stops. Never the model's choice.
     delete body.profile;
     if (body.desk !== 'private' && desks && desks.keeps && desks.keeps.has(a.machine)) body.profile = AGENT_PROFILE;
-    return core.pcs.desk(person, body.machine, body, { signal: ctx.signal });
+    const out = await core.pcs.desk(person, body.machine, body, { signal: ctx.signal });
+    return out && !out.error ? { ...out, desk: body.desk || 'private' } : out;
 }
 
 module.exports = {
@@ -78,8 +79,10 @@ module.exports = {
                     out = await startDesk({ ...a, machine: id }, person, core, ctx);
                     if (!(out && out.error && /limit|max_desks|already runs/i.test(out.error))) {
                         if (out && !out.error && desks && !desks.placed) desks.placed = id;
+                        const stream = out && !out.error ? await startDeskStream(desks, person, core, ctx, id, out.desk || a.desk, out) : null;
                         const computer = out && !out.error ? computerOf({ run: desks, machine: id }) : undefined;
-                        return { text: json(out && !out.error ? { machine: id, ...out } : out), data: out, ...(computer ? { computer } : {}) };
+                        const watch = out && !out.error ? core.pcs.watchUrl(id, out.desk || a.desk) : null;
+                        return { text: json(out && !out.error ? { watch, machine: id, ...out, ...(stream ? { stream } : {}) } : out), data: out, ...(computer ? { computer } : {}) };
                     }
                 }
                 // None of the person's own machines has room (or none runs desks): a browser desk on a desk host,
@@ -103,9 +106,11 @@ module.exports = {
         if (a.action === 'start') {
             const out = await startDesk(a, person, core, ctx);
             if (out && !out.error && desks && !desks.placed) desks.placed = a.machine;
+            const stream = out && !out.error ? await startDeskStream(desks, person, core, ctx, a.machine, out.desk || a.desk, out) : null;
             const computer = out && !out.error ? computerOf({ run: desks, machine: a.machine }) : undefined;
-            return { text: json(out && out.running && !(core.pcs.isSession && core.pcs.isSession(a.machine)) ? { watch: core.pcs.watchUrl(a.machine, a.desk), ...out } : out), data: out, ...(computer ? { computer } : {}) };
+            return { text: json(out && out.running && !(core.pcs.isSession && core.pcs.isSession(a.machine)) ? { watch: core.pcs.watchUrl(a.machine, a.desk), ...out, ...(stream ? { stream } : {}) } : out), data: out, ...(computer ? { computer } : {}) };
         }
+        if (a.action === 'stop' && desks) await stopDeskStream(desks, person, core, a.machine, a.desk);
         const out = await core.pcs.desk(person, a.machine, a, { signal: ctx.signal });
         if (desks && out && !out.error) {
             if (a.action === 'stop' && desks.placed === a.machine) desks.placed = null;

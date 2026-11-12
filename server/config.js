@@ -177,6 +177,10 @@ function load(env = process.env) {
             // OpenVibe.Run: a browser session on a desk host when none of the person's own machines has a desk for the
             // task (Desks plan D6). It is also where a skill's code runs (ADR-060). Empty turns it off.
             runUrl: trim(env.ACTOR_RUN_URL != null ? env.ACTOR_RUN_URL : (selfHosted ? '' : 'http://127.0.0.1:4920')),
+            // OpenVibe.Live: an agent desk's private stream and its embed (Agent Streams S1). Empty turns the live
+            // tile off (the still fallback stays). The person's own token mints the view ticket; Actor never stores it.
+            liveUrl: trim(env.ACTOR_LIVE_URL != null ? env.ACTOR_LIVE_URL : 'https://openvibe.live'),
+            livePublicUrl: trim(env.ACTOR_LIVE_PUBLIC_URL != null ? env.ACTOR_LIVE_PUBLIC_URL : 'https://openvibe.live'),
             // OpenVibe.Media: where a sandbox skill's code bytes are stored, private to Actor's tenant (ADR-060).
             // Empty means a sandbox skill cannot be published (a prompt skill is unaffected).
             mediaUrl: trim(env.ACTOR_MEDIA_URL != null ? env.ACTOR_MEDIA_URL : (selfHosted ? '' : 'http://127.0.0.1:4100')),

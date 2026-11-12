@@ -1,7 +1,8 @@
 'use strict';
 
 const { serviceFor, json, personOf } = require('./_openvibe');
-const { handToPerson } = require('./_person');
+const { handToPerson, PERSON_WAIT_MS, PERSON_POLL_MS } = require('./_person');
+const driving = require('../../agents/driving');
 
 const machine = { type: 'string', description: 'the machine id (dev_…) from list_my_computers' };
 
@@ -24,7 +25,21 @@ module.exports = {
         if (ctx.day && core.pcs.isSession && core.pcs.isSession(target)) {
             return ctx.day.ask(ctx.taskId, { kind: 'sign_in', text: input.what, options: ['Sign in on its screen', 'Done'], session_id: target.slice(4) });
         }
-        if (core.pcs.isSession && core.pcs.isSession(target)) return { text: json({ done: false, note: 'Your desk is on a desk host, which the person cannot take over from here: tell them in your answer what is left for them to do, and where.' }), data: null };
+        if (core.pcs.isSession && core.pcs.isSession(target)) {
+            // A Run desk's Ask: the viewer takes the session's lease and says so in Actor's driving marker. Wait for the
+            // person to take over and hand back, then let the agent look again. No note is passed in a tool result.
+            const what = String(input.what || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+            if (ctx.emit) await ctx.emit({ step: 'text', text: `Needs you: ${what}` });
+            const end = Date.now() + PERSON_WAIT_MS;
+            let took = false;
+            const pause = (ms) => new Promise((resolve) => { const timer = setTimeout(resolve, ms); if (ctx.signal) ctx.signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true }); });
+            while (Date.now() < end && !(ctx.signal && ctx.signal.aborted)) {
+                if (driving.is(ctx.taskId)) took = true;
+                else if (took) return { text: json({ done: true, note: 'The person used the desk and handed it back. Look at it again before you go on.', session_id: target.slice(4) }), data: { done: true } };
+                await pause(PERSON_POLL_MS);
+            }
+            return { text: json({ done: false, note: took ? 'The person was still using the desk when the wait ended: tell them what is left.' : 'The person did not take the desk in time: tell them in your answer what is left for them to do.' }), data: { done: false } };
+        }
         const data = await handToPerson(person, input, ctx, core);
         return { text: json(data), data };
     },

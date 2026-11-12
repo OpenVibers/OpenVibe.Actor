@@ -34,6 +34,7 @@ const inputs = require('../tasks/inputs');
 const modelPrefs = require('../runtime/model-prefs');
 const aiCatalog = require('../runtime/ai-catalog');
 const canvases = require('../canvases');
+const replay = require('../tasks/replay');
 
 // The model a person's tasks run on (plan L55 C3; the owner, 11-01: "use your own API keys, or OpenVibe's"). Auto is
 // OpenVibe's own; "own:<provider>" is the person's key, sealed in OpenVibe.AI, which Actor never sees.
@@ -241,6 +242,131 @@ ${from ? html`<input type="hidden" name="from" value="${from}">` : ''}<label for
     }
 
     /**
+     * Where a running task's desk is (See it work, W1): Link's desk on the person's machine or a Run session on a desk
+     * host, read from the task's own tool results. → { where, id, machine, desk, kind, label, still } or null.
+     */
+    function deskContext(events) {
+        const desk = store.deskFrom(events);
+        const computer = store.computerFrom(events);
+        if (computer && computer.session_id) {
+            return { where: 'run', id: `run:${computer.session_id}`, session_id: computer.session_id, machine: null, desk: null,
+                kind: 'browser', label: computer.where === 'yours' ? `${computer.machine || 'Your computer'} · a desk host` : 'OpenVibe computer',
+                still: `/api/v1/tasks/__TASK__/still` };
+        }
+        const place = desk && store.deskPlace(desk.url);
+        // The person's own screen is never framed: an agent's desk is private or desk-<name>.
+        if (!place || place.desk === 'main') return null;
+        return { where: 'link', id: `link:${place.machine}:${place.desk}`, machine: place.machine, desk: place.desk,
+            kind: desk.kind || 'desktop', label: `${(computer && computer.machine) || 'Your PC'} · ${place.desk === 'main' ? 'your screen' : 'its own desk'}`,
+            still: `/api/v1/tasks/__TASK__/desk-still?desk=${encodeURIComponent(place.desk)}` };
+    }
+
+    /** The latest browser address the desk's browser reported (a page address, never model text). */
+    function browserUrlOf(events) {
+        for (let i = events.length - 1; i >= 0; i--) {
+            const e = events[i];
+            if (!e || e.kind !== 'output' || e.step !== 'tool_result' || e.tool !== 'computer_browser' || e.is_error) continue;
+            try { const d = JSON.parse(e.text || '{}'); if (d && typeof d.url === 'string' && /^https?:\/\//.test(d.url)) return d.url.slice(0, 500); } catch { /* not JSON */ }
+        }
+        return null;
+    }
+
+    /** The last click or move, for the ring: x,y in the screen picture's pixels, and that picture's size. */
+    function lastClick(events) {
+        for (let i = events.length - 1; i >= 0; i--) {
+            const e = events[i];
+            if (!e || e.kind !== 'output' || e.step !== 'tool_call' || e.tool !== 'computer_input') continue;
+            const a = e.args && typeof e.args === 'object' ? e.args : {};
+            if (!['click', 'double_click', 'right_click', 'move'].includes(String(a.action))) continue;
+            if (!Number.isFinite(a.x) || !Number.isFinite(a.y)) continue;
+            return { x: Number(a.x), y: Number(a.y), width: Number(a.width) || 1280, height: Number(a.height) || 800 };
+        }
+        return null;
+    }
+
+    /** The latest computer step in plain words, for the tile's one caption. Never the typed text. */
+    function deskCaption(events) {
+        for (let i = events.length - 1; i >= 0; i--) {
+            const e = events[i];
+            if (!e || e.kind !== 'output' || e.step !== 'tool_call') continue;
+            const a = e.args && typeof e.args === 'object' ? e.args : {};
+            if (e.tool === 'computer_input') {
+                if (a.action === 'type') return 'Typing';
+                if (a.action === 'click' || a.action === 'double_click' || a.action === 'right_click') return `Clicking at ${Math.round(Number(a.x) || 0)}, ${Math.round(Number(a.y) || 0)}`;
+                if (a.action === 'scroll') return 'Scrolling';
+                if (a.action === 'key') return 'Pressing a key';
+                if (a.action === 'move') return 'Moving the mouse';
+                return 'Using the computer';
+            }
+            if (e.tool === 'computer_browser') {
+                if (a.action === 'open') return 'Opening a page';
+                if (a.action === 'read') return 'Reading the page';
+                if (a.action === 'click') return 'Clicking on the page';
+                if (a.action === 'fill') return 'Typing in a field';
+                if (a.action === 'press') return 'Pressing a key';
+                if (a.action === 'back') return 'Going back';
+                return 'Using the browser';
+            }
+            if (e.tool === 'computer_screen') return 'Looking at the screen';
+            if (e.tool === 'computer_desk') return a.action === 'start' ? 'Starting its desk' : a.action === 'stop' ? 'Stopping its desk' : 'Checking its desk';
+        }
+        return 'Getting ready';
+    }
+
+    /** A step waiting for the person (hand_to_person) becomes an Ask whose button opens the viewer in control. */
+    function pendingAsk(events) {
+        // The public body keeps the tool but not call_id; a hand_to_person stays open until its result arrives.
+        let open = null;
+        for (const e of events) {
+            if (!e || e.kind !== 'output') continue;
+            if (e.step === 'tool_call' && e.tool === 'hand_to_person') open = String((e.args && e.args.what) || 'Actor needs you on its desk').slice(0, 300);
+            if (e.step === 'tool_result' && e.tool === 'hand_to_person') open = null;
+        }
+        return open;
+    }
+
+    function deskTile(row, events, readOnly = false) {
+        const d = deskContext(events);
+        if (!d || readOnly) return '';
+        const still = d.still.replace('__TASK__', row.id);
+        const click = lastClick(events);
+        const ring = click ? (() => {
+            const left = Math.max(0, Math.min(100, (click.x / Math.max(1, click.width)) * 100));
+            const top = Math.max(0, Math.min(100, (click.y / Math.max(1, click.height)) * 100));
+            return `<span class="ct-desk-ring" data-ct-desk-ring aria-hidden="true" style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%"></span>`;
+        })() : '';
+        const page = browserUrlOf(events);
+        const ask = pendingAsk(events);
+        return html`<figure class="ct-desk-tile" data-ct-desk data-task="${row.id}" data-desk="${d.id}" data-where="${d.where}" data-kind="${d.kind}" data-label="${d.label}" data-still="${still}">
+<div class="ct-desk-frame" data-ct-desk-frame>
+<img data-ct-desk-still src="${still}" alt="Actor's desk" loading="lazy" decoding="async">
+<span class="ct-desk-live" data-ct-desk-live hidden>Live</span>
+<button type="button" class="ct-desk-open" data-ct-desk-open aria-label="Open the desk viewer" title="Open the desk viewer"><span>Watch</span></button>
+${raw(ring)}
+</div>
+<figcaption><span data-ct-desk-caption>${deskCaption(events)}</span><span class="ct-desk-place">${d.label}</span>${page ? html`<a data-ct-desk-url href="${page}" target="_blank" rel="noopener nofollow" hidden>${String(page).replace(/^https?:\/\//, '').slice(0, 80)}</a>` : ''}</figcaption>
+${ask ? html`<div class="ct-desk-ask" data-ct-desk-ask><p><b>Actor needs you:</b> ${ask}</p><button type="button" class="ct-desk-take" data-ct-takeover>Take over</button></div>` : ''}
+</figure>`;
+    }
+
+    /** A finished task's replay: the steps with stills, and the first picture until the person scrubs. */
+    async function replayBlock(row) {
+        const steps = await replay.steps(s, row);
+        if (!steps.length) return '';
+        const first = steps.find((x) => x.still) || null;
+        const json = raw(JSON.stringify(steps).replace(/</g, '\\u003c').replace(/&/g, '\\u0026'));
+        return html`<details class="ct-replay" data-ct-replay data-task="${row.id}">
+<summary>Replay · ${String(steps.length)} step${steps.length === 1 ? '' : 's'}</summary>
+<div class="ct-replay-body">
+<input type="range" min="0" max="${String(Math.max(0, steps.length - 1))}" value="0" step="1" data-ct-replay-range aria-label="Scrub the replay">
+<figure class="ct-replay-shot">${first ? html`<img data-ct-replay-img src="${first.still.url}" alt="What the step saw" loading="lazy">` : html`<span class="ct-replay-none">No pictures were kept for this run.</span>`}
+<figcaption><span data-ct-replay-caption>${replay.caption(steps[0])}</span>${first ? html`<a data-ct-replay-link href="${first.still.url}" target="_blank" rel="noopener">Open the picture</a>` : ''}</figcaption></figure>
+<ol class="ct-replay-steps">${steps.map((st, i) => html`<li><button type="button" data-ct-replay-step="${String(i)}"><span>${String(i + 1)}</span>${replay.caption(st)}${st.still ? '' : ' · no picture'}</button></li>`)}</ol>
+<script type="application/json" data-ct-replay-data>${json}</script>
+</div></details>`;
+    }
+
+    /**
      * A turn that is running is a card in the conversation (one-agent system, stage 1: the owner, 11-12, "a more
      * modular system… reused in a shared modular way"), not a separate console panel: its title, its state, the last
      * steps it took and Stop. js/chat.js refreshes the card in place from GET /chat/turn/:id; the finished turn becomes
@@ -262,6 +388,7 @@ ${from ? html`<input type="hidden" name="from" value="${from}">` : ''}<label for
             return `<li class="ovt-w-step"><span>${esc(clip(r.text, 200))}</span></li>`;
         };
         return html`<article class="ovt-card ct-run" data-ct-run="${row.id}">
+${deskTile(row, events, readOnly)}
 <p class="ovt-card-h"><span class="ct-run-title">${clip(row.task, 160)}</span><span class="ct-run-state" data-ct-run-state>${LIVE_TEXT[row.state] || 'Working'}…</span></p>
 <p class="ct-run-live" data-ovt-live>${live}</p>
 <ol class="ct-run-steps" data-ovt-work>${raw(rows.map(item).join(''))}</ol>
@@ -523,7 +650,7 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
     async function turnHtml(row, { events = null, files = null, readOnly = false } = {}) {
         const attached = files || (await inputs.list(s, [row.id])).get(row.id) || [];
         const t = store.toWire(row, { baseUrl: config.baseUrl });
-        const evs = events || await store.eventsAfter(s, row.id, 0);
+        const evs = events || await store.eventsDetailed(s, row.id, 0);
         const open = OPEN.includes(row.state);
         let reply;
         if (row.state === 'succeeded') reply = html`${workBlock(row, evs, false)}${screenBlock(row, evs, false)}${answerBlock(row, t)}`;
@@ -534,7 +661,14 @@ ${shown.length ? html`<div class="ct-trig-runs">${shown}</div>` : ''}`;
             // A running turn is a card in the conversation (one-agent system, stage 1). A turn parked on a wait still
             // says what it waits for (plan A2).
             const parked = ctx.waits && typeof ctx.waits.listForTask === 'function' ? (await ctx.waits.listForTask(row.id).catch(() => [])).find((w) => w.status === 'waiting') : null;
-            reply = html`${runCard(row, evs, readOnly)}${screenBlock(row, evs, true)}${waitBlock(row, parked, readOnly)}`;
+            // The desk's own tile is the live picture (See it work, W1): the old separate screen panel stays only for a
+            // run that has no desk to stream (a single look), so there is never a second, empty Live box under the card.
+            reply = html`${runCard(row, evs, readOnly)}${deskContext(evs) ? '' : screenBlock(row, evs, true)}${waitBlock(row, parked, readOnly)}`;
+        }
+        // See it work (W1): a finished run keeps a replay of the pictures its steps saw.
+        if (!readOnly && ['succeeded', 'failed', 'cancelled'].includes(row.state)) {
+            const shown = await replayBlock(row).catch(() => '');
+            if (shown) reply = html`${reply}${shown}`;
         }
         // A routine the turn made is its card, after whatever the turn said (plan §12 A-4).
         const routines = await triggerBlocks(row, evs, readOnly);
@@ -674,7 +808,7 @@ ${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}<tex
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
             // The network's sidebar (kit.css, kit-web.js) and its conversation UI (thread.css, ov-thread.js); composer
             // v2 draws the box (ov-composer.js, 4.215.0).
-            css: ['css/chat.css', 'css/skill-draft.css'], scripts: ['js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css', 'ov-upload.css'],
+            css: ['css/chat.css', 'css/skill-draft.css'], scripts: ['js/desks.js', 'js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css', 'ov-upload.css'],
             sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-composer.js', 'ov-share.js', 'ov-canvas.js', 'ov-upload.js'],
             body: html`${busy && !shared ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
 <div class="chat" data-chat="${first ? first.id : ''}">${raw(thread.page({

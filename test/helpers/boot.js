@@ -31,6 +31,9 @@ async function boot(opts = {}) {
         // A test boot makes many runs in one "day"; the free allowance is measured in free-allowance.test.js, which
         // sets its own. This keeps the other suites about what they are about.
         ACTOR_FREE_PER_DAY_USD: '1000',
+        // Tests stand Live in when they need a view ticket; no test calls openvibe.live.
+        ACTOR_LIVE_URL: '',
+        ACTOR_LIVE_PUBLIC_URL: 'https://openvibe.live',
         OV_NETWORK_URL: network.url, OV_NETWORK_INTERNAL_URL: network.url,
         OV_OAUTH_CLIENT_ID: 'actor', OV_OAUTH_CLIENT_SECRET: 'actor-secret', COOKIE_SECURE: 'false',
         ...providers.env,
@@ -45,7 +48,7 @@ async function boot(opts = {}) {
     const { createStore } = require('../../server/db');
     const testdb = await require('./db').testDb();
     const store = createStore(testdb.db, { now: opts.now });
-    const built = await createApp({ config, env, store, log, telemetrySink: opts.telemetrySink, limitsNow: opts.limitsNow, callerLimits: opts.callerLimits === true, adapters: opts.adapters, accountSend: opts.accountSend, webhookPost: opts.webhookPost, chatClient: opts.chatClient, secretSigner: opts.secretSigner, bot: opts.bot, projects: opts.projects, mailFetch: opts.mailFetch, mailTokens: opts.mailTokens, notifier: opts.notifier, models: opts.models, registry: opts.registry, loop: opts.loop, connectors: opts.connectors, guard: opts.guard });
+    const built = await createApp({ config, env, store, log, telemetrySink: opts.telemetrySink, limitsNow: opts.limitsNow, callerLimits: opts.callerLimits === true, adapters: opts.adapters, accountSend: opts.accountSend, webhookPost: opts.webhookPost, chatClient: opts.chatClient, secretSigner: opts.secretSigner, bot: opts.bot, live: opts.live, projects: opts.projects, mailFetch: opts.mailFetch, mailTokens: opts.mailTokens, notifier: opts.notifier, models: opts.models, registry: opts.registry, loop: opts.loop, connectors: opts.connectors, guard: opts.guard });
     await built.ctx.keys.ensure();
     const server = await new Promise((resolve) => { const s = http.createServer(built.app); s.listen(0, '127.0.0.1', () => resolve(s)); });
     const base = `http://127.0.0.1:${server.address().port}`;

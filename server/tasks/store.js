@@ -134,8 +134,13 @@ function deskFrom(events) {
         if (!e || e.step !== 'tool_result' || e.tool !== 'computer_desk' || e.is_error) continue;
         const t = String(e.text || '');
         const m = DESK_WATCH.exec(t);
-        if (m && /"running":true/.test(t)) desk = { url: m[1], kind: (/"kind":"(browser|desktop)"/.exec(t) || [])[1] || null };
-        else if (/"running":false/.test(t)) desk = null;
+        if (m && /"running":true/.test(t)) {
+            let parsed = null;
+            try { parsed = JSON.parse(t); } catch { parsed = null; }
+            desk = { url: m[1], kind: (/"kind":"(browser|desktop)"/.exec(t) || [])[1] || null };
+            // See it work: the private Live stream the desk started for this task (Link's desk.stream), if any.
+            if (parsed && parsed.stream && typeof parsed.stream === 'object') desk.stream = parsed.stream;
+        } else if (/"running":false/.test(t)) desk = null;
     }
     return desk;
 }
@@ -179,6 +184,20 @@ async function taskComputer(s, row) {
 async function eventsAfter(s, taskId, after = 0) {
     const rows = await s.db.many('SELECT body FROM task_events WHERE task_id = $1 AND seq > $2 ORDER BY seq', [taskId, after]);
     return rows.map((r) => parse(r.body));
+}
+
+/**
+ * The events with the detail a replay needs (See it work, W1): the tool args that appendEvent keeps out of the public
+ * body (a click's x,y; a browser action). They were stripped of credential-shaped fields before they were stored, and
+ * the replay blanks typed text again. Only the task's own replay reads this.
+ */
+async function eventsDetailed(s, taskId, after = 0) {
+    const rows = await s.db.many('SELECT body, ui_detail FROM task_events WHERE task_id = $1 AND seq > $2 ORDER BY seq', [taskId, after]);
+    return rows.map((r) => {
+        const body = parse(r.body) || {};
+        const detail = parse(r.ui_detail) || {};
+        return { ...body, ...(detail.args !== undefined ? { args: detail.args } : {}), ...(detail.call_id ? { call_id: detail.call_id } : {}) };
+    });
 }
 
 /** Add to a requester's and everyone's spend today (tasks counts only the requester's). */
@@ -256,6 +275,8 @@ async function prune(s) {
     const cutoff = new Date(s.now() - RETENTION_DAYS * 86_400_000).toISOString();
     const n = await s.db.exec('DELETE FROM tasks WHERE created_at < $1', [cutoff]);
     await s.db.query('DELETE FROM spend_daily WHERE day < $1', [cutoff.slice(0, 10)]);
+    // See it work: a replay's pictures go with the task that saw them.
+    await require('./stills').prune(s).catch(() => null);
     return n;
 }
 
@@ -290,4 +311,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, lastEvent, needsYou, deskFrom, deskPlace, taskDesk, computerFrom, taskComputer, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, eventsDetailed, lastEvent, needsYou, deskFrom, deskPlace, taskDesk, computerFrom, taskComputer, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };

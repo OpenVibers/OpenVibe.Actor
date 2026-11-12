@@ -500,6 +500,7 @@
                         liveLine(turn);
                         draft(turn);
                         syncWait(turn, next);
+                        if (window.OVDesks) window.OVDesks.sync(turn, next);
                     } else {
                         stopScreen(turn);
                         // An answer the person already watched being written is not typed in again: it only takes its
@@ -507,6 +508,7 @@
                         if (turn.querySelector('[data-ovt-draft]')) turn.removeAttribute('data-open');
                         turn._draft = null;
                         if (window.OVThread) window.OVThread.replace(id, h); else turn.replaceWith(next);
+                        if (window.OVDesks) window.OVDesks.scan();
                         var dot = chat.querySelector('.ovt-list a[aria-current] .ovt-dot'); if (dot) dot.remove();
                         if (note) note.textContent = '';
                         syncSend();

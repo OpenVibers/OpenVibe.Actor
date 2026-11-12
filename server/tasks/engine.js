@@ -19,6 +19,8 @@ const PERSON_WAIT_MAX_MS = 15 * 60_000;
  * At most config.maxRunning tasks run at once; the rest wait queued in order.
  */
 const store = require('./store');
+const stills = require('./stills');
+const looks = require('../agents/looks');
 const modelPrefs = require('../runtime/model-prefs');
 // The person's own model choice rides with the models layer (plan L55 C3). A stand-in models object (a test's)
 // does not carry it, and a run then keeps today's behaviour.
@@ -188,6 +190,12 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         const saved = await store.appendEvent(s, id, event);
         if (day) await day.event(id, event);
         stream.publish(id, saved);
+        // See it work (W1): every computer step keeps the picture it saw, for the finished run's replay. The desk's
+        // own curtain has already blanked a secret screen before the shot reached Actor; typed text is not a picture.
+        if (event.kind === 'output' && event.step === 'tool_result' && /^computer_/.test(String(event.tool || '')) && saved.seq) {
+            const shot = looks.get(id);
+            if (shot) await stills.save(s, id, saved.seq, { ...shot, tool: event.tool }).catch(() => null);
+        }
         return saved;
     }
     /**
