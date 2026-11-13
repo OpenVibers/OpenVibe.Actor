@@ -205,6 +205,28 @@ function stepFor(name, input) {
                 payload: safeInput({ space_id: a.space_id }),
             };
 
+        // ── The person's drive and the shared nodes (plan §Z.6, job 2) ──
+        case 'files_save': {
+            const folder = ['Agent'].concat(String(a.path || '').split(/[\\/]/).map((p) => p.trim()).filter((p) => p && p !== '.' && p !== '..')).join('/');
+            return {
+                act: 'edit',
+                kind: 'files.save',
+                summary: `Save ${quoted(a.name, 80)} in your OpenVibe.Download drive, in ${text(folder, 120)}`,
+                target: exactTarget(`save in ${folder}`),
+                payload: safeInput({ path: folder, name: a.name, ...(a.artifact_id ? { artifact_id: a.artifact_id } : {}) }),
+            };
+        }
+        case 'shared_node_check': {
+            const repo = text(a.repo, 300);
+            return {
+                act: 'act',
+                kind: 'run.check',
+                summary: `Run the checks of ${repo || 'a repository'}${a.ref ? ` at ${text(a.ref, 80)}` : ''} on a shared node`,
+                target: repoTarget(a.repo),
+                payload: safeInput({ repo, ref: a.ref, ...(a.workflow ? { workflow: a.workflow } : {}), ...(a.job ? { job: a.job } : {}) }),
+            };
+        }
+
         // ── Coding on the person's machine ──
         case 'codes_task': {
             const repo = text(a.repo, 300);

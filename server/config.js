@@ -211,6 +211,16 @@ function load(env = process.env) {
             // full text and sends the reply from the agent's inbox, over loopback under its own service token. Empty
             // turns the mail consumer off.
             mailUrl: trim(env.ACTOR_MAIL_URL != null ? env.ACTOR_MAIL_URL : (selfHosted ? '' : 'http://127.0.0.1:5250')),
+            // Where a person opens their mailbox: the draft card points here, and the person sends it themselves.
+            mailPublicUrl: trim(env.ACTOR_MAIL_PUBLIC_URL || 'https://openvibe.email'),
+            // OpenVibe.Download: the person's own drive (the files_* tools). The person's own token is the
+            // credential; a sync key is never used here. Empty turns the file tools off.
+            downloadUrl: trim(env.ACTOR_DOWNLOAD_URL != null ? env.ACTOR_DOWNLOAD_URL : (selfHosted ? '' : 'https://openvibe.download')),
+            // The same drive as the person opens it (the link a file answer carries).
+            downloadPublicUrl: trim(env.ACTOR_DOWNLOAD_PUBLIC_URL || 'https://openvibe.download'),
+            // OpenVibe Git (git.openvibe.codes): where the shared-node check asks whether the person may read a
+            // repository, with the person's own token.
+            gitUrl: trim(env.ACTOR_GIT_URL || 'https://git.openvibe.codes'),
         },
 
         // Skills that run code in a sandbox (plan HO8, ADR-060). A tool's code is stored in Media under Actor's

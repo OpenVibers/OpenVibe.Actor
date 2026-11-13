@@ -33,6 +33,7 @@ const EXPECTED = {
     computer_input: 'computer.input',
     computer_run: 'computer.run',
     computer_write: 'computer.write',
+    files_save: 'files.save',
     hand_to_person: null,
     make_chart: null,
     make_file: null,
@@ -42,6 +43,7 @@ const EXPECTED = {
     robot_steps: 'robot.move',
     run_tool: 'by-tool',
     schedule_trigger: 'routine',
+    shared_node_check: 'run.check',
     space_create: 'space',
     space_files_write: 'space',
     space_publish: 'publish',
@@ -70,6 +72,8 @@ const SAMPLE = {
     space_files_write: { space_id: 'sp_1', files: [{ path: 'a.txt', content: 'x' }] },
     space_publish: { space_id: 'sp_1' },
     spend_vibes: { to: 'bo', amount: 12, reason: 'thanks for the stream' },
+    files_save: { path: 'notes/2026', name: 'notes.txt', text: 'x' },
+    shared_node_check: { repo: 'https://git.openvibe.codes/OpenVibers/OpenVibe.Actor', ref: 'main' },
 };
 
 (async () => {

@@ -1,6 +1,25 @@
 # Changelog
 
 
+## Unreleased — the agent's files, mail and shared nodes (plan §Z.6, job 2)
+
+- **Files (OpenVibe.Download):** `files_list` (a folder's files and folders), `files_read` (a text file of at most
+  200 KB as text; a bigger or a binary file is described, with its link), and `files_save` (a file written under
+  `Agent/…`, from text or from a file the task already made). The drive is reached through `openvibe-sdk/download`
+  with the **person's own** token — never a sync key, never a service secret. A name that is taken gets the next
+  free one ("notes.txt" → "notes (2).txt"), so nothing the agent did not make is ever overwritten.
+- **Mail (OpenVibe.Mail):** `email_list` (the newest messages, at most 25, unread only if asked), `email_read` (one
+  message as plain text only — never the HTML, never an attachment — framed as what it is: data from a stranger),
+  and `email_draft` (a card with the draft and a link to the inbox). Mail's send is human-only, so the agent never
+  sends: a draft is a draft, and the person sends it themselves.
+- **Shared nodes (OpenVibe.Run):** `shared_node_check` runs a repository's own CI job on a shared node, as the job
+  the checks scheduler makes (class `code`, artifact `openvibe-codes@1.0.0`, args of kind `check`), and answers the
+  conclusion, the steps and the last forty lines of the log of the step that failed. Only a repository the person
+  may read is run.
+- Each of the three groups is a connector of the manifest (plan §Z.6), so the owner and the person switch them off
+  and the daily cap counts their calls. The settings of a run (plan 11c) gate them too: a run with the files off
+  never sees the file tools, and a run with the network off never sees any of the three.
+
 ## Unreleased — run settings and permission rules (plan 11c)
 
 - **Two settings per run** beside its approval level: `files` (none, read, write; default write) and `network` (off,

@@ -20,6 +20,8 @@ const KINDS = [
     'computer.desk',   // start or stop the agent's desk on a machine
     'robot.move',      // move the person's robot
     'space',           // change the person's own OpenVibe.Space (make one, write its files)
+    'files.save',      // save a file in the person's OpenVibe.Download drive (under Agent)
+    'run.check',       // run a repository's checks on a shared node
     'publish',         // publish something for the public to see
     'post',            // post on an OpenVibe site
     'send',            // send an email, a message or a file to someone
@@ -43,6 +45,8 @@ const LABELS = {
     'computer.desk': "starting or stopping your agent's desk",
     'robot.move': 'moving your robot',
     'space': 'changing your own OpenVibe.Space',
+    'files.save': 'saving a file in your OpenVibe.Download drive',
+    'run.check': 'running the checks of your code on a shared node',
     'publish': 'publishing for others to see',
     'post': 'posting on an OpenVibe site',
     'send': 'sending something to someone',

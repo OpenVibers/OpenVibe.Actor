@@ -35,9 +35,9 @@ const SAME_SITE = { 'sec-fetch-site': 'same-origin' };
                 `${tool.name} names the connector "${tool.connector}", which is not in the manifest`);
         }
         assert.deepStrictEqual(core, [...connectors.CORE_TOOLS].sort());
-        // Every connector of the manifest has at least one tool, except the three the next job fills in.
+        // Every connector of the manifest has at least one tool.
         const used = new Set(reg.tools.map((tool) => tool.connector).filter(Boolean));
-        for (const id of ['openvibe', 'tools', 'computers', 'robots', 'codes', 'space', 'phone', 'schedules', 'money', 'logins']) {
+        for (const id of ['openvibe', 'tools', 'computers', 'robots', 'codes', 'space', 'phone', 'schedules', 'money', 'logins', 'files', 'email', 'shared_nodes']) {
             assert.ok(used.has(id), `no tool names the connector ${id}`);
         }
         // An unknown connector is a problem with the module, like a bad scope.
