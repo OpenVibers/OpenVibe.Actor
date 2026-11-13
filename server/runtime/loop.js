@@ -161,7 +161,7 @@ function planText(plan, brain = null) {
     const lines = [];
     if (plan.assumptions.length) lines.push(`Assumptions: ${plan.assumptions.join('; ')}`);
     plan.steps.forEach((s, i) => {
-        const mark = s.state === 'done' ? '✓' : s.state === 'active' ? '→' : '·';
+        const mark = s.state === 'done' ? '✓' : s.state === 'active' ? 'Now' : '·';
         lines.push(`${mark} ${i + 1}. ${s.goal}`);
     });
     // The ledgers ride in the existing plan event (stage V2-8), so the live plan shows them without a second event.

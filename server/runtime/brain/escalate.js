@@ -56,7 +56,7 @@ function createEscalations({ maxPerTask = MAX_PER_TASK, maxPerStep = MAX_PER_STE
         if (tier) {
             total += 1;
             byStep.set(stepKey, (byStep.get(stepKey) || 0) + 1);
-            const out = { kind: 'model', tier, text: `Tried a stronger model for this step (${currentTier} → ${tier}).`, stepKey };
+            const out = { kind: 'model', tier, text: `Tried a stronger model for this step (from ${currentTier} to ${tier}).`, stepKey };
             made.push(out);
             return out;
         }

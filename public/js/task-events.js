@@ -73,12 +73,12 @@
      */
     // A plan as the loop states it (server/runtime/loop.js planText): an optional "Assumptions: a; b" line, then one line
     // a step, "\u2713 1. goal" (done), "\u2192 2. goal" (in hand) or "\u00b7 3. goal" (next). → { assumptions, steps } or null.
-    var PLAN_LINE = /^([\u2713\u2192\u00b7]) (\d+)\. (.+)$/;
+    var PLAN_LINE = /^([\u2713\u00b7]|Now|\u2192) (\d+)\. (.+)$/;
     function plan(text) {
         var out = { assumptions: [], steps: [] };
         String(text || '').split('\n').forEach(function (raw) {
             var line = raw.trim(), m = PLAN_LINE.exec(line);
-            if (m) out.steps.push({ goal: m[3], state: m[1] === '\u2713' ? 'done' : m[1] === '\u2192' ? 'active' : 'todo' });
+            if (m) out.steps.push({ goal: m[3], state: m[1] === '\u2713' ? 'done' : m[1] === '\u00b7' ? 'todo' : 'active' });
             else if (/^Assumptions: /.test(line)) out.assumptions = line.slice(13).split('; ').filter(Boolean);
             // The brain's ledgers (stage V2-8) ride in the plan event: "Task ledger: given … · find … · derive …" and
             // "Progress: done/not done; looping/not looping; moving/no progress; next …". Parsed here so both the

@@ -48,7 +48,7 @@ function answerOf(t) {
     const r = t.result || {};
     const lines = [];
     const took = typeof r.duration_ms === 'number' ? `, ${Math.max(1, Math.round(r.duration_ms / 1000))} s` : '';
-    lines.push(`**Done on your machine**${r.agents && r.agents.length ? ` (${r.agents.join(' → ')}${took})` : took ? ` (${took.slice(2)})` : ''}.`);
+    lines.push(`**Done on your machine**${r.agents && r.agents.length ? ` (${r.agents.join(', then ')}${took})` : took ? ` (${took.slice(2)})` : ''}.`);
     if (r.summary) lines.push('', r.summary.trim());
     const files = Array.isArray(r.files) ? r.files : [];
     if (files.length) {
