@@ -122,6 +122,8 @@ function createApi(ctx) {
         return next();
     });
     r.use('/me/actor', require('../day/cors').cors(ctx.config));
+    // The menu's agent stack reads the faces from openvibe.network: the same first-party CORS as the Actor strip.
+    r.use('/me/agents/faces', require('../day/cors').cors(ctx.config));
     r.use(principal.middleware);
     // GET /runs and /runs/:id/steps: the one agent system's read-only view (agents.run@1, agents.step@1).
     r.use('/runs', runsApi.createRunsRoutes(ctx));
@@ -223,6 +225,12 @@ function createApi(ctx) {
     // A person's own agents live under /me: /agents stays the public catalog of agent systems (actor.agent.read).
     r.get('/me/agents', principal.requireCapability('actor.agent.manage'), (req, res, next) => owner(req, res, next), limits.reads('actor.agent.manage'), async (req, res) => {
         res.json({ agents: await personal.list(s, req.principal.requester) });
+    });
+    // The menu's stack (actor-characters.md §6): each agent's face, what it is doing and how many asks wait. A tiny,
+    // private answer a menu may cache for 15 seconds; no instructions, memory or secret is in it.
+    r.get('/me/agents/faces', principal.requireCapability('actor.agent.manage'), (req, res, next) => owner(req, res, next), limits.reads('actor.agent.manage'), async (req, res) => {
+        res.set('Cache-Control', 'private, max-age=15');
+        res.json({ agents: await personal.faces(s, config, req.principal.requester) });
     });
 
     // ── The skills registry (plan HO2, ADR-058) ───────────────────────────────────────────────────────────
@@ -403,6 +411,23 @@ function createApi(ctx) {
         if (!out) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
         if (!out.row) return problem(req, res, 422, 'actor.agent.invalid', out.error || 'Level invalid.');
         res.json(contacts.wire(out.row));
+    });
+
+    // ── An agent's soul (agents.soul@1; actor-characters.md §3) ─────────────────────────────────────────────
+    // Import is the person's own write: a SOUL.md from anywhere becomes the soul, checked against the schema and
+    // SDK rules; an agent never writes its own soul. A suggestion only proposes: the person accepts or dismisses it
+    // through the existing suggestions decide route, and nothing changes until they do.
+    r.post('/agents/:id/soul/import', principal.requireCapability('actor.agent.manage'), personOnly, limits.budget('actor.agent.manage'), async (req, res) => {
+        const out = await personal.importSoul(s, config, req.principal.requester, req.params.id, (req.body || {}).soul_md);
+        if (!out) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        if (out.error) return problem(req, res, out.status || 422, 'actor.agent.invalid', out.error);
+        res.json(contacts.wire(out.row));
+    });
+    r.post('/agents/:id/soul/suggest', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
+        const out = await personal.addSoulProposal(s, req.principal.requester, req.params.id, (req.body || {}).patch);
+        if (!out) return problem(req, res, 404, 'actor.agent.not_found', 'No such agent.');
+        if (out.error) return problem(req, res, out.status || 422, 'actor.agent.invalid', out.error);
+        res.json({ words: out.words, suggestion: out.row });
     });
 
     // ── The one timeline behind the Dock (design 2026-11-07) ──
@@ -611,7 +636,7 @@ function createApi(ctx) {
     r.post('/me/agents/:id/suggestions/:pid/:action', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
         const out = req.params.action === 'keep'
             ? await personal.keepSkillProposal(s, req.principal.requester, req.params.id, req.params.pid, req.body || {}, { readFindings: (req.body || {}).read_findings === true })
-            : await personal.decide(s, req.principal.requester, req.params.id, req.params.pid, req.params.action);
+            : await personal.decide(s, req.principal.requester, req.params.id, req.params.pid, req.params.action, { person: req.principal.kind === 'user' });
         if (out.error) return problem(req, res, out.status, out.status === 404 ? 'actor.agent.not_found' : 'actor.agent.invalid', out.error);
         res.json({ suggestion: out.row, agent: out.agent, ...(out.listing ? { listing: out.listing } : {}) });
     });

@@ -13,6 +13,8 @@ const store = require('../server/tasks/store');
 const contacts = require('../server/agents/contacts');
 
 const SAME = { 'sec-fetch-site': 'same-origin' };
+// actor.agent@1 (Contracts 0.424.0) describes the contact fields; soul and soul_md are the additive agents.soul@1 part.
+const contact = ({ soul, soul_md, ...rest }) => rest;
 const PRESET_NAMES = ['Researcher', 'Inbox', 'Studio editor', 'Party host'];
 
 (async () => {
@@ -28,7 +30,7 @@ const PRESET_NAMES = ['Researcher', 'Inbox', 'Studio editor', 'Party host'];
             const r = await t.get('/api/v1/agents', { as: alice });
             assert.strictEqual(r.status, 200, r.text);
             const body = r.json();
-            assert.deepStrictEqual(contracts.validate('actor.agent-list@1', body).errors, []);
+            assert.deepStrictEqual(contracts.validate('actor.agent-list@1', { agents: body.agents.map(contact) }).errors, []);
             assert.strictEqual(body.agents.length, 1);
             vibe = body.agents[0];
             assert.strictEqual(vibe.name, 'Vibe');
@@ -64,7 +66,7 @@ const PRESET_NAMES = ['Researcher', 'Inbox', 'Studio editor', 'Party host'];
             const made = await post('/api/v1/agents', { preset: 'researcher', name: 'Ada' });
             assert.strictEqual(made.status, 201, made.text);
             const agent = made.json();
-            assert.deepStrictEqual(contracts.validate('actor.agent@1', agent).errors, []);
+            assert.deepStrictEqual(contracts.validate('actor.agent@1', contact(agent)).errors, []);
             assert.deepStrictEqual([agent.name, agent.owner, agent.model.engine, agent.level], ['Ada', owner, 'runtime', 'ask']);
             assert.deepStrictEqual(agent.computer, { kind: 'kept-browser', placement: 'auto' });
             assert.match(made.headers.get('location'), new RegExp(agent.id));
@@ -84,7 +86,7 @@ const PRESET_NAMES = ['Researcher', 'Inbox', 'Studio editor', 'Party host'];
         await check('PUT .../level takes actor.level-change@1 and refuses anything else', async () => {
             const r = await t.get(`/api/v1/agents/${vibe.id}/level`, { as: alice, method: 'PUT', json: { level: 'full' }, headers: SAME });
             assert.strictEqual(r.status, 200, r.text);
-            assert.deepStrictEqual(contracts.validate('actor.agent@1', r.json()).errors, []);
+            assert.deepStrictEqual(contracts.validate('actor.agent@1', contact(r.json())).errors, []);
             assert.strictEqual(r.json().level, 'full');
             const bad = await t.get(`/api/v1/agents/${vibe.id}/level`, { as: alice, method: 'PUT', json: { level: 'everything' }, headers: SAME });
             assert.strictEqual(bad.status, 422);
