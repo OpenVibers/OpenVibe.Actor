@@ -464,6 +464,7 @@ module.exports = {
         required: ['expression'],
     },
     scope: 'public',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     costUsd: 0,
     timeoutMs: 5000,
     sources: [source('https://www.nist.gov/pml/owm/si-units', 'NIST: the international system of units')],

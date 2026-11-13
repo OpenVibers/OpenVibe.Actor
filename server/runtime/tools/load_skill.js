@@ -40,6 +40,7 @@ module.exports = {
         additionalProperties: false,
     },
     scope: 'person',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     acts: false,
     costUsd: 0,
     timeoutMs: 5000,

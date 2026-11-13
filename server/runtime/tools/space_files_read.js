@@ -14,6 +14,7 @@ module.exports = {
     description: 'Read one file of one of your spaces on OpenVibe.Space (its whole content). Name the space (spc_…) and the file path (for example index.html).',
     input: { type: 'object', properties: { space_id: { type: 'string', description: 'the space id (spc_…)' }, path: { type: 'string', description: 'the file\'s path inside the space' } }, required: ['space_id', 'path'] },
     scope: 'person',
+    needs: { files: 'read', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'space',
     costUsd: 0,
     timeoutMs: 20_000,

@@ -342,6 +342,7 @@ async function createApp(opts = {}) {
     app.use('/api/v1', createApi(ctx));
     // The connectors (plan §Z.6): the person's own switches (/me/connectors) and the owner's (/admin/connectors).
     app.use('/api/v1', require('./http/connector-api').createConnectorApi(ctx));
+    app.use('/api/v1', require('./http/run-policy-api').createRunPolicyApi(ctx));
     // A2A (stage V2-11): another agent hands Actor a task. The card is /.well-known/agent.json, below.
     app.use(createA2APages(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));

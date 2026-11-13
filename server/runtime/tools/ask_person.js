@@ -7,6 +7,7 @@ module.exports = {
         options: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 200 } },
     } },
     scope: 'person', acts: false, costUsd: 0, timeoutMs: 30000,
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     available: (ctx) => Boolean(ctx.day),
     async run(input, ctx) { return ctx.day.ask(ctx.taskId, input); },
 };

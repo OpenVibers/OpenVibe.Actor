@@ -52,6 +52,7 @@ module.exports = {
         required: ['zone'],
     },
     scope: 'public',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     costUsd: 0,
     timeoutMs: 5000,
     sources: [source('https://www.iana.org/time-zones', 'IANA: the time zone database')],

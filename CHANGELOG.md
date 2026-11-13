@@ -1,6 +1,26 @@
 # Changelog
 
 
+## Unreleased — run settings and permission rules (plan 11c)
+
+- **Two settings per run** beside its approval level: `files` (none, read, write; default write) and `network` (off,
+  on; default on). Every tool module says what it `needs` (`{ files, network }`); a run whose settings do not give it
+  leaves the tool out of the list and refuses it in one line. A task takes `settings: { files, network }`; the person's
+  defaults fill the rest, and `tasks.run_settings` keeps what the run started with (migration 0074). The card's first
+  steps say them ("Settings: reads your files · network on · asks before it acts").
+- **Rules as data** (`server/runtime/run-policy.js`): an ordered list of `{ match: { tool, connector, risk, args },
+  decision: allow | ask | deny, why }`; the last matching rule wins. The owner's list for everyone comes first and is
+  final; then the person's. A deny is left out of the tools and refused with its why; an allow or an ask goes to the
+  approval gate (`levels.decide({ rule })`): the floor first (money, a password, a deletion, a new recipient always
+  ask), a site rule, the person's standing permission for that exact step, the person's rule, the level. An ask on a
+  call the gate would not see goes through it, or is refused when nobody can be asked.
+- **Unattended runs** (a schedule, a trigger Watch delivered, an agent's own routine, a run for nobody) never wait: the
+  approval card stays for the person, and the step says the run goes on without it.
+- **Starting points:** Careful, Balanced and Hands-off on the Settings page ("How your agent asks") write the rule list;
+  files and the open web are set there too, and each rule can be removed. The owner's rules show read-only.
+- **API:** `GET/PUT /api/v1/me/run-policy` (`{ files, network, rules }` or `{ preset }`), `GET/PUT
+  /api/v1/admin/run-policy` (the owner's `{ rules }`).
+
 ## Unreleased — agents have souls
 
 - **A soul** (`agents.soul@1`, Contracts 0.424.0; `openvibe-sdk/agents/soul` 0.165.0; migration 0072): who a personal

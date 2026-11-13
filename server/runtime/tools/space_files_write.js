@@ -32,6 +32,7 @@ module.exports = {
         required: ['space_id', 'files'],
     },
     scope: 'person',
+    needs: { files: 'write', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'space',
     costUsd: 0,
     timeoutMs: 30_000,

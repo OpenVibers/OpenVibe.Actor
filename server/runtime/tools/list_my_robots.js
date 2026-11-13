@@ -7,6 +7,7 @@ module.exports = {
     description: 'List the robots the person owns on OpenVibe.Bot. For each robot they opened to their agent: whether it is online, battery, sensor readings and the step lines it accepts. A robot not opened to the agent says how the person can open it.',
     input: { type: 'object', properties: {} },
     scope: 'person',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'robots',
     costUsd: 0,
     timeoutMs: 20_000,

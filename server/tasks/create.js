@@ -13,6 +13,7 @@ const catalog = require('../agents/catalog');
 const { checkWebhookUrl } = require('../net/webhook-post');
 const { mintSecret } = require('./webhooks');
 const learn = require('../runtime/brain/learn');
+const runPolicy = require('../runtime/run-policy');
 const contacts = require('../agents/contacts');
 const assignments = require('../agents/assignments');
 const triggerStore = require('../triggers/store');
@@ -82,7 +83,8 @@ function turnFields(turnTools, turnConversation, turnModel, turnTier) {
 }
 
 async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, chatContext = null, afterInsert = null, parentId = null, forkOfStep = null, forkChange = null, assignmentOrigin = null, assignmentLevel = null, triggerId = null, personToken = null, timezone = null }) {
-    const { tools: turnTools, conversation: turnConversation, model: turnModel, tier: turnTier, ...contractBody } = body || {};
+    // `settings` (plan 11c) rides beside the contract body like the turn fields, until Contracts carries it.
+    const { tools: turnTools, conversation: turnConversation, model: turnModel, tier: turnTier, settings: bodySettings, ...contractBody } = body || {};
     const v = contracts.validate('actor.task-create-request@1', contractBody);
     if (!v.valid) return { status: 422, code: 'actor.task.invalid', detail: (v.errors || []).map((e) => `${e.path || e.instancePath || ''} ${e.message}`.trim()).join('; ').slice(0, 500) || 'invalid request' };
     const turn = turnFields(turnTools, turnConversation, turnModel, turnTier);
@@ -108,6 +110,13 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         return { status: 422, code: 'actor.agent.not_found', detail: 'agent_id names one of your own agents (GET /api/v1/agents).' };
     }
     const level = body.level || 'ask';
+    // The run's settings (plan 11c): the person's defaults, with this request's own files and network over them, and
+    // whether anybody is there to answer an ask (a schedule, an agent's own routine and a run for nobody are not).
+    const askedSettings = runPolicy.validateSettings(bodySettings);
+    if (askedSettings.error) return { status: 422, code: 'actor.settings.invalid', detail: askedSettings.error };
+    const unattended = !String(principal.requester || '').startsWith('user:') ? 'nobody'
+        : (triggerId != null || principal.via === 'service:watch' || assignmentOrigin === 'routine') ? 'schedule' : null;
+    const runSettings = runPolicy.runSettings(await runPolicy.load(s, principal.requester), askedSettings.value, unattended);
     // The content tier (one-engine slice): the uncensored tier is only for a task that names the person it is for.
     // A task with no person (a watch, a webhook, a service acting for an anonymous visitor) answers on the standard
     // tier. OpenVibe.AI checks that person's 18+ confirmation on the account before it answers on the adult tier,
@@ -140,7 +149,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     }
     const ownSecret = webhooks.some((h) => !h.secret_ref);
 
-    const hash = crypto.createHash('sha256').update(JSON.stringify({ task: body.task, mode: body.mode || 'balanced', budget: [perTask, perDay], agent: body.agent || null, ...(body.agent_id ? { agent_id: body.agent_id } : {}), ...(body.level ? { level: body.level } : {}), ...(turn.tools != null ? { tools: turn.tools } : {}), ...(turn.conversation ? { conversation: turn.conversation } : {}), ...(turn.model ? { model: turn.model } : {}), ...(turn.tier ? { tier: turn.tier } : {}), ...(webhooks.length ? { webhooks } : {}) })).digest('hex');
+    const hash = crypto.createHash('sha256').update(JSON.stringify({ task: body.task, mode: body.mode || 'balanced', budget: [perTask, perDay], agent: body.agent || null, ...(body.agent_id ? { agent_id: body.agent_id } : {}), ...(body.level ? { level: body.level } : {}), ...(turn.tools != null ? { tools: turn.tools } : {}), ...(turn.conversation ? { conversation: turn.conversation } : {}), ...(turn.model ? { model: turn.model } : {}), ...(turn.tier ? { tier: turn.tier } : {}), ...(bodySettings ? { settings: askedSettings.value } : {}), ...(webhooks.length ? { webhooks } : {}) })).digest('hex');
     if (body.idempotency_key) {
         const prior = await store.byIdempotency(s, principal.requester, body.idempotency_key);
         if (prior) {
@@ -184,6 +193,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
             // A product conversation turn (one-engine slice): which conversation it answers, the tools it may
             // call, the model it asked for, and the content tier it answers under.
             conversation: turn.conversation, tools: turn.tools, model: turn.model, tier: turn.tier,
+            run_settings: runSettings,
         });
         // What belongs with the task from its first moment (the chat's attached files), in the same transaction: the
         // engine starts it only after this commits, so the run never begins without them.

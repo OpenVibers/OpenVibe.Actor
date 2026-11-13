@@ -14,6 +14,7 @@ module.exports = {
     description: 'List the files of one of your spaces on OpenVibe.Space, or (with no space id) the spaces you own. Answers the file paths, and for a list of spaces each space\'s id, name and where it lives.',
     input: { type: 'object', properties: { space_id: { type: 'string', description: 'the space id (spc_…); leave it out to list your spaces' } } },
     scope: 'person',
+    needs: { files: 'read', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'space',
     costUsd: 0,
     timeoutMs: 20_000,

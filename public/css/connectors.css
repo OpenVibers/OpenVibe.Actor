@@ -18,3 +18,22 @@
   .cn-conn-switch { margin-left: 0; width: 100%; justify-content: space-between; }
   .cn-conn-cap { flex: 1 1 auto; }
 }
+
+/* How your agent asks (plan 11c): three starting points, the files and web settings, and the rule list. */
+.rp-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 10px; margin: 6px 0 14px; }
+.rp-preset { display: grid; gap: 4px; text-align: left; min-height: 44px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line, #33456a); background: var(--surface, rgba(255, 255, 255, .03)); color: inherit; font: inherit; cursor: pointer; }
+.rp-preset b { font-size: 15px; font-weight: 600; }
+.rp-preset span { color: var(--text-secondary, #a8b3c7); font-size: 13px; line-height: 1.4; }
+.rp-preset:hover { border-color: var(--accent, #6aa0ff); }
+.rp-preset:focus-visible { outline: 2px solid var(--accent, #6aa0ff); outline-offset: 2px; }
+.rp-preset.is-current { border-color: var(--accent, #6aa0ff); box-shadow: inset 0 0 0 1px var(--accent, #6aa0ff); }
+.rp-settings { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 8px; }
+.rp-settings label { display: grid; gap: 4px; font-size: 13px; color: var(--text-secondary, #a8b3c7); }
+.rp-settings select { min-height: 44px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line, #33456a); background: var(--bg, #0b1220); color: var(--text, inherit); font: inherit; }
+.rp-head { font-size: 14px; font-weight: 600; margin: 16px 0 2px; }
+.rp-head span { font-weight: 400; color: var(--text-secondary, #a8b3c7); font-size: 12.5px; margin-left: 6px; }
+.rp-remove { min-height: 44px; }
+@media (max-width: 560px) {
+  .rp-rule { flex-wrap: nowrap; align-items: flex-start; }
+  .rp-rule .cn-conn-switch { width: auto; margin-left: auto; }
+}

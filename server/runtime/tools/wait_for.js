@@ -37,6 +37,7 @@ module.exports = {
         required: ['source', 'seconds'],
     },
     scope: 'person',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     acts: false,
     costUsd: 0,
     timeoutMs: 30_000,

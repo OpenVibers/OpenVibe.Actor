@@ -8,6 +8,7 @@ module.exports = {
     input: { type: 'object', properties: { why: { type: 'string', maxLength: 300 },
         device: { type: 'string', description: 'Optional paired phone id (dev_…). If it is offline, this request fails plainly. Without one, the person may answer on any phone or in a browser.' } }, required: ['why'] },
     scope: 'person', acts: true, costUsd: 0, timeoutMs: 30_000,
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'phone',
     available: device.ready,
     run: (input, ctx) => device.ask(ctx, 'device.camera', input),

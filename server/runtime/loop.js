@@ -898,7 +898,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
      * a span; and drives on from the step it stopped at. A checkpoint whose last step already answered is delivered
      * without another model call.
      */
-    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, connectorSwitches = null }) {
+    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, connectorSwitches = null, runPolicy = null }) {
         const source = resume && resume.state ? resume.state : (fork && fork.checkpoint && fork.checkpoint.state);
         const restored = restoreState(source);
         if (!restored) throw Object.assign(new Error('the saved step could not be read'), { code: 'actor.checkpoint.invalid' });
@@ -932,6 +932,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // The connectors of this run (plan §Z.6): the owner's switches and this person's own. The registry leaves
             // out the tools of a connector that is off, and refuses to run them.
             connectorSwitches,
+            // The run's settings and the permission rules (plan 11c): the registry applies them to every call.
+            runPolicy,
             // The budget already spent by the run before the restart; the engine adds the new calls to it.
             spent: typeof spent === 'function' ? spent : () => Number(resume && resume.state ? resume.state.spent : 0) || 0,
             // The waits (plan A2): the wait_for tool writes a row through this, and nothing else may.
@@ -946,7 +948,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // The waits (plan A2) travel with the tool list: wait_for offers itself only when the run may wait.
         const dayRun = day ? await day.run(taskId) : null;
         const dayTools = dayRun ? day.lanes[dayRun.lane].tools : null;
-        const offered = registry.definitions({ requester, mode, chatPolicy, config, models, signal, artifacts, store, agentId, taskId, now, waits, spend, day, connectorSwitches })
+        const offered = registry.definitions({ requester, mode, chatPolicy, config, models, signal, artifacts, store, agentId, taskId, now, waits, spend, day, connectorSwitches, runPolicy })
             .filter((d) => !dayTools || dayTools.includes(d.function.name));
         // The connector tools of this person (stage V2-11), at most the checkpoint's allow-list.
         const dynamic = day ? { definitions: [], byAlias: new Map() } : await connectorTools({ requester, mode });
@@ -1064,9 +1066,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         }
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, allowedTools = null, connectorSwitches = null }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, allowedTools = null, connectorSwitches = null, runPolicy = null }) {
         if (resume || fork) {
-            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta, latency, spend, day, connectorSwitches });
+            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta, latency, spend, day, connectorSwitches, runPolicy });
         }
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
@@ -1103,6 +1105,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // The connectors of this run (plan §Z.6): the owner's switches and this person's own. The registry leaves
             // out the tools of a connector that is off, and refuses to run them.
             connectorSwitches,
+            // The run's settings and the permission rules (plan 11c): the registry applies them to every call.
+            runPolicy,
             // What the task has spent so far, for the checkpoint (the loop waits on budgetLeft, not the total).
             spent: typeof spent === 'function' ? spent : () => 0,
             // The waits (plan A2): the wait_for tool writes a row through this, and nothing else may.
@@ -1147,7 +1151,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // The waits (plan A2) travel with the tool list: wait_for offers itself only when the run may wait.
         const dayRun = day ? await day.run(taskId) : null;
         const dayTools = dayRun ? day.lanes[dayRun.lane].tools : null;
-        const offered = registry.definitions({ requester, mode, chatPolicy, config, models, signal, artifacts, store, agentId, taskId, now, waits, spend, day, connectorSwitches })
+        const offered = registry.definitions({ requester, mode, chatPolicy, config, models, signal, artifacts, store, agentId, taskId, now, waits, spend, day, connectorSwitches, runPolicy })
             .filter((d) => !dayTools || dayTools.includes(d.function.name));
             // The connections of this person (stage V2-11): the MCP tools they turned on and ask_agent for their agents.
             const dynamic = day ? { definitions: [], byAlias: new Map() } : await connectorTools({ requester, mode });
@@ -1255,7 +1259,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return prev;
         state.messages.push({ role: 'user', content: `The verifier found claims in your answer with no evidence in this run:\n${list.map((c) => `- ${clip(c, 300)}`).join('\n')}\nFetch each one with a tool now if a tool can fetch it, or remove it. Then answer again, citing [E#] for every live fact.` });
         // The run's own tools and allow-list (sub-agents included in "best" mode), so a revision can do no more than the run.
-        const tools = state.tools && state.tools.length ? state.tools : registry.definitions({ requester: state.requester, mode: state.mode, config, models, signal: ctx.signal, artifacts: ctx.artifacts, store, agentId: state.agentId, taskId: state.taskId, now, spend: ctx.spend, connectorSwitches: ctx.connectorSwitches });
+        const tools = state.tools && state.tools.length ? state.tools : registry.definitions({ requester: state.requester, mode: state.mode, config, models, signal: ctx.signal, artifacts: ctx.artifacts, store, agentId: state.agentId, taskId: state.taskId, now, spend: ctx.spend, connectorSwitches: ctx.connectorSwitches, runPolicy: ctx.runPolicy });
         if (!state.allow) state.allow = new Set(tools.map((t) => t.function.name));
         const r = await callModel(state, ctx, { tools });
         if (r) {

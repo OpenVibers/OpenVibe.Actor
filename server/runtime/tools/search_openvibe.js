@@ -7,6 +7,7 @@ module.exports = {
     description: 'Search everything published on the OpenVibe network (streams, clips, pastes, community posts, wiki pages, blog posts, threads). Returns titles, summaries and links.',
     input: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
     scope: 'public',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 20_000,

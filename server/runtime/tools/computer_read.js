@@ -9,6 +9,7 @@ module.exports = {
     description: 'Read a file on one of the person\'s computers, as text (64 KB at a time; offset reads further).',
     input: { type: 'object', properties: { machine, path: { type: 'string' }, offset: { type: 'integer' } }, required: ['machine', 'path'] },
     scope: 'person',
+    needs: { files: 'read', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'computers',
     costUsd: 0,
     timeoutMs: 20_000,

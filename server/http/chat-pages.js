@@ -37,6 +37,8 @@ const canvases = require('../canvases');
 const replay = require('../tasks/replay');
 // The connectors of a person (plan §Z.6): what their agent may reach, and what they may switch off.
 const connectors = require('../runtime/connectors');
+// Run settings and permission rules (plan 11c): the presets, the files and network defaults, the rule list.
+const runPolicy = require('../runtime/run-policy');
 const siteOwner = require('../auth/site-owner');
 
 // The model a person's tasks run on (plan L55 C3; the owner, 11-01: "use your own API keys, or OpenVibe's"). Auto is
@@ -865,6 +867,45 @@ ${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}<tex
 <input class="ovk-switch" type="checkbox" role="switch" name="c_${row.id}" value="1"${row.enabled ? raw(' checked') : ''} aria-label="${row.name}">
 <span class="cn-conn-state">${row.enabled ? 'On' : 'Off'}</span></div></div>`;
 
+    /** How your agent asks (plan 11c): the three starter buttons, the files and network defaults, and the rules. */
+    const PRESET_TEXT = {
+        careful: ['Careful', 'Asks before it changes, sends, spends or signs in to anything.'],
+        balanced: ['Balanced', 'Changes go by your approval level; sending, spending and logins ask.'],
+        'hands-off': ['Hands-off', 'Changes go ahead; sending and spending still ask.'],
+    };
+    const ruleRowHtml = (rule, i, removable) => {
+        const w = runPolicy.ruleWords(rule);
+        return html`<div class="cn-conn-row rp-rule"><div class="cn-conn-text"><b>${w.decision}</b><span>${w.what}</span>
+${w.why ? html`<span class="cn-conn-meta">${w.why}</span>` : ''}</div>
+${removable ? html`<div class="cn-conn-switch"><button class="sc-btn rp-remove" type="submit" name="remove" value="${String(i)}" aria-label="Remove the rule: ${w.decision} ${w.what}">Remove</button></div>` : ''}</div>`;
+    };
+    const runPolicyHtml = async (requester, saved) => {
+        const mine = await runPolicy.read(s, requester);
+        const site = await runPolicy.read(s, runPolicy.SITE);
+        const current = runPolicy.presetOf(mine.rules);
+        const files = mine.files || runPolicy.DEFAULTS.files;
+        const network = mine.network || runPolicy.DEFAULTS.network;
+        const opt = (value, label, on) => html`<option value="${value}"${on ? raw(' selected') : ''}>${label}</option>`;
+        return html`<section class="ct-settings-card" aria-labelledby="ct-set-asks"><h2 id="ct-set-asks">How your agent asks</h2>
+<p>Pick a starting point, then change what your runs may touch. Money, passwords, deleting and a new recipient always ask, whatever you pick.</p>
+${saved ? html`<p class="cm-ok" role="status">Saved. Your next run uses these settings.</p>` : ''}
+<form method="post" action="/chat/run-policy" class="rp-form">
+<div class="rp-presets" role="group" aria-label="Starting points">
+${Object.keys(runPolicy.PRESETS).map((id) => html`<button class="rp-preset${current === id ? ' is-current' : ''}" type="submit" name="preset" value="${id}"${current === id ? raw(' aria-pressed="true"') : raw(' aria-pressed="false"')}><b>${PRESET_TEXT[id][0]}</b><span>${PRESET_TEXT[id][1]}</span></button>`)}
+</div>
+<div class="rp-settings">
+<label>Your files and computers <select name="files">${opt('write', 'Read and change', files === 'write')}${opt('read', 'Read only', files === 'read')}${opt('none', 'Not at all', files === 'none')}</select></label>
+<label>The open web <select name="network">${opt('on', 'On', network === 'on')}${opt('off', 'Off', network === 'off')}</select></label>
+<button class="sc-btn" type="submit" name="save" value="1">Save</button>
+</div>
+${mine.rules.length ? html`<h3 class="rp-head">Your rules <span>the last one that matches decides</span></h3>
+<div class="cn-conn">${mine.rules.map((rule, i) => raw(ruleRowHtml(rule, i, true)))}</div>` : html`<p class="cn-conn-meta">No rules of your own: your approval level decides.</p>`}
+</form>
+${site.rules.length ? html`<h3 class="rp-head">Rules for everyone <span>set by the owner of this Actor; they come first</span></h3>
+<div class="cn-conn">${site.rules.map((rule, i) => raw(ruleRowHtml(rule, i, false)))}</div>` : ''}
+<p class="ct-settings-foot">Every rule can also be written through the API: <code>PUT /api/v1/me/run-policy</code>.</p></section>`;
+    };
+
     r.get('/chat/settings', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         if (!signedIn(req)) return res.redirect(303, loginTo(req));
@@ -897,6 +938,8 @@ ${connectorList.map((row) => raw(connectorRowHtml(row)))}
 <p><button class="sc-btn" type="submit">Save</button></p>
 </form>
 ${ownerLink ? html`<p class="ct-settings-foot">${ownerLink}</p>` : ''}
+</section>
+${raw(await runPolicyHtml(requester, req.query.saved === 'run-policy'))}
 </div>`;
         return send(res, 200, {
             viewer: req.viewer, config, path: req.originalUrl, title: 'Settings', app: true, noReferrer: true,
@@ -928,6 +971,29 @@ ${ownerLink ? html`<p class="ct-settings-foot">${ownerLink}</p>` : ''}
             await connectors.setPersonSwitch(s, requester, c.id, enabled);
         }
         return res.redirect(303, '/chat/settings?saved=connectors');
+    });
+
+    // How your agent asks (plan 11c): a starter button writes the rule list, Save writes files and network, Remove
+    // takes one rule out. The same validation as the API.
+    r.post('/chat/run-policy', express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req)) return res.redirect(303, loginTo(req));
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('Change this on openvibe.actor itself.');
+        const body = req.body || {};
+        const requester = requesterOf(req);
+        const patch = {};
+        if (typeof body.preset === 'string' && Object.prototype.hasOwnProperty.call(runPolicy.PRESETS, body.preset)) {
+            patch.rules = runPolicy.validateRules(runPolicy.PRESETS[body.preset]).value;
+        } else if (body.remove != null && /^\d{1,3}$/.test(String(body.remove))) {
+            const mine = await runPolicy.read(s, requester);
+            patch.rules = mine.rules.filter((_, i) => i !== Number(body.remove));
+        } else {
+            const settings = runPolicy.validateSettings({ files: body.files, network: body.network });
+            if (settings.error) return res.status(422).type('text/plain').send(settings.error);
+            Object.assign(patch, settings.value);
+        }
+        await runPolicy.save(s, requester, patch, requester);
+        return res.redirect(303, '/chat/settings?saved=run-policy#ct-set-asks');
     });
 
     // The "Now" strip, refreshed in place by js/chat.js while a turn is open. Its owner only; empty when nothing runs.

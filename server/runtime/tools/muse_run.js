@@ -119,6 +119,7 @@ module.exports = {
         required: ['machine', 'prompt'],
     },
     scope: 'person',
+    needs: { files: 'write', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'codes',
     acts: true,
     costUsd: 0,

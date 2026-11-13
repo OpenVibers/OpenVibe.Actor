@@ -43,6 +43,7 @@ module.exports = {
         additionalProperties: false,
     },
     scope: 'person',
+    needs: { files: 'write', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'space',
     acts: false,
     costUsd: 0,
