@@ -43,6 +43,7 @@ module.exports = {
         required: ['content'],
     },
     scope: 'person',
+    connector: 'tools',
     acts: true,
     costUsd: 0,
     timeoutMs: 30_000,

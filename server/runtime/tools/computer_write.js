@@ -9,6 +9,7 @@ module.exports = {
     description: 'Write a text file on one of the person\'s computers (mode create, overwrite or append). At level "ask" it waits for the person to approve it on the machine.',
     input: { type: 'object', properties: { machine, path: { type: 'string' }, text: { type: 'string' }, mode: { type: 'string', enum: ['create', 'overwrite', 'append'] } }, required: ['machine', 'path', 'text'] },
     scope: 'person',
+    connector: 'computers',
     acts: true,
     costUsd: 0,
     timeoutMs: 30_000,

@@ -32,6 +32,7 @@ module.exports = {
         required: ['space_id', 'files'],
     },
     scope: 'person',
+    connector: 'space',
     costUsd: 0,
     timeoutMs: 30_000,
     acts: true,

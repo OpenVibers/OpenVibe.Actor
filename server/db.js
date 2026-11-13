@@ -9,7 +9,7 @@ const path = require('path');
 const { createDb } = require('openvibe-sdk/db');
 const { ids } = require('openvibe-contracts');
 
-const TABLES = ['tasks', 'task_events', 'spend_daily', 'actor_agents', 'actor_agent_memory', 'actor_agent_proposals', 'actor_vibe_deliveries', 'actor_approvals', 'actor_approval_allows', 'actor_artifacts', 'actor_task_notices', 'actor_spans', 'actor_bench_offers', 'actor_checkpoints', 'actor_waits', 'actor_wait_events', 'actor_event_cursors', 'agent_timeline', 'agent_state', 'actor_memory_tidy', 'actor_memory_tidy_runs', 'actor_memory_changes', 'actor_memory_diary', 'actor_spends', 'actor_skill_listings', 'actor_skill_installs', 'actor_canvases', 'actor_mention_firings', 'actor_fabric_tasks', 'actor_fabric_observe', 'actor_fabric_lane_changes'];
+const TABLES = ['tasks', 'task_events', 'spend_daily', 'actor_agents', 'actor_agent_memory', 'actor_agent_proposals', 'actor_vibe_deliveries', 'actor_approvals', 'actor_approval_allows', 'actor_artifacts', 'actor_task_notices', 'actor_spans', 'actor_bench_offers', 'actor_checkpoints', 'actor_waits', 'actor_wait_events', 'actor_event_cursors', 'agent_timeline', 'agent_state', 'actor_memory_tidy', 'actor_memory_tidy_runs', 'actor_memory_changes', 'actor_memory_diary', 'actor_spends', 'actor_skill_listings', 'actor_skill_installs', 'actor_canvases', 'actor_mention_firings', 'actor_fabric_tasks', 'actor_fabric_observe', 'actor_fabric_lane_changes', 'actor_connector_settings', 'actor_person_connector_settings', 'actor_connector_calls'];
 
 const MIGRATIONS = path.join(__dirname, '..', 'migrations');
 const DEV_PGLITE = path.join(__dirname, '..', 'data', 'pglite');

@@ -50,6 +50,7 @@ module.exports = {
         required: ['type', 'data'],
     },
     scope: 'person',
+    connector: 'tools',
     acts: true,
     costUsd: 0,
     timeoutMs: 30_000,

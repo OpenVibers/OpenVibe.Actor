@@ -100,7 +100,7 @@ function createPrincipal({ config, keys }) {
             if (!v.ok) return { error: [401, v.expired ? 'token.expired' : 'token.invalid', v.reason] };
             if (v.claims.typ === 'fedcm' || v.claims.actor_type !== undefined) return { error: [401, 'token.invalid', 'not a person\'s token'] };
             if (!ids.isSubjectId('user', v.claims.subject_id)) return { error: [403, 'identity.no_subject', 'this account has no canonical subject yet; sign in again'] };
-            return { principal: { kind: 'user', requester: `user:${v.claims.subject_id}`, project: null, viaSession: false } };
+            return { principal: { kind: 'user', requester: `user:${v.claims.subject_id}`, project: null, viaSession: false, claims: v.claims } };
         }
         const viewer = req.viewer;
         if (viewer && viewer.kind === 'user' && ids.isSubjectId('user', viewer.subject)) {

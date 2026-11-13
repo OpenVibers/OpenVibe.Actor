@@ -108,6 +108,9 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             username,
             displayName: typeof claims.display_name === 'string' ? claims.display_name.slice(0, 80) : (username || 'you'),
             role,
+            // OpenVibe's owner account says so in the session (Network's own is_owner claim): the owner of this
+            // site may change its own settings.
+            isOwner: claims.is_owner === true,
             avatarUrl: typeof claims.avatar_url === 'string' && /^https:\/\/[^\s"'<>]{1,500}$/.test(claims.avatar_url) ? claims.avatar_url : null,
             profileColor: typeof claims.profile_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(claims.profile_color) ? claims.profile_color : null,
             token,

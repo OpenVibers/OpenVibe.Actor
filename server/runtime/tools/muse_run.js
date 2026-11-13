@@ -119,6 +119,7 @@ module.exports = {
         required: ['machine', 'prompt'],
     },
     scope: 'person',
+    connector: 'codes',
     acts: true,
     costUsd: 0,
     timeoutMs: 150_000,

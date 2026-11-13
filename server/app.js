@@ -340,6 +340,8 @@ async function createApp(opts = {}) {
     app.use('/api/v1/resources', resourceIndex.router(ctx));
     app.use('/api/v1/fabric', require('./fabric/api').createRoutes(ctx));
     app.use('/api/v1', createApi(ctx));
+    // The connectors (plan §Z.6): the person's own switches (/me/connectors) and the owner's (/admin/connectors).
+    app.use('/api/v1', require('./http/connector-api').createConnectorApi(ctx));
     // A2A (stage V2-11): another agent hands Actor a task. The card is /.well-known/agent.json, below.
     app.use(createA2APages(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
@@ -351,6 +353,8 @@ async function createApp(opts = {}) {
     app.use(createSkillPages(ctx));
     app.use(createConnectionsPages(ctx));
     app.use(createConsolePages(ctx, opts.bot || {}));
+    // The owner's console (plan §Z.6): the connectors, for the owner of this site only.
+    app.use(require('./http/owner-pages').createOwnerPages(ctx));
     app.use(createChatPages(ctx, opts.bot || {}));
     const pageRoutes = createPageRoutes(ctx);
     // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public

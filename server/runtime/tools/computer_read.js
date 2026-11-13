@@ -9,6 +9,7 @@ module.exports = {
     description: 'Read a file on one of the person\'s computers, as text (64 KB at a time; offset reads further).',
     input: { type: 'object', properties: { machine, path: { type: 'string' }, offset: { type: 'integer' } }, required: ['machine', 'path'] },
     scope: 'person',
+    connector: 'computers',
     costUsd: 0,
     timeoutMs: 20_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.botUrl && personOf(ctx.requester)),

@@ -60,6 +60,15 @@ function load(env = process.env) {
             sessionSecret: env.ACTOR_SESSION_SECRET || '',
         },
         valkey: { url: env.VALKEY_URL || '', prefix: env.VALKEY_PREFIX || 'ov:actor:' },
+        // The people who may change this site's own settings (the connectors page and the admin API). OpenVibe's
+        // owner account says so itself (is_owner on its session); these are the rest: a self-hosted Actor's one
+        // owner, or a site whose owner is named here. A usr_… subject id, never a name.
+        owner: {
+            subjects: [...new Set([
+                ...String(env.ACTOR_OWNER_SUBJECTS || '').split(',').map((x) => x.trim()).filter(Boolean),
+                ...(selfHosted && env.ACTOR_OWNER_SUBJECT ? [String(env.ACTOR_OWNER_SUBJECT).trim()] : []),
+            ])],
+        },
 
         // A drill (ACTOR_DRILL=1) keeps every background loop off, the network's convention: the wait deadlines
         // and the sweep do not run in a drill.

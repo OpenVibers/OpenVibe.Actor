@@ -1,0 +1,20 @@
+/* The connectors (plan §Z.6): one row per connector, with its switch, on the person's Settings page and on the
+   owner's own page. The rows are the same on both; only the wording and the extra fields differ. */
+.cn-conn { display: grid; }
+.cn-conn-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line, #23304d); }
+.cn-conn-row:first-child { border-top: 0; }
+.cn-conn-text { display: grid; gap: 3px; min-width: 0; }
+.cn-conn-text b { font-size: 15px; font-weight: 600; }
+.cn-conn-text span { color: var(--text-secondary, #a8b3c7); font-size: 13.5px; line-height: 1.45; }
+.cn-conn-meta { font-size: 12.5px !important; color: var(--text-secondary, #8b9ab4) !important; overflow-wrap: anywhere; }
+.cn-conn-switch { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
+.cn-conn-state { font-size: 13px; color: var(--text-secondary, #a8b3c7); min-width: 54px; text-align: right; }
+.cn-conn-cap { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary, #a8b3c7); white-space: nowrap; }
+.cn-conn-cap input { width: 92px; min-height: 44px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line, #33456a); background: var(--bg, #0b1220); color: inherit; font: inherit; }
+.cn-conn-off { opacity: .8; }
+.cn-conn-off .cn-conn-text b { color: var(--text-secondary, #a8b3c7); }
+@media (max-width: 560px) {
+  .cn-conn-row { flex-wrap: wrap; }
+  .cn-conn-switch { margin-left: 0; width: 100%; justify-content: space-between; }
+  .cn-conn-cap { flex: 1 1 auto; }
+}

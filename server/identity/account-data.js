@@ -93,6 +93,10 @@ const TABLES = [
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is
     // the operator's total, a separate row.
     { table: 'spend_daily', subject: 'requester', value: (usr) => `user:${usr}`, file: 'spend.json' },
+    // The person's own connectors (plan §Z.6): the groups of tools they switched off, and the calls of the day the
+    // owner's cap counted. The site's own switches (actor_connector_settings) are the operator's, not theirs.
+    { table: 'actor_person_connector_settings', subject: 'requester', value: (usr) => `user:${usr}`, file: 'connectors.json' },
+    { table: 'actor_connector_calls', subject: 'requester', value: (usr) => `user:${usr}`, file: 'connector-calls.json' },
     { table: 'actor_agent_memory', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-memory.json' },
     // The night's tidy (HO5): the diary their agents wrote, the changes the nights made (with the state each change
     // replaced, so an undo can put it back) and the nights themselves. Before the agents, whose rows they hang on.

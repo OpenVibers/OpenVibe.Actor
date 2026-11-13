@@ -7,6 +7,7 @@ module.exports = {
     description: 'Search everything published on the OpenVibe network (streams, clips, pastes, community posts, wiki pages, blog posts, threads). Returns titles, summaries and links.',
     input: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
     scope: 'public',
+    connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 20_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.searchUrl),

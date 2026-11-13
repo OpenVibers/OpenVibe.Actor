@@ -54,6 +54,7 @@ module.exports = {
         required: ['place'],
     },
     scope: 'public',
+    connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 15000,
     sources: [

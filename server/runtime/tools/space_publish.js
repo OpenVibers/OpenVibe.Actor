@@ -17,6 +17,7 @@ module.exports = {
     description: 'Ask to publish one of your spaces on OpenVibe.Space. The person answers before anything goes live, so this answers "waiting for your approval" until they do. Tell them what the space is and where they can see it.',
     input: { type: 'object', properties: { space_id: { type: 'string', description: 'the space id (spc_…)' } }, required: ['space_id'] },
     scope: 'person',
+    connector: 'space',
     costUsd: 0,
     timeoutMs: 20_000,
     acts: true,

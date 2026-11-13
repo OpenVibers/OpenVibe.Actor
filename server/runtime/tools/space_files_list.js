@@ -14,6 +14,7 @@ module.exports = {
     description: 'List the files of one of your spaces on OpenVibe.Space, or (with no space id) the spaces you own. Answers the file paths, and for a list of spaces each space\'s id, name and where it lives.',
     input: { type: 'object', properties: { space_id: { type: 'string', description: 'the space id (spc_…); leave it out to list your spaces' } } },
     scope: 'person',
+    connector: 'space',
     costUsd: 0,
     timeoutMs: 20_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.spaceUrl && ctx.config.oauth && ctx.config.oauth.clientSecret && personOf(ctx.requester)),

@@ -45,6 +45,7 @@ module.exports = {
         required: ['from'],
     },
     scope: 'public',
+    connector: 'tools',
     costUsd: 0,
     timeoutMs: 15000,
     sources: [source('https://www.frankfurter.app/', 'Frankfurter: ECB reference exchange rates')],

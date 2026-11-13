@@ -7,6 +7,7 @@ module.exports = {
     description: 'Tell your person something on their phone. Give a short title and text. It appears in their Action Center; Link raises a local notification while Stay connected is on. This is a device.notify action, scoped to this agent.',
     input: { type: 'object', properties: { title: { type: 'string', maxLength: 120 }, text: { type: 'string', maxLength: 400 } }, required: ['title', 'text'] },
     scope: 'person', acts: true, costUsd: 0, timeoutMs: 15_000,
+    connector: 'phone',
     available: (ctx) => Boolean(ctx && ctx.store && ctx.agentId && ctx.requester && !ctx.chatPolicy),
     async run(input, ctx) {
         const title = clean(input.title, 120);

@@ -35,6 +35,9 @@ const modelPrefs = require('../runtime/model-prefs');
 const aiCatalog = require('../runtime/ai-catalog');
 const canvases = require('../canvases');
 const replay = require('../tasks/replay');
+// The connectors of a person (plan §Z.6): what their agent may reach, and what they may switch off.
+const connectors = require('../runtime/connectors');
+const siteOwner = require('../auth/site-owner');
 
 // The model a person's tasks run on (plan L55 C3; the owner, 11-01: "use your own API keys, or OpenVibe's"). Auto is
 // OpenVibe's own; "own:<provider>" is the person's key, sealed in OpenVibe.AI, which Actor never sees.
@@ -843,6 +846,25 @@ ${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}<tex
      * all my existing runs"), the model and where it runs, and what has been spent. The same route (/chat/defaults)
      * and the same behaviour; it is simply a page of its own now, reached from the chat's head and its sidebar.
      */
+    /**
+     * The connectors of a person (plan §Z.6): one row per connector the owner left on, with its switch, what it does
+     * and its risk in words. A connector the owner turned off is shown as "Off for everyone" and has no switch:
+     * the owner's switch wins over anybody's own.
+     */
+    const connectorRows = async (requester) => {
+        const state = await connectors.load(s, { requester });
+        return connectors.manifest().map((c) => state.connectors[c.id]);
+    };
+
+    const connectorRowHtml = (row) => row.offForEveryone
+        ? html`<div class="cn-conn-row cn-conn-off"><div class="cn-conn-text"><b>${row.name}</b><span>${row.what}</span>
+<span class="cn-conn-meta">Off for everyone — the owner of this Actor turned it off</span></div></div>`
+        : html`<div class="cn-conn-row"><div class="cn-conn-text"><b>${row.name}</b><span>${row.what}</span>
+<span class="cn-conn-meta">${connectors.RISK_WORDS[row.risk] || row.risk}${row.cap != null ? ` · ${row.calls} of ${row.cap} calls used today` : ''}</span></div>
+<div class="cn-conn-switch"><input type="hidden" name="c_${row.id}" value="0">
+<input class="ovk-switch" type="checkbox" role="switch" name="c_${row.id}" value="1"${row.enabled ? raw(' checked') : ''} aria-label="${row.name}">
+<span class="cn-conn-state">${row.enabled ? 'On' : 'Off'}</span></div></div>`;
+
     r.get('/chat/settings', async (req, res) => {
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         if (!signedIn(req)) return res.redirect(303, loginTo(req));
@@ -850,6 +872,12 @@ ${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}<tex
         const chats = await chatsFor(requester);
         const current = sharing ? await sharing.defaultOf(requester).catch(() => 'private') : 'private';
         const saved = req.query.saved === '1';
+        const connectorsSaved = req.query.saved === 'connectors';
+        const connectorList = await connectorRows(requester);
+        // The owner of this Actor may change the switches of everyone; they find their own page from here.
+        const ownerLink = siteOwner.isOwner({ viewer: req.viewer, config })
+            ? html`<a href="/owner/connectors">Connectors for everyone</a> — you are the owner of this Actor.`
+            : null;
         const body = html`<div class="ct-settings">
 <h1>Settings</h1>
 <p class="ct-settings-lede">How your runs start and what they run on. Every run's own Share button still changes just that run.</p>
@@ -861,10 +889,18 @@ ${raw(await defaultsHtml(requester, { from: 'settings' }))}
 <section class="ct-settings-card" aria-labelledby="ct-set-model"><h2 id="ct-set-model">The model your tasks run on</h2>
 <p>OpenVibe's own keys, your own key for a provider, or a model you run on your own computer. The model and where it runs are one page.</p>
 <p><a class="sc-btn" href="/chat/model">Open the model settings</a></p></section>
+<section class="ct-settings-card" aria-labelledby="ct-set-connectors"><h2 id="ct-set-connectors">Connectors</h2>
+<p>What your agent may reach. Turn one off and your agent will not use it. The owner of this Actor may turn one off for everyone.</p>
+${connectorsSaved ? html`<p class="cm-ok" role="status">Saved. Your next run uses these connectors.</p>` : ''}
+<form method="post" action="/chat/connectors">
+${connectorList.map((row) => raw(connectorRowHtml(row)))}
+<p><button class="sc-btn" type="submit">Save</button></p>
+</form>
+${ownerLink ? html`<p class="ct-settings-foot">${ownerLink}</p>` : ''}
 </div>`;
         return send(res, 200, {
             viewer: req.viewer, config, path: req.originalUrl, title: 'Settings', app: true, noReferrer: true,
-            css: ['css/chat.css'], scripts: [], styles: ['kit.css', 'thread.css'],
+            css: ['css/chat.css', 'css/connectors.css'], scripts: [], styles: ['kit.css', 'thread.css'],
             body: raw(thread.page({
                 sidebar: String(sidebar(chats, null, { settings: true })),
                 head: thread.head({ title: 'Settings', newHref: '/chat' }),
@@ -872,6 +908,26 @@ ${raw(await defaultsHtml(requester, { from: 'settings' }))}
                 label: 'Settings',
             })),
         });
+    });
+
+    // The person's own connectors (plan §Z.6): the form on the Settings page, one switch per connector. A
+    // connector the owner turned off is off for everyone: the person may not turn it on, and their row for it is
+    // left alone.
+    r.post('/chat/connectors', express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
+        if (!signedIn(req)) return res.redirect(303, loginTo(req));
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('Change this on openvibe.actor itself.');
+        const body = req.body || {};
+        const requester = requesterOf(req);
+        const state = await connectors.load(s, { requester });
+        for (const c of connectors.manifest()) {
+            if (!state.connectors[c.id].ownerEnabled) continue;
+            const given = body[`c_${c.id}`];
+            const last = Array.isArray(given) ? given[given.length - 1] : given;
+            const enabled = last === '1' || last === 'true';
+            await connectors.setPersonSwitch(s, requester, c.id, enabled);
+        }
+        return res.redirect(303, '/chat/settings?saved=connectors');
     });
 
     // The "Now" strip, refreshed in place by js/chat.js while a turn is open. Its owner only; empty when nothing runs.

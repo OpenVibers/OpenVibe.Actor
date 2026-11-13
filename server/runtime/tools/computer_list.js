@@ -9,6 +9,7 @@ module.exports = {
     description: 'List a folder on one of the person\'s computers (an absolute path inside its folders).',
     input: { type: 'object', properties: { machine, path: { type: 'string' } }, required: ['machine', 'path'] },
     scope: 'person',
+    connector: 'computers',
     costUsd: 0,
     timeoutMs: 20_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.botUrl && personOf(ctx.requester)),

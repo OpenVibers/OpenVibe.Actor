@@ -82,6 +82,7 @@ module.exports = {
         required: ['asset'],
     },
     scope: 'public',
+    connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 15000,
     sources: [
