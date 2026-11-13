@@ -66,6 +66,16 @@ const EXPECTED = {
     space_publish: true,
     // Money (plan HO7): a tip asks the person, and the payment moves their Vibes when they approve it.
     spend_vibes: true,
+    // Files (the person's own drive, OpenVibe.Download): listing and reading change nothing; saving a file does.
+    files_list: false,
+    files_read: false,
+    files_save: true,
+    // Mail (OpenVibe.Mail): reading the person's inbox changes nothing, and a draft is a draft: the person sends it.
+    email_list: false,
+    email_read: false,
+    email_draft: false,
+    // A check on a shared node (OpenVibe.Run) starts work on somebody's machine: it acts.
+    shared_node_check: true,
 };
 
 (async () => {
