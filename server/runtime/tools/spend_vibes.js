@@ -30,6 +30,7 @@ module.exports = {
         required: ['to', 'amount'],
     },
     scope: 'person',
+    connector: 'money',
     acts: true,
     costUsd: 0,
     timeoutMs: 20_000,

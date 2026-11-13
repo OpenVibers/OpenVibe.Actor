@@ -62,14 +62,15 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
 
     const problem = (json, status, code, detail) => json(status, { type: `https://openvibe.network/problems/${code}`, title: 'Error', status, code, detail, error: detail, request_id: `req_${crypto.randomBytes(6).toString('hex')}` }, { 'Content-Type': 'application/problem+json' });
 
-    function addUser(username, { role = 'user' } = {}) {
-        const u = { id: nextUserId++, subject: ids.newId('user'), username, display_name: username, role };
+    function addUser(username, { role = 'user', isOwner = false } = {}) {
+        const u = { id: nextUserId++, subject: ids.newId('user'), username, display_name: username, role, isOwner };
         st.users.set(u.id, u); st.byUsername.set(username, u);
         return u;
     }
     function userToken(u, { ttl = 3600, iat = null } = {}) {
         const now = iat != null ? iat : Math.floor(Date.now() / 1000);
-        return signJwt({ iss: issuer, sub: u.id, subject_id: u.subject, username: u.username, display_name: u.display_name, role: u.role, aud: ['openvibe.network'], iat: now, exp: now + ttl }, privatePem);
+        // Network's owner account says so in its own session (is_owner): the owner of the site.
+        return signJwt({ iss: issuer, sub: u.id, subject_id: u.subject, username: u.username, display_name: u.display_name, role: u.role, ...(u.isOwner ? { is_owner: true } : {}), aud: ['openvibe.network'], iat: now, exp: now + ttl }, privatePem);
     }
     function userFrom(req) {
         const h = String(req.headers.authorization || '');

@@ -7,6 +7,7 @@ module.exports = {
     description: 'Read a public web page as text (title, description, main text, links). Use it for URLs the task gives or that a result links to.',
     input: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] },
     scope: 'public',
+    connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 40_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.toolsUrl),

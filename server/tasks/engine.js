@@ -43,6 +43,8 @@ const taskNotices = require('../notify/task-notices');
 const confidence = require('../runtime/brain/confidence');
 const learn = require('../runtime/brain/learn');
 const canvases = require('../canvases');
+// The connectors of a run (plan §Z.6): the owner's switches and the person's own.
+const connectors = require('../runtime/connectors');
 
 const MAX_ATTEMPTS = 2;
 // The one loop's agent id on the event stream and in the result (the old runtime's id, kept for readers).
@@ -621,8 +623,15 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     // tick starts no turn by itself, so the next run is told which item changed.
                     const context = row.parent_id && row.fork_of_step == null && !resume ? await store.followContext(s, row) : [];
                     if (!resume && !fork) context.push(...await canvases.takeNoticesForTask(s, row));
+                    // The connectors of this run (plan §Z.6): the owner's switch for the site and this person's own.
+                    // A task with no signed-in requester (a chat ask, a watch) uses the site switches and the defaults.
+                    const switches = await connectors.load(s, { requester: fromChat ? null : row.requester }).catch((err) => {
+                        log.warn('[Actor] the connector switches could not be read:', (err && err.message) || err);
+                        return null;
+                    });
                     out = await metered(() => withChoice(models, choice, async () => loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
+                        connectorSwitches: switches,
                         // A fork carries its parent's state in the checkpoint, not as a follow-up conversation.
                         context,
                         emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
@@ -750,7 +759,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                                     outward, signal, trace: out.state && out.state.ctx && out.state.ctx.trace,
                                     budgetLeft, writerFamily: out.family || null, now: () => now(),
                                     search: async (query) => (registry
-                                        ? registry.run('search_web', { query }, { config, log, signal, requester: row.requester, now })
+                                        ? registry.run('search_web', { query }, { config, log, signal, requester: row.requester, now, connectorSwitches: switches })
                                         : { text: 'no search is configured', isError: true }),
                                 })));
                                 await meter(review.cost_usd);

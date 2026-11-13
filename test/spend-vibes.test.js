@@ -112,6 +112,9 @@ const doneTurn = { content: 'The tip was sent.' };
         const ada = t.network.addUser('ada');
         const owner = `user:${ada.subject}`;
         const creator = 'usr_01JZ7QK9F3M8N2P4R6T8V0X2YB';
+        // The spending connector is off until the person turns it on (plan §Z.6): these tests are about what
+        // happens once they have.
+        await t.get('/api/v1/me/connectors', { as: ada, method: 'PUT', json: { connectors: [{ id: 'money', enabled: true }] }, headers: SAME });
         const agent = (await personal.create(t.ctx.s, t.config, owner, {
             name: 'Tipper', instructions: 'Tip creators when the person asks for it.', mode: 'balanced',
             budget_per_run_usd: 0.05, daily_runs_max: 5, schedule: 'off', status: 'active',

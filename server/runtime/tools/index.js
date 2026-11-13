@@ -39,11 +39,17 @@
  * `definitions(ctx)` answers the OpenAI function tools the model may call, filtered by scope: private mode sees only
  * private-ok tools; a task with no signed-in requester never sees `person` tools. A module may also export
  * `available(ctx)` to narrow itself further (a service that is not connected this boot).
+ *
+ * A module may name its `connector`: one of the ids in server/runtime/connectors.js (the group of tools that
+ * reaches one OpenVibe service). A module without one is a core tool and is always on. The connectors that are off
+ * for the requester — the owner's switch and the person's own — leave their tools out of the list, and `run()`
+ * refuses them with the line that says where to turn the connector on.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { stepFor } = require('../../agents/actions');
+const connectors = require('../connectors');
 
 const SCOPES = ['public', 'person', 'private-ok'];
 const NAME = /^[a-z][a-z0-9_]{1,63}$/;
@@ -65,6 +71,7 @@ function validateTool(mod) {
     if (mod.acts != null && typeof mod.acts !== 'boolean') errors.push('acts: true or false (omit it for a read-only tool)');
     if (mod.costUsd != null && !(Number.isFinite(mod.costUsd) && mod.costUsd >= 0)) errors.push('costUsd: a number, 0 or more');
     if (mod.timeoutMs != null && !(Number.isInteger(mod.timeoutMs) && mod.timeoutMs > 0 && mod.timeoutMs <= MAX_TIMEOUT_MS)) errors.push(`timeoutMs: an integer from 1 to ${MAX_TIMEOUT_MS}`);
+    if (mod.connector != null && !connectors.isConnectorId(mod.connector)) errors.push(`connector: one of ${connectors.CONNECTOR_IDS.join(', ')}`);
     if (typeof mod.run !== 'function') errors.push('run: a function (input, ctx)');
     return errors;
 }
@@ -126,12 +133,19 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
     const get = (name) => byName.get(name) || null;
     const has = (name) => byName.has(name);
 
-    /** The OpenAI function definitions for this task, filtered by scope and by the module's optional `available(ctx)`. */
+    /** Is this connector off for the requester of this run (the owner's switch, then the person's own)? */
+    const connectorOff = (ctx, id) => {
+        const sw = ctx && ctx.connectorSwitches;
+        return Boolean(sw && sw.off && sw.off.has(id));
+    };
+
+    /** The OpenAI function definitions for this task, filtered by scope, by the module's optional `available(ctx)` and by the connectors that are off. */
     function definitions(ctx = {}) {
         const { requester = null, mode = null } = ctx;
         return [...byName.values()]
             .filter((t) => allowedBy(t.scope, { requester, mode }) && require('../../chat-apps/policy').allowed(t, ctx.chatPolicy))
             .filter((t) => (typeof t.available === 'function' ? t.available(ctx) !== false : true))
+            .filter((t) => !t.connector || !connectorOff(ctx, t.connector))
             .map((t) => ({
                 type: 'function',
                 function: { name: t.name, description: t.description, parameters: t.input },
@@ -150,6 +164,19 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
         const tool = byName.get(name) || dynamic;
         if (!tool) return { text: JSON.stringify({ error: `unknown tool ${name}` }), data: null, sources: [], isError: true };
         if (!allowedBy(tool.scope, ctx)) return { text: JSON.stringify({ error: `tool ${name} is not available for this task` }), data: null, sources: [], isError: true };
+        // The connectors (plan §Z.6): a tool whose connector is off for this requester does not run, and the model is
+        // told in one plain line where to turn it on. A connector with a daily cap counts this call before it runs.
+        if (tool.connector) {
+            const sw = ctx && ctx.connectorSwitches;
+            if (sw && sw.off && sw.off.has(tool.connector)) {
+                return normalize({ text: JSON.stringify({ error: connectors.offMessage(tool.connector) }), isError: true });
+            }
+            const cap = sw && sw.connectors && sw.connectors[tool.connector] ? sw.connectors[tool.connector].cap : null;
+            if (cap != null && sw && typeof sw.take === 'function') {
+                const taken = await sw.take(tool.connector, cap);
+                if (!taken.ok) return normalize({ text: JSON.stringify({ error: connectors.capMessage(tool.connector, cap) }), isError: true });
+            }
+        }
         if (!require('../../chat-apps/policy').allowed(tool, ctx.chatPolicy)) return normalize({ text: 'This tool is unavailable in this chat.', isError: true });
         let dayApproved = false;
         if (ctx.day) {

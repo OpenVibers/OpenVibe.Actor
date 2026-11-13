@@ -14,6 +14,7 @@ module.exports = {
     description: 'Read one file of one of your spaces on OpenVibe.Space (its whole content). Name the space (spc_…) and the file path (for example index.html).',
     input: { type: 'object', properties: { space_id: { type: 'string', description: 'the space id (spc_…)' }, path: { type: 'string', description: 'the file\'s path inside the space' } }, required: ['space_id', 'path'] },
     scope: 'person',
+    connector: 'space',
     costUsd: 0,
     timeoutMs: 20_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.spaceUrl && ctx.config.oauth && ctx.config.oauth.clientSecret && personOf(ctx.requester)),

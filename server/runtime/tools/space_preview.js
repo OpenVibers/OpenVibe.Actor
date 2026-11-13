@@ -14,6 +14,7 @@ module.exports = {
     description: 'Show one of your spaces on OpenVibe.Space: where it can be seen now (the editor with its live preview while it is a draft, its own address once it is published), the files it is made of, and whether it is live.',
     input: { type: 'object', properties: { space_id: { type: 'string', description: 'the space id (spc_…)' } }, required: ['space_id'] },
     scope: 'person',
+    connector: 'space',
     costUsd: 0,
     timeoutMs: 20_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.spaceUrl && ctx.config.oauth && ctx.config.oauth.clientSecret && personOf(ctx.requester)),

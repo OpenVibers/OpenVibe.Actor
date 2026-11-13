@@ -33,6 +33,7 @@ module.exports = {
     name: 'schedule_trigger',
     description: 'Make a routine on a schedule, a Watch event, a goal, or when the person mentions a phrase in their own messages. For a mention such as "when the release comes up, remind me to check rollback", pass mention.phrases, mention.match, task, and words (the card line). A mention fires once per conversation and expires after 30 days by default. Ask before making a routine if the phrase or task is unclear. The creation is a routine approval, and each run keeps the agent level and approval gates.',
     scope: 'person',
+    connector: 'schedules',
     acts: true,
     costUsd: 0,
     timeoutMs: 25_000,

@@ -175,6 +175,7 @@ module.exports = {
         required: ['league'],
     },
     scope: 'public',
+    connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 15000,
     sources: [source('https://www.thesportsdb.com/', 'TheSportsDB: free sports data')],

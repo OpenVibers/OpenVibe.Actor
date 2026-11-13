@@ -7,6 +7,7 @@ module.exports = {
     description: 'List the person\'s own computers open to their agent on OpenVibe.Bot: online or not, the level the person set on the machine (observe: read only; ask: each run or write waits for their approval on the machine; trusted; full), what it offers (terminal, files, screen) and its folders.',
     input: { type: 'object', properties: {} },
     scope: 'person',
+    connector: 'computers',
     costUsd: 0,
     timeoutMs: 20_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.botUrl && personOf(ctx.requester)),

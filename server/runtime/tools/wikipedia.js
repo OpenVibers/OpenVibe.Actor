@@ -47,6 +47,7 @@ module.exports = {
         required: ['topic'],
     },
     scope: 'public',
+    connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 15000,
     sources: [source('https://en.wikipedia.org/', 'Wikipedia')], 

@@ -43,6 +43,7 @@ module.exports = {
         additionalProperties: false,
     },
     scope: 'person',
+    connector: 'space',
     acts: false,
     costUsd: 0,
     timeoutMs: 5000,
