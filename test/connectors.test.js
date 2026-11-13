@@ -3,7 +3,7 @@
  * The connectors (plan §Z.6): the groups of tools a person and the owner can switch off.
  *
  * - every tool module names its connector, or is one of the documented core tools;
- * - the manifest's defaults: reads and writes on, sends and spends off;
+ * - the manifest's defaults: reads and writes on; sends, spends and secrets (saved logins) off;
  * - the owner's switch beats the person's, and a connector the owner turned off is off for everyone;
  * - a person's own switch hides the tools of that connector and refuses to run them;
  * - the owner's daily cap counts the calls of one person per UTC day and refuses past it;
@@ -52,18 +52,19 @@ const SAME_SITE = { 'sec-fetch-site': 'same-origin' };
         const list = connectors.manifest();
         for (const c of list) {
             assert.deepStrictEqual(Object.keys(c).sort(), ['default', 'id', 'name', 'risk', 'service', 'what']);
-            assert.ok(['reads', 'writes', 'sends', 'spends'].includes(c.risk), c.id);
+            assert.ok(['reads', 'writes', 'sends', 'spends', 'secrets'].includes(c.risk), c.id);
             assert.strictEqual(typeof c.default, 'boolean');
             assert.ok(c.name && c.service && c.what, c.id);
         }
         const ids = list.map((c) => c.id);
         for (const id of ['files', 'email', 'shared_nodes']) assert.ok(ids.includes(id), id);
         for (const c of list) {
-            if (c.risk === 'sends' || c.risk === 'spends') assert.strictEqual(c.default, false, c.id);
+            if (c.risk === 'sends' || c.risk === 'spends' || c.risk === 'secrets') assert.strictEqual(c.default, false, c.id);
             else assert.strictEqual(c.default, true, c.id);
         }
         assert.strictEqual(list.find((c) => c.id === 'money').default, false);
         assert.strictEqual(list.find((c) => c.id === 'email').default, false);
+        assert.strictEqual(list.find((c) => c.id === 'logins').default, false, 'saved logins wait for the person');
     });
 
     await check('a connector that is off is left out of the tools and refused when it is called', async () => {

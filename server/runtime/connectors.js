@@ -104,8 +104,9 @@ const CONNECTORS = [
         name: 'Your saved logins',
         service: 'openvibe.locker',
         what: 'Fill in a login for a site with the credentials you saved in Locker.',
-        risk: 'writes',
-        default: true,
+        // It uses the person's own passwords: off until they turn it on, like spending (11-13, main review).
+        risk: 'secrets',
+        default: false,
     },
     {
         id: 'files',
@@ -157,6 +158,7 @@ const RISK_WORDS = {
     writes: 'changes things',
     sends: 'sends things out',
     spends: 'spends your money',
+    secrets: 'uses your saved passwords',
 };
 
 /** Is this one of the manifest's ids? */
