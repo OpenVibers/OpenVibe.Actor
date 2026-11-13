@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * The process's one meter client (ai-metrics.md): every model call Actor makes itself — its providers, its own key
- * through OpenVibe.AI, the router — is recorded with openvibe-sdk/ai-meter and sent to AI's POST /api/v1/usage/calls.
+ * The process's one meter client (ai-metrics.md): every model call Actor makes straight to a provider is recorded with
+ * openvibe-sdk/ai-meter and sent to AI's POST /api/v1/usage/calls. A call through OpenVibe.AI (a person's own key, the
+ * router) is AI's own to record, so it is never reported here.
  *
  * AI is also the only place that prices a call Actor did not route, so this client sends tokens, timing and outcome
  * only (never a price): AI applies its rate cards and publishes ai.call.recorded@1.

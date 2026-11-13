@@ -745,7 +745,9 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         // that tier. A caller may also name it directly.
         const policyOf = policy || (choice && choice.policy) || null;
         if (choice && choice.provider) {
-            const call = startMetered({ provider: AI_PROVIDER, model: choice.model || 'openvibe', place: choice.provider === 'link' ? 'machine' : 'provider', streamed: Boolean(onDelta) });
+            // OpenVibe.AI records every call it serves (ai.call.recorded@1) itself: Actor reporting it too would count
+            // it twice. Only the calls Actor makes straight to a provider, below, are Actor's to report.
+            const call = null;
             let r;
             try {
                 r = await chatViaAi({ choice, messages, tools, json, maxTokens, signal, onDelta: watchFirstToken(call, onDelta), policy: policyOf });
@@ -759,7 +761,9 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
         if (routerOn() || (choice && choice.model && !choice.provider)) {
             const args = { tier, messages, tools, json, maxTokens, signal, onDelta, subject: subject || (choice && choice.subject), target: choice && choice.target, latency, policy: policyOf };
-            const call = startMetered({ provider: AI_PROVIDER, model: (choice && choice.model) || routerModel(tier), place: 'provider', streamed: Boolean(onDelta) });
+            // OpenVibe.AI records every call it serves (ai.call.recorded@1) itself: Actor reporting it too would count
+            // it twice. Only the calls Actor makes straight to a provider, below, are Actor's to report.
+            const call = null;
             args.onDelta = watchFirstToken(call, onDelta);
             let r;
             try {

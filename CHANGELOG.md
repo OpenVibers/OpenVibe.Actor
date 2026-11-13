@@ -3,8 +3,9 @@
 
 ## Unreleased — every AI call measured
 
-- **AI meter** (`openvibe-sdk/ai-meter`, SDK 0.164.0): every model call Actor makes itself — its providers, its own
-  key through OpenVibe.AI, the router — is recorded and sent to OpenVibe.AI's `POST /api/v1/usage/calls`: provider,
+- **AI meter** (`openvibe-sdk/ai-meter`, SDK 0.164.0): every model call Actor makes straight to a provider is recorded
+  and sent to OpenVibe.AI's `POST /api/v1/usage/calls` (a call through OpenVibe.AI, with a person's own key or the
+  router, is recorded by AI itself, so it is never counted twice): provider,
   model, task and call id, TTFT, tokens per second, latency, tokens, tool calls, the outcome, a failure's class, and
   the task's wall time on its last step. Actor's service token is narrowed to `ai.usage.report`. The meter is off in
   a drill and in tests, and it never fails or blocks a model call.

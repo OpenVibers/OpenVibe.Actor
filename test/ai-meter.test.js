@@ -101,6 +101,16 @@ const tickingMeter = () => ({ records: [], record(rec) { this.records.push(rec);
         assert.strictEqual(meter.records[0].turn_id, 'tsk_fail:1');
     });
 
+    await ok('a call that goes through OpenVibe.AI is AI\'s to record, never Actor\'s (no double count)', async () => {
+        const meter = tickingMeter();
+        const fetchImpl = async () => { throw new Error('AI is down'); };
+        const models = createModels({ config: configLib.load(env), rates: RATES, fetchImpl, log: quiet, meter });
+        const meta = { taskId: 'tsk_via_ai', task: 'actor.task', startedAt: 0, seq: 0 };
+        await assert.rejects(models.withMetering(meta, () => models.withChoice({ provider: 'openai', model: 'gpt-5-mini' },
+            () => models.chat({ tier: 'smart', messages: [{ role: 'user', content: 'x' }] }))));
+        assert.strictEqual(meter.records.length, 0, 'AI publishes its own ai.call.recorded@1 for this call');
+    });
+
     await ok('the meter client posts the records to a stub AI with Actor\'s service token', async () => {
         const seen = [];
         const tokenRequests = [];
