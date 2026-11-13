@@ -7,6 +7,7 @@ module.exports = {
     description: 'Search the web for anything outside OpenVibe (news, facts, documentation, products). Returns up to 6 results, each with its title, summary, URL, site and date: cite the URLs you use. Prefer search_openvibe for OpenVibe content.',
     input: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
     scope: 'public',
+    needs: { files: 'none', network: true },   // plan 11c: the run's files and network settings gate it
     connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 35_000,

@@ -7,6 +7,7 @@ module.exports = {
     description: 'Run one OpenVibe.Tools tool by id with its input object (use find_tools first to see the input).',
     input: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool', 'input'] },
     scope: 'public',
+    needs: { files: 'none', network: true },   // plan 11c: the run's files and network settings gate it
     connector: 'tools',
     acts: true,
     costUsd: 0,

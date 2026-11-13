@@ -15,6 +15,11 @@
  * `allow` is the person's standing permission for one exact step (plan HO1): { kind, target, rules }. A rule that
  * covers this kind and this target lets the step go on at any level. The floor is checked first and is never
  * covered by a rule: money, a password, a deletion and a new recipient ask every time.
+ *
+ * `rule` is what the permission rules said about this call (plan 11c, runtime/run-policy.js): { decision: allow | ask,
+ * why, source: site | person }. The order: the floor; a site rule (final: the owner's ask cannot be allowed away by
+ * anybody); the person's standing permission for this exact step (the most specific thing they said); the person's
+ * own rule; the level.
  */
 
 const LEVELS = ['ask', 'auto-edits', 'approve-for-me', 'full'];
@@ -80,13 +85,20 @@ const floorFor = (categories) => (Array.isArray(categories) ? categories : []).f
  * anything else for an outward action. Returns { ask, floor, reason } — and for approve-for-me whose reviewer approves,
  * { ask: false, reviewer }. Never returns ask=false for a floor category.
  */
-async function decide({ level = 'ask', categories = [], act = 'act', models = null, summary = '', payload = null, signal = null, allow = null } = {}) {
+async function decide({ level = 'ask', categories = [], act = 'act', models = null, summary = '', payload = null, signal = null, allow = null, rule = null } = {}) {
     const floored = floorFor(categories);
     if (floored.length) return { ask: true, floor: floored[0], categories: floored, reason: `Always asks before ${floored.join(', ')} at every level.` };
+    const ruled = rule && (rule.decision === 'allow' || rule.decision === 'ask') ? rule : null;
+    // The owner's rule for everyone (plan 11c) is final: nothing the person allowed covers it.
+    if (ruled && ruled.source === 'site') {
+        return ruled.decision === 'allow' ? { ask: false, rule: ruled, reason: ruled.why } : { ask: true, rule: ruled, reason: ruled.why };
+    }
     // The person's own standing permission for this exact step (plan HO1): it covers the level, never the floor.
     if (allow && require('./allows').matches(allow.rules, allow.kind, allow.target)) {
         return { ask: false, allowed: true, reason: 'You allowed this for this agent.' };
     }
+    // The person's own rule (plan 11c): the last of theirs that matched this call.
+    if (ruled) return ruled.decision === 'allow' ? { ask: false, rule: ruled, reason: ruled.why } : { ask: true, rule: ruled, reason: ruled.why };
     if (level === 'ask') return { ask: true, reason: 'This agent asks before it acts.' };
     if (level === 'auto-edits' && (act === 'code' || act === 'edit')) return { ask: false, reason: 'Auto-accept edits.' };
     if (level === 'auto-edits') return { ask: true, reason: 'Auto-accept edits covers edits; other actions ask.' };

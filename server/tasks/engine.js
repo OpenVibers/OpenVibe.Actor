@@ -36,6 +36,7 @@ const contacts = require('../agents/contacts');
 const assignments = require('../agents/assignments');
 const runTokens = require('../triggers/tokens');
 const levels = require('../agents/levels');
+const runPolicy = require('../runtime/run-policy');
 const spend = require('../agents/spend');
 const { repoIn: codesRepoIn } = require('../agents/codes');
 const memory = require('../memory');
@@ -428,6 +429,23 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         const spendAllowance = taskAgent
             ? await spend.allowance(s, row.requester, taskAgent.id).catch(() => null)
             : null;
+        // The run's settings and the permission rules (plan 11c): the settings the task started with (a task from
+        // before 11c reads as the person's defaults), the owner's rules and the person's, read per run. Rules that
+        // cannot be read make the run ask before anything that is not a read: never fewer asks than the rules.
+        let policyForRun;
+        try {
+            const loaded = await runPolicy.load(s, row.requester);
+            policyForRun = { site: loaded.site, person: loaded.person, settings: row.run_settings || runPolicy.runSettings(loaded, null, null) };
+        } catch (err) {
+            log.warn && log.warn('[Actor] run policy:', id, (err && err.message) || err);
+            const why = 'the permission rules could not be read, so this run asks first';
+            policyForRun = {
+                site: ['writes', 'sends', 'spends', 'secrets'].map((risk) => ({ match: { risk }, decision: 'ask', why })),
+                person: [],
+                settings: row.run_settings || runPolicy.runSettings(null, null, null),
+            };
+        }
+        const runSettings = policyForRun.settings;
         // Both execution paths get the same gate and assignment callbacks: the one loop passes them into its
         // tools, and an adapter that starts a Codes task gets them too.
         let requestApproval = null;
@@ -437,7 +455,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         // a reviewer model of another family. Returns { asked: false } when the step may go ahead.
         // A standing permission the person gave for this exact kind and target (plan HO1) is read here: it lets the
         // step go on, and it never covers the floor.
-        const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT, target = null, spendStep = false }) => {
+        const askForApproval = async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, agent = LOOP_AGENT, target = null, spendStep = false, rule = null }) => {
             const categories = levels.classify({ category, summary, payload, recipientKnown });
             // HO7: money is the person's own. Before a tip reaches them, its recipient is resolved (a person
             // usr_… or a creator's OpenVibe page) and the agent's weekly allowance is checked. An ask that
@@ -449,7 +467,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             }
             const rules = taskAgent ? await allows.list(s, row.requester, taskAgent.id) : [];
             const scopedTarget = kind === 'device.notify' && taskAgent ? taskAgent.name : target;
-            const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal, allow: { kind, target: scopedTarget, rules } });
+            const decision = await levels.decide({ level: taskLevel, categories, act, models, summary, payload, signal, allow: { kind, target: scopedTarget, rules }, rule });
             if (!decision.ask) return { asked: false, decision };
             const ask = await approvals.request(s, { owner: row.requester, agentId: taskAgent ? taskAgent.id : null, taskId: id, kind, summary: money ? money.summary : summary, payload: money ? money.payload : payload, target: scopedTarget, categories });
             const url = `${config.baseUrl}/me/approvals/${ask.id}`;
@@ -574,15 +592,20 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 };
                 controls.set(id, control);
                 if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: 'The agent starts with a plan, then works through it.' });
+                // The run's settings on its card (plan 11c): what it may touch, the network, how it asks. A plan step in
+                // words (actor.task-event@2 has no settings step yet); the values are on the task (run_settings). It
+                // names no agent, so the task page keeps it inside this attempt instead of starting another.
+                if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', text: `Settings: ${runPolicy.describe(runSettings, taskLevel)}.` });
                 // A task that would start coding work on the person's machine asks through the same gate (levels.js):
                 // the level first, then the always-ask floor. Full access or auto-edits may let an edit through; a
                 // payment, password, deletion or a new recipient never does.
-                requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, target = null, spend = false }) => {
-                    const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown, target, spendStep: spend });
+                requestApproval = taskAgent ? async ({ kind, summary, payload, category = null, act = 'act', recipientKnown = null, target = null, spend = false, rule = null }) => {
+                    const out = await askForApproval({ kind, summary, payload, category, act, recipientKnown, target, spendStep: spend, rule });
                     // A refusal (plan HO7): the step does not run and the model is told why.
                     if (out.refusal) return { refused: out.refusal };
                     if (!out.asked) return null;
-                    return { pending: true, id: out.ask.id, url: out.url };
+                    // An unattended run (plan 11c) never waits: the card stays for the person, and the step says so.
+                    return { pending: true, id: out.ask.id, url: out.url, unattended: runSettings.unattended || null };
                 } : null;
                 // The wait that ended (plan A2), if this run was woken by one: the notice, and the event as data.
                 const wakePayload = wakes.get(id) || (dayRun ? await day.wakePayload(id) : null);
@@ -632,6 +655,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     out = await metered(() => withChoice(models, choice, async () => loop.run({
                         task: row.task, requester: fromChat ? null : row.requester, taskId: id, mode: row.mode, signal,
                         connectorSwitches: switches,
+                        runPolicy: policyForRun,
                         // A fork carries its parent's state in the checkpoint, not as a follow-up conversation.
                         context,
                         emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
@@ -759,7 +783,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                                     outward, signal, trace: out.state && out.state.ctx && out.state.ctx.trace,
                                     budgetLeft, writerFamily: out.family || null, now: () => now(),
                                     search: async (query) => (registry
-                                        ? registry.run('search_web', { query }, { config, log, signal, requester: row.requester, now, connectorSwitches: switches })
+                                        ? registry.run('search_web', { query }, { config, log, signal, requester: row.requester, now, connectorSwitches: switches, runPolicy: policyForRun })
                                         : { text: 'no search is configured', isError: true }),
                                 })));
                                 await meter(review.cost_usd);

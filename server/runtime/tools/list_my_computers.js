@@ -7,6 +7,7 @@ module.exports = {
     description: 'List the person\'s own computers open to their agent on OpenVibe.Bot: online or not, the level the person set on the machine (observe: read only; ask: each run or write waits for their approval on the machine; trusted; full), what it offers (terminal, files, screen) and its folders.',
     input: { type: 'object', properties: {} },
     scope: 'person',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'computers',
     costUsd: 0,
     timeoutMs: 20_000,

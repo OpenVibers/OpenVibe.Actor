@@ -87,7 +87,7 @@ const TABLES = [
             // the adult tier.
             'tier',
             // The first-party service permitted to read a personal agent run on the person's behalf.
-            'delegated_via'],
+            'delegated_via', 'run_settings'],
     },
     // The person's own per-UTC-day spend accounting. Deleted: nothing in Actor keeps a person's spend record for a
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is
@@ -97,6 +97,8 @@ const TABLES = [
     // owner's cap counted. The site's own switches (actor_connector_settings) are the operator's, not theirs.
     { table: 'actor_person_connector_settings', subject: 'requester', value: (usr) => `user:${usr}`, file: 'connectors.json' },
     { table: 'actor_connector_calls', subject: 'requester', value: (usr) => `user:${usr}`, file: 'connector-calls.json' },
+    // Their run settings and permission rules (plan 11c). The site's own rules (subject 'site') are the operator's.
+    { table: 'actor_run_policies', subject: 'subject', value: (usr) => `user:${usr}`, file: 'run-policy.json' },
     { table: 'actor_agent_memory', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-memory.json' },
     // The night's tidy (HO5): the diary their agents wrote, the changes the nights made (with the state each change
     // replaced, so an undo can put it back) and the nights themselves. Before the agents, whose rows they hang on.

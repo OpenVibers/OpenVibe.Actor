@@ -17,6 +17,7 @@ module.exports = {
     description: 'Make a new space of your own on OpenVibe.Space. The space starts from Space\'s blank template; write its files with space_files_write and show it with space_preview. Answers the space (its id, slug and name).',
     input: { type: 'object', properties: { name: { type: 'string', description: 'the space\'s name, in a few words' }, description: { type: 'string', description: 'what the space does, in one line' } } },
     scope: 'person',
+    needs: { files: 'write', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'space',
     costUsd: 0,
     timeoutMs: 20_000,

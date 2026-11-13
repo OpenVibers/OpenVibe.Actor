@@ -9,6 +9,7 @@ module.exports = {
     description: 'List a folder on one of the person\'s computers (an absolute path inside its folders).',
     input: { type: 'object', properties: { machine, path: { type: 'string' } }, required: ['machine', 'path'] },
     scope: 'person',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'computers',
     costUsd: 0,
     timeoutMs: 20_000,

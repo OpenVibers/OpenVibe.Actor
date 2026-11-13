@@ -7,6 +7,7 @@ module.exports = {
     description: 'Find OpenVibe.Tools tools for a need (for example "mx records", "ssl certificate", "whois", "http headers", "base64", "hash"). Returns each tool id with its input schema and an example.',
     input: { type: 'object', properties: { need: { type: 'string' } }, required: ['need'] },
     scope: 'public',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     costUsd: 0,
     timeoutMs: 20_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.toolsUrl),

@@ -43,6 +43,7 @@ module.exports = {
         required: ['content'],
     },
     scope: 'person',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'tools',
     acts: true,
     costUsd: 0,

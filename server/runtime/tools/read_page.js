@@ -7,6 +7,7 @@ module.exports = {
     description: 'Read a public web page as text (title, description, main text, links). Use it for URLs the task gives or that a result links to.',
     input: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] },
     scope: 'public',
+    needs: { files: 'none', network: true },   // plan 11c: the run's files and network settings gate it
     connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 40_000,

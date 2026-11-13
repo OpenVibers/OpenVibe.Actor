@@ -26,6 +26,7 @@ module.exports = {
     description: 'Hand a coding task to OpenVibe.Codes, which runs it on the person\'s own machine (it needs them signed in and a machine connected). Name the repository as its https address and say what to change. Answers the summary, the changed files and the patch, or a link to follow the task while the machine is still working.',
     input: { type: 'object', properties: { instruction: { type: 'string', description: 'what to change, in plain words' }, repo: { type: 'string', description: 'the repository as its https address, if the instruction does not already name it' }, agent: { type: 'string', description: 'which coding agent runs it (omit it and Codes picks; "muse" runs it through Muse Code on the person\'s own Muse sign-in, with contributor mode off)' } }, required: ['instruction'] },
     scope: 'person',
+    needs: { files: 'write', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'codes',
     acts: true,
     costUsd: 0,

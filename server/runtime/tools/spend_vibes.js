@@ -30,6 +30,7 @@ module.exports = {
         required: ['to', 'amount'],
     },
     scope: 'person',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     connector: 'money',
     acts: true,
     costUsd: 0,

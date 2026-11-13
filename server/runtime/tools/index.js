@@ -40,6 +40,12 @@
  * private-ok tools; a task with no signed-in requester never sees `person` tools. A module may also export
  * `available(ctx)` to narrow itself further (a service that is not connected this boot).
  *
+ * A module says what it `needs` of the person's files and of the open web (plan 11c, runtime/run-policy.js):
+ * `needs: { files: 'none' | 'read' | 'write', network: true | false }`; without it, files none and network on. A run
+ * whose settings do not give a tool what it needs leaves it out of the list, and `run()` refuses it in one line. The
+ * permission rules (the site's, then the person's; the last match wins) deny, ask or allow each call before the
+ * approval level is asked; an allow never lowers the always-ask floor.
+ *
  * A module may name its `connector`: one of the ids in server/runtime/connectors.js (the group of tools that
  * reaches one OpenVibe service). A module without one is a core tool and is always on. The connectors that are off
  * for the requester — the owner's switch and the person's own — leave their tools out of the list, and `run()`
@@ -50,6 +56,7 @@ const fs = require('fs');
 const path = require('path');
 const { stepFor } = require('../../agents/actions');
 const connectors = require('../connectors');
+const runPolicy = require('../run-policy');
 
 const SCOPES = ['public', 'person', 'private-ok'];
 const NAME = /^[a-z][a-z0-9_]{1,63}$/;
@@ -72,6 +79,7 @@ function validateTool(mod) {
     if (mod.costUsd != null && !(Number.isFinite(mod.costUsd) && mod.costUsd >= 0)) errors.push('costUsd: a number, 0 or more');
     if (mod.timeoutMs != null && !(Number.isInteger(mod.timeoutMs) && mod.timeoutMs > 0 && mod.timeoutMs <= MAX_TIMEOUT_MS)) errors.push(`timeoutMs: an integer from 1 to ${MAX_TIMEOUT_MS}`);
     if (mod.connector != null && !connectors.isConnectorId(mod.connector)) errors.push(`connector: one of ${connectors.CONNECTOR_IDS.join(', ')}`);
+    errors.push(...runPolicy.needsProblems(mod.needs));
     if (typeof mod.run !== 'function') errors.push('run: a function (input, ctx)');
     return errors;
 }
@@ -139,6 +147,14 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
         return Boolean(sw && sw.off && sw.off.has(id));
     };
 
+    /** The run's settings and rules (plan 11c), or null for a caller that has none (a test, an old path). */
+    const policyOf = (ctx) => (ctx && ctx.runPolicy && typeof ctx.runPolicy === 'object' ? ctx.runPolicy : null);
+    /** A rule that denies the tool whatever its input: the tool is left out of the list, so the model never tries. */
+    const deniedOutright = (policy, tool) => {
+        const d = runPolicy.decide(policy, { tool, args: null });
+        return Boolean(d && d.decision === 'deny');
+    };
+
     /** The OpenAI function definitions for this task, filtered by scope, by the module's optional `available(ctx)` and by the connectors that are off. */
     function definitions(ctx = {}) {
         const { requester = null, mode = null } = ctx;
@@ -146,6 +162,7 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
             .filter((t) => allowedBy(t.scope, { requester, mode }) && require('../../chat-apps/policy').allowed(t, ctx.chatPolicy))
             .filter((t) => (typeof t.available === 'function' ? t.available(ctx) !== false : true))
             .filter((t) => !t.connector || !connectorOff(ctx, t.connector))
+            .filter((t) => !policyOf(ctx) || (!runPolicy.settingsRefusal(policyOf(ctx).settings, t) && !deniedOutright(policyOf(ctx), t)))
             .map((t) => ({
                 type: 'function',
                 function: { name: t.name, description: t.description, parameters: t.input },
@@ -178,6 +195,18 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
             }
         }
         if (!require('../../chat-apps/policy').allowed(tool, ctx.chatPolicy)) return normalize({ text: 'This tool is unavailable in this chat.', isError: true });
+        // The run's settings and the permission rules (plan 11c): what the run may touch, then the site's rules and
+        // the person's. A deny ends here with its reason; an allow or an ask goes on to the approval gate below.
+        const policy = policyOf(ctx);
+        let rule = null;
+        if (policy) {
+            const refused = runPolicy.settingsRefusal(policy.settings, tool);
+            if (refused) return normalize({ text: JSON.stringify({ error: `not run: ${refused}` }), data: { refused, setting: true }, isError: true });
+            rule = runPolicy.decide(policy, { tool, args: input && typeof input === 'object' ? input : {} });
+            if (rule && rule.decision === 'deny') {
+                return normalize({ text: JSON.stringify({ error: `not run: ${rule.why}` }), data: { refused: rule.why, rule: { source: rule.source, index: rule.index } }, isError: true });
+            }
+        }
         let dayApproved = false;
         if (ctx.day) {
             const gate = await ctx.day.guardTool(ctx.taskId, name, input, tool);
@@ -186,6 +215,23 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
         }
         if (ctx.chatPolicy && tool.acts === true) {
             if (!ctx.approveChatTool || !await ctx.approveChatTool(name, input)) return normalize({ text: 'The action was not approved. Nothing ran.', isError: true });
+        }
+        // A rule that asks before a call the approval gate would not see (a read, a step with no approval kind, a chat
+        // read): there is nobody to ask here, so it does not run, and the model is told why.
+        const gated = !dayApproved && !ctx.chatPolicy && tool.acts === true && typeof ctx.requestApproval === 'function'
+            && Boolean(typeof tool.step === 'function' ? tool.step(input) : stepFor(name, input));
+        if (rule && rule.decision === 'ask' && !dayApproved && !(ctx.chatPolicy && tool.acts === true) && !gated) {
+            if (typeof ctx.requestApproval !== 'function' || ctx.chatPolicy) {
+                return normalize({ text: JSON.stringify({ error: `not run: ${rule.why}, and this run has nobody to ask` }), data: { refused: rule.why }, isError: true });
+            }
+            let ask;
+            try {
+                ask = await ctx.requestApproval({ kind: 'actor.action', summary: `Use ${name.replace(/_/g, ' ')}`, payload: input, target: name, act: 'act', rule });
+            } catch (err) {
+                return normalize({ text: JSON.stringify({ error: `the approval gate could not be asked, so nothing ran: ${(err && err.message) || err}`.slice(0, 300) }), isError: true });
+            }
+            const stopped = gateAnswer(ask);
+            if (stopped) return stopped;
         }
         // The approval gate (plan §12 A-2): every acting tool sees levels.decide with its act and its
         // always-ask category before it changes anything. A tool that only writes Actor's own working
@@ -198,25 +244,12 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
                 let ask;
                 try {
                     // The step says which kind of act it is (plan HO1); an unknown tool is an action of a connected tool.
-                    ask = await ctx.requestApproval({ ...step, kind: step.kind || 'actor.action' });
+                    ask = await ctx.requestApproval({ ...step, kind: step.kind || 'actor.action', rule });
                 } catch (err) {
                     return normalize({ text: JSON.stringify({ error: `the approval gate could not be asked, so nothing ran: ${(err && err.message) || err}`.slice(0, 300) }), isError: true });
                 }
-                if (ask && ask.pending) {
-                    return normalize({
-                        text: JSON.stringify({ error: `not started: the person must approve it first at ${ask.url}`, approval: { id: ask.id, url: ask.url } }),
-                        data: ask, isError: true,
-                    });
-                }
-                // The gate refused the step outright (plan HO7: a tip over what is left of the agent's weekly
-                // allowance, or a creator that names nobody). The step does not run, and the model is told why in
-                // one plain line.
-                if (ask && ask.refused) {
-                    return normalize({
-                        text: JSON.stringify({ error: String(ask.refused).slice(0, 300) }),
-                        data: { refused: String(ask.refused).slice(0, 300) }, isError: true,
-                    });
-                }
+                const stopped = gateAnswer(ask);
+                if (stopped) return stopped;
             }
         }
         const signal = ctx.signal;
@@ -231,6 +264,29 @@ function createRegistry({ dir = __dirname, log = console, strict = false, fetchI
             const why = timeout.aborted ? `timed out after ${timeoutMs} ms` : ((err && err.message) || String(err));
             return { text: JSON.stringify({ error: why.slice(0, 300) }), data: null, sources: [], isError: true };
         }
+    }
+
+    /**
+     * What the approval gate answered, as the step's result: pending (the card is out; an unattended run says it goes on
+     * without it), refused (plan HO7, or a rule), or null when the step may run.
+     */
+    function gateAnswer(ask) {
+        if (ask && ask.pending) {
+            const why = ask.unattended ? ` This run is unattended (${ask.unattended}), so it goes on without it.` : '';
+            return normalize({
+                text: JSON.stringify({ error: `not started: the person must approve it first at ${ask.url}.${why}`, approval: { id: ask.id, url: ask.url } }),
+                data: ask, isError: true,
+            });
+        }
+        // The gate refused the step outright (plan HO7: a tip over what is left of the agent's weekly allowance, or a
+        // creator that names nobody). The step does not run, and the model is told why in one plain line.
+        if (ask && ask.refused) {
+            return normalize({
+                text: JSON.stringify({ error: String(ask.refused).slice(0, 300) }),
+                data: { refused: String(ask.refused).slice(0, 300) }, isError: true,
+            });
+        }
+        return null;
     }
 
     function report() {

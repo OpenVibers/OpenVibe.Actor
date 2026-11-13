@@ -26,6 +26,7 @@ module.exports = {
         additionalProperties: false,
     },
     scope: 'person',
+    needs: { files: 'none', network: false },   // plan 11c: the run's files and network settings gate it
     costUsd: 0,
     timeoutMs: 5000,
     available: (ctx) => Boolean(ctx && ctx.store),

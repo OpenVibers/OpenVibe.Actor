@@ -47,6 +47,7 @@ module.exports = {
         required: ['topic'],
     },
     scope: 'public',
+    needs: { files: 'none', network: true },   // plan 11c: the run's files and network settings gate it
     connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 15000,
