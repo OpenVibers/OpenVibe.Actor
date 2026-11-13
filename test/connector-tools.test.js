@@ -295,8 +295,14 @@ const registry = () => createRegistry({ strict: true, log: { warn() {}, log() {}
         assert.strictEqual(draft.to, 'stranger@example.test', 'the recipient comes from the letter it answers');
         assert.strictEqual(draft.subject, 'Re: Do something');
         assert.strictEqual(draft.body, 'Hello, here is the answer.');
-        assert.ok(draft.mail_url.startsWith('https://openvibe.email/inbox'), draft.mail_url);
-        assert.strictEqual(draft.prefilled, false, 'Mail has no route that opens its composer with a draft filled in');
+        assert.strictEqual(draft.prefilled, true, 'Mail opens its composer filled in from a link (Mail #103)');
+        const link = new URL(draft.mail_url);
+        assert.strictEqual(link.origin + link.pathname, 'https://openvibe.email/inbox');
+        assert.deepStrictEqual(Object.fromEntries(link.searchParams), { compose: '1', to: 'stranger@example.test', subject: 'Re: Do something', body: 'Hello, here is the answer.' });
+        // A body too long for a link goes as the fields to copy, with the letter it answers.
+        const long = await reg.run('email_draft', { reply_to_id: 'm1', body: 'x'.repeat(6001) }, ctxFor(mail.fetchImpl));
+        assert.strictEqual(long.data.draft.prefilled, false);
+        assert.strictEqual(long.data.draft.mail_url, 'https://openvibe.email/inbox/m1');
     });
 
     await check('shared_node_check submits the job the checks scheduler makes, as the person, and waits for its end', async () => {
@@ -375,7 +381,7 @@ const registry = () => createRegistry({ strict: true, log: { warn() {}, log() {}
         assert.ok(!draft.isError, draft.text);
         assert.strictEqual(mail.calls.length, 0, 'a draft with a recipient needs nothing from Mail');
         assert.strictEqual(draft.data.draft.to, 'someone@example.test');
-        assert.strictEqual(draft.data.draft.mail_url, 'https://openvibe.email/inbox');
+        assert.strictEqual(draft.data.draft.mail_url, 'https://openvibe.email/inbox?compose=1&to=someone%40example.test&subject=Hello&body=Hi+there.');
     });
 
     await check('shared_node_check runs the workflow and the job it is told to run', async () => {

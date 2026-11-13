@@ -7,8 +7,8 @@
  * only makes the draft and shows it as a card, so the person reads it, copies it and sends it in Mail
  * themselves. That is why the tool does not act.
  *
- * Mail's composer is a dialog inside its inbox page: there is no route that takes a draft as a query and opens
- * the composer with it filled. The card therefore carries the three fields to copy and the link to the inbox (and
+ * Mail opens its composer filled in from a link (Mail #103: /inbox?compose=1&to=&subject=&body=), so the card's link
+ * opens the draft ready to send, and the person presses Send there. The card still carries the three fields (and
  * to the message it answers, when there is one), and the run says in one line that the person sends it.
  */
 
@@ -61,18 +61,23 @@ module.exports = {
         if (!to) return { text: JSON.stringify({ error: 'name the recipient of the draft' }), isError: true };
 
         const inbox = mailPublicUrl(ctx) + '/inbox';
-        const link = replyTo ? inbox + '/' + encodeURIComponent(replyTo) : inbox;
+        // The composer, filled in (Mail #103): a link stays well under what browsers and proxies take, so a body longer
+        // than 6,000 characters goes as the fields to copy instead.
+        const q = new URLSearchParams({ compose: '1', to, subject, body });
+        const prefilled = body.length <= 6000;
+        const link = prefilled ? inbox + '?' + q.toString() : (replyTo ? inbox + '/' + encodeURIComponent(replyTo) : inbox);
         const draft = {
             to, subject, body,
             reply_to_id: replyTo || null,
             mail_url: link,
-            // Mail has no route that opens its composer with a draft filled in, so the card carries the fields
-            // to copy and the link to the inbox (and to the letter, for a reply).
-            prefilled: false,
-            note: 'The person sends this themselves: copy the three fields into their inbox, or open the message it answers and press reply.',
+            prefilled,
+            note: prefilled
+                ? 'The person sends this themselves: the link opens it in OpenVibe.Mail, filled in, and they press Send.'
+                : 'The person sends this themselves: it is too long for a link, so copy the three fields into their inbox, or open the message it answers and press reply.',
         };
         const line = 'A draft is ready for you to send in OpenVibe.Mail (nothing was sent): to ' + to
-            + (subject ? ', subject "' + subject + '"' : '') + '. Open ' + link + ' and paste the text, or press reply on the message it answers.';
+            + (subject ? ', subject "' + subject + '"' : '') + '. '
+            + (prefilled ? 'Open it, filled in, and press Send: ' + link : 'Open ' + link + ' and paste the text, or press reply on the message it answers.');
         if (ctx.emit) await ctx.emit({ step: 'text', text: line });
         return { text: line, data: { draft } };
     },
