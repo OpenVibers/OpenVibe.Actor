@@ -311,7 +311,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     }
 
     /** One model turn. Checks the clock and the budget first; meters its cost after. */
-    async function callModel(state, ctx, { tools, forceNoTools = false, stepKind = 'work' } = {}) {
+    async function callModel(state, ctx, { tools, forceNoTools = false, stepKind = 'work', taskEnd = false } = {}) {
         if (state.signal && state.signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'actor.task.cancelled' });
         if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return null;
         const defs = forceNoTools ? null : shortlistTools(tools, state);
@@ -332,6 +332,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 ...(onDelta ? { onDelta } : {}),
                 // A routine's run may wait (plan BA): the class it asks AI's router for, when the caller named one.
                 ...(ctx.latency ? { latency: ctx.latency } : {}),
+                // The last step of a task carries its whole wall time on the record (AI's task_ms).
+                ...(taskEnd ? { taskEnd: true } : {}),
             });
         } catch (err) {
             await spanModel(ctx.trace, { tier: state.tier, family: state.family, startedAt, ms: now() - startedAt, error: err, step: state.calls + 1 });
@@ -476,7 +478,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (ctx.budgetLeft && ctx.budgetLeft() > 0) {
             state.messages.push({ role: 'user', content: `Stop working now (${why}). Answer from the evidence you already have, citing [E#] for every live fact; remove anything the evidence does not support. If the evidence cannot answer the task, say exactly what is missing.` });
             try {
-                const r = await callModel(state, ctx, { tools: null, forceNoTools: true });
+                const r = await callModel(state, ctx, { tools: null, forceNoTools: true, taskEnd: state.depth === 0 });
                 if (r && r.text && r.text.trim()) return r.text.trim();
             } catch (err) {
                 if (state.signal && state.signal.aborted) throw err;
@@ -619,7 +621,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const tier = await tierFor(state, ctx);
             if (tier === null) { await answered('the budget cannot pay for another model call'); break; }
             state.tier = tier;
-            const r = await callModel(state, ctx, { tools: state.tools, stepKind: 'work' });
+            const r = await callModel(state, ctx, { tools: state.tools, stepKind: 'work', taskEnd: state.depth === 0 && state.selfReflections >= reflections });
             if (!r) { await answered('the task reached its budget'); break; }
             state.messages.push(r.message);
             if (r.text && r.text.trim()) { state.lastText = r.text.trim(); if (state.brain) state.brain.lastLine = clip(r.text.trim(), 160); }

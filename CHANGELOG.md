@@ -1,6 +1,16 @@
 # Changelog
 
 
+## Unreleased — every AI call measured
+
+- **AI meter** (`openvibe-sdk/ai-meter`, SDK 0.164.0): every model call Actor makes straight to a provider is recorded
+  and sent to OpenVibe.AI's `POST /api/v1/usage/calls` (a call through OpenVibe.AI, with a person's own key or the
+  router, is recorded by AI itself, so it is never counted twice): provider,
+  model, task and call id, TTFT, tokens per second, latency, tokens, tool calls, the outcome, a failure's class, and
+  the task's wall time on its last step. Actor's service token is narrowed to `ai.usage.report`. The meter is off in
+  a drill and in tests, and it never fails or blocks a model call.
+- Pins: openvibe-contracts v0.421.0, openvibe-sdk v0.164.0.
+
 ## Unreleased — make your own agent (blueprints)
 
 - **Blueprints** (`agents.blueprint@1`, Contracts 0.419.0): a person's agent as one document of ten parts.
