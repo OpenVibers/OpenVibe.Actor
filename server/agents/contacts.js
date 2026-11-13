@@ -18,13 +18,14 @@
  *   agentForTask(s, config, task) / effectiveLevelFor(s, task, agent) / maxLevel(...)
  */
 const levels = require('./levels');
+const soulSdk = require('openvibe-sdk/agents/soul');
 
 const ID = /^agt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const ENGINE = ['runtime', 'own-keys', 'open-gpu', 'link'];
 const KINDS = ['browser', 'kept-browser', 'desktop', 'gpu-desktop', 'always-on', 'your-computer', 'throwaway'];
 const PLACEMENTS = ['auto', 'link', 'home', 'ovh'];
 const APP = /^[a-z][a-z0-9._-]{0,63}$/;
-const ALLOWED = ['preset', 'name', 'face', 'voice', 'model', 'computer', 'apps', 'memory', 'level', 'instructions'];
+const ALLOWED = ['preset', 'name', 'face', 'voice', 'model', 'computer', 'apps', 'memory', 'level', 'instructions', 'soul'];
 const VIBE_INSTRUCTIONS = 'You are Vibe, this person\'s first agent. Help them with whatever they bring you: answer, plan, and use the tools you are allowed. Ask before anything that spends money, reveals a password, deletes something or sends to a new recipient.';
 
 const PRESETS = [
@@ -60,6 +61,12 @@ const presets = () => ({ presets: PRESETS.map((p) => ({ ...p, model: { ...p.mode
 const parse = (v) => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
 
 function wire(row) {
+    let soul = null;
+    let soulMd = null;
+    try {
+        soul = parse(row.soul) || null;
+        if (soul) soulMd = soulSdk.toSoulMd(soul, { name: row.name });
+    } catch { soul = null; }
     return {
         id: row.id,
         owner: row.owner,
@@ -71,6 +78,8 @@ function wire(row) {
         apps: parse(row.apps) || [],
         memory: row.memory_scope || null,
         level: levels.LEVELS.includes(row.level) ? row.level : 'ask',
+        soul,
+        ...(soulMd ? { soul_md: soulMd } : {}),
         created_at: row.created_at,
     };
 }
@@ -90,6 +99,10 @@ function validate(next) {
     if (!Array.isArray(next.apps) || next.apps.length > 50 || new Set(next.apps).size !== next.apps.length) return 'apps must be an array of at most 50 distinct app ids.';
     if (next.apps.some((a) => typeof a !== 'string' || !APP.test(a))) return 'each app id must be a connect slug.';
     if (next.memory != null && (typeof next.memory !== 'string' || next.memory.length > 100)) return 'memory must be a Memory scope id or null.';
+    if (next.soul != null) {
+        const v = soulSdk.validate(next.soul);
+        if (!v.ok) return v.errors && v.errors[0] ? `${v.errors[0].at}: ${v.errors[0].why}` : 'soul is invalid.';
+    }
     if (!levels.LEVELS.includes(next.level)) return `level must be one of ${levels.LEVELS.join(', ')}.`;
     return null;
 }
@@ -138,6 +151,7 @@ async function create(s, config, owner, input, extra = null) {
         apps: body.apps != null ? body.apps : base.apps,
         memory: body.memory !== undefined ? body.memory : base.memory,
         level: body.level != null ? body.level : base.level,
+        soul: body.soul !== undefined ? body.soul : null,
     };
     const invalid = validate(next);
     if (invalid) return { error: invalid };
@@ -152,8 +166,8 @@ async function create(s, config, owner, input, extra = null) {
     const now = s.iso();
     const row = await s.db.maybe(`INSERT INTO actor_agents
         (id, owner, name, instructions, mode, budget_per_run_usd, daily_runs_max, schedule, status, created_at, updated_at,
-         face, voice, model_engine, model_id, computer, apps, memory_scope, level, is_vibe, preset, bio, rules, voice_author, voice_author_name, voice_author_checked, voice_source, voice_suggested_apps)
-        VALUES ($1,$2,$3,$4,'balanced',$5,1,'off','active',$6,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,false,$15,$16,$17::jsonb,$18,$19,$20,$21,$22::jsonb) RETURNING *`,
+         face, voice, model_engine, model_id, computer, apps, memory_scope, level, is_vibe, preset, bio, rules, voice_author, voice_author_name, voice_author_checked, voice_source, voice_suggested_apps, soul)
+        VALUES ($1,$2,$3,$4,'balanced',$5,1,'off','active',$6,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,false,$15,$16,$17::jsonb,$18,$19,$20,$21,$22::jsonb,$23::jsonb) RETURNING *`,
     [s.newId('agt'), owner, next.name, instructions, Math.max(0.000001, Number(config.allowance.perTaskUsd) || 0.05), now,
         next.face, next.voice, next.model.engine, next.model.model, next.computer ? JSON.stringify(next.computer) : null,
         JSON.stringify(next.apps), next.memory, next.level, p ? p.id : null,
@@ -161,7 +175,8 @@ async function create(s, config, owner, input, extra = null) {
         extra && extra.voice_author ? extra.voice_author : null, extra && extra.voice_author_name ? extra.voice_author_name : null,
         extra && extra.voice_author_checked ? true : false,
         extra && extra.voice_source ? extra.voice_source : null,
-        JSON.stringify((extra && Array.isArray(extra.suggested_apps) ? extra.suggested_apps : []).slice(0, 50))]);
+        JSON.stringify((extra && Array.isArray(extra.suggested_apps) ? extra.suggested_apps : []).slice(0, 50)),
+        next.soul ? JSON.stringify(next.soul) : null]);
     return { row };
 }
 
@@ -179,6 +194,7 @@ async function update(s, config, owner, id, patch) {
         apps: body.apps !== undefined ? body.apps : (parse(row.apps) || []),
         memory: body.memory !== undefined ? body.memory : row.memory_scope,
         level: body.level !== undefined ? body.level : row.level,
+        soul: body.soul !== undefined ? body.soul : parse(row.soul),
     };
     const invalid = validate(next);
     if (invalid) return { error: invalid };
@@ -188,10 +204,10 @@ async function update(s, config, owner, id, patch) {
         instructions = body.instructions;
     }
     return { row: await s.db.maybe(`UPDATE actor_agents SET name=$3, face=$4, voice=$5, model_engine=$6, model_id=$7,
-        computer=$8::jsonb, apps=$9::jsonb, memory_scope=$10, level=$11, instructions=$12, updated_at=$13
+        computer=$8::jsonb, apps=$9::jsonb, memory_scope=$10, level=$11, instructions=$12, soul=$13::jsonb, updated_at=$14
         WHERE id=$1 AND owner=$2 RETURNING *`,
     [id, owner, next.name, next.face, next.voice, next.model.engine, next.model.model, next.computer ? JSON.stringify(next.computer) : null,
-        JSON.stringify(next.apps), next.memory, next.level, instructions, s.iso()]) };
+        JSON.stringify(next.apps), next.memory, next.level, instructions, next.soul ? JSON.stringify(next.soul) : null, s.iso()]) };
 }
 
 async function remove(s, owner, id) {

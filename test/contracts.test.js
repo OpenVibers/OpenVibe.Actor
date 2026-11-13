@@ -68,6 +68,11 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/me/approvals/:id', 'actor.approval.decide'],
     ['POST /api/v1/me/approvals/:id/photo', 'actor.approval.decide'],
     ['POST /api/v1/me/approvals/:id/answer', 'actor.approval.decide'],
+    // An agent's soul (agents.soul@1, Contracts 0.424.0): the faces the menu's stack reads, a person's SOUL.md import
+    // and a suggested change. The release ships the schema, not the routes; the agent capability already covers them.
+    ['GET /api/v1/me/agents/faces', 'actor.agent.manage'],
+    ['POST /api/v1/agents/:id/soul/import', 'actor.agent.manage'],
+    ['POST /api/v1/agents/:id/soul/suggest', 'actor.agent.manage'],
 ]);
 const API_SRC = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
 // The A2A surface (stage V2-11): POST /a2a/v1/tasks and GET /a2a/v1/tasks/:id, guarded by actor.a2a.task.

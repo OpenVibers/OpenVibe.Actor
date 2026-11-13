@@ -1,6 +1,24 @@
 # Changelog
 
 
+## Unreleased — agents have souls
+
+- **A soul** (`agents.soul@1`, Contracts 0.424.0; `openvibe-sdk/agents/soul` 0.165.0; migration 0072): who a personal
+  agent is, kept apart from its instructions and its memory. `actor_agents.soul` is jsonb (null: no soul yet); a create
+  and a patch take a `soul` that the SDK validates, and a catalogue answer carries it back with its `soul_md`.
+- **The prompt:** a soul is the first block of a personal agent's prompt (`toPrompt(soul, { name })`) and the first
+  prompt layer, before the person's instructions, so the cached prefix stays stable. It says who the agent is, never
+  what it may do.
+- **Import:** `POST /api/v1/agents/:id/soul/import` takes a `SOUL.md` of at most 20 KB and stores what
+  `fromSoulMd` reads; an invalid result (a secret, a bad part) is 422.
+- **Suggestions (Design rule 176):** `POST /api/v1/agents/:id/soul/suggest` waits in `actor_agent_proposals` as kind
+  `soul` with `change()`'s words; the person accepts or dismisses it on the existing suggestions route. An agent never
+  writes its own soul.
+- **Your agents in the menu:** `GET /api/v1/me/agents/faces` answers each face's name, avatar, hue, glyph, state
+  (working, asks, paused, resting), current step and number of asks, newest activity first and at most twelve; the
+  same first-party CORS as the Actor strip, cached privately for 15 seconds.
+- Pins: openvibe-contracts v0.424.0, openvibe-sdk v0.165.0.
+
 ## Unreleased — every AI call measured
 
 - **AI meter** (`openvibe-sdk/ai-meter`, SDK 0.164.0): every model call Actor makes straight to a provider is recorded
