@@ -28,7 +28,7 @@ module.exports = {
         required: ['body'],
     },
     scope: 'person',
-    needs: { files: 'read', network: true },   // plan 11c: the run's files and network settings gate it
+    needs: { files: 'read', network: false },   // plan 11c: OpenVibe's own service, not the open web
     connector: 'email',
     acts: false,   // nothing leaves: the person sends the draft in Mail
     costUsd: 0,

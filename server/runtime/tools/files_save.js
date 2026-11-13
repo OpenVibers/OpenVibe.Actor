@@ -15,7 +15,8 @@ const { downloadFor, personOf, freeName } = require('./_download');
 
 /** The folder path a save goes to: 'Agent' plus the path the person gave. */
 const folderFor = (path) => {
-    const wanted = String(path || '').split('/').map((p) => p.trim()).filter(Boolean);
+    // "." and ".." are never folder names here: a save stays under Agent whatever the path says.
+    const wanted = String(path || '').split(/[\\/]/).map((p) => p.trim()).filter((p) => p && p !== '.' && p !== '..');
     return ['Agent'].concat(wanted).join('/');
 };
 
@@ -33,7 +34,7 @@ module.exports = {
         required: ['name'],
     },
     scope: 'person',
-    needs: { files: 'write', network: true },   // plan 11c: the run's files and network settings gate it
+    needs: { files: 'write', network: false },   // plan 11c: OpenVibe's own service, not the open web
     connector: 'files',
     acts: true,
     costUsd: 0,

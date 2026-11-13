@@ -76,7 +76,7 @@ module.exports = {
         required: ['repo'],
     },
     scope: 'person',
-    needs: { files: 'read', network: true },   // plan 11c: the run's files and network settings gate it
+    needs: { files: 'read', network: true },   // plan 11c: a public GitHub repository is fetched from the open web
     connector: 'shared_nodes',
     acts: true,
     costUsd: 0,

@@ -21,7 +21,7 @@ module.exports = {
         },
     },
     scope: 'person',
-    needs: { files: 'read', network: true },   // plan 11c: the run's files and network settings gate it
+    needs: { files: 'read', network: false },   // plan 11c: OpenVibe's own service, not the open web
     connector: 'email',
     costUsd: 0,
     timeoutMs: 30_000,
