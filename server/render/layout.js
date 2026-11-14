@@ -25,11 +25,11 @@ const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
 // The product's own places: the main ones carry an icon (phones get them as the bottom tab bar), the rest fold into
 // the navbar's More (Shared 4.22). Search is the navbar's magnifier and What shipped is the footer's.
 const NAV = [
-    { label: 'Chat', href: '/chat', icon: 'fa-comments' },
-    { label: 'Your tasks', href: '/tasks', icon: 'fa-list-check' },
-    { label: 'Agents', href: '/agents', icon: 'fa-robot' },
-    { label: 'Settings', href: '/chat/settings', icon: 'fa-gear' },
-    { label: 'API', href: '/docs', icon: 'fa-code', more: true },
+    { label: 'Chat', href: '/chat', icon: 'chat' },
+    { label: 'Your tasks', href: '/tasks', icon: 'steps' },
+    { label: 'Agents', href: '/agents', icon: 'robot' },
+    { label: 'Settings', href: '/chat/settings', icon: 'gear' },
+    { label: 'API', href: '/docs', icon: 'code', more: true },
 ];
 
 const hashes = new Map();
@@ -61,7 +61,7 @@ function renderPage(o) {
         service: 'actor',
         apiBase: NETWORK_URL,
         links: NAV.map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) })),
-        appBar: [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Chat', href: '/chat', icon: 'fa-comments' }, { label: 'Agents', href: '/agents', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20): Home, Chat, Agents
+        appBar: [{ label: 'Home', href: '/', icon: 'home' }, { label: 'Chat', href: '/chat', icon: 'chat' }, { label: 'Agents', href: '/agents', icon: 'robot' }],   // phones: the bottom tab bar (Shared 4.20): Home, Chat, Agents
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
@@ -72,7 +72,7 @@ function renderPage(o) {
     };
     // This site's own account links live in the shared navbar's account menu (the page's account
     // bar below is only for visitors without JavaScript).
-    if (signedIn) nav.menu = { before: [{ label: 'Chat', href: '/chat', icon: 'fa-comments' }, { label: 'Your tasks', href: '/tasks', icon: 'fa-list-check' }, { label: 'Your agents', href: '/me/agents', icon: 'fa-robot' }, { label: 'Memory', href: '/memory', icon: 'fa-brain' }, { label: 'Settings', href: '/chat/settings', icon: 'fa-gear' }] };
+    if (signedIn) nav.menu = { before: [{ label: 'Chat', href: '/chat', icon: 'chat' }, { label: 'Your tasks', href: '/tasks', icon: 'steps' }, { label: 'Your agents', href: '/me/agents', icon: 'robot' }, { label: 'Memory', href: '/memory', icon: 'brain' }, { label: 'Settings', href: '/chat/settings', icon: 'gear' }] };
     const footer = { service: 'actor', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' };
     const account = signedIn
         ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`

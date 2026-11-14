@@ -525,16 +525,16 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
 ${box}
 ${raw(starts)}</section>
 ${raw(showcase.features({ id: 'watch', title: 'Watch it work, from anywhere', lede: 'It is your AI, doing things on your behalf, so you can always see what it is doing.', items: [
-                { icon: 'fa-eye', title: 'Its screen, live', text: 'When it works on a computer, watch its screen from the Dock on any OpenVibe page, or on your phone.' },
-                { icon: 'fa-list-check', title: 'What it is doing, in plain words', text: 'Away from a screen: the step it is on, what it read, what it did last and what it will do next.' },
-                { icon: 'fa-hand-pointer', title: 'Take over any time', text: 'Tap to take the mouse, then hand it back. Signing in? It hands you its screen and you type your own password.' },
-                { icon: 'fa-bell', title: 'It asks before it acts', text: 'Spending money, posting, applying or messaging someone waits for your yes, on any OpenVibe page or your phone.' },
+                { icon: 'ov:eye', title: 'Its screen, live', text: 'When it works on a computer, watch its screen from the Dock on any OpenVibe page, or on your phone.' },
+                { icon: 'ov:steps', title: 'What it is doing, in plain words', text: 'Away from a screen: the step it is on, what it read, what it did last and what it will do next.' },
+                { icon: 'ov:hand', title: 'Take over any time', text: 'Tap to take the mouse, then hand it back. Signing in? It hands you its screen and you type your own password.' },
+                { icon: 'ov:bell', title: 'It asks before it acts', text: 'Spending money, posting, applying or messaging someone waits for your yes, on any OpenVibe page or your phone.' },
             ] }))}
 ${raw(showcase.features({ id: 'brains', title: 'The model is your call', lede: 'Pick what it thinks with for each job, and change it any time.', items: [
-                { icon: 'fa-wand-magic-sparkles', title: 'OpenVibe\'s models', text: 'DeepSeek, GPT and open models, at cost, through OpenVibe.Exchange.' },
-                { icon: 'fa-key', title: 'Your own keys, no fee', text: 'Claude, OpenAI, DeepSeek or Gemini on your own account: OpenVibe adds nothing.' },
-                { icon: 'fa-terminal', title: 'Your Codex or Claude Code plan', text: 'Coding jobs run through OpenVibe.Codes on the plan you already pay for.' },
-                { icon: 'fa-desktop', title: 'On your own computer', text: 'With OpenVibe Link it can work on your machine, with your models, from your own internet address.' },
+                { icon: 'ov:wand', title: 'OpenVibe\'s models', text: 'DeepSeek, GPT and open models, at cost, through OpenVibe.Exchange.' },
+                { icon: 'ov:key', title: 'Your own keys, no fee', text: 'Claude, OpenAI, DeepSeek or Gemini on your own account: OpenVibe adds nothing.' },
+                { icon: 'ov:terminal', title: 'Your Codex or Claude Code plan', text: 'Coding jobs run through OpenVibe.Codes on the plan you already pay for.' },
+                { icon: 'ov:computer', title: 'On your own computer', text: 'With OpenVibe Link it can work on your machine, with your models, from your own internet address.' },
             ] }))}
 ${raw(showcase.compare({ id: 'compare', title: 'Yours, not theirs', lede: 'The big personal agents of 2026 each lock you to one company\'s model and cloud.', columns: ['OpenVibe.Actor', 'Grok Bot', 'OpenAI Dots', 'Meta Muse'], rows: [
                 { label: 'Pick any model, including your own', values: [true, false, false, false] },
