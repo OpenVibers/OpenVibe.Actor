@@ -34,6 +34,7 @@ const EXPECTED = {
     search_web: false,
     sports_scores: false,
     time_in: false,
+    video_analyze: false,
     weather_now: false,
     wikipedia: false,
     // Acting: a robot moves, a command runs, a file or memory is written, a task or hand-off starts, or a generic
