@@ -62,6 +62,36 @@ const ME = 'usr_01JAB2C3D4E5F6G7H8J9K0MNPQ';
     assert.strictEqual(grants.grantFor('tsk_three'), null, 'a spent grant is forgotten');
     assert.strictEqual(tool.available(ctx), false, 'and the tool is gone');
 
+    // 11-14 review: the guard outlives the grant. After the save the key page is still open: reads stay masked and
+    // screenshots stay blocked, for this provider's key and any other provider's.
+    const after = await browserTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', action: 'read' }, ctx);
+    assert.ok(!after.text.includes(CANARY) && after.text.includes('[a key: hidden]'), 'after the save, a page read still never shows the key');
+    let blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', question: 'and now?' }, ctx);
+    assert.ok(blocked.isError && /A key is on the screen/.test(blocked.text), 'after the save, still no screenshot while it shows');
+    const OTHER = 'sk-ant-' + 'Q'.repeat(40);
+    page = `Anthropic console: ${OTHER}`;
+    const other = await browserTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', action: 'read' }, ctx);
+    assert.ok(!other.text.includes(OTHER), 'another provider\'s key is hidden too');
+    blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ' }, ctx);
+    assert.ok(blocked.isError, 'and blocks the screenshot');
+    // Fail closed: a page that cannot be read gets no screenshot.
+    const readPage = core.pcs.browser;
+    core.pcs.browser = async () => { throw new Error('the desk did not answer'); };
+    blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ' }, ctx);
+    assert.ok(blocked.isError && /could not be checked/.test(blocked.text), 'an unreadable page gets no screenshot');
+    core.pcs.browser = readPage;
+    // A provider whose keys we cannot recognise: no screenshots at all.
+    grants.remember('tsk_six', { grantId: GRANT, keys: ['mystery.api_key'], provider: 'mystery' });
+    blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ' }, { ...ctx, taskId: 'tsk_six' });
+    assert.ok(blocked.isError && /cannot be recognised/.test(blocked.text), 'an unknown key shape: no screenshots');
+    // After the grant's 30 minutes the guard still holds; it ends long after the task.
+    const t1 = Date.now();
+    grants.remember('tsk_seven', { grantId: GRANT, keys: ['deepseek.api_key'], provider: 'deepseek' }, t1);
+    assert.strictEqual(grants.grantFor('tsk_seven', t1 + grants.TTL_MS + 1), null, 'the grant expired');
+    assert.ok(grants.guardFor('tsk_seven', t1 + grants.TTL_MS + 1), 'the guard did not');
+    assert.strictEqual(grants.guardFor('tsk_seven', t1 + grants.GUARD_MS + 1), null, 'and ends in the end');
+    page = `Your new API key (shown once):\n${CANARY}\nDone`;
+
     // A save Network refuses says why, never the key.
     grants.remember('tsk_four', { grantId: GRANT, keys: ['deepseek.api_key'], provider: 'deepseek' });
     const refused = await tool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ' }, { ...ctx, taskId: 'tsk_four', setupSaver: { save: async () => ({ ok: false, reason: 'setup_grant.gone' }) } });

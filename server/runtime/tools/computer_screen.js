@@ -21,17 +21,22 @@ module.exports = {
         if (!core.pcs.enabled || !person) return { text: json({ error: 'computers are only for a signed-in person\'s task' }), isError: true };
         const a = await prepareDesk('computer_screen', input, person, core, ctx);
         if (a.error) return { text: json(a), isError: true };
-        // A task setting up a provider key (plan §AB.44): no look at the screen while it shows the new key (the picture
-        // would go to a vision model, and its answer could repeat the key); setup_save_key reads and saves it.
+        // A task setting up a provider key (plan §AB.44): no picture of the screen that could show a key (it would go to a
+        // vision model, and its answer could repeat the key). Enforced, and failing closed, for the task's whole life (the
+        // guard outlives the grant): the page must be read first and show nothing shaped like any provider's key, and a
+        // provider whose keys we cannot recognise gets no screenshots at all. setup_save_key reads and saves the key.
         const setup = require('../../setup/grants');
-        const g = setup.grantFor(ctx.taskId);
-        if (g) {
+        const guard = setup.guardFor(ctx.taskId);
+        if (guard) {
+            const no = (why) => ({ text: json({ error: why }), isError: true });
+            if (!setup.KEY_SHAPES[guard.provider]) return no('This task sets up a key whose shape cannot be recognised, so no screenshots: read the page with computer_browser instead.');
             let page = null;
             try { page = await core.pcs.browser(person, a.machine, { action: 'read', ...(a.desk ? { desk: a.desk } : {}) }, { signal: ctx.signal }); } catch { page = null; }
-            const text = page && typeof page === 'object' ? [page.text, page.content, page.value].filter((x) => typeof x === 'string').join('\n') : '';
-            const seen = setup.findKey(text, g.provider);
-            if (seen.key || seen.reason === 'several_keys_on_page') {
-                return { text: json({ error: 'The new key is on the screen: call setup_save_key now. No screenshot while it shows.' }), isError: true };
+            if (!page || typeof page !== 'object') return no('The page could not be checked for a key, so no screenshot: read it with computer_browser instead.');
+            const text = [page.text, page.content, page.value, page.title].filter((x) => typeof x === 'string').join('\n');
+            if (setup.showsKey(text)) {
+                return no(setup.grantFor(ctx.taskId) ? 'The new key is on the screen: call setup_save_key now. No screenshot while it shows.'
+                    : 'A key is on the screen. No screenshot while it shows: close or leave that page first.');
             }
         }
         const data = await lookAtScreen(person, a, ctx, core);
