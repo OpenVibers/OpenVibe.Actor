@@ -135,3 +135,5 @@ img.ac-face { background: var(--bg-card, #131c2e); }
 .pa-panel .ac-lv input { grid-row: auto; margin: .15rem 0 0; }
 .pa-panel .ac-lv-line { grid-column: 1 / -1; font-size: 12.5px; line-height: 1.35; }
 @media (max-width: 22rem) { .pa-panel .ac-levels { grid-template-columns: 1fr; } }
+/* Design rule 201: the intro is one line on a computer, at most two on a phone. */
+@media (max-width: 640px) { .pa-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
