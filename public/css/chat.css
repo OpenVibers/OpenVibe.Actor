@@ -330,3 +330,5 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
    the navbar and above a phone's app bar; each side scrolls on its own. */
 .ac-messenger { height: calc(100dvh - var(--ovnav-real-h, 52px) - var(--ovnav-appbar-h, 0px)); min-height: 420px; box-sizing: border-box; }
 html.ac-has-messenger, html.ac-has-messenger body { overflow: hidden; }
+/* Design rule 201: the intro is one line on a computer, at most two on a phone. */
+@media (max-width: 640px) { .cm-lede, .ct-settings-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }

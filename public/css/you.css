@@ -74,3 +74,5 @@
 .ay-dock .ovt-c-note:empty{display:none}
 .ay-dock .ovt-send{width:44px;height:44px;border-radius:50%}
 @media (max-width:420px){.ay-bar{gap:8px;padding:7px 7px 7px 9px}.ay-bar .ay-avatar{width:36px;height:36px}.ay-bar-spend small{display:none}}
+/* Design rule 201: the intro is one line on a computer, at most two on a phone. */
+@media (max-width: 640px) { .ay-starters-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }

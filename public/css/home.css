@@ -91,3 +91,5 @@
 .hm-now-btn.is-yes { background: var(--accent-strong, #2563eb); border-color: transparent; color: var(--on-accent-strong, #fff); }
 .hm-now-meta { margin: 0; font-size: .82rem; color: var(--text-muted, #8b93a7); }
 .hm-compare-src { position: relative; clear: both; margin: 22px 0 28px; font-size: .78rem; color: var(--text-muted, #8b93a7); max-width: 70ch; }
+/* Design rule 201: the intro is one line on a computer, at most two on a phone. */
+@media (max-width: 640px) { .sc-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }

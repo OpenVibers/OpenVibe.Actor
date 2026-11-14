@@ -93,3 +93,5 @@
     .mem-btn, .mem-more { min-height: 44px; }
     .mem-more { width: 44px; height: 44px; }
 }
+/* Design rule 201: the intro is one line on a computer, at most two on a phone. */
+@media (max-width: 640px) { .mem-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
