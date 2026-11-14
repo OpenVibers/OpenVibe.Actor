@@ -793,6 +793,38 @@ function createApi(ctx) {
         return res.status(out.status).json({ ...(await wireTask(out.task)), ...(out.task.webhook_secret ? { webhook_secret: out.task.webhook_secret } : {}) });
     });
 
+    /**
+     * Setup done by your agent (plan §AB.44): a task that sets up one provider key for the person's OpenVibe, with the
+     * one-time grant they made on Network's guided setup. The person's own token only (never an app). The grant id stays
+     * in memory beside the task (server/setup/grants.js); the task's text never carries it.
+     *   POST /api/v1/setup/tasks { grant: 'sgr_…', keys: ['deepseek.api_key'], provider: 'deepseek', label?: 'DeepSeek', get_it_at: 'https://…' }
+     */
+    r.post('/setup/tasks', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), async (req, res) => {
+        const p = req.principal;
+        if (!p || p.kind !== 'user' || p.via) return problem(req, res, 403, 'actor.setup.person_only', 'Only the person sets up their own keys.');
+        const b = req.body && typeof req.body === 'object' ? req.body : {};
+        const setupGrants = require('../setup/grants');
+        const provider = String(b.provider || '').toLowerCase();
+        const keys = Array.isArray(b.keys) ? b.keys.map(String) : [];
+        if (!setupGrants.GRANT_ID.test(String(b.grant || '')) || !keys.length || keys.length > 4) return problem(req, res, 422, 'actor.setup.grant', 'A setup grant and its key are needed.');
+        if (!setupGrants.KEY_SHAPES[provider]) return problem(req, res, 422, 'actor.setup.provider', 'Your agent cannot read this provider\'s keys from its page yet: paste it in Setup.');
+        let url;
+        try { url = new URL(String(b.get_it_at || '')); } catch { url = null; }
+        if (!url || url.protocol !== 'https:') return problem(req, res, 422, 'actor.setup.page', 'The page where the key is made is needed (https).');
+        const label = String(b.label || provider).replace(/[^\p{L}\p{N} ._()-]+/gu, '').slice(0, 60) || provider;
+        const task = `Set up your person's ${label} key for OpenVibe.\n\n`
+            + `1. Open ${url.href} in your own browser on a private desk (computer_browser with desk "private").\n`
+            + '2. Whenever the page asks to sign in, to verify (a code, 2FA), to solve a CAPTCHA, to pay or to accept terms, hand the desk to your person (hand_to_person) with one plain sentence of what to do, and wait for them to give it back. Never type a password or payment details yourself.\n'
+            + '3. Create a new API key named "OpenVibe" with the rights the page offers by default.\n'
+            + '4. As soon as the page shows the new key, call setup_save_key with the same machine and desk. Never read the page, take a screenshot, copy or type the key yourself: the tool reads it and saves it.\n'
+            + `5. Tell your person the ${label} key is saved (with the four characters the tool gives), or what stopped you.`;
+        const out = await createTask({ s, config, engine, webhooks, principal: p, body: { task, mode: 'balanced' }, personToken: watchToken(req), timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null });
+        if (out.code) return problem(req, res, out.status, out.code, out.detail);
+        setupGrants.remember(out.task.id, { grantId: b.grant, keys, provider, label });
+        res.set('Location', `/api/v1/tasks/${out.task.id}`);
+        return res.status(out.status).json({ ...(await wireTask(out.task)), setup: { provider, label, keys } });
+    });
+
     r.get('/tasks', principal.requireCapability('actor.task.list'), limits.reads('actor.task.list'), async (req, res) => {
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
         const before = typeof req.query.before === 'string' && TASK_ID.test(req.query.before) ? req.query.before : null;

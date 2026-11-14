@@ -26,6 +26,7 @@ const EXPECTED = {
     list_my_computers: false,
     list_my_robots: false,
     locker_fill_login: false,
+    setup_save_key: true,
     market_quote: false,
     place_info: false,
     read_page: false,
