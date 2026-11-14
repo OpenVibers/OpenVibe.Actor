@@ -325,3 +325,8 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
   .ct-desk-open span { min-height: 44px; }
   .ct-viewer-bar button, .ct-viewer-note button { min-height: 44px; }
 }
+
+/* The messenger full-page (public/js/messenger.js, openvibe-shared ov-run.js OpenVibeRun.page): it fills the screen under
+   the navbar and above a phone's app bar; each side scrolls on its own. */
+.ac-messenger { height: calc(100dvh - var(--ovnav-real-h, 52px) - var(--ovnav-appbar-h, 0px)); min-height: 420px; box-sizing: border-box; }
+html.ac-has-messenger, html.ac-has-messenger body { overflow: hidden; }
