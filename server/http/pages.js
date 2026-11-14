@@ -468,8 +468,10 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
         const faq = faqItems(agents);
         // Actor v3 (the owner, 2026-11-09): your own AI that works for you, on your behalf, while you watch.
         const hero = showcase.hero({
-            eyebrow: 'OpenVibe.Actor · alpha',
-            title: 'Your own AI.', accent: 'It works for you while you watch.',
+            // Plan §AB.15 (the owner, 11-14: "openvibe.actor is our agent's … website … a more cohesive product"): Actor is
+            // where your agents live: make one, share it, install others, each doing only what you allow.
+            eyebrow: 'OpenVibe.Actor · your agents',
+            title: 'Your agents.', accent: 'They work for you while you watch.',
             lede: 'Tell it what you want: find you work, earn from a gig, grow your channel, brief you every morning, build something. It works on a screen you can watch from any OpenVibe page, uses your own accounts, asks before it spends, posts or applies, and runs on the model you pick.',
             actions: signed ? [{ label: 'Give it a job', href: '#task', primary: true }, { label: 'Your Actor', href: '/chat' }] : [{ label: 'Start your Actor', href: '/auth/login?next=%2F', primary: true }, { label: 'What it can do', href: '#templates' }],
             note: `Open source (AGPL-3.0). Free: ${tier.tasksPerDay} tasks a day and ${usd(tier.perDayUsd)} of model use, no card.`,
@@ -524,6 +526,12 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
 <section class="sc-sec hm-task" id="task" aria-labelledby="h-task"><h2 id="h-task">Give it a job</h2>
 ${box}
 ${raw(starts)}</section>
+${raw(showcase.features({ id: 'yours', title: 'One agent system', lede: 'Your agents: make one, share it, install others. Each does only what you allow. Vibe, in the menu on every OpenVibe site, is your first agent on OpenVibe.Actor.', items: [
+                { icon: 'ov:wand', title: 'Make one', text: 'Say what it is for in plain words. It gets instructions, a memory you can read and edit, a schedule and a budget.', href: '/me/agents' },
+                { icon: 'ov:share', title: 'Share it', text: 'Publish an agent you made so other people can install it as it is, or remix it into their own.', href: '/me/agents' },
+                { icon: 'ov:download', title: 'Install others', text: 'Add an agent or a skill someone shared. It starts with nothing and asks for each thing it needs.', href: '/skills' },
+                { icon: 'ov:shield', title: 'What each may do', text: 'Every agent has its own list: the tools, accounts, computers and money it may use. Anything else waits for your yes.', href: '/me/agents' },
+            ] }))}
 ${raw(showcase.features({ id: 'watch', title: 'Watch it work, from anywhere', lede: 'It is your AI, doing things on your behalf, so you can always see what it is doing.', items: [
                 { icon: 'ov:eye', title: 'Its screen, live', text: 'When it works on a computer, watch its screen from the Dock on any OpenVibe page, or on your phone.' },
                 { icon: 'ov:steps', title: 'What it is doing, in plain words', text: 'Away from a screen: the step it is on, what it read, what it did last and what it will do next.' },

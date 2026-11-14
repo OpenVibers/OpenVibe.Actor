@@ -17,7 +17,7 @@ const DESCRIPTION = 'OpenVibe.Actor is your own AI that works for you: it finds 
 const DISALLOW = ['/auth/', '/api/', '/tasks'];
 
 const PAGE_TEXT = {
-    '/': ['OpenVibe.Actor home', 'Your own AI that works for you while you watch: jobs, a gig, your channel, a morning brief, deals and builds. It asks before it acts and runs on the model you pick.'],
+    '/': ['OpenVibe.Actor home', 'Your agents: make one, share it, install others, each doing only what you allow. They work for you while you watch: jobs, a gig, your channel, a morning brief, deals and builds. It asks before it acts and runs on the model you pick.'],
     '/agents': ['The agents', 'Every agent system Actor routes to, with what it can do, its trust class, its price per million tokens and whether it works now; the modes and the check.'],
     '/docs': ['The Actor API', 'Create a task, watch it over server-sent events, read the result with its cost and explanation, cancel; list the agents and dry-run the router.'],
     '/updates': ['What shipped on OpenVibe.Actor', 'This site\'s update log, from the network changelog feed.'],

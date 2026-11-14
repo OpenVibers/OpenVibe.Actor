@@ -61,7 +61,10 @@ const { boot, check, done } = require('./helpers/boot');
 
     await check('Actor v3 (owner, 11-09): your own AI working for you; the lanes, watching, the model and the comparison', async () => {
         const r = await t.get('/');
-        assert.match(r.text, /Your own AI\./, 'the hero says what it is');
+        assert.match(r.text, /Your agents\./, 'the hero says what it is: where your agents live (plan §AB.15)');
+        assert.match(r.text, /One agent system/, 'the one agent system is sold on the home');
+        assert.match(r.text, /Make one[\s\S]*Share it[\s\S]*Install others[\s\S]*What each may do/, 'make, share, install, what each may do');
+        assert.match(r.text, /Vibe, in the menu on every OpenVibe site, is your first agent on OpenVibe\.Actor/, 'Vibe is your first agent');
         assert.doesNotMatch(r.text, /Like OpenRouter|Ask once\.|The right agent does it/, 'no router pitch');
         assert.doesNotMatch(r.text, /Tokyo|standing desk|Lisbon/, 'none of the old errand examples');
         const templates = (/<section class="ovk-rail[^"]*" id="templates"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
