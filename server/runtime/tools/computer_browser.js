@@ -28,6 +28,13 @@ module.exports = {
         const a = await prepareDesk('computer_browser', input, person, core, ctx);
         if (a.error) return { text: json(a), isError: true };
         const data = await core.pcs.browser(person, a.machine, a, { signal: ctx.signal });
+        // A task setting up a provider key (plan §AB.44) never reads the key itself: anything shaped like that provider's
+        // key is hidden from what the page says here; setup_save_key reads and saves it.
+        const setup = require('../../setup/grants').grantFor(ctx.taskId);
+        if (setup && data && typeof data === 'object') {
+            const shape = require('../../setup/grants').KEY_SHAPES[setup.provider];
+            for (const f of ['text', 'content', 'value']) if (shape && typeof data[f] === 'string') data[f] = data[f].replace(new RegExp(shape.source, 'g'), '[the new key: call setup_save_key]');
+        }
         return { text: json(data), data, sources: data && data.url ? [{ url: data.url, title: data.title || '' }] : [] };
     },
 };

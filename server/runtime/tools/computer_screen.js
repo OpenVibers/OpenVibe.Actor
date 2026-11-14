@@ -21,6 +21,19 @@ module.exports = {
         if (!core.pcs.enabled || !person) return { text: json({ error: 'computers are only for a signed-in person\'s task' }), isError: true };
         const a = await prepareDesk('computer_screen', input, person, core, ctx);
         if (a.error) return { text: json(a), isError: true };
+        // A task setting up a provider key (plan §AB.44): no look at the screen while it shows the new key (the picture
+        // would go to a vision model, and its answer could repeat the key); setup_save_key reads and saves it.
+        const setup = require('../../setup/grants');
+        const g = setup.grantFor(ctx.taskId);
+        if (g) {
+            let page = null;
+            try { page = await core.pcs.browser(person, a.machine, { action: 'read', ...(a.desk ? { desk: a.desk } : {}) }, { signal: ctx.signal }); } catch { page = null; }
+            const text = page && typeof page === 'object' ? [page.text, page.content, page.value].filter((x) => typeof x === 'string').join('\n') : '';
+            const seen = setup.findKey(text, g.provider);
+            if (seen.key || seen.reason === 'several_keys_on_page') {
+                return { text: json({ error: 'The new key is on the screen: call setup_save_key now. No screenshot while it shows.' }), isError: true };
+            }
+        }
         const data = await lookAtScreen(person, a, ctx, core);
         return { text: json(data), data };
     },
