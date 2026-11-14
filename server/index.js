@@ -47,7 +47,7 @@ async function start() {
     const socketActivated = process.env.LISTEN_FDS === '1' && Number(process.env.LISTEN_PID) === process.pid;
     const server = app.listen(...(socketActivated ? [{ fd: 3 }] : [config.port, config.host]), () => {
         const available = require('./agents/catalog').list(config).filter((a) => a.available).map((a) => a.id);
-        console.log(`[Actor] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (db ${ctx.s.db.store}); agents available: ${available.join(', ') || 'none'}`);
+        console.log(`[Actor] ${config.nodeEnv} on http://${config.host}:${config.port}, public ${config.baseUrl} (db ${ctx.s.db.store}); agents available: ${available.join(', ') || 'none'}`);
     });
     server.keepAliveTimeout = 65_000;
     // telemetry_samples rows older than 14 days go: a minute after start, then daily (openvibe-sdk/telemetry).

@@ -1449,7 +1449,7 @@ ${table(['Mode', 'What it picks'], MODES.map((m) => [html`<strong>${MODE_LABEL[m
   -H 'content-type: application/json' \\
   -d '{"task":"Is the TLS certificate of example.com valid, and when does it expire?","mode":"cheapest"}'
 
-# → 201 { "id": "tsk_…", "state": "queued", "progress": { "stream_url": "…/events" }, … }`;
+# 201 { "id": "tsk_…", "state": "queued", "progress": { "stream_url": "…/events" }, … }`;
         const watch = `curl -N ${b}/api/v1/tasks/tsk_…/events -H "authorization: Bearer $TOKEN"
 
 id: 3
@@ -1480,7 +1480,7 @@ ${table(['Route', 'Capability', 'What it does'], [
                 [html`<code>GET /api/v1/agent-systems</code>`, 'public', 'The agent systems even when signed in (the explicit catalog path).'],
                 [html`<code>GET /api/v1/agents/presets</code>`, 'public', 'The four presets a create can copy: Researcher, Inbox, Studio editor and Party host.'],
                 [html`<code>POST /api/v1/agents</code>, <code>GET/PATCH/DELETE /api/v1/agents/:id</code>, <code>PUT /api/v1/agents/:id/level</code>`, html`<code>actor.agent.manage</code> (the person)`, html`A person's agent contacts (<code>actor.agent@1</code>): create from a preset or with <code>{ name, face?, voice?, model?, computer?, apps?, memory?, level? }</code>, read, change, delete (Vibe answers 409 <code>actor.agent.vibe</code>) and set the level with <code>{ level }</code> (<code>actor.level-change@1</code>). The default is <code>ask</code>; money, passwords, deletions and sending to a new recipient always ask.`],
-                [html`<code>POST /api/v1/route</code>`, 'public', html`<code>{ task, mode? }</code> → which agent would take it and why, for every candidate. Nothing runs and nothing is charged.`],
+                [html`<code>POST /api/v1/route</code>`, 'public', html`<code>{ task, mode? }</code> answers which agent would take it and why, for every candidate. Nothing runs and nothing is charged.`],
                 [html`<code>GET /api/v1/stats/tools</code>, <code>GET /api/v1/stats/models</code>`, 'public', html`Live per-tool and per-model numbers over the last 7 days: <code>{ name, n, successRate, p50ms, p90ms, meanCostUsd, lastFailureAt }</code>. Names and numbers only, and only rows with <code>n >= 20</code>, so no one person's use shows.`],
                 [html`<code>GET /api/v1/skills</code>, <code>GET /api/v1/skills/:id</code>`, 'public', html`The skills registry (<a href="/skills">the catalogue</a>): one listing per skill (<code>actor.skill-listing@1</code>, or <code>@2</code> with the Media id and sha256 of each code resource) with the document as published, the publisher the registry vouches for, the scan's state and its findings, and the curator's state. A skill is a document anybody may read; a sandbox skill's code runs on a machine that declared the skill runner, never on Actor's server.`],
                 [html`<code>POST /api/v1/me/agents/:id/skills</code>, <code>DELETE /api/v1/me/agents/:id/skills/:listingId</code>`, html`<code>actor.agent.manage</code> (the person)`, html`Install a skill on one of your own agents, or take it back. Installing grants nothing: the agent's level and your approvals still decide every step. A flagged skill needs <code>{ read_findings: true }</code>; a failed one never installs.`],

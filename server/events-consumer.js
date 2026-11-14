@@ -39,7 +39,7 @@ function startSubscriptions({ config, port, secret, eventsUrl = config.events.ur
             if (mine.some((s) => s.topic_pattern === topic)) continue;
             const r = await call('POST', '/api/v1/subscriptions', { topic_pattern: topic, endpoint, secret });
             if (!r.ok && r.status !== 409) throw new Error(`subscribing to ${topic}: ${r.status} ${r.body.code || ''}`);
-            if (r.ok) log.log(`[Events consumer] subscription created: ${r.body.id} (${topic} → ${endpoint})`);
+            if (r.ok) log.log(`[Events consumer] subscription created: ${r.body.id} (${topic} to ${endpoint})`);
         }
     };
     const delays = [0, 10_000, 60_000, 5 * 60_000, 15 * 60_000];
