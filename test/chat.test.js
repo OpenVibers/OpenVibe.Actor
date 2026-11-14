@@ -53,6 +53,8 @@ const LOC = /^\/chat\/(tsk_[0-9A-HJKMNP-TV-Z]{26})#t-\1$/;
             const r = await t.get('/chat', { as: kim });
             assert.strictEqual(r.status, 200);
             assert.match(r.text, /<h2>What should Actor do\?<\/h2>/);
+            // 4.250.0 (§AB.8/47): the network's messenger swaps in over a new chat once the site's Shared has it.
+            assert.match(r.text, /<script src="[^"]*js\/messenger\.js[^"]*"[^>]*><\/script>/, 'the messenger comes on a new chat');
             // The run defaults moved to Settings (one-agent system, stage 1): nothing of them under the composer.
             assert.ok(!/ct-share-defaults/.test(r.text), 'the run settings are not on the chat');
             assert.strictEqual((r.text.match(/data-ovt-starter="/g) || []).length, 4, 'four suggestion chips, not the card grid');

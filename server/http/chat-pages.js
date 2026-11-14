@@ -813,7 +813,9 @@ ${parent ? html`<input type="hidden" name="parent" value="${parent}">` : ''}<tex
             viewer: req.viewer, config, path: req.originalUrl, title, app: true, noReferrer: true,
             // The network's sidebar (kit.css, kit-web.js) and its conversation UI (thread.css, ov-thread.js); composer
             // v2 draws the box (ov-composer.js, 4.215.0).
-            css: ['css/chat.css', 'css/skill-draft.css'], scripts: ['js/desks.js', 'js/chat.js'], styles: ['kit.css', 'thread.css', 'ov-share.css', 'ov-upload.css'],
+            // 4.250.0 (plan §AB.8/47): a new chat is the network's messenger full-page once the site's Shared has it
+            // (public/js/messenger.js swaps it in with the person's token); a turn, a shared chat and no Shared yet keep this page.
+            css: ['css/chat.css', 'css/skill-draft.css'], scripts: ['js/desks.js', 'js/chat.js', ...(!first && !shared ? ['js/messenger.js'] : [])], styles: ['kit.css', 'thread.css', 'ov-share.css', 'ov-upload.css'],
             sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-composer.js', 'ov-share.js', 'ov-canvas.js', 'ov-upload.js'],
             body: html`${busy && !shared ? raw('<noscript><meta http-equiv="refresh" content="5"></noscript>') : ''}
 <div class="chat" data-chat="${first ? first.id : ''}">${raw(thread.page({
