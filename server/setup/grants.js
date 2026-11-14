@@ -3,7 +3,7 @@
  * Setup done by your agent (plan §AB.44): the one-time grants a person handed to one of their tasks, and the one save.
  *
  * The person's guided setup on OpenVibe.Network makes a grant for exactly one Setup row (POST /api/admin/setup/grants,
- * owner, fresh sign-in) and starts a task here with it (POST /api/v1/setup/tasks). The grant id is kept in memory only,
+ * owner, fresh sign-in) and starts a task here with it (POST /api/v1/tasks with { setup }). The grant id is kept in memory only,
  * beside its task, for at most its 30 minutes: never in the database, a step, a checkpoint or a log, and a restart simply
  * ends the setup. The task's tool setup_save_key reads the provider's page itself, finds the new key by the provider's
  * key shape, and saves it through Network's POST /internal/setup/grants/:id/save (network.setup.grant.save) with Actor's

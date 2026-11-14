@@ -10,7 +10,7 @@ const machine = { type: 'string', description: 'the machine id (dev_…) whose b
  * Setup done by your agent (plan §AB.44): save the new key the provider's page shows into the one Setup row the person
  * granted this task. The tool reads the page itself, finds the key by the provider's key shape and saves it through
  * Network with the task's grant; the model never sees, copies or types it, and the answer is "saved" with the key's last
- * four characters. Only a task started with a live grant (POST /api/v1/setup/tasks) has it.
+ * four characters. Only a task started with a live grant (POST /api/v1/tasks with { setup }) has it.
  */
 module.exports = {
     name: 'setup_save_key',

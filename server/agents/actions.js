@@ -159,6 +159,15 @@ function stepFor(name, input) {
                 payload: safeInput({ machine: a.machine, action, url: a.url, ref: a.ref, selector: a.selector, text: a.text, key: a.key, desk: a.desk }, { removeText: action === 'fill' }),
             };
         }
+        case 'setup_save_key':
+            // Plan §AB.44: the key the person granted this task, saved into the one Setup row they chose; never shown.
+            return {
+                act: 'act',
+                kind: 'setup.key',
+                summary: 'Save the new key in your OpenVibe Setup',
+                target: exactTarget('save the key you asked me to set up'),
+                payload: safeInput({ machine: a.machine, desk: a.desk }),
+            };
         case 'computer_desk': {
             const action = text(a.action, 20) || 'status';
             if (action === 'status') return null;

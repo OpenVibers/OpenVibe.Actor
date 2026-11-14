@@ -1,5 +1,5 @@
 'use strict';
-// POST /api/v1/setup/tasks (plan §AB.44): the person's own task to set up one provider key with their grant. The task's
+// POST /api/v1/tasks with setup (plan §AB.44): the person's own task to set up one provider key with their grant. The task's
 // text never carries the grant id; the grant waits in memory beside the task; an app, a bad grant, a provider whose keys
 // cannot be read from its page, or a page that is not https are each refused.
 const assert = require('assert');
@@ -11,7 +11,7 @@ const GRANT = 'sgr_' + 'B'.repeat(32);
     try {
         const ada = t.network.addUser('setupada');
         const SAME = { origin: t.base, 'sec-fetch-site': 'same-origin' };
-        const post = (json, as = ada) => t.get('/api/v1/setup/tasks', { as, json, headers: SAME });
+        const post = (json, as = ada) => t.get('/api/v1/tasks', { as, json: { setup: json }, headers: SAME });
         const body = { grant: GRANT, keys: ['deepseek.api_key'], provider: 'deepseek', label: 'DeepSeek', get_it_at: 'https://platform.deepseek.com/api_keys' };
         const r = await post(body);
         assert.strictEqual(r.status, 201, r.text);

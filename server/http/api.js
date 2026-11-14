@@ -779,6 +779,7 @@ function createApi(ctx) {
     });
 
     r.post('/tasks', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), async (req, res) => {
+        if (req.body && req.body.setup) return startSetupTask(req, res);
         const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: req.body || {}, personToken: watchToken(req), timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null });
         if (out.code) {
             if (out.retryAfter) res.set('Retry-After', String(out.retryAfter));
@@ -797,12 +798,12 @@ function createApi(ctx) {
      * Setup done by your agent (plan §AB.44): a task that sets up one provider key for the person's OpenVibe, with the
      * one-time grant they made on Network's guided setup. The person's own token only (never an app). The grant id stays
      * in memory beside the task (server/setup/grants.js); the task's text never carries it.
-     *   POST /api/v1/setup/tasks { grant: 'sgr_…', keys: ['deepseek.api_key'], provider: 'deepseek', label?: 'DeepSeek', get_it_at: 'https://…' }
+     *   POST /api/v1/tasks { setup: { grant: 'sgr_…', keys: ['deepseek.api_key'], provider: 'deepseek', label?: 'DeepSeek', get_it_at: 'https://…' } }
      */
-    r.post('/setup/tasks', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), async (req, res) => {
+    async function startSetupTask(req, res) {
         const p = req.principal;
         if (!p || p.kind !== 'user' || p.via) return problem(req, res, 403, 'actor.setup.person_only', 'Only the person sets up their own keys.');
-        const b = req.body && typeof req.body === 'object' ? req.body : {};
+        const b = req.body && req.body.setup && typeof req.body.setup === 'object' ? req.body.setup : {};
         const setupGrants = require('../setup/grants');
         const provider = String(b.provider || '').toLowerCase();
         const keys = Array.isArray(b.keys) ? b.keys.map(String) : [];
@@ -823,7 +824,7 @@ function createApi(ctx) {
         setupGrants.remember(out.task.id, { grantId: b.grant, keys, provider, label });
         res.set('Location', `/api/v1/tasks/${out.task.id}`);
         return res.status(out.status).json({ ...(await wireTask(out.task)), setup: { provider, label, keys } });
-    });
+    }
 
     r.get('/tasks', principal.requireCapability('actor.task.list'), limits.reads('actor.task.list'), async (req, res) => {
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));

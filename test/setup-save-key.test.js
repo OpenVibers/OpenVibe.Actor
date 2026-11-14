@@ -44,6 +44,11 @@ const ME = 'usr_01JAB2C3D4E5F6G7H8J9K0MNPQ';
     const read = await browserTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', action: 'read' }, ctx);
     assert.ok(!read.text.includes(CANARY) && read.text.includes('[the new key: call setup_save_key]'), 'a page read never shows the key');
 
+    // And no look at the screen while the key shows (the picture would go to a vision model).
+    const screenTool = require('../server/runtime/tools/computer_screen');
+    const looked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', question: 'what is on the page?' }, ctx);
+    assert.ok(looked.isError && /call setup_save_key now/.test(looked.text) && !looked.text.includes(CANARY), 'no screenshot while the key shows');
+
     page = 'Create new API key';
     let out = await tool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ' }, ctx);
     assert.match(JSON.parse(out.text).reason, /does not show a new key yet/);
