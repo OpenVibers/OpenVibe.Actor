@@ -28,12 +28,14 @@ module.exports = {
         const a = await prepareDesk('computer_browser', input, person, core, ctx);
         if (a.error) return { text: json(a), isError: true };
         const data = await core.pcs.browser(person, a.machine, a, { signal: ctx.signal });
-        // A task setting up a provider key (plan §AB.44) never reads the key itself: anything shaped like that provider's
-        // key is hidden from what the page says here; setup_save_key reads and saves it.
-        const setup = require('../../setup/grants').grantFor(ctx.taskId);
-        if (setup && data && typeof data === 'object') {
-            const shape = require('../../setup/grants').KEY_SHAPES[setup.provider];
-            for (const f of ['text', 'content', 'value']) if (shape && typeof data[f] === 'string') data[f] = data[f].replace(new RegExp(shape.source, 'g'), '[the new key: call setup_save_key]');
+        // A task setting up a provider key (plan §AB.44) never reads a key itself: anything shaped like any provider's key
+        // is hidden from what the page says here, for the task's whole life (the guard outlives the grant: after the save
+        // or its expiry the page may still show the key); setup_save_key reads and saves it.
+        const setup = require('../../setup/grants');
+        if (setup.guardFor(ctx.taskId) && data && typeof data === 'object') {
+            const label = setup.grantFor(ctx.taskId) ? '[the new key: call setup_save_key]' : '[a key: hidden]';
+            for (const f of ['text', 'content', 'value', 'title']) if (typeof data[f] === 'string') data[f] = setup.maskKeys(data[f], label);
+            if (Array.isArray(data.links)) data.links = data.links.map((l) => (l && typeof l === 'object' ? { ...l, ...(typeof l.text === 'string' ? { text: setup.maskKeys(l.text) } : {}), ...(typeof l.href === 'string' ? { href: setup.maskKeys(l.href) } : {}) } : l));
         }
         return { text: json(data), data, sources: data && data.url ? [{ url: data.url, title: data.title || '' }] : [] };
     },

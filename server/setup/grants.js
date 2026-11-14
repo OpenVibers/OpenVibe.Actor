@@ -32,19 +32,42 @@ const KEY_SHAPES = {
 };
 
 const live = new Map();   // taskId → { grantId, keys, provider, label, until }
+// The guard (11-14 review): a setup task keeps its key guard for its whole life, apart from the grant. The grant goes
+// when the key is saved or after 30 minutes, but the provider's page may still show the key: page reads stay masked
+// and screenshots stay checked until the task is long over. taskId → { provider, until }
+const guards = new Map();
+const GUARD_MS = 12 * 60 * 60 * 1000;
 
 function remember(taskId, grant, now = Date.now()) {
     if (!taskId || !grant || !GRANT_ID.test(String(grant.grantId))) throw new Error('a grant id and a task');
     const keys = (Array.isArray(grant.keys) ? grant.keys : []).map(String).filter((k) => KEY_NAME.test(k)).slice(0, 4);
     if (!keys.length) throw new Error('the grant names no key');
-    live.set(String(taskId), { grantId: grant.grantId, keys, provider: String(grant.provider || '').toLowerCase(), label: String(grant.label || grant.provider || 'the provider').slice(0, 60), until: now + TTL_MS });
+    const provider = String(grant.provider || '').toLowerCase();
+    live.set(String(taskId), { grantId: grant.grantId, keys, provider, label: String(grant.label || grant.provider || 'the provider').slice(0, 60), until: now + TTL_MS });
+    guards.set(String(taskId), { provider, until: now + GUARD_MS });
 }
+/** The key guard of a setup task: { provider } while it holds (long after its grant is spent or expired), else null. */
+function guardFor(taskId, now = Date.now()) {
+    const g = guards.get(String(taskId || ''));
+    if (!g) return null;
+    if (g.until <= now) { guards.delete(String(taskId)); return null; }
+    return g;
+}
+/** Every key shape we know, joined: a guarded task hides any provider's key, not only the one it sets up. */
+const ANY_KEY = new RegExp(Object.values(KEY_SHAPES).map((r) => `(?:${r.source})`).join('|'), 'g');
+/** The text with every key-shaped run replaced (a guarded task's page reads). */
+function maskKeys(text, label = '[a key: hidden]') {
+    return String(text).replace(new RegExp(ANY_KEY.source, 'g'), label);
+}
+/** Whether the text shows anything shaped like a key of any provider we know. */
+const showsKey = (text) => new RegExp(ANY_KEY.source).test(String(text || ''));
 function grantFor(taskId, now = Date.now()) {
     const g = live.get(String(taskId || ''));
     if (!g) return null;
     if (g.until <= now) { live.delete(String(taskId)); return null; }
     return g;
 }
+/** The grant is spent (or revoked): the task can no longer save. Its key guard stays (guardFor). */
 function forget(taskId) { live.delete(String(taskId || '')); }
 
 /** The one new key on a page's text, by the provider's key shape: { key } or { reason } (none, or more than one). */
@@ -86,4 +109,4 @@ function createSaver({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
     return { enabled, save };
 }
 
-module.exports = { remember, grantFor, forget, findKey, hintOf, createSaver, KEY_SHAPES, TTL_MS, GRANT_ID };
+module.exports = { remember, grantFor, forget, guardFor, maskKeys, showsKey, findKey, hintOf, createSaver, KEY_SHAPES, TTL_MS, GUARD_MS, GRANT_ID };
