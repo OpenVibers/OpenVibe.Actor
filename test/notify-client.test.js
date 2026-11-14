@@ -62,6 +62,33 @@ const reply = (status, body) => new Response(JSON.stringify(body), { status, hea
         assert.deepStrictEqual(await n.taskEnded({ subject: ME, state: 'failed', taskId: 'nope', title: 'x', url }), { sent: false, reason: 'bad_input' });
     });
 
+    await check('the notice wears the agent\'s face (plan §AB.31)', async () => {
+        const calls = [];
+        const fetchImpl = async (url, init = {}) => {
+            calls.push({ url: String(url), method: init.method || 'GET', body: init.body ? JSON.parse(init.body) : null });
+            if (String(url).includes('/internal/identity/resolve')) return reply(200, { network_user_id: 42 });
+            return reply(200, { ok: true });
+        };
+        const n = createNotifier({ config, fetchImpl, tokens, log: { warn() {} } });
+        const url = 'https://openvibe.actor/tasks/tsk_01M4W5JBFEG3QG9ER8W1A2K0RX';
+        const taskId = 'tsk_01M4W5JBFEG3QG9ER8W1A2K0RX';
+        const agent = { id: 'agt_01M4W5JBFEG3QG9ER8W1A2K0RX', name: 'Researcher', avatar_url: 'https://openvibe.media/a.png', hue: 205, glyph: 'search' };
+        await n.needsYou({ subject: ME, what: 'Sign in to the airline.', url, agent });
+        const asked = calls.find((c) => c.method === 'POST').body;
+        assert.deepStrictEqual(asked.rich_content.agent, agent, 'the step carries the agent');
+        calls.length = 0;
+        await n.taskEnded({ subject: ME, state: 'succeeded', taskId, title: 'Say hello.', url, agent });
+        const done = calls.find((c) => c.method === 'POST').body;
+        assert.deepStrictEqual(done.rich_content.agent, agent, 'the outcome carries the agent');
+        calls.length = 0;
+        await n.needsYou({ subject: ME, what: 'x', url, agent: { id: 'vibe', name: 'Vibe', avatar_url: 'http://not-https.example/a.png', hue: 400, glyph: 'not a glyph' } });
+        const bare = calls.find((c) => c.method === 'POST').body.rich_content.agent;
+        assert.deepStrictEqual(bare, { id: 'vibe', name: 'Vibe' }, 'only what is safe to show travels');
+        calls.length = 0;
+        await n.needsYou({ subject: ME, what: 'x', url });
+        assert.strictEqual(calls.find((c) => c.method === 'POST').body.rich_content.agent, undefined, 'no agent, no face');
+    });
+
     await check('a failure is an answer, never a throw; off without a client secret', async () => {
         const n = createNotifier({ config, fetchImpl: async () => { throw new Error('down'); }, tokens, log: { warn() {} } });
         assert.deepStrictEqual(await n.needsYou({ subject: ME, what: 'x', url: 'https://openvibe.bot/x' }), { sent: false, reason: 'error' });

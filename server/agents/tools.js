@@ -63,7 +63,7 @@ const json = (v) => clip(JSON.stringify(v));
 /** The person a task is for, when it is a signed-in person ('user:usr_…' → 'usr_…'), else null. */
 const personOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
 
-function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null, notifier = null, searchTokens = null }) {
+function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null, notifier = null, searchTokens = null, agentCard = null }) {
     const { searchUrl, toolsUrl } = config.services;
     // The web scope costs money past the open index, so it is asked as Actor (a service principal), never anonymously:
     // off without Actor's client secret.
@@ -271,7 +271,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
      * to watch and take over the desk, and waits: first for the person to use the desk, then for them to stop for a
      * while. The task's clock waits too (waitForPerson, at most 15 minutes in all).
      */
-    async function handToPerson(person, a, { signal, desks, emit, waitForPerson, pollMs = PERSON_POLL_MS, quietMs = PERSON_QUIET_MS } = {}) {
+    async function handToPerson(person, a, { signal, desks, emit, waitForPerson, pollMs = PERSON_POLL_MS, quietMs = PERSON_QUIET_MS, agent = null } = {}) {
         const what = String(a.what || '').replace(/\s+/g, ' ').trim().slice(0, 300);
         if (!what) return { error: 'what is the step the person should do, in a sentence' };
         // The task's own desk on a machine that runs several; else the machine's one private desk (an older Link).
@@ -282,7 +282,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         if (emit) await emit({ step: 'text', text: `Needs you: ${what} Open your agent's desk, take it over, do it, then let go: ${watch}` });
         // Wherever the person is (Network's bell, and a push when they allowed it), with the link to the desk. Best
         // effort, never awaited by the wait below.
-        if (notify.enabled) notify.needsYou({ subject: person, what, url: watch }).catch(() => {});
+        if (notify.enabled) notify.needsYou({ subject: person, what, url: watch, ...(agent ? { agent } : {}) }).catch(() => {});
         const started = Date.now();
         const end = started + granted;
         let took = false;
@@ -383,7 +383,9 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                 if (name === 'hand_to_person') {
                     // A desk on a desk host (an OpenVibe.Run session) is not the person's to take over yet.
                     if (pcs.isSession && pcs.isSession(a.machine === 'any' && desks ? desks.placed : a.machine)) return json({ done: false, note: 'Your desk is on a desk host, which the person cannot take over from here: tell them in your answer what is left for them to do, and where.' });
-                    return json(await handToPerson(person, a, { signal, desks, emit, waitForPerson }));
+                    // The notice wears the face of the agent the task belongs to (plan §AB.31).
+                    const agent = taskId && agentCard ? await agentCard(taskId, requester).catch(() => null) : null;
+                    return json(await handToPerson(person, a, { signal, desks, emit, waitForPerson, agent }));
                 }
                 return json(await pcs.write(person, a.machine, a.path, a.text, { mode: a.mode || 'create', signal }));
             }

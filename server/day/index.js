@@ -5,6 +5,7 @@ const { LANES, LOCAL, DESK } = require('./lanes');
 const tasks = require('../tasks/store');
 const { createTask } = require('../tasks/create');
 const waitStore = require('../waits/store');
+const agentCard = require('../notify/agent-card');
 const plain = (x, n = 2000) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, n);
 const fail = (text, status = 422) => { throw Object.assign(new Error(text), { status, code: 'actor.day.invalid' }); };
 const date = (ms) => new Date(ms).toISOString();
@@ -321,7 +322,7 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
     async function notify(q) {
         const claimed = await s.db.maybe('UPDATE actor_day_asks SET notified_at=$2 WHERE id=$1 AND notified_at IS NULL RETURNING id', [q.id, s.iso()]);
         if (claimed) await journal(await run(q.task_id), q.text);
-        if (claimed && notifier) await notifier.needsYou({ subject: q.owner.slice(5), what: q.text, title: 'Your Actor needs you', url: `${config.baseUrl}/you?ask=${q.id}` });
+        if (claimed && notifier) await notifier.needsYou({ subject: q.owner.slice(5), what: q.text, title: 'Your Actor needs you', url: `${config.baseUrl}/you?ask=${q.id}`, agent: await agentCard.cardForTaskId(s, q.task_id) });
     }
     async function answer(owner, id, body, decline = false) {
         const q = await s.db.maybe('SELECT q.*,w.status AS wait_status,w.deadline_at FROM actor_day_asks q JOIN actor_waits w ON w.id=q.wait_id WHERE q.id=$1 AND q.owner=$2', [id, owner]);
