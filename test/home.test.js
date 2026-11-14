@@ -101,7 +101,7 @@ const { boot, check, done } = require('./helpers/boot');
         const agents = (await t.get('/api/v1/agents')).json().agents;
         assert.strictEqual(list.numberOfItems, agents.length);
         const faq = (/<section class="sc-sec" id="faq"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
-        const shown = [...faq.matchAll(/<summary>([^<]+)<\/summary>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
+        const shown = [...faq.matchAll(/<summary>(?:<span class="sc-q-ic"[^>]*>[\s\S]*?<\/span>)?(?:<span>)?([^<]+)(?:<\/span>)?<\/summary>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
         assert.ok(shown.length >= 6);
         assert.deepStrictEqual(ld.find((x) => x['@type'] === 'FAQPage').mainEntity.map((q) => q.name), shown);
         assert.strictEqual((r.text.match(/<h1[ >]/g) || []).length, 1, 'one h1');

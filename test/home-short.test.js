@@ -21,7 +21,7 @@ const { boot, check, done } = require('./helpers/boot');
         }
         // The parts themselves are in the page, not removed: the questions, the agents and what shipped.
         const faq = (/<section class="sc-sec" id="faq"[\s\S]*?<\/section>/.exec(home) || [''])[0];
-        assert.ok((faq.match(/<summary>[^<]+<\/summary>/g) || []).length >= 6, 'the questions are in the page');
+        assert.ok((faq.match(/<summary>(?:<span class="sc-q-ic"[^>]*>[\s\S]*?<\/span>)?(?:<span>)?([^<]+)(?:<\/span>)?<\/summary>/g) || []).length >= 6, 'the questions are in the page');
         assert.match(home, /id="h-agents"/, 'the agents keep their heading');
         assert.match(home, /data-ov-shipped="list"/, 'what shipped is in the page');
         // What the home keeps: the task box and the tasks to start from come first.
