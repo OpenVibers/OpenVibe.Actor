@@ -41,6 +41,7 @@ const spend = require('../agents/spend');
 const { repoIn: codesRepoIn } = require('../agents/codes');
 const memory = require('../memory');
 const taskNotices = require('../notify/task-notices');
+const agentCard = require('../notify/agent-card');
 const confidence = require('../runtime/brain/confidence');
 const learn = require('../runtime/brain/learn');
 const canvases = require('../canvases');
@@ -126,12 +127,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         if (!subject) return;
         try {
             if (!(await taskNotices.once(s, row.id, kind))) return;
+            // The notice wears the face of the agent the task belongs to (plan §AB.31).
+            const agent = await agentCard.cardForTaskId(s, row.id);
             if (kind === 'needs_you') {
-                await notifier.needsYou({ subject, what: detail.what, kind: detail.kind || null, title: await taskTitle(row), url: detail.url || `${config.baseUrl}/tasks/${row.id}` });
+                await notifier.needsYou({ subject, what: detail.what, kind: detail.kind || null, title: await taskTitle(row), url: detail.url || `${config.baseUrl}/tasks/${row.id}`, agent });
             } else {
                 await notifier.taskEnded({
                     subject, state: kind, taskId: row.id, title: await taskTitle(row),
-                    url: `${config.baseUrl}/tasks/${row.id}`, detail: kind === 'failed' ? (row.error_detail || row.error_code || null) : null,
+                    url: `${config.baseUrl}/tasks/${row.id}`, detail: kind === 'failed' ? (row.error_detail || row.error_code || null) : null, agent,
                 });
             }
         } catch (err) { log.warn && log.warn('[Actor] task notification failed:', row.id, err && err.message); }
