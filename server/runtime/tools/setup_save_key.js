@@ -45,7 +45,12 @@ module.exports = {
         }
         const saver = (ctx.setupSaver) || grants.createSaver({ config: ctx.config });
         const out = await saver.save(g.grantId, { [g.keys[0]]: found.key }, ctx.taskId);
-        if (!out.ok) return { text: json({ ok: false, reason: `the save did not go through (${out.reason})` }), data: { ok: false, reason: out.reason }, isError: true };
+        if (!out.ok) {
+            const why = out.reason === 'network_no_answer'
+                ? 'OpenVibe did not answer in time, so the key may still be saving: do not save it again; tell your person to look at Setup'
+                : `the save did not go through (${out.reason})`;
+            return { text: json({ ok: false, reason: why }), data: { ok: false, reason: out.reason }, isError: true };
+        }
         grants.forget(ctx.taskId);
         const hint = (out.keys[0] && out.keys[0].hint) || grants.hintOf(found.key);
         return { text: json({ ok: true, saved: `${g.label} key`, ends_in: hint }), data: { ok: true, ends_in: hint } };

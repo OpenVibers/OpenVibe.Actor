@@ -32,11 +32,10 @@ module.exports = {
         // is hidden from what the page says here, for the task's whole life (the guard outlives the grant: after the save
         // or its expiry the page may still show the key); setup_save_key reads and saves it.
         const setup = require('../../setup/grants');
-        if (setup.guardFor(ctx.taskId) && data && typeof data === 'object') {
-            const label = setup.grantFor(ctx.taskId) ? '[the new key: call setup_save_key]' : '[a key: hidden]';
-            for (const f of ['text', 'content', 'value', 'title']) if (typeof data[f] === 'string') data[f] = setup.maskKeys(data[f], label);
-            if (Array.isArray(data.links)) data.links = data.links.map((l) => (l && typeof l === 'object' ? { ...l, ...(typeof l.text === 'string' ? { text: setup.maskKeys(l.text) } : {}), ...(typeof l.href === 'string' ? { href: setup.maskKeys(l.href) } : {}) } : l));
-        }
-        return { text: json(data), data, sources: data && data.url ? [{ url: data.url, title: data.title || '' }] : [] };
+        // Every string of the answer, not only its text fields (the 11-15 review): an element's line can carry a field's
+        // value, a click's receipt the lines that appeared, an address a query.
+        const shown = setup.guardFor(ctx.taskId) && data && typeof data === 'object'
+            ? setup.maskDeep(data, setup.grantFor(ctx.taskId) ? '[the new key: call setup_save_key]' : '[a key: hidden]') : data;
+        return { text: json(shown), data: shown, sources: shown && shown.url ? [{ url: shown.url, title: shown.title || '' }] : [] };
     },
 };
