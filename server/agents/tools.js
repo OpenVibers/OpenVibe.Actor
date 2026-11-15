@@ -19,6 +19,9 @@ const { stepFor } = require('./actions');
  *                               headers, WHOIS, conversions, hashes, … — only tools the catalog marks callable by anyone
  *   run_tools(calls)            up to 8 run_tool calls at once (11-15, the owner: "do shit in parallel"), each answered
  *                               on its own, the slowest setting the time
+ *   make_tool(description, kind) OpenVibe.Tools makes a new tool for the person the task is for (Contracts 0.439.0
+ *                               tools.made.write): drafted from their words by a model (their allowance pays) and saved
+ *                               as their own private tool, ready for run_tool; only they publish it
  *   search_sites(query, sites)  one question asked of up to 6 named sites at once (site: per site, the web scope), each
  *                               site's results under its name
  *   read_page(url)              OpenVibe.Tools' page reader, when Tools offers it: a web page as text
@@ -67,7 +70,7 @@ const json = (v) => clip(JSON.stringify(v));
 /** The person a task is for, when it is a signed-in person ('user:usr_…' → 'usr_…'), else null. */
 const personOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
 
-function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null, notifier = null, searchTokens = null, madeTokens = null, agentCard = null }) {
+function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null, notifier = null, searchTokens = null, madeTokens = null, makeTokens = null, agentCard = null }) {
     const { searchUrl, toolsUrl } = config.services;
     // The web scope costs money past the open index, so it is asked as Actor (a service principal), never anonymously:
     // off without Actor's client secret.
@@ -80,6 +83,12 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     const madeAuth = !toolsUrl ? null : madeTokens || (config.oauth && config.oauth.clientSecret ? serviceAuth.createTokenClient({
         tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
         audience: 'openvibe.tools', scope: 'tools.made.run', fetchImpl,
+    }) : null);
+    // And make one for them (Contracts 0.439.0 tools.made.write; the owner, 11-15: "use codes or actor to create a tool for
+    // you completely end to end"). A token of its own, so a Network without the grant yet never costs the runs above.
+    const makeAuth = !toolsUrl ? null : makeTokens || (config.oauth && config.oauth.clientSecret ? serviceAuth.createTokenClient({
+        tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.tools', scope: 'tools.made.write', fetchImpl,
     }) : null);
     const madeMine = new Map();   // person → { at, rows }
     // Desks plan D4: "hand it to me" reaches the person through Network's notifications (server/notify/client.js).
@@ -183,6 +192,31 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     }
 
     /** Up to 8 run_tool calls at once, each with run_tool's own rules; every answer under its call's index. */
+    /** make_tool: Tools drafts the tool from the person's words and saves it as theirs, private (both as the person, with
+     *  Actor's token and X-OV-Subject). A slug they already use gets a short suffix. */
+    async function makeTool(description, kind, { signal, person = null } = {}) {
+        if (!person || !makeAuth) return { error: 'a tool is made only for a signed-in person' };
+        const words = String(description || '').trim().slice(0, 2000);
+        if (words.length < 8) return { error: 'say in a sentence or two what the tool should do' };
+        let headers;
+        try { headers = { ...(await makeAuth.authHeaders()), 'X-OV-Subject': person }; } catch { return { error: 'Actor may not make tools for people on this network yet' }; }
+        const d = await getJson(`${toolsUrl}/api/v1/made-tools/draft`, { method: 'POST', body: { description: words, kind: kind === 'code' ? 'code' : 'prompt' }, headers, signal, timeoutMs: 120_000 });
+        if (!d.ok || !d.data || !d.data.body) return { error: (d.data && (d.data.detail || d.data.title)) || `Tools could not draft it (${d.status})` };
+        let body = { ...d.data.body, visibility: 'private' };
+        for (let tries = 0; tries < 3; tries++) {
+            const m = await getJson(`${toolsUrl}/api/v1/made-tools`, { method: 'POST', body, headers, signal, timeoutMs: 30_000 });
+            if (m.status === 201 && m.data) {
+                madeMine.delete(person);   // find_tools sees it at once
+                const t = m.data;
+                return { made: { tool: t.id, name: t.name, does: t.summary, kind: t.kind, input: t.input || null }, page: `https://openvibe.tools/make#${t.id}`,
+                    note: 'Saved as the person\'s own private tool: run it now with run_tool; they change or publish it on its page.' };
+            }
+            if (m.status !== 409) return { error: (m.data && (m.data.detail || m.data.title)) || `Tools did not save it (${m.status})` };
+            body = { ...body, slug: `${String(body.slug).slice(0, 34)}-${Math.random().toString(36).slice(2, 6)}` };
+        }
+        return { error: 'the tool was not saved: its name is taken; try other words' };
+    }
+
     async function runTools(calls, { signal, person = null } = {}) {
         const list = Array.isArray(calls) ? calls.slice(0, 8) : [];
         if (!list.length) return { error: 'calls is a list of { tool, input }, at most 8' };
@@ -246,6 +280,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         if (list.some((t) => t.id === 'read')) {
             defs.push({ type: 'function', function: { name: 'read_page', description: 'Read a public web page as text (title, description, main text, links). Use it for URLs the task gives or that a result links to.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } });
         }
+        if (toolsUrl && makeAuth && personOf(requester)) defs.push({ type: 'function', function: { name: 'make_tool', description: 'Make a new tool for the person when find_tools has nothing that fits and they will want it again (for example "turn my meeting notes into decisions and action items", "add sales tax to a price"). OpenVibe.Tools drafts it from the description, as instructions for a model (kind prompt, the default) or as JavaScript that computes the answer without a network (kind code), and saves it as their own private tool; then run it with run_tool. Drafting is paid from their allowance.', parameters: { type: 'object', properties: { description: { type: 'string', description: 'What the tool should do, in a sentence or two' }, kind: { type: 'string', enum: ['prompt', 'code'] } }, required: ['description'] } } });
         if (bot.enabled && personOf(requester)) defs.push(...ROBOT_DEFS);
         if (pcs.enabled && personOf(requester)) defs.push(...COMPUTER_DEFS, BROWSER_DEF, DESK_DEF, HAND_DEF, ...(vision ? [SCREEN_DEF, INPUT_DEF] : []));
         if (personOf(requester) && runTokens.get(taskId)?.token) defs.push({ type: 'function', function: { name: 'read_my_history', description: 'Read the recent OpenVibe pages this person visited. Available only if they enabled “My agents may read my history”; returns titles, kinds, sites, links and times, never page contents.', parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 50 } } } } });
@@ -474,6 +509,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
             if (name === 'find_tools') return json(await findTools(a.need, { signal, person: personOf(requester) }));
             if (name === 'run_tool') return json(await runTool(String(a.tool || ''), a.input, { signal, person: personOf(requester) }));
             if (name === 'run_tools') return json(await runTools(a.calls, { signal, person: personOf(requester) }));
+            if (name === 'make_tool') return json(await makeTool(a.description, a.kind, { signal, person: personOf(requester) }));
             if (name === 'search_sites') return json(await searchSites(a.query, a.sites, personOf(requester), { signal }));
             if (name === 'read_page') return json(await runTool('read', { url: String(a.url || ''), max_chars: 12000 }, { signal }));
             return json({ error: `unknown tool ${name}` });
