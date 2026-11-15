@@ -30,11 +30,14 @@ module.exports = {
         if (guard) {
             const no = (why) => ({ text: json({ error: why }), isError: true });
             if (!setup.KEY_SHAPES[guard.provider]) return no('This task sets up a key whose shape cannot be recognised, so no screenshots: read the page with computer_browser instead.');
+            // The person's own screen can show a key in any window, not only the page checked below (the 11-15 review):
+            // a key setup looks only at the agent's private desk.
+            if (!input || input.desk !== 'private') return no('While this task sets up a key, screenshots are of your private desk only (desk: "private"): the person\'s own screen can show keys in other windows. Read the page with computer_browser instead.');
             let page = null;
             try { page = await core.pcs.browser(person, a.machine, { action: 'read', ...(a.desk ? { desk: a.desk } : {}) }, { signal: ctx.signal }); } catch { page = null; }
-            if (!page || typeof page !== 'object') return no('The page could not be checked for a key, so no screenshot: read it with computer_browser instead.');
-            const text = [page.text, page.content, page.value, page.title].filter((x) => typeof x === 'string').join('\n');
-            if (setup.showsKey(text)) {
+            // An empty or error-shaped read proves nothing, so it lets no screenshot by (the 11-15 review).
+            if (!setup.readablePage(page)) return no('The page could not be read to check it for a key, so no screenshot: read it with computer_browser instead.');
+            if (setup.showsKey(setup.stringsOf(page).join('\n'))) {
                 return no(setup.grantFor(ctx.taskId) ? 'The new key is on the screen: call setup_save_key now. No screenshot while it shows.'
                     : 'A key is on the screen. No screenshot while it shows: close or leave that page first.');
             }

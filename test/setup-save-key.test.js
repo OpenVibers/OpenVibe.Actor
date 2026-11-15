@@ -46,7 +46,7 @@ const ME = 'usr_01JAB2C3D4E5F6G7H8J9K0MNPQ';
 
     // And no look at the screen while the key shows (the picture would go to a vision model).
     const screenTool = require('../server/runtime/tools/computer_screen');
-    const looked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', question: 'what is on the page?' }, ctx);
+    const looked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', desk: 'private', question: 'what is on the page?' }, ctx);
     assert.ok(looked.isError && /call setup_save_key now/.test(looked.text) && !looked.text.includes(CANARY), 'no screenshot while the key shows');
 
     page = 'Create new API key';
@@ -66,23 +66,40 @@ const ME = 'usr_01JAB2C3D4E5F6G7H8J9K0MNPQ';
     // screenshots stay blocked, for this provider's key and any other provider's.
     const after = await browserTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', action: 'read' }, ctx);
     assert.ok(!after.text.includes(CANARY) && after.text.includes('[a key: hidden]'), 'after the save, a page read still never shows the key');
-    let blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', question: 'and now?' }, ctx);
+    let blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', desk: 'private', question: 'and now?' }, ctx);
     assert.ok(blocked.isError && /A key is on the screen/.test(blocked.text), 'after the save, still no screenshot while it shows');
     const OTHER = 'sk-ant-' + 'Q'.repeat(40);
     page = `Anthropic console: ${OTHER}`;
     const other = await browserTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', action: 'read' }, ctx);
     assert.ok(!other.text.includes(OTHER), 'another provider\'s key is hidden too');
-    blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ' }, ctx);
+    blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', desk: 'private' }, ctx);
     assert.ok(blocked.isError, 'and blocks the screenshot');
     // Fail closed: a page that cannot be read gets no screenshot.
     const readPage = core.pcs.browser;
     core.pcs.browser = async () => { throw new Error('the desk did not answer'); };
+    blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', desk: 'private' }, ctx);
+    assert.ok(blocked.isError && /could not be read to check it/.test(blocked.text), 'an unreadable page gets no screenshot');
+    // 11-15 review: an empty or error-shaped read proves nothing either, and lets no screenshot by.
+    for (const answer of [{}, { error: 'no page open' }, { ok: false, text: 'x' }, { text: '   ', url: 'about:blank' }, { isError: true, text: 'boom' }, [], 'text']) {
+        core.pcs.browser = async () => answer;
+        blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', desk: 'private' }, ctx);
+        assert.ok(blocked.isError && /could not be read to check it/.test(blocked.text), `no screenshot on ${JSON.stringify(answer)}`);
+    }
+    // A key anywhere in the answer counts, not only its text: an element's line or a receipt's new lines.
+    core.pcs.browser = async () => ({ text: 'API keys', url: 'https://platform.deepseek.test/api_keys', elements: [`e4 textbox "Key" value "${CANARY}"`], receipt: { appeared: [`Copied ${CANARY}`] } });
+    blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', desk: 'private' }, ctx);
+    assert.ok(blocked.isError && /A key is on the screen/.test(blocked.text), 'a key in an element blocks the screenshot');
+    const deep = await browserTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', action: 'read' }, ctx);
+    assert.ok(!JSON.stringify(deep).includes(CANARY), 'and is hidden from every part of a page read (elements, receipts)');
+    assert.ok(deep.data.elements[0].includes('[a key: hidden]') && deep.data.receipt.appeared[0].includes('[a key: hidden]'), JSON.stringify(deep.data));
+    // The person's own screen can show a key in another window: a key setup looks only at its private desk.
+    core.pcs.browser = async () => ({ text: 'Nothing secret here', url: 'https://example.test/' });
     blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ' }, ctx);
-    assert.ok(blocked.isError && /could not be checked/.test(blocked.text), 'an unreadable page gets no screenshot');
+    assert.ok(blocked.isError && /private desk only/.test(blocked.text), 'no screenshot of the person\'s own screen in a key setup');
     core.pcs.browser = readPage;
     // A provider whose keys we cannot recognise: no screenshots at all.
     grants.remember('tsk_six', { grantId: GRANT, keys: ['mystery.api_key'], provider: 'mystery' });
-    blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ' }, { ...ctx, taskId: 'tsk_six' });
+    blocked = await screenTool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ', desk: 'private' }, { ...ctx, taskId: 'tsk_six' });
     assert.ok(blocked.isError && /cannot be recognised/.test(blocked.text), 'an unknown key shape: no screenshots');
     // After the grant's 30 minutes the guard still holds; it ends long after the task.
     const t1 = Date.now();
@@ -108,5 +125,12 @@ const ME = 'usr_01JAB2C3D4E5F6G7H8J9K0MNPQ';
     assert.strictEqual(seen[0].init.redirect, 'error');
     assert.deepStrictEqual(JSON.parse(seen[0].init.body), { values: { 'deepseek.api_key': CANARY }, run: 'tsk_five' });
     assert.deepStrictEqual(await saver.save('bad', {}, null), { ok: false, reason: 'no_grant' });
+    // 11-15 review: no answer in time is not "not saved" (Network may still finish the write), and the agent says so.
+    const slowSaver = grants.createSaver({ config: { networkInternalUrl: 'http://network.test' }, tokens: { authHeaders: async () => ({}) },
+        fetchImpl: async () => { throw Object.assign(new Error('timed out'), { name: 'TimeoutError' }); } });
+    assert.deepStrictEqual(await slowSaver.save(GRANT, { 'deepseek.api_key': CANARY }, 'tsk_eight'), { ok: false, reason: 'network_no_answer' });
+    grants.remember('tsk_eight', { grantId: GRANT, keys: ['deepseek.api_key'], provider: 'deepseek' });
+    const noAnswer = await tool.run({ machine: 'dev_01JAB2C3D4E5F6G7H8J9K0MNPQ' }, { ...ctx, taskId: 'tsk_eight', setupSaver: slowSaver });
+    assert.ok(noAnswer.isError && /may still be saving/.test(noAnswer.text) && !noAnswer.text.includes(CANARY), noAnswer.text);
     console.log('setup save key: the page read here, one key by its shape, saved through the grant, never in the answer');
 })().catch((e) => { console.error(e); process.exit(1); });

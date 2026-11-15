@@ -61,6 +61,34 @@ function maskKeys(text, label = '[a key: hidden]') {
 }
 /** Whether the text shows anything shaped like a key of any provider we know. */
 const showsKey = (text) => new RegExp(ANY_KEY.source).test(String(text || ''));
+
+/**
+ * Every string anywhere in a value (an answer's fields, its elements, a receipt's lines, a link's address), at most
+ * 5000 of them six levels deep: a guard reads all of a page's answer, not the few fields it expects (the 11-15 review).
+ */
+function stringsOf(value, out = [], depth = 0) {
+    if (out.length >= 5000 || depth > 6 || value == null) return out;
+    if (typeof value === 'string') out.push(value);
+    else if (Array.isArray(value)) for (const v of value) stringsOf(v, out, depth + 1);
+    else if (typeof value === 'object') for (const v of Object.values(value)) stringsOf(v, out, depth + 1);
+    return out;
+}
+/** A copy of value with every key-shaped run in every string replaced (its field names kept). */
+function maskDeep(value, label = '[a key: hidden]', depth = 0) {
+    if (typeof value === 'string') return maskKeys(value, label);
+    if (value == null || typeof value !== 'object' || depth > 8) return value;
+    if (Array.isArray(value)) return value.map((v) => maskDeep(v, label, depth + 1));
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, maskDeep(v, label, depth + 1)]));
+}
+/**
+ * Whether a page read is one a guard may trust: an answer with no error and some words on the page. An empty or
+ * error-shaped answer (the read failed, the page was blank or still loading) proves nothing, so it lets nothing by.
+ */
+function readablePage(page) {
+    if (!page || typeof page !== 'object' || Array.isArray(page)) return false;
+    if (page.error || page.isError || page.ok === false) return false;
+    return [page.text, page.content, page.value].some((x) => typeof x === 'string' && x.trim().length > 0);
+}
 function grantFor(taskId, now = Date.now()) {
     const g = live.get(String(taskId || ''));
     if (!g) return null;
@@ -100,7 +128,10 @@ function createSaver({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
                 headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(await tokens.authHeaders()) },
                 body: JSON.stringify({ values, ...(run ? { run: String(run).slice(0, 80) } : {}) }),
             });
-        } catch { return { ok: false, reason: 'network_unreachable' }; }
+        } catch (err) {
+            // No answer in time is not "not saved": Network may still finish the write (Setup says which).
+            return { ok: false, reason: err && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'network_no_answer' : 'network_unreachable' };
+        }
         const out = await res.json().catch(() => null);
         if (!res.ok) return { ok: false, reason: (out && out.code) || `network_${res.status}` };
         const keys = (out && Array.isArray(out.keys) ? out.keys : []).map((k) => ({ key: String(k.key), hint: String(k.hint || '').slice(0, 8) }));
@@ -109,4 +140,4 @@ function createSaver({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
     return { enabled, save };
 }
 
-module.exports = { remember, grantFor, forget, guardFor, maskKeys, showsKey, findKey, hintOf, createSaver, KEY_SHAPES, TTL_MS, GUARD_MS, GRANT_ID };
+module.exports = { remember, grantFor, forget, guardFor, maskKeys, maskDeep, showsKey, stringsOf, readablePage, findKey, hintOf, createSaver, KEY_SHAPES, TTL_MS, GUARD_MS, GRANT_ID };
