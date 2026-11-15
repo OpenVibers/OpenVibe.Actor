@@ -32,6 +32,7 @@ const EXPECTED = {
     read_page: false,
     recall: false,
     search_openvibe: false,
+    openvibe_updates: false,
     search_web: false,
     sports_scores: false,
     time_in: false,

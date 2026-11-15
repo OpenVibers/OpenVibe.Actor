@@ -1,7 +1,7 @@
 'use strict';
 
 const READ = ['calculate', 'convert_time', 'currency_convert', 'geocode', 'market_quote', 'place_info',
-    'read_page', 'recall', 'search_openvibe', 'search_web', 'sports_scores', 'time_in', 'weather_now', 'wikipedia'];
+    'read_page', 'recall', 'search_openvibe', 'openvibe_updates', 'search_web', 'sports_scores', 'time_in', 'weather_now', 'wikipedia'];
 const WORK = [...READ, 'make_file', 'make_chart', 'remember', 'ask_person', 'wait_for'];
 const DESK = ['computer_desk', 'computer_browser', 'computer_input', 'computer_screen', 'computer_list',
     'computer_read', 'computer_write', 'computer_run', 'muse_run', 'list_my_computers', 'hand_to_person'];

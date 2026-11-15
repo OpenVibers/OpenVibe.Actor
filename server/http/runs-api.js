@@ -9,6 +9,16 @@
  *   GET /api/v1/runs/:id            actor.task.read   one run
  *   GET /api/v1/runs/:id/steps      actor.task.read   its steps after ?after= (an append-only log, never renumbered)
  *
+ * Conversations (2026-11-15, the owner: "it's supposed to use the actor even when you're on here … your main actor
+ * … instead of vibe character"): the menu, openvibe.chat and every site talk to the person's Actor through these
+ * routes, by way of Network's /api/frame/runs. With ?conversations=1 (the list) or ?conversation=1 (one run, its
+ * steps) a run is a whole conversation: its first turn's id, every turn's messages and steps in order, and its
+ * status from the newest turn (a finished turn waits for the person's next message).
+ *   POST /api/v1/runs               actor.task.create  { text, agent?, idempotency_key? }: a new conversation
+ *                                                      (a body with `skill` is the catalogue's skill run, below)
+ *   POST /api/v1/runs/:id/messages  actor.task.create  { text }: the next turn, from the newest one
+ *   POST /api/v1/runs/:id/stop      actor.task.create  stops the turn under way
+ *
  * A person's Network token (or this site's session) only: an app's token gets the same 404 as another person's run,
  * so nothing confirms that a run exists. Read-only: creating, stopping and answering an approval are the engine's
  * later routes and are not here. No table changes.
@@ -17,8 +27,16 @@ const contracts = require('openvibe-contracts');
 const { asyncRouter } = require('./router');
 const store = require('../tasks/store');
 const catalog = require('../agents/catalog');
+const canvases = require('../canvases');
+const { createTask } = require('../tasks/create');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
+const AGENT_ID = /^agt_[0-9A-HJKMNP-TV-Z]{26}$/;
+const IDEMPOTENCY = /^[A-Za-z0-9._:-]{8,128}$/;
+// A conversation's step numbers, so one cursor reads them all: a turn's place × TURN, + 1 for the person's message,
+// + 1 + its own event number for each of its steps, and TURN − 1 for an answer kept only in its result.
+const TURN = 1000000;
+const MAX_TURNS = 200;
 const STATUS = { queued: 'planning', running: 'running', verifying: 'running', needs_you: 'waiting', succeeded: 'done', failed: 'failed', cancelled: 'stopped' };
 const BY_STATUS = {
     planning: ['queued'],
@@ -105,6 +123,106 @@ function runOf(row, names, now) {
     return out;
 }
 
+const oneLine = (v, n) => clip(String(v == null ? '' : v).replace(/\s+/g, ' ').trim(), n);
+
+/**
+ * A conversation's turns in order, as run rows: its first turn, then at each turn the newest follow-up (a retry
+ * replaces the turn it retries; a fork starts a conversation of its own). Two queries.
+ */
+async function turnsOf(s, rootId, requester) {
+    const path = await s.db.many(`WITH RECURSIVE down AS (
+            SELECT id, 0 AS depth FROM tasks WHERE id = $1 AND requester = $2
+            UNION ALL
+            SELECT n.id, down.depth + 1
+              FROM down
+              CROSS JOIN LATERAL (
+                  SELECT t.id FROM tasks t
+                   WHERE t.parent_id = down.id AND t.fork_of_step IS NULL
+                   ORDER BY t.id DESC LIMIT 1) n
+             WHERE down.depth < ${MAX_TURNS})
+        SELECT id, depth FROM down ORDER BY depth`, [String(rootId), requester]);
+    if (!path.length) return [];
+    // Each turn's last words (its newest text step): what the thread shows as the answer, and so the preview.
+    const rows = await s.db.many(`SELECT r.*, (SELECT e.body->>'text' FROM task_events e WHERE e.task_id = r.id AND e.body->>'kind' = 'output'
+            AND e.body->>'step' = 'text' ORDER BY e.seq DESC LIMIT 1) AS last_text
+        FROM (${RUN_ROW_SELECT} WHERE t.id = ANY($1::text[]) AND t.requester = $2) r`, [path.map((x) => x.id), requester]);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return path.map((x) => byId.get(x.id)).filter(Boolean);
+}
+
+/** A conversation's turns → one agents.run@1: the first turn's id and title, the newest turn's state, every turn's cost. */
+function conversationOf(turns, names, now, baseUrl) {
+    const root = turns[0];
+    const last = turns[turns.length - 1];
+    const run = runOf(last, names, now);
+    run.id = root.id;
+    run.kind = 'chat';
+    run.parent_run = root.fork_of_step != null ? root.parent_id || null : null;
+    run.created_at = iso(root.created_at);
+    run.title = oneLine(root.task, 200) || 'Conversation';
+    run.turns = turns.length;
+    const usd = turns.reduce((sum, t) => sum + (num(t.cost_usd) || 0), 0);
+    const steps = turns.reduce((sum, t) => sum + (Number(t.step_count) || 0), 0);
+    const seconds = elapsedSeconds({ created_at: root.created_at, finished_at: last.finished_at }, now);
+    run.cost = { usd: round(usd), steps, ...(seconds != null ? { seconds } : {}) };
+    const open = store.OPEN.includes(last.state);
+    // A finished answer is the person's turn, as in any chat; failing and stopping still say so.
+    if (last.state === 'succeeded') { run.status = 'waiting'; run.waiting = { for: 'message' }; }
+    if (open) run.doing = { text: 'Working on it', glyph: 'spark' };
+    const said = open ? null : (last.last_text || summaryOf(last));
+    run.preview = open || !said
+        ? { text: oneLine(last.task, 500), from: 'person', at: run.updated_at }
+        : { text: oneLine(said, 500), from: 'agent', at: run.updated_at };
+    run.url = `${String(baseUrl || '').replace(/\/$/, '')}/chat/${last.id}`;
+    return run;
+}
+
+/**
+ * A conversation's steps after a cursor: each turn opens with the person's message, then its own steps; a finished
+ * turn whose answer is only in its result (no text step) still answers in the thread.
+ */
+async function conversationSteps(s, turns, after, limit) {
+    const out = [];
+    const root = turns[0];
+    for (let i = 0; i < turns.length && out.length <= limit; i++) {
+        const turn = turns[i];
+        const base = i * TURN;
+        if (base + TURN <= after) continue;
+        if (base + 1 > after) {
+            out.push({ run_id: root.id, seq: base + 1, kind: 'message', from: 'person', text: clip(String(turn.task || ''), 65536),
+                started_at: iso(turn.created_at), ended_at: iso(turn.created_at), cost: null, child_run: null });
+        }
+        const rows = await s.db.many(`SELECT e.seq, e.body FROM task_events e
+            WHERE e.task_id = $1 AND e.seq > $2 AND e.body->>'kind' = 'output'
+            ORDER BY e.seq LIMIT $3`, [turn.id, Math.max(0, after - base - 1), limit + 1]);
+        for (const entry of rows) {
+            const step = stepOf(root.id, entry.seq, parse(entry.body));
+            step.run_id = root.id;
+            step.seq = base + 1 + Number(entry.seq);
+            if (step.kind === 'message') step.from = 'agent';
+            out.push(step);
+        }
+        if (!store.OPEN.includes(turn.state) && rows.length <= limit && base + TURN - 1 > after) {
+            const answer = summaryOf(turn);
+            const spoke = answer && await s.db.maybe(`SELECT 1 AS yes FROM task_events e WHERE e.task_id = $1 AND e.body->>'kind' = 'output' AND e.body->>'step' = 'text' LIMIT 1`, [turn.id]);
+            if (answer && !spoke) {
+                const at = iso(turn.finished_at || turn.created_at);
+                out.push({ run_id: root.id, seq: base + TURN - 1, kind: 'message', from: 'agent', text: answer, started_at: at, ended_at: at, cost: null, child_run: null });
+            }
+        }
+    }
+    const page = out.slice(0, limit);
+    return { steps: page, next: out.length > limit ? Number(page[page.length - 1].seq) : null };
+}
+
+/** One conversation's run, read by any of its turns' ids (the first turn's id is the run's). */
+async function conversationView(s, taskId, requester, now, baseUrl) {
+    const rootId = await canvases.threadForTask(s, taskId);
+    const turns = rootId ? await turnsOf(s, rootId, requester) : [];
+    if (!turns.length) return null;
+    return conversationOf(turns, await namesFor(s, requester, turns), now, baseUrl);
+}
+
 /** A task event → agents.step@1. One event is one step: Actor writes a tool call and its result as two entries. */
 function stepOf(runId, seq, body) {
     const b = body && typeof body === 'object' ? body : {};
@@ -155,7 +273,7 @@ async function viewOf(s, row, now) {
 }
 
 function createRunsRoutes(ctx) {
-    const { s, principal, limits } = ctx;
+    const { s, principal, limits, config = {}, engine, webhooks, triggers } = ctx;
     const r = asyncRouter();
     const problem = (req, res, status, code, detail) => contracts.http.sendProblem(res, status, code, { detail, ctx: req.ov });
     const notFound = (req, res) => problem(req, res, 404, 'agents.run.not_found', 'No such run.');
@@ -164,6 +282,40 @@ function createRunsRoutes(ctx) {
     const own = (req, res, next) => (req.principal && req.principal.kind === 'user' && /^user:usr_/.test(String(req.principal.requester)) ? next() : notFound(req, res));
 
     const RUN_SELECT = RUN_ROW_SELECT;
+
+    const wantsConversations = (req) => req.query.conversations === '1' || req.query.conversation === '1';
+    // The person's own Bearer and clock, for a trigger made in a turn (their Watch, their timezone).
+    const bearerOf = (req) => { const h = String(req.get('authorization') || ''); return h.startsWith('Bearer ') ? h.slice(7).trim() : (req.token || null); };
+    const tzOf = (req) => (req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null);
+    const textOf = (b) => (b && typeof b.text === 'string' ? b.text.trim().slice(0, 20000) : '');
+    const started = async (req, row, text, rootId) => {
+        if (!triggers || !triggers.onMessage || !row.agent_id) return;
+        await triggers.onMessage({ owner: String(req.principal.requester || '').replace(/^user:/, ''), agentId: row.agent_id, text,
+            conversation: `chat:${rootId}`, turnTaskId: row.id, place: `/chat/${row.id}` });
+    };
+    const failed = (req, res, out) => {
+        if (out.retryAfter) res.set('Retry-After', String(out.retryAfter));
+        return problem(req, res, out.status, out.code, out.detail);
+    };
+
+    // A new conversation with the person's Actor (or one of their own agents). A body with `skill` is the
+    // catalogue's skill run, served by the route after this router.
+    r.post('/', (req, res, next) => (req.body && req.body.skill != null ? next('router') : next()),
+        principal.requireCapability('actor.task.create'), own, limits.budget('actor.task.create'), async (req, res) => {
+            const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+            const text = textOf(b);
+            if (!text) return problem(req, res, 422, 'agents.run.start_needs_words', 'Say what the run is for ({ text }).');
+            const key = String(b.idempotency_key || req.get('idempotency-key') || '');
+            const body = { task: text, mode: 'balanced',
+                ...(typeof b.agent === 'string' && AGENT_ID.test(b.agent) ? { agent_id: b.agent } : {}),
+                ...(IDEMPOTENCY.test(key) ? { idempotency_key: key } : {}) };
+            const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body, personToken: bearerOf(req), timezone: tzOf(req) });
+            if (out.code) return failed(req, res, out);
+            if (out.status === 201) await started(req, out.task, text, out.task.id);
+            const view = await conversationView(s, out.task.id, req.principal.requester, s.now(), config.baseUrl);
+            res.set('Location', `/api/v1/runs/${out.task.id}`);
+            return res.status(out.status).json(view);
+        });
 
     r.get('/', principal.requireCapability('actor.task.list'), own, limits.reads('actor.task.list'), async (req, res) => {
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
@@ -177,6 +329,22 @@ function createRunsRoutes(ctx) {
         const where = ['t.requester = $1'];
         const args = [req.principal.requester];
         if (before) { args.push(before); where.push(`t.id < $${args.length}`); }
+        if (wantsConversations(req)) {
+            // Conversations: their first turns (a fork is a conversation of its own); the status is the newest turn's.
+            where.push('(t.parent_id IS NULL OR t.fork_of_step IS NOT NULL)');
+            if (agent) { args.push(agent); where.push(`(t.agent_id = $${args.length} OR t.agent = $${args.length})`); }
+            args.push(limit + 1);
+            const roots = await s.db.many(`SELECT t.id FROM tasks t WHERE ${where.join(' AND ')} ORDER BY t.id DESC LIMIT $${args.length}`, args);
+            const page = roots.slice(0, limit);
+            const now = s.now();
+            const runs = [];
+            for (const root of page) {
+                const turns = await turnsOf(s, root.id, req.principal.requester);
+                if (turns.length) runs.push(conversationOf(turns, await namesFor(s, req.principal.requester, turns), now, config.baseUrl));
+            }
+            const wanted = req.query.status ? runs.filter((x) => x.status === String(req.query.status)) : runs;
+            return res.json({ runs: wanted, next: roots.length > limit ? page[page.length - 1].id : null });
+        }
         if (states) { args.push(states); where.push(`t.state = ANY($${args.length}::text[])`); }
         if (agent) { args.push(agent); where.push(`(t.agent_id = $${args.length} OR t.agent = $${args.length})`); }
         args.push(limit + 1);
@@ -199,6 +367,13 @@ function createRunsRoutes(ctx) {
         if (!row) return;
         const after = Math.max(0, parseInt(req.query.after, 10) || 0);
         const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 200));
+        if (wantsConversations(req)) {
+            const rootId = await canvases.threadForTask(s, row.id);
+            const turns = rootId ? await turnsOf(s, rootId, req.principal.requester) : [];
+            if (!turns.length) return notFound(req, res);
+            const page = await conversationSteps(s, turns, after, limit);
+            return res.json({ run_id: turns[0].id, ...page });
+        }
         const rows = await s.db.many(`SELECT e.seq, e.body FROM task_events e
             WHERE e.task_id = $1 AND e.seq > $2 AND e.body->>'kind' = 'output'
             ORDER BY e.seq LIMIT $3`, [row.id, after, limit + 1]);
@@ -207,7 +382,37 @@ function createRunsRoutes(ctx) {
         res.json({ run_id: row.id, steps, next: rows.length > limit ? Number(page[page.length - 1].seq) : null });
     });
 
+    // The person's next message: a new turn from the conversation's newest one, as typing it on openvibe.actor does.
+    r.post('/:id/messages', principal.requireCapability('actor.task.create'), own, limits.budget('actor.task.create'), async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        const text = textOf(req.body);
+        if (!text) return problem(req, res, 422, 'agents.run.say_needs_words', 'Write a message first ({ text }).');
+        const rootId = await canvases.threadForTask(s, row.id);
+        const latest = rootId ? await canvases.latestForThread(s, rootId) : null;
+        if (!latest || latest.requester !== req.principal.requester) return notFound(req, res);
+        if (store.OPEN.includes(latest.state) || latest.state === 'needs_you') {
+            return problem(req, res, 409, 'agents.run.busy', 'Your Actor is still working on the last message. Wait for it, or stop it.');
+        }
+        const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: { task: text, mode: latest.mode || 'balanced' },
+            parentId: latest.id, personToken: bearerOf(req), timezone: tzOf(req) });
+        if (out.code) return failed(req, res, out);
+        await started(req, out.task, text, rootId);
+        return res.status(202).json({ ok: true, run: await conversationView(s, rootId, req.principal.requester, s.now(), config.baseUrl) });
+    });
+
+    // Stop: the turn under way stops; the conversation stays, ready for the next message.
+    r.post('/:id/stop', principal.requireCapability('actor.task.create'), own, async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        const rootId = await canvases.threadForTask(s, row.id);
+        const latest = rootId ? await canvases.latestForThread(s, rootId) : null;
+        if (!latest || latest.requester !== req.principal.requester) return notFound(req, res);
+        if (store.OPEN.includes(latest.state) || latest.state === 'needs_you') await engine.cancel(latest.id, req.principal.requester);
+        return res.json(await conversationView(s, rootId, req.principal.requester, s.now(), config.baseUrl));
+    });
+
     return r;
 }
 
-module.exports = { createRunsRoutes, runOf, stepOf, viewOf, loadRunRow, STATUS, STEP_KIND };
+module.exports = { createRunsRoutes, runOf, stepOf, viewOf, loadRunRow, conversationView, turnsOf, STATUS, STEP_KIND, TURN };
