@@ -62,6 +62,10 @@ const EXPECTED = {
     // Space: the agent builds the person's own spaces (plan 2026-10-22 §Z stage Z1). Making one, writing its files
     // and asking to publish it change the world; listing and reading them do not.
     space_create: true,
+    git_repos_list: false,
+    git_repo_create: true,
+    git_files_write: true,
+    git_change_open: true,
     space_files_list: false,
     space_files_read: false,
     space_files_write: true,

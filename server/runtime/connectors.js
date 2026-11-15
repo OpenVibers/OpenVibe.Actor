@@ -68,6 +68,14 @@ const CONNECTORS = [
         default: true,
     },
     {
+        id: 'git',
+        name: 'Your code on OpenVibe.Git',
+        service: 'openvibe.git',
+        what: 'Make repositories on git.openvibe.codes, commit files to them and open changes for you to merge.',
+        risk: 'writes',
+        default: true,
+    },
+    {
         id: 'space',
         name: 'Your spaces',
         service: 'openvibe.space',

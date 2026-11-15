@@ -200,6 +200,9 @@ function load(env = process.env) {
             // OpenVibe.Space: the person's own spaces, which their agent builds (plan 2026-10-22 §Z stage Z1).
             // Empty turns the space tools off.
             spaceUrl: trim(env.ACTOR_SPACE_URL != null ? env.ACTOR_SPACE_URL : (selfHosted ? '' : 'http://127.0.0.1:4940')),
+            // OpenVibe.Git (git.openvibe.codes): the person's own repositories, which their agent makes, writes and opens
+            // changes on (plan §AD.10 step 1). Empty turns the git tools off.
+            gitUrl: trim(env.ACTOR_GIT_URL != null ? env.ACTOR_GIT_URL : (selfHosted ? '' : 'http://127.0.0.1:5270')),
             // OpenVibe.Watch: where a trigger's subscription lives (plan §12 A-4). The person's own token is
             // always the authority; empty turns triggers off.
             watchUrl: trim(env.ACTOR_WATCH_URL != null ? env.ACTOR_WATCH_URL : (selfHosted ? '' : 'http://127.0.0.1:4730')),
