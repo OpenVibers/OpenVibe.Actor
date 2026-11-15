@@ -10,6 +10,11 @@ const SAME = { 'sec-fetch-site':'same-origin' };
         const user=t.network.addUser('you'), other=t.network.addUser('other');
         const api=(path='',json,method)=>t.get('/api/v1/me/actor'+path,{as:user,json,method,headers:SAME});
         const a=(await api()).json();
+        // A drawn face (11-15, edit your Actor in the menu): one of the menu's shapes in a hue; anything else is refused.
+        let f=await api('',{avatar:{blob:{hue:300,shape:'pebble'}}},'PATCH');assert.equal(f.status,200,f.text);
+        assert.deepEqual((await api()).json().avatar,{blob:{hue:300,shape:'pebble'}});
+        for(const bad of [{blob:{hue:400,shape:'round'}},{blob:{hue:10,shape:'star'}},{blob:{hue:10,shape:'round',url:'x'}}]){f=await api('',{avatar:bad},'PATCH');assert.equal(f.status,422,JSON.stringify(bad));}
+        f=await api('',{avatar:null},'PATCH');assert.equal(f.status,200,f.text);
         const base={actor:a,models:[{id:'test/uncensored@1',name:'Uncensored model'}]};
         assert.match(render(base),/data-state="Paused"/);
         for(const status of ['working','resting']){
