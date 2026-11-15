@@ -526,7 +526,7 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
 <section class="sc-sec hm-task" id="task" aria-labelledby="h-task"><h2 id="h-task">Give it a job</h2>
 ${box}
 ${raw(starts)}</section>
-${raw(showcase.features({ id: 'yours', title: 'One agent system', lede: 'Your agents: make one, share it, install others. Each does only what you allow. Vibe, in the menu on every OpenVibe site, is your first agent on OpenVibe.Actor.', items: [
+${raw(showcase.features({ id: 'yours', title: 'One agent system', lede: 'Your agents: make one, share it, install others. Each does only what you allow. Actor, in the menu on every OpenVibe site, is your first agent: call it what you like.', items: [
                 { icon: 'ov:wand', title: 'Make one', text: 'Say what it is for in plain words. It gets instructions, a memory you can read and edit, a schedule and a budget.', href: '/me/agents' },
                 { icon: 'ov:share', title: 'Share it', text: 'Publish an agent you made so other people can install it as it is, or remix it into their own.', href: '/me/agents' },
                 { icon: 'ov:download', title: 'Install others', text: 'Add an agent or a skill someone shared. It starts with nothing and asks for each thing it needs.', href: '/skills' },

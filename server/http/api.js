@@ -572,7 +572,7 @@ function createApi(ctx) {
     });
     r.delete('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (!row) return;
-        if (row.is_vibe) return problem(req, res, 409, 'actor.agent.vibe', 'Vibe is your first agent and cannot be deleted.');
+        if (row.is_vibe) return problem(req, res, 409, 'actor.agent.vibe', 'Your Actor is your first agent and cannot be deleted.');
         await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [row.id, row.owner]);
         res.status(204).end();
     });

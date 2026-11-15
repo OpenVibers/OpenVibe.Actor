@@ -26,7 +26,7 @@ const KINDS = ['browser', 'kept-browser', 'desktop', 'gpu-desktop', 'always-on',
 const PLACEMENTS = ['auto', 'link', 'home', 'ovh'];
 const APP = /^[a-z][a-z0-9._-]{0,63}$/;
 const ALLOWED = ['preset', 'name', 'face', 'voice', 'model', 'computer', 'apps', 'memory', 'level', 'instructions', 'soul'];
-const VIBE_INSTRUCTIONS = 'You are Vibe, this person\'s first agent. Help them with whatever they bring you: answer, plan, and use the tools you are allowed. Ask before anything that spends money, reveals a password, deletes something or sends to a new recipient.';
+const VIBE_INSTRUCTIONS = 'You are this person\'s own agent, their Actor. Help them with whatever they bring you: answer, plan, and use the tools you are allowed. Ask before anything that spends money, reveals a password, deletes something or sends to a new recipient.';
 
 const PRESETS = [
     {
@@ -114,7 +114,7 @@ async function ensureVibe(s, config, owner) {
     const inserted = await s.db.maybe(`INSERT INTO actor_agents
         (id, owner, name, instructions, mode, budget_per_run_usd, daily_runs_max, schedule, status, created_at, updated_at,
          face, voice, model_engine, model_id, computer, apps, memory_scope, level, is_vibe)
-        VALUES ($1,$2,'Vibe',$3,'balanced',$4,24,'off','active',$5,$5,'preset:vibe',NULL,'runtime','smart',NULL,'[]'::jsonb,NULL,'ask',true)
+        VALUES ($1,$2,'Actor',$3,'balanced',$4,24,'off','active',$5,$5,'preset:vibe',NULL,'runtime','smart',NULL,'[]'::jsonb,NULL,'ask',true)
         ON CONFLICT DO NOTHING RETURNING *`,
     [s.newId('agt'), owner, VIBE_INSTRUCTIONS, Math.max(0.000001, Number(config.allowance.perTaskUsd) || 0.05), now]);
     if (inserted) return inserted;
@@ -203,6 +203,10 @@ async function update(s, config, owner, id, patch) {
         if (typeof body.instructions !== 'string' || !body.instructions.trim() || body.instructions.length > 4000) return { error: 'instructions must be 1–4000 characters.' };
         instructions = body.instructions;
     }
+    // Your first agent is your Actor (the owner, 11-15): a new name for one is the other's name too.
+    if (row.is_vibe && next.name !== row.name && typeof next.name === 'string' && next.name.trim()) {
+        await s.db.query('UPDATE actors SET name=$2, updated_at=$3 WHERE owner=$1', [owner, next.name.trim(), s.iso()]);
+    }
     return { row: await s.db.maybe(`UPDATE actor_agents SET name=$3, face=$4, voice=$5, model_engine=$6, model_id=$7,
         computer=$8::jsonb, apps=$9::jsonb, memory_scope=$10, level=$11, instructions=$12, soul=$13::jsonb, updated_at=$14
         WHERE id=$1 AND owner=$2 RETURNING *`,
@@ -213,7 +217,7 @@ async function update(s, config, owner, id, patch) {
 async function remove(s, owner, id) {
     const row = await get(s, owner, id);
     if (!row) return null;
-    if (row.is_vibe) return { error: 'Vibe is your first agent and cannot be deleted.', status: 409, code: 'actor.agent.vibe' };
+    if (row.is_vibe) return { error: 'Your Actor is your first agent and cannot be deleted.', status: 409, code: 'actor.agent.vibe' };
     await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [id, owner]);
     return { row };
 }

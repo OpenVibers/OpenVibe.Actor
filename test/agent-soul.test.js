@@ -142,10 +142,10 @@ const GOOD = {
             assert.strictEqual(by.Juniper.state, 'asks');
             assert.strictEqual(by.Juniper.asks, 1);
             assert.strictEqual(by.Sleepy.state, 'paused');
-            assert.strictEqual(by.Vibe.state, 'resting');
-            assert.strictEqual(by.Vibe.glyph, 'spark');
-            assert.strictEqual(by.Vibe.hue, 258);
-            assert.strictEqual(by.Vibe.avatar_url, null);
+            assert.strictEqual(by.Actor.state, 'resting', 'your first agent is Actor (11-15)');
+            assert.strictEqual(by.Actor.glyph, 'spark');
+            assert.strictEqual(by.Actor.hue, 258);
+            assert.strictEqual(by.Actor.avatar_url, null);
             assert.strictEqual(agents[0].name, 'Worker', 'newest activity first');
             const text = JSON.stringify(agents);
             assert.ok(!text.includes('Work carefully.'), 'no instructions');

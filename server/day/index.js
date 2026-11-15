@@ -61,8 +61,11 @@ function createDay(ctx) {
             const locked = await s.db.maybe('SELECT * FROM actors WHERE owner = $1 FOR UPDATE', [owner]);
             if (locked.active_task && Object.keys(body).some(k => ['computer', 'caps'].includes(k))) fail('Pause your Actor before changing its settings.', 409);
             const latest = { ...locked, ...body, caps: budget(body.caps || locked.caps, locked.caps, true) };
-            return s.db.maybe(`UPDATE actors SET name=$2,avatar=$3::jsonb,brain=$4,computer=$5::jsonb,caps=$6::jsonb,updated_at=$7,adult_opt_in=$8 WHERE owner=$1 RETURNING *`,
+            const saved = await s.db.maybe(`UPDATE actors SET name=$2,avatar=$3::jsonb,brain=$4,computer=$5::jsonb,caps=$6::jsonb,updated_at=$7,adult_opt_in=$8 WHERE owner=$1 RETURNING *`,
                 [owner, latest.name.trim(), JSON.stringify(latest.avatar), latest.brain, JSON.stringify(latest.computer), JSON.stringify(latest.caps), s.iso(), next.adult_opt_in]);
+            // Your Actor is your first agent (the owner, 11-15): its name is that agent's name too.
+            if (saved && latest.name.trim() !== locked.name) await s.db.query('UPDATE actor_agents SET name=$2, updated_at=$3 WHERE owner=$1 AND is_vibe', [owner, latest.name.trim(), s.iso()]);
+            return saved;
         });
     }
     const goals = (owner) => s.db.many('SELECT * FROM actor_day_goals WHERE owner=$1 AND deleted_at IS NULL ORDER BY next_due_at,id', [owner]);

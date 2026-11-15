@@ -39,7 +39,7 @@ async function cardForTask(s, task) {
         row = await s.db.maybe('SELECT * FROM actor_agents WHERE id = $1 AND owner = $2', [String(task.via).slice(6), owner]).catch(() => null);
     }
     if (!row && owner.startsWith('user:')) row = await s.db.maybe('SELECT * FROM actor_agents WHERE owner = $1 AND is_vibe ORDER BY created_at, id LIMIT 1', [owner]).catch(() => null);
-    if (!row) return owner.startsWith('user:') ? { id: 'vibe', name: 'Vibe' } : null;   // a person's task is their Vibe, even before it has a row
+    if (!row) return owner.startsWith('user:') ? { id: 'vibe', name: 'Actor' } : null;   // a person's task is their Actor's, even before it has a row
     return cardOf(row);
 }
 
