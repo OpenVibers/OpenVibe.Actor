@@ -27,6 +27,8 @@ const { boot, check, done } = require('./helpers/boot');
         const visitor = await t.get('/');
         assert.strictEqual(visitor.status, 200);
         assert.doesNotMatch(visitor.text, /data-chat=""/);
+        const template = await t.get('/?task=Explain%20DNS&mode=balanced', { as: u });
+        assert.doesNotMatch(template.text, /data-chat=""/, 'a template link fills the home\'s task box');
         const own = await t.get('/?home=1', { as: u });
         assert.strictEqual(own.status, 200);
         assert.doesNotMatch(own.text, /data-chat=""/);

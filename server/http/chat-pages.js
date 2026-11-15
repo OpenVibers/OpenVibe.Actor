@@ -1065,9 +1065,11 @@ ${runsSaved ? html`<p class="cm-ok" role="status">Saved. Your next task runs on 
     });
 
     // A signed-in person's home is the messenger (the owner, 11-15: "migrate this layout style to openvibe.actor"): your
-    // agents, your conversations and one box, the page /chat draws. A visitor, and ?home=1, get the product's own page.
+    // agents, your conversations and one box, the page /chat draws. A visitor, ?home=1 and a template link get the
+    // product's own page.
     r.get('/', async (req, res, next) => {
-        if (!signedIn(req) || req.query.home === '1') return next();
+        // A template link (/?task=…&mode=…) fills the home's task box with its mode: that page answers it.
+        if (!signedIn(req) || req.query.home === '1' || typeof req.query.task === 'string') return next();
         res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         const text = typeof req.query.ask === 'string' ? req.query.ask.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').slice(0, 2000) : '';
         return render(req, res, { text });
