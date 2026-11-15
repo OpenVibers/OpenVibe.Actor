@@ -67,7 +67,7 @@ const json = (v) => clip(JSON.stringify(v));
 /** The person a task is for, when it is a signed-in person ('user:usr_…' → 'usr_…'), else null. */
 const personOf = (requester) => (typeof requester === 'string' && requester.startsWith('user:') ? requester.slice(5) : null);
 
-function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null, notifier = null, searchTokens = null, agentCard = null }) {
+function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () => Date.now(), log = console, robots = null, computers = null, vision = null, notifier = null, searchTokens = null, madeTokens = null, agentCard = null }) {
     const { searchUrl, toolsUrl } = config.services;
     // The web scope costs money past the open index, so it is asked as Actor (a service principal), never anonymously:
     // off without Actor's client secret.
@@ -75,6 +75,13 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
         audience: 'openvibe.search', scope: 'search.query.delegate', fetchImpl,
     }) : null);
+    // The tools people make (plan §AD.12 (b), Contracts 0.437.0 tools.made.run): the person's own and the public ones,
+    // found with the catalogue and run as the person (X-OV-Subject), paid from their allowance. Off without the secret.
+    const madeAuth = !toolsUrl ? null : madeTokens || (config.oauth && config.oauth.clientSecret ? serviceAuth.createTokenClient({
+        tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.tools', scope: 'tools.made.run', fetchImpl,
+    }) : null);
+    const madeMine = new Map();   // person → { at, rows }
     // Desks plan D4: "hand it to me" reaches the person through Network's notifications (server/notify/client.js).
     const notify = notifier || createNotifier({ config, fetchImpl, log });
     const bot = robots || createRobots({ config, fetchImpl });
@@ -117,7 +124,32 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
 
     const words = (s) => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1);
 
-    async function findTools(need, { signal } = {}) {
+    /** The made tools that fit a need: the person's own (kept two minutes) and the public ones. */
+    async function findMade(need, person, { signal } = {}) {
+        if (!toolsUrl) return [];
+        const out = [];
+        const take = (rows, mine) => { for (const t of rows || []) if (t && /^mtl_[0-9A-HJKMNP-TV-Z]{26}$/.test(t.id) && !out.some((x) => x.tool === t.id)) out.push({ tool: t.id, name: t.name, does: t.summary, input: t.input || null, made: true, ...(mine ? { yours: true } : {}) }); };
+        if (person && madeAuth) {
+            let kept = madeMine.get(person);
+            if (!kept || now() - kept.at > 120_000) {
+                try {
+                    const r = await getJson(`${toolsUrl}/api/v1/made-tools?mine=1`, { signal, headers: { ...(await madeAuth.authHeaders()), 'X-OV-Subject': person } });
+                    kept = { at: now(), rows: r.ok && r.data && Array.isArray(r.data.tools) ? r.data.tools : [] };
+                    if (madeMine.size > 500) madeMine.clear();
+                    madeMine.set(person, kept);
+                } catch { kept = { at: now(), rows: [] }; }
+            }
+            const q = new Set(words(need));
+            take(kept.rows.filter((t) => words(`${t.name} ${t.summary} ${t.slug}`).some((w) => q.has(w))), true);
+        }
+        try {
+            const r = await getJson(`${toolsUrl}/api/v1/made-tools?q=${encodeURIComponent(String(need || '').slice(0, 100))}&limit=6`, { signal });
+            take(r.ok && r.data && Array.isArray(r.data.tools) ? r.data.tools : [], false);
+        } catch { /* the catalogue still answers */ }
+        return out.slice(0, 6);
+    }
+
+    async function findTools(need, { signal, person = null } = {}) {
         const list = await tools({ signal });
         const q = new Set(words(need));
         const scored = list.map((t) => {
@@ -131,10 +163,18 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         for (const { t } of scored) {
             out.push({ tool: t.id, name: t.name, does: t.summary, input: await inputSchema(t.id, { signal }), example: (t.examples && t.examples[0] && t.examples[0].input) || null });
         }
-        return out;
+        return [...out, ...await findMade(need, person, { signal })];
     }
 
-    async function runTool(id, input, { signal } = {}) {
+    async function runTool(id, input, { signal, person = null } = {}) {
+        if (/^mtl_[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) {
+            // A tool a person made runs as the person this task is for, paid from their own allowance.
+            if (!person || !madeAuth) return { error: 'a tool people made runs only for a signed-in person' };
+            const r = await getJson(`${toolsUrl}/api/v1/made-tools/${id}/run`, { method: 'POST', body: { input: input && typeof input === 'object' ? input : {} }, signal, timeoutMs: 90_000, headers: { ...(await madeAuth.authHeaders()), 'X-OV-Subject': person } });
+            if (!r.ok) return { error: (r.data && (r.data.detail || r.data.title || r.data.error)) || `Tools answered ${r.status}` };
+            if (r.data && r.data.state === 'failed') return { error: (r.data.error && (r.data.error.detail || r.data.error.title)) || 'the tool failed' };
+            return r.data && r.data.result !== undefined ? r.data.result : r.data;
+        }
         const list = await tools({ signal });
         if (!list.some((t) => t.id === id)) return { error: `no callable tool "${id}"; use find_tools to see which exist` };
         const r = await getJson(`${toolsUrl}/api/v1/tools/${id}/run`, { method: 'POST', body: { input: input && typeof input === 'object' ? input : {} }, signal, timeoutMs: 30_000 });
@@ -143,12 +183,12 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     }
 
     /** Up to 8 run_tool calls at once, each with run_tool's own rules; every answer under its call's index. */
-    async function runTools(calls, { signal } = {}) {
+    async function runTools(calls, { signal, person = null } = {}) {
         const list = Array.isArray(calls) ? calls.slice(0, 8) : [];
         if (!list.length) return { error: 'calls is a list of { tool, input }, at most 8' };
         const out = await Promise.all(list.map(async (c) => {
             const tool = String((c && c.tool) || '');
-            try { return { tool, result: await runTool(tool, c && c.input, { signal }) }; } catch (err) { return { tool, result: { error: String((err && err.message) || err).slice(0, 200) } }; }
+            try { return { tool, result: await runTool(tool, c && c.input, { signal, person }) }; } catch (err) { return { tool, result: { error: String((err && err.message) || err).slice(0, 200) } }; }
         }));
         return { results: out, ...(Array.isArray(calls) && calls.length > 8 ? { note: `only the first 8 of ${calls.length} calls ran` } : {}) };
     }
@@ -200,7 +240,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
             ...(searchUrl ? [{ type: 'function', function: { name: 'search_openvibe', description: 'Search everything published on the OpenVibe network (streams, clips, pastes, community posts, wiki pages, blog posts, threads). Returns titles, summaries and links.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } }] : []),
             ...(webTokens ? [{ type: 'function', function: { name: 'search_sites', description: 'Ask the same question of several named sites at once (for example ["github.com", "stackoverflow.com", "reddit.com"]): each site is searched in parallel, and its results come back under its name. Use it to compare what different sites say, or to search the ones you trust.', parameters: { type: 'object', properties: { query: { type: 'string' }, sites: { type: 'array', items: { type: 'string' }, maxItems: 6 } }, required: ['query', 'sites'] } } }] : []),
             ...(webTokens ? [{ type: 'function', function: { name: 'search_web', description: 'Search the web for anything outside OpenVibe (news, facts, documentation, products). Returns up to 6 results, each with its title, summary, URL, site and date: cite the URLs you use. Prefer search_openvibe for OpenVibe content.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } }] : []),
-            ...(toolsUrl ? [{ type: 'function', function: { name: 'find_tools', description: 'Find OpenVibe.Tools tools for a need (for example "mx records", "ssl certificate", "whois", "http headers", "base64", "hash"). Returns each tool id with its input schema and an example.', parameters: { type: 'object', properties: { need: { type: 'string' } }, required: ['need'] } } }, { type: 'function', function: { name: 'run_tool', description: 'Run one OpenVibe.Tools tool by id with its input object (use find_tools first to see the input).', parameters: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool', 'input'] } } }] : []),
+            ...(toolsUrl ? [{ type: 'function', function: { name: 'find_tools', description: 'Find OpenVibe.Tools tools for a need (for example "mx records", "ssl certificate", "whois", "http headers", "base64", "hash"), including the tools people made (the person\'s own first; an mtl_ id runs as them). Returns each tool id with its input schema and an example.', parameters: { type: 'object', properties: { need: { type: 'string' } }, required: ['need'] } } }, { type: 'function', function: { name: 'run_tool', description: 'Run one OpenVibe.Tools tool by id with its input object (use find_tools first to see the input).', parameters: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool', 'input'] } } }] : []),
             ...(toolsUrl ? [{ type: 'function', function: { name: 'run_tools', description: 'Run several OpenVibe.Tools tools at once (at most 8): the same tools and inputs run_tool takes, in parallel. Use it when several lookups or conversions are independent (for example the DNS, the certificate and the headers of one site, or one lookup for several domains). Each answer comes back under its call.', parameters: { type: 'object', properties: { calls: { type: 'array', maxItems: 8, items: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool'] } } }, required: ['calls'] } } }] : []),
         ];
         if (list.some((t) => t.id === 'read')) {
@@ -431,9 +471,9 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                 return json(r.data);
             }
             if (name === 'search_web') return json(await searchWeb(a.query, personOf(requester), { signal }));
-            if (name === 'find_tools') return json(await findTools(a.need, { signal }));
-            if (name === 'run_tool') return json(await runTool(String(a.tool || ''), a.input, { signal }));
-            if (name === 'run_tools') return json(await runTools(a.calls, { signal }));
+            if (name === 'find_tools') return json(await findTools(a.need, { signal, person: personOf(requester) }));
+            if (name === 'run_tool') return json(await runTool(String(a.tool || ''), a.input, { signal, person: personOf(requester) }));
+            if (name === 'run_tools') return json(await runTools(a.calls, { signal, person: personOf(requester) }));
             if (name === 'search_sites') return json(await searchSites(a.query, a.sites, personOf(requester), { signal }));
             if (name === 'read_page') return json(await runTool('read', { url: String(a.url || ''), max_chars: 12000 }, { signal }));
             return json({ error: `unknown tool ${name}` });
