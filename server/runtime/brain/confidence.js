@@ -31,7 +31,7 @@ const DIRECT_TOOLS = new Set([
     'calculate', 'run_code', 'market_quote', 'currency_convert', 'weather_now', 'sports_scores',
     'time_in', 'convert_time', 'geocode', 'place_info', 'wikipedia', 'read_page', 'run_tool', 'find_tools',
     'recall', 'remember', 'make_file', 'make_chart', 'codes_task', 'list_my_robots', 'list_my_computers',
-    'robot_steps', 'computer_read', 'computer_screen', 'search_openvibe',
+    'robot_steps', 'computer_read', 'computer_screen', 'search_openvibe', 'openvibe_updates',
 ]);
 const HIGH_STAKES = /(?:\$|€|£|¥)|\b(?:price|prices|cost|costs|fee|fees|rate|rates|quote|quoted|market|stock|crypto|exchange|date|dates|deadline|expires?|expiry|due|medical|health|symptom|symptoms|treatment|dose|dosage|doctor|diagnosis|legal|law|laws|lawyer|attorney|contract|contracts|terms|clause|financial|finance|invest|investment|tax|taxes|interest|mortgage|loan|salary|income|insurance|refund|payout|send|sending|post|posting|publish|buy|buying|book|booking|order|pay|payment|sign up|signup|contact)\b/i;
 const MAX_CHALLENGES = 2;

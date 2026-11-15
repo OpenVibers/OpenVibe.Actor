@@ -104,7 +104,7 @@ const usd = (n) => (n == null ? '—' : n === 0 ? '$0' : n < 0.01 ? `$${Number(n
 // ── The task page v2 (Actor v2, stage V2-5): the plan, the evidence behind each claim, the files, the check, honestly ──
 // What a tool is called on the page; an unknown one reads as its own name with spaces.
 const TOOL_LABEL = {
-    search_web: 'Web search', read_page: 'Read a page', search_openvibe: 'OpenVibe search', wikipedia: 'Wikipedia',
+    search_web: 'Web search', read_page: 'Read a page', search_openvibe: 'OpenVibe search', openvibe_updates: 'OpenVibe updates', wikipedia: 'Wikipedia',
     weather_now: 'Weather', market_quote: 'Market price', currency_convert: 'Currency', time_in: 'Local time',
     convert_time: 'Time zones', geocode: 'Place lookup', place_info: 'Place', sports_scores: 'Sports scores',
     calculate: 'Calculator', make_file: 'File', make_chart: 'Chart', run_tool: 'OpenVibe tool', find_tools: 'Find a tool',

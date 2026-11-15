@@ -42,3 +42,22 @@ All three are read-only and use the task routes' `actor.task.read`/`actor.task.l
 token (or this site's session) is accepted, and anyone else — including an app's own token — gets the same 404 as a
 run that does not exist. Actor's tables are unchanged. The event log splits a tool call and its result into two
 entries; both become `kind: tool`, the call's entry has `tool_call`, the result's has `result`.
+
+### Conversations (talking to your Actor from any site)
+
+The menu, openvibe.chat and every site talk to the person's Actor through Network's `/api/frame/runs`, which uses
+these routes with the person's own Bearer (2026-11-15: the old Vibe character is gone; your Actor answers):
+
+- `POST /api/v1/runs { text, agent?, idempotency_key? }` — a new conversation with the person's Actor (or one of
+  their own `agt_` agents). `201` with the conversation's run; the same `Idempotency-Key` answers `200` with the
+  same run. A body with `skill` is still the catalogue's skill run.
+- `POST /api/v1/runs/:id/messages { text }` — the next turn, from the conversation's newest one (as typing it on
+  openvibe.actor does); `409 agents.run.busy` while a turn is still working. `202 { ok, run }`.
+- `POST /api/v1/runs/:id/stop` — stops the turn under way; the conversation stays.
+- `?conversations=1` on the list, `?conversation=1` on `GET /runs/:id` and `/runs/:id/steps` — a run is a whole
+  conversation: the first turn's id, `kind: "chat"`, `title` (the first message), `turns`, `preview`
+  (`{ text, from, at }`), `url`, the newest turn's state (a finished turn is `waiting` for the person's
+  `message`), and the cost of every turn. Its steps open each turn with the person's message (`from: "person"`),
+  then the turn's own steps (`from: "agent"` on messages); `seq` is the turn's place × 1,000,000 + 1 for the
+  person's message, + 1 + the event's own number for each step, so one `after` cursor reads the whole
+  conversation. Any turn's id reads the conversation it belongs to. The plain list still lists every turn.
