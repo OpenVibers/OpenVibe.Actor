@@ -29,6 +29,8 @@ const ROUTE_EXTENSIONS = new Map([
     ['POST /api/v1/runs {text}', 'actor.task.create'],
     ['POST /api/v1/runs/:id/messages', 'actor.task.create'],
     ['POST /api/v1/runs/:id/stop', 'actor.task.create'],
+    // Rename a conversation (plan §AD.8): the person's own conversation, the same grant as sending it a message.
+    ['PATCH /api/v1/runs/:id', 'actor.task.create'],
     ['GET /api/v1/tasks/:id/trace', 'actor.task.read'],
     ['GET /api/v1/stats/tools', null],
     ['GET /api/v1/stats/models', null],

@@ -18,6 +18,7 @@
  *                                                      (a body with `skill` is the catalogue's skill run, below)
  *   POST /api/v1/runs/:id/messages  actor.task.create  { text }: the next turn, from the newest one
  *   POST /api/v1/runs/:id/stop      actor.task.create  stops the turn under way
+ *   PATCH /api/v1/runs/:id          actor.task.create  names the conversation ({ title }; empty gives it back)
  *
  * A person's Network token (or this site's session) only: an app's token gets the same 404 as another person's run,
  * so nothing confirms that a run exists. Read-only: creating, stopping and answering an approval are the engine's
@@ -171,7 +172,8 @@ function conversationOf(turns, names, now, baseUrl) {
     run.kind = 'chat';
     run.parent_run = root.fork_of_step != null ? root.parent_id || null : null;
     run.created_at = iso(root.created_at);
-    run.title = oneLine(root.task, 200) || 'Conversation';
+    // The name the person gave it (Rename, migration 0079), else its first message.
+    run.title = oneLine(root.title, 200) || oneLine(root.task, 200) || 'Conversation';
     run.turns = turns.length;
     const usd = turns.reduce((sum, t) => sum + (num(t.cost_usd) || 0), 0);
     const steps = turns.reduce((sum, t) => sum + (Number(t.step_count) || 0), 0);
@@ -415,6 +417,20 @@ function createRunsRoutes(ctx) {
         if (out.code) return failed(req, res, out);
         await started(req, out.task, text, rootId);
         return res.status(202).json({ ok: true, run: await conversationView(s, rootId, req.principal.requester, s.now(), config.baseUrl) });
+    });
+
+    // Rename (plan §AD.8, the session's ⋯ menu): the person names the conversation; an empty title gives it back its first
+    // message. The name is kept on the conversation's first turn.
+    r.patch('/:id', principal.requireCapability('actor.task.create'), own, async (req, res) => {
+        const row = await load(req, res);
+        if (!row) return;
+        const raw = req.body && Object.prototype.hasOwnProperty.call(req.body, 'title') ? req.body.title : undefined;
+        if (raw !== null && typeof raw !== 'string') return problem(req, res, 422, 'agents.run.title_needed', 'Send the new name ({ title }).');
+        const title = raw == null ? null : (oneLine(raw, 200) || null);
+        const rootId = (await canvases.threadForTask(s, row.id)) || row.id;
+        const updated = await s.db.maybe('UPDATE tasks SET title = $1 WHERE id = $2 AND requester = $3 RETURNING id', [title, rootId, req.principal.requester]);
+        if (!updated) return notFound(req, res);
+        return res.json(await conversationView(s, rootId, req.principal.requester, s.now(), config.baseUrl));
     });
 
     // Stop: the turn under way stops; the conversation stays, ready for the next message.
