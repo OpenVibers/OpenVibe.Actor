@@ -20,7 +20,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const page = await t.get('/me/agents', { as: a });
             assert.strictEqual(page.status, 200);
             const rows = [...page.text.matchAll(/<a class="ac-row" href="\/me\/agents\/(agt_[0-9A-Z]{26})">[\s\S]*?<strong>([^<]+)<\/strong>/g)];
-            assert.strictEqual(rows[0][2], 'Vibe', 'Vibe is first');
+            assert.strictEqual(rows[0][2], 'Actor', 'your Actor is first (the owner, 11-15: Actor, not Vibe)');
             assert.ok(page.text.includes('Your first agent'));
             assert.ok(page.text.includes('<span class="ac-level" data-level="ask">Asks first</span>'), 'its level in two words');
             assert.ok(page.text.includes('<span class="ac-row-uses">OpenVibe AI</span>'), 'what it uses');

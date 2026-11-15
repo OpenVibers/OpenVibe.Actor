@@ -48,7 +48,7 @@ function storeOf({ byId = {}, vibe = null } = {}) {
 
     await check('a Vibe without a row yet is still a Vibe, without a face', async () => {
         const card = await cardForTask(storeOf(), { requester: OWNER });
-        assert.deepStrictEqual(card, { id: 'vibe', name: 'Vibe' });
+        assert.deepStrictEqual(card, { id: 'vibe', name: 'Actor' });
     });
 
     await check('a task that is nobody\'s has no agent to wear', async () => {
