@@ -71,6 +71,7 @@ const EXPECTED = {
     space_files_write: true,
     space_preview: false,
     space_publish: true,
+    space_site_from_repo: true,
     // Money (plan HO7): a tip asks the person, and the payment moves their Vibes when they approve it.
     spend_vibes: true,
     // Files (the person's own drive, OpenVibe.Download): listing and reading change nothing; saving a file does.
