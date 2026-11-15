@@ -87,3 +87,10 @@
 .ay-place:has(input:focus-visible){outline:2px solid var(--accent,#3b82f6);outline-offset:2px}
 #ay-computer-form:not(:has(input[name="kind"][value="link"]:checked)) .ay-machines{display:none}
 .ay-machines{margin:0 0 12px}
+
+/* The status bar tucks away while scrolling down (2026-11-15): it slides up under the site bar and comes back on the way
+   up; every jump target keeps clear of it. Calm moves less; Off does not move. */
+.ay-bar{transition:transform .28s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
+.ay-bar.is-tucked{transform:translateY(calc(-100% - 12px - 40px * var(--ov-move,1)));opacity:0;pointer-events:none}
+html[data-ov-motion=off] .ay-bar{transition:none}
+.ay-page [id]{scroll-margin-top:calc(var(--ovnav-h,56px) + 84px)}
