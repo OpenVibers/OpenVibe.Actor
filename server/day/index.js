@@ -45,7 +45,13 @@ function createDay(ctx) {
         if (!object(body) || Object.keys(body).some((k) => !['name', 'avatar', 'brain', 'computer', 'caps', 'adult_opt_in'].includes(k))) fail('Choose a name, picture, brain, computer or daily limits.');
         const next = { ...a, ...body };
         if (typeof next.name !== 'string' || !next.name.trim() || next.name.length > 80) fail('Give your Actor a name of up to 80 characters.');
-        if (next.avatar !== null && (!object(next.avatar) || Object.keys(next.avatar).join() !== 'media_id' || !/^med_[0-9A-HJKMNP-TV-Z]{26}$/.test(next.avatar.media_id))) fail('Choose a Media picture, or use your own picture.');
+        // A face is a Media picture, or (11-15, the owner: edit your Actor in the menu itself) a drawn face: one of the
+        // menu's shapes in a hue of the person's choosing ({ blob: { hue: 0..359, shape } }).
+        const SHAPES = ['round', 'squircle', 'drop', 'leaf', 'pebble'];
+        const drawn = object(next.avatar) && Object.keys(next.avatar).join() === 'blob' && object(next.avatar.blob)
+            && Number.isInteger(next.avatar.blob.hue) && next.avatar.blob.hue >= 0 && next.avatar.blob.hue <= 359 && SHAPES.includes(next.avatar.blob.shape)
+            && Object.keys(next.avatar.blob).every((k) => k === 'hue' || k === 'shape');
+        if (next.avatar !== null && !drawn && (!object(next.avatar) || Object.keys(next.avatar).join() !== 'media_id' || !/^med_[0-9A-HJKMNP-TV-Z]{26}$/.test(next.avatar.media_id))) fail('Choose a Media picture, or use your own picture.');
         if (typeof next.adult_opt_in !== 'boolean') fail('Choose whether to show adult models.');
         if (!['auto', 'openvibe', 'own:node', ...require('../runtime/model-prefs').KEY_PROVIDERS.map(p => 'own:' + p)].includes(next.brain)) {
             const entries = models.aiCatalog ? await models.aiCatalog() : null;
