@@ -38,6 +38,8 @@ const SAME = { 'sec-fetch-site':'same-origin' };
         assert.match(render({...base,actor:{...a,asks:[{id:'ask',kind:'sign_in',text:'Sign in to the site',options:['Sign in on its screen','Done']} ]}}),/Waiting for you/);
         const page=await t.get('/you',{as:user});assert.equal(page.status,200,page.text);assert.match(page.text,/ovt-composer/);
         assert.equal((await t.get('/you')).status,302);
+        // The menu's "Name, face and rules" link (/me, 11-15) reaches your Actor.
+        const me=await t.get('/me?tab=rules',{as:user,redirect:'manual'});assert.equal(me.status,301);assert.equal(me.headers.get('location'),'/you?tab=rules');
         const g=(await api('/goals',{text:'Find a useful job',lane:'find_work',schedule:{days:[1,2,3,4,5],start:9,end:17,zone:'America/Los_Angeles'}})).json();
         assert.deepEqual(g.schedule.days,[1,2,3,4,5]);
         assert.equal((await api('/goals/'+g.id,{schedule:{days:[],start:9,end:17,zone:'UTC'}},'PATCH')).status,422);
