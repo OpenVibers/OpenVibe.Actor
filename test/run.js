@@ -15,7 +15,7 @@
 const { run } = require('openvibe-shared/test-runner');
 
 // VERBOSE=1 also prints every file's output, then the summary again.
-run({ dir: __dirname, timeoutMs: 60000, pad: 34, parallel: 1 }).then((r) => {
+run({ dir: __dirname, timeoutMs: 60000, pad: 34 }).then((r) => {
     if (process.env.VERBOSE) {
         for (const t of r.results) console.log(`\n── ${t.file} ──\n${t.output.trimEnd()}`);
         console.log(`\n${r.summary}`);
