@@ -17,6 +17,10 @@ const { stepFor } = require('./actions');
  *   find_tools(need)            OpenVibe.Tools' catalog: which of its tools can do this, with each tool's input
  *   run_tool(tool, input)       OpenVibe.Tools' run API (POST /api/v1/tools/<id>/run): DNS, mail records, certificates,
  *                               headers, WHOIS, conversions, hashes, … — only tools the catalog marks callable by anyone
+ *   run_tools(calls)            up to 8 run_tool calls at once (11-15, the owner: "do shit in parallel"), each answered
+ *                               on its own, the slowest setting the time
+ *   search_sites(query, sites)  one question asked of up to 6 named sites at once (site: per site, the web scope), each
+ *                               site's results under its name
  *   read_page(url)              OpenVibe.Tools' page reader, when Tools offers it: a web page as text
  *   list_my_robots()            OpenVibe.Bot: the person's own robots, and for each one they opened to their agent its
  *                               state and the step lines it takes (agents/robots.js) — a signed-in person's task only
@@ -138,6 +142,30 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         return r.data && r.data.result !== undefined ? r.data.result : r.data;
     }
 
+    /** Up to 8 run_tool calls at once, each with run_tool's own rules; every answer under its call's index. */
+    async function runTools(calls, { signal } = {}) {
+        const list = Array.isArray(calls) ? calls.slice(0, 8) : [];
+        if (!list.length) return { error: 'calls is a list of { tool, input }, at most 8' };
+        const out = await Promise.all(list.map(async (c) => {
+            const tool = String((c && c.tool) || '');
+            try { return { tool, result: await runTool(tool, c && c.input, { signal }) }; } catch (err) { return { tool, result: { error: String((err && err.message) || err).slice(0, 200) } }; }
+        }));
+        return { results: out, ...(Array.isArray(calls) && calls.length > 8 ? { note: `only the first 8 of ${calls.length} calls ran` } : {}) };
+    }
+
+    /** One question of several named sites at once: the web scope with site: per site, in parallel. */
+    async function searchSites(query, sites, person, { signal } = {}) {
+        const names = [...new Set((Array.isArray(sites) ? sites : []).map((x) => String(x || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+            .filter((x) => /^[a-z0-9.-]{3,100}\.[a-z]{2,}$/.test(x)))].slice(0, 6);
+        if (!names.length) return { error: 'sites is a list of site names, like ["github.com", "reddit.com"]' };
+        const q = String(query || '').slice(0, 250);
+        const per = await Promise.all(names.map(async (site) => {
+            const r = await searchWeb(`${q} site:${site}`, person, { signal }).catch((err) => ({ error: String((err && err.message) || err).slice(0, 200) }));
+            return [site, r];
+        }));
+        return { query: q, sites: Object.fromEntries(per) };
+    }
+
     async function searchOpenVibe(query, { signal } = {}) {
         const q = encodeURIComponent(String(query || '').slice(0, 200));
         const r = await getJson(`${searchUrl}/api/v1/query?q=${q}&scopes=network&limit=8`, { signal });
@@ -170,8 +198,10 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         // the runtime is then offered only the tools it can reach.
         const defs = [
             ...(searchUrl ? [{ type: 'function', function: { name: 'search_openvibe', description: 'Search everything published on the OpenVibe network (streams, clips, pastes, community posts, wiki pages, blog posts, threads). Returns titles, summaries and links.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } }] : []),
+            ...(webTokens ? [{ type: 'function', function: { name: 'search_sites', description: 'Ask the same question of several named sites at once (for example ["github.com", "stackoverflow.com", "reddit.com"]): each site is searched in parallel, and its results come back under its name. Use it to compare what different sites say, or to search the ones you trust.', parameters: { type: 'object', properties: { query: { type: 'string' }, sites: { type: 'array', items: { type: 'string' }, maxItems: 6 } }, required: ['query', 'sites'] } } }] : []),
             ...(webTokens ? [{ type: 'function', function: { name: 'search_web', description: 'Search the web for anything outside OpenVibe (news, facts, documentation, products). Returns up to 6 results, each with its title, summary, URL, site and date: cite the URLs you use. Prefer search_openvibe for OpenVibe content.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } }] : []),
             ...(toolsUrl ? [{ type: 'function', function: { name: 'find_tools', description: 'Find OpenVibe.Tools tools for a need (for example "mx records", "ssl certificate", "whois", "http headers", "base64", "hash"). Returns each tool id with its input schema and an example.', parameters: { type: 'object', properties: { need: { type: 'string' } }, required: ['need'] } } }, { type: 'function', function: { name: 'run_tool', description: 'Run one OpenVibe.Tools tool by id with its input object (use find_tools first to see the input).', parameters: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool', 'input'] } } }] : []),
+            ...(toolsUrl ? [{ type: 'function', function: { name: 'run_tools', description: 'Run several OpenVibe.Tools tools at once (at most 8): the same tools and inputs run_tool takes, in parallel. Use it when several lookups or conversions are independent (for example the DNS, the certificate and the headers of one site, or one lookup for several domains). Each answer comes back under its call.', parameters: { type: 'object', properties: { calls: { type: 'array', maxItems: 8, items: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool'] } } }, required: ['calls'] } } }] : []),
         ];
         if (list.some((t) => t.id === 'read')) {
             defs.push({ type: 'function', function: { name: 'read_page', description: 'Read a public web page as text (title, description, main text, links). Use it for URLs the task gives or that a result links to.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } });
@@ -403,6 +433,8 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
             if (name === 'search_web') return json(await searchWeb(a.query, personOf(requester), { signal }));
             if (name === 'find_tools') return json(await findTools(a.need, { signal }));
             if (name === 'run_tool') return json(await runTool(String(a.tool || ''), a.input, { signal }));
+            if (name === 'run_tools') return json(await runTools(a.calls, { signal }));
+            if (name === 'search_sites') return json(await searchSites(a.query, a.sites, personOf(requester), { signal }));
             if (name === 'read_page') return json(await runTool('read', { url: String(a.url || ''), max_chars: 12000 }, { signal }));
             return json({ error: `unknown tool ${name}` });
         } catch (err) {
