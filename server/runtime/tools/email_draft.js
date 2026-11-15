@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * A draft reply for the person's own mailbox (OpenVibe.Mail), written by the agent and sent by the person.
+ * A draft reply for the person's own mailbox (OpenVibe.Email), written by the agent and sent by the person.
  *
  * Nothing leaves: the tool never calls a send route, never queues a message and never touches an outbox. It
  * only makes the draft and shows it as a card, so the person reads it, copies it and sends it in Mail
@@ -16,7 +16,7 @@ const { mailFor, mailPublicUrl, personOf } = require('./_mail');
 
 module.exports = {
     name: 'email_draft',
-    description: 'Write a draft for the person to send in OpenVibe.Mail: give the recipient, the subject and the text (and the message id it answers, if it is a reply). Nothing is sent: the draft comes back as a card with the fields to copy and a link to your inbox, and the person sends it themselves.',
+    description: 'Write a draft for the person to send in OpenVibe.Email: give the recipient, the subject and the text (and the message id it answers, if it is a reply). Nothing is sent: the draft comes back as a card with the fields to copy and a link to your inbox, and the person sends it themselves.',
     input: {
         type: 'object',
         properties: {
@@ -72,10 +72,10 @@ module.exports = {
             mail_url: link,
             prefilled,
             note: prefilled
-                ? 'The person sends this themselves: the link opens it in OpenVibe.Mail, filled in, and they press Send.'
+                ? 'The person sends this themselves: the link opens it in OpenVibe.Email, filled in, and they press Send.'
                 : 'The person sends this themselves: it is too long for a link, so copy the three fields into their inbox, or open the message it answers and press reply.',
         };
-        const line = 'A draft is ready for you to send in OpenVibe.Mail (nothing was sent): to ' + to
+        const line = 'A draft is ready for you to send in OpenVibe.Email (nothing was sent): to ' + to
             + (subject ? ', subject "' + subject + '"' : '') + '. '
             + (prefilled ? 'Open it, filled in, and press Send: ' + link : 'Open ' + link + ' and paste the text, or press reply on the message it answers.');
         if (ctx.emit) await ctx.emit({ step: 'text', text: line });

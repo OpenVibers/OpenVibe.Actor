@@ -120,7 +120,7 @@ const CONNECTORS = [
         id: 'email',
         name: 'Email',
         service: 'openvibe.mail',
-        what: 'Read the mail at your OpenVibe.Mail address and answer it.',
+        what: 'Read the mail at your OpenVibe.Email address and answer it.',
         risk: 'sends',
         default: false,
     },

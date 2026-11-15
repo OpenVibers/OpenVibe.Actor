@@ -299,7 +299,7 @@ ${provenance(a)}${suggestedApps(a)}</section>`;
         const bound = Boolean(inbox && inbox.boundTo);
         return html`<section class="pa-panel" id="mail" aria-labelledby="ac-mail-h"><h2 id="ac-mail-h">Its mail address</h2>
 ${address ? html`<p class="pa-mail-address"><code>${address}</code> <button type="button" class="pa-btn pa-copy" data-copy="${address}" aria-label="Copy the address">Copy</button></p>`
-        : html`<p class="muted">OpenVibe.Mail is not answering right now, so its address cannot be shown or turned on.</p>`}
+        : html`<p class="muted">OpenVibe.Email is not answering right now, so its address cannot be shown or turned on.</p>`}
 <p class="pa-hint">Mail sent to this address lands in your own mailbox. The agent named under Where it listens may answer it. Answering is <strong>${on ? 'on' : 'off'}</strong>: ${on ? (bound ? 'the bound agent reads the letters and replies.' : 'no agent is bound to answer these letters.') : 'no agent reads or answers them until you turn this on.'}</p>
 ${address ? html`<form method="post" action="/me/agents/${a.id}/mail"><label class="pa-check"><input type="checkbox" name="enabled" value="on" ${on ? 'checked' : ''}> Answer mail sent to this address</label><button type="submit" class="pa-btn pa-primary">${on ? 'Save' : 'Turn answering on'}</button></form>` : ''}
 <p class="pa-hint">A reply to one of your own addresses (your mailbox, a mask, a burner) is sent as it is. A reply to anyone else waits for your yes, in your approvals. OpenVibe Mail cannot send outside OpenVibe yet, so such a reply stays pending there until sending is turned on.</p>
