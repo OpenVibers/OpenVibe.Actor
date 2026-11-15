@@ -207,7 +207,7 @@ function load(env = process.env) {
             // page is looked up to resolve the person who receives it (plan HO7). The person's own token pays, at
             // their own approval; empty turns the spending tool off.
             tipsUrl: trim(env.ACTOR_TIPS_URL != null ? env.ACTOR_TIPS_URL : (selfHosted ? '' : 'http://127.0.0.1:4610')),
-            // OpenVibe.Mail (track HO6): an agent answers the mail sent to its own address. Actor reads one letter in
+            // OpenVibe.Email (track HO6): an agent answers the mail sent to its own address. Actor reads one letter in
             // full text and sends the reply from the agent's inbox, over loopback under its own service token. Empty
             // turns the mail consumer off.
             mailUrl: trim(env.ACTOR_MAIL_URL != null ? env.ACTOR_MAIL_URL : (selfHosted ? '' : 'http://127.0.0.1:5250')),

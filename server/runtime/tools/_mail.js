@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * OpenVibe.Mail from the tool modules (not a module itself: the registry skips files starting with "_").
+ * OpenVibe.Email from the tool modules (not a module itself: the registry skips files starting with "_").
  *
  * The person reads their own mail with their OWN Network token (the one the run carries), against Mail's own
  * routes (GET /api/v1/me/mail/messages…). A service token of Actor's own is never used here: Mail reads the
@@ -30,7 +30,7 @@ function mailFor(ctx, person) {
     const token = ctx.personToken || null;
     const enabled = Boolean(base && token && person);
     if (!enabled) {
-        return { enabled: false, base, reason: base ? 'this run has no OpenVibe session of its own' : 'OpenVibe.Mail is not connected to this server' };
+        return { enabled: false, base, reason: base ? 'this run has no OpenVibe session of its own' : 'OpenVibe.Email is not connected to this server' };
     }
     const fetchImpl = ctx.fetch || globalThis.fetch;
     let byFetch = CACHE.get(config);
@@ -50,13 +50,13 @@ function mailFor(ctx, person) {
                 signal: AbortSignal.timeout(20_000),
             });
         } catch (err) {
-            return { ok: false, status: 502, error: 'OpenVibe.Mail did not answer: ' + String((err && err.message) || err).slice(0, 200) };
+            return { ok: false, status: 502, error: 'OpenVibe.Email did not answer: ' + String((err && err.message) || err).slice(0, 200) };
         }
         const text = await res.text().catch(() => '');
         let data = null;
         try { data = text ? JSON.parse(text) : null; } catch { data = null; }
         if (!res.ok) {
-            const detail = String((data && (data.detail || data.title || data.code)) || text || ('OpenVibe.Mail answered ' + res.status)).slice(0, 300);
+            const detail = String((data && (data.detail || data.title || data.code)) || text || ('OpenVibe.Email answered ' + res.status)).slice(0, 300);
             return { ok: false, status: res.status, error: detail, data };
         }
         return { ok: true, status: res.status, data };
