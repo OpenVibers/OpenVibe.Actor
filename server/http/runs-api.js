@@ -33,6 +33,18 @@ const { createTask } = require('../tasks/create');
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const AGENT_ID = /^agt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const IDEMPOTENCY = /^[A-Za-z0-9._:-]{8,128}$/;
+/**
+ * The model a run was asked for: the context chip's { id, source, name } (the Frame forwards it) or a bare exact id.
+ * It rides as the task's model, resolved by OpenVibe.AI like one the person picked (tasks/engine.js). 'openvibe/auto'
+ * and an empty choice leave it to the person's own model preference (11-15: the chip's model was dropped on the floor).
+ */
+function modelOf(b) {
+    const m = b && b.model;
+    const id = typeof m === 'string' ? m : m && typeof m === 'object' && typeof m.id === 'string' ? m.id : '';
+    const clean = id.trim();
+    if (!clean || clean === 'openvibe/auto' || clean.length > 256) return null;
+    return clean;
+}
 // A conversation's step numbers, so one cursor reads them all: a turn's place × TURN, + 1 for the person's message,
 // + 1 + its own event number for each of its steps, and TURN − 1 for an answer kept only in its result.
 const TURN = 1000000;
@@ -306,7 +318,9 @@ function createRunsRoutes(ctx) {
             const text = textOf(b);
             if (!text) return problem(req, res, 422, 'agents.run.start_needs_words', 'Say what the run is for ({ text }).');
             const key = String(b.idempotency_key || req.get('idempotency-key') || '');
+            const model = modelOf(b);
             const body = { task: text, mode: 'balanced',
+                ...(model ? { model } : {}),
                 ...(typeof b.agent === 'string' && AGENT_ID.test(b.agent) ? { agent_id: b.agent } : {}),
                 ...(IDEMPOTENCY.test(key) ? { idempotency_key: key } : {}) };
             const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body, personToken: bearerOf(req), timezone: tzOf(req) });
@@ -394,7 +408,9 @@ function createRunsRoutes(ctx) {
         if (store.OPEN.includes(latest.state) || latest.state === 'needs_you') {
             return problem(req, res, 409, 'agents.run.busy', 'Your Actor is still working on the last message. Wait for it, or stop it.');
         }
-        const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: { task: text, mode: latest.mode || 'balanced' },
+        // The next turn keeps the model the conversation runs on, unless this message names another (a swap mid-session).
+        const model = modelOf(req.body) || (typeof latest.model === 'string' && latest.model.trim() ? latest.model.trim() : null);
+        const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: { task: text, mode: latest.mode || 'balanced', ...(model ? { model } : {}) },
             parentId: latest.id, personToken: bearerOf(req), timezone: tzOf(req) });
         if (out.code) return failed(req, res, out);
         await started(req, out.task, text, rootId);
