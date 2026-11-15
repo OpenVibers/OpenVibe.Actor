@@ -205,6 +205,14 @@ function stepFor(name, input) {
                 target: raw(a.repo) ? exactTarget(`repository ${word(a.repo)}${a.branch ? ` branch ${word(a.branch)}` : ''}`) : null,
                 payload: safeInput({ repo: a.repo, branch: a.branch, base: a.base, message: a.message, files: a.files }),
             };
+        case 'space_site_from_repo':
+            return {
+                act: 'act',
+                kind: 'publish',
+                summary: `Put ${text(a.repo, 120)} on the web as a website${a.folder ? ` (its ${text(a.folder, 60)} folder)` : ''}; each push arrives as a preview you make live`,
+                target: raw(a.repo) ? exactTarget(`website from ${word(a.repo)}`) : null,
+                payload: safeInput({ repo: a.repo, branch: a.branch, folder: a.folder, name: a.name }),
+            };
         case 'git_change_open':
             return {
                 act: 'act',
