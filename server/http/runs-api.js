@@ -300,8 +300,8 @@ function createRunsRoutes(ctx) {
 
     // A new conversation with the person's Actor (or one of their own agents). A body with `skill` is the
     // catalogue's skill run, served by the route after this router.
-    r.post('/', (req, res, next) => (req.body && req.body.skill != null ? next('router') : next()),
-        principal.requireCapability('actor.task.create'), own, limits.budget('actor.task.create'), async (req, res) => {
+    const skillGoesOn = (req, res, next) => (req.body && req.body.skill != null ? next('router') : next());
+    r.post('/', skillGoesOn, principal.requireCapability('actor.task.create'), own, limits.budget('actor.task.create'), async (req, res) => {
             const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
             const text = textOf(b);
             if (!text) return problem(req, res, 422, 'agents.run.start_needs_words', 'Say what the run is for ({ text }).');

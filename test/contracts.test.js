@@ -24,6 +24,11 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/runs/:id', 'actor.task.read'],
     ['GET /api/v1/runs/:id/steps', 'actor.task.read'],
     ['GET /api/v1/runs/:id/events', 'actor.task.read'],
+    // Conversations through the run API (2026-11-15: "your Actor answers everywhere"): start one with words, send the
+    // next message, stop it. They create work for the person's own Actor, as actor.task.create already grants.
+    ['POST /api/v1/runs {text}', 'actor.task.create'],
+    ['POST /api/v1/runs/:id/messages', 'actor.task.create'],
+    ['POST /api/v1/runs/:id/stop', 'actor.task.create'],
     ['GET /api/v1/tasks/:id/trace', 'actor.task.read'],
     ['GET /api/v1/stats/tools', null],
     ['GET /api/v1/stats/models', null],
@@ -95,7 +100,10 @@ function codeRoutes() {
     for (const m of RUNS_SRC.matchAll(/^\s*r\.(get|post|put|patch|delete)\('([^']+)'(.*)$/gm)) {
         const guard = m[3].match(/requireCapability\('([a-z0-9._]+)'\)/);
         const read = m[3].match(/limits\.reads\('([a-z0-9._]+)'\)/);
-        out.set(`${m[1].toUpperCase()} /api/v1/runs${m[2] === '/' ? '' : m[2]}`, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });
+        // POST / starts a conversation ({ text }); a body with `skill` goes on to the catalogue's skill run, which keeps
+        // POST /api/v1/runs and its own guard. The conversation start is listed as POST /api/v1/runs {text}.
+        const key = `${m[1].toUpperCase()} /api/v1/runs${m[2] === '/' ? '' : m[2]}`;
+        out.set(out.has(key) ? `${key} {text}` : key, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });
     }
     return out;
 }
