@@ -78,6 +78,9 @@ function render(data, viewer = {}) {
 }
 function router(ctx) {
     const r = require('../http/router').asyncRouter();
+    // The menu's "Name, face and rules" pointed at /me (the owner, 11-15: "editing your actors like broken"): your Actor
+    // is /you; /me goes there, with its query and its anchor kept by the browser.
+    r.get('/me',(req,res)=>{ const q=req.originalUrl.indexOf('?'); res.redirect(301,'/you'+(q>=0?req.originalUrl.slice(q):'')); });
     r.get('/you',async(req,res)=>{
         if(req.viewer?.kind!=='user'||!req.viewer.subject) return res.redirect('/auth/login?next=%2Fyou');
         const data = await ctx.day.pageData('user:'+req.viewer.subject);
