@@ -18,6 +18,7 @@
  *                                                      (a body with `skill` is the catalogue's skill run, below)
  *   POST /api/v1/runs/:id/messages  actor.task.create  { text }: the next turn, from the newest one
  *   POST /api/v1/runs/:id/stop      actor.task.create  stops the turn under way
+ *   PATCH /api/v1/runs/:id          actor.task.create  names the conversation ({ title }; empty gives it back)
  *
  * A person's Network token (or this site's session) only: an app's token gets the same 404 as another person's run,
  * so nothing confirms that a run exists. Read-only: creating, stopping and answering an approval are the engine's
