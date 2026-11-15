@@ -188,6 +188,32 @@ function stepFor(name, input) {
                 payload: safeInput({ robot: a.robot, steps: a.steps }),
             };
 
+        // ── OpenVibe.Git: the person's own repositories (plan §AD.10 step 1) ──
+        case 'git_repo_create':
+            return {
+                act: 'act',
+                kind: 'code',
+                summary: `Create the repository ${quoted(a.name, 80)} on OpenVibe.Git${a.private ? ' (private)' : ''}`,
+                target: raw(a.name) ? exactTarget(`new repository ${word(a.name)}`) : null,
+                payload: safeInput({ name: a.name, description: a.description, private: a.private, starter: a.starter }),
+            };
+        case 'git_files_write':
+            return {
+                act: 'edit',
+                kind: 'code',
+                summary: `Commit ${Array.isArray(a.files) ? Math.min(a.files.length, 200) : 0} file(s) to ${text(a.repo, 120)}${a.branch ? ` on ${text(a.branch, 80)}` : ''}: ${quoted(a.message, 160)}`,
+                target: raw(a.repo) ? exactTarget(`repository ${word(a.repo)}${a.branch ? ` branch ${word(a.branch)}` : ''}`) : null,
+                payload: safeInput({ repo: a.repo, branch: a.branch, base: a.base, message: a.message, files: a.files }),
+            };
+        case 'git_change_open':
+            return {
+                act: 'act',
+                kind: 'code',
+                summary: `Open a change on ${text(a.repo, 120)} from ${text(a.head, 80)} into ${text(a.base, 80)}: ${quoted(a.title, 160)}`,
+                target: raw(a.repo) ? exactTarget(`changes of ${word(a.repo)}`) : null,
+                payload: safeInput({ repo: a.repo, head: a.head, base: a.base, title: a.title, body: a.body }),
+            };
+
         // ── OpenVibe.Space: the person's own spaces ──
         case 'space_create':
             return {
