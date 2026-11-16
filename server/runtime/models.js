@@ -579,6 +579,22 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
      * class than the route's own; AI clamps a faster one and says so. The classes live on AI's router, so a call that
      * goes through the person's own key asks for none.
      */
+    /**
+     * OpenVibe.AI's Decisions API (POST /api/v1/decisions; Actor's engines, 11-16): closed-set questions answered with
+     * probabilities, with Actor's service token (ai.run.create). → AI's answer { answers, calibrated, receipt }.
+     */
+    async function decide(body, { signal = null } = {}) {
+        const c = routerClient();
+        if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
+        const token = await c.tokens.getToken();
+        const res = await fetchImpl(`${trimSlash(ai.url)}/api/v1/decisions`, { method: 'POST', redirect: 'error', signal: signal || undefined,
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
+        const j = await res.json().catch(() => null);
+        if (!res.ok) throw new ProviderError(`OpenVibe.AI decisions: ${clip(String((j && (j.detail || j.title)) || `HTTP ${res.status}`), 300)}`, { status: res.status, code: res.status === 429 ? 'actor.provider.rate_limited' : 'actor.provider.error' });
+        if (!j || !j.answers) throw new ProviderError('OpenVibe.AI decisions answered without answers');
+        return j;
+    }
+
     async function chatViaRouter({ tier, messages = [], tools = null, json = false, maxTokens = 4000, signal, onDelta = null, subject = null, target = null, latency = null, policy = null }) {
         const c = routerClient();
         if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
@@ -846,7 +862,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     return {
-        warm, chat, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog, latencyClass,
+        warm, chat, decide, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog, latencyClass,
         withMetering, currentMetering,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },
