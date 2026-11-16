@@ -215,9 +215,8 @@ async function conversationSteps(s, turns, after, limit) {
             out.push({ run_id: root.id, seq: base + 1, kind: 'message', from: 'person', text: clip(String(turn.task || ''), 65536),
                 started_at: iso(turn.created_at), ended_at: iso(turn.created_at), cost: null, child_run: null });
         }
-        // Actor's own bookkeeping (internal: the task's class, the run settings) is its task page's, never a session step.
         const rows = await s.db.many(`SELECT e.seq, e.body FROM task_events e
-            WHERE e.task_id = $1 AND e.seq > $2 AND e.body->>'kind' = 'output' AND COALESCE(e.body->>'internal', '') <> 'true'
+            WHERE e.task_id = $1 AND e.seq > $2 AND e.body->>'kind' = 'output'
             ORDER BY e.seq LIMIT $3`, [turn.id, Math.max(0, after - base - 1), limit + 1]);
         for (const entry of rows) {
             const step = stepOf(root.id, entry.seq, parse(entry.body));
@@ -249,14 +248,22 @@ async function conversationView(s, taskId, requester, now, baseUrl) {
 }
 
 /** A task event → agents.step@1. One event is one step: Actor writes a tool call and its result as two entries. */
+/** The plan lines Actor writes for itself (tasks/engine.js), which a person's session never shows. */
+const BOOKKEEPING = [
+    /^This is an? "[^"]*" task\.$/,
+    /^The agent starts with a plan, then works through it\.$/,
+    /^Settings: .*\.$/,
+];
+
 function stepOf(runId, seq, body) {
     const b = body && typeof body === 'object' ? body : {};
-    // 2026-11-16: the plan a person reads is the plan. The task and progress ledgers in the same event are the model's
-    // and Actor's own task page's ("Task ledger: given … Progress: not done; not looping …" read as a Thought); a plan
-    // that was only ledger is no step at all (null).
+    // 2026-11-16: the plan a person reads is the plan. Actor's own bookkeeping (the task's class, how the agent starts,
+    // the run settings: BOOKKEEPING) and the task and progress ledgers inside a plan are the model's and Actor's own task
+    // page's, never a session's Thought ("Task ledger: given … Progress: not done; not looping …"). A plan that was only
+    // bookkeeping is no step at all (null). The events stay as they are: agents.task-event@1 has no field for this.
     if (b.step === 'plan' && typeof b.text === 'string') {
         const text = b.text.split('\n').filter((l) => !/^(Task ledger|Progress):/.test(l.trim())).join('\n').trim();
-        if (!text) return null;
+        if (!text || BOOKKEEPING.some((re) => re.test(text))) return null;
         b.text = text;
     }
     const step = {
@@ -412,7 +419,7 @@ function createRunsRoutes(ctx) {
             return res.json({ run_id: turns[0].id, ...page });
         }
         const rows = await s.db.many(`SELECT e.seq, e.body FROM task_events e
-            WHERE e.task_id = $1 AND e.seq > $2 AND e.body->>'kind' = 'output' AND COALESCE(e.body->>'internal', '') <> 'true'
+            WHERE e.task_id = $1 AND e.seq > $2 AND e.body->>'kind' = 'output'
             ORDER BY e.seq LIMIT $3`, [row.id, after, limit + 1]);
         const page = rows.slice(0, limit);
         const steps = page.map((entry) => stepOf(row.id, entry.seq, parse(entry.body))).filter(Boolean);
@@ -471,4 +478,4 @@ function createRunsRoutes(ctx) {
     return r;
 }
 
-module.exports = { createRunsRoutes, runOf, stepOf, viewOf, loadRunRow, conversationView, turnsOf, STATUS, STEP_KIND, TURN };
+module.exports = { BOOKKEEPING, createRunsRoutes, runOf, stepOf, viewOf, loadRunRow, conversationView, turnsOf, STATUS, STEP_KIND, TURN };
