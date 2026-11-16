@@ -220,6 +220,7 @@ async function conversationSteps(s, turns, after, limit) {
             ORDER BY e.seq LIMIT $3`, [turn.id, Math.max(0, after - base - 1), limit + 1]);
         for (const entry of rows) {
             const step = stepOf(root.id, entry.seq, parse(entry.body));
+            if (!step) continue;
             step.run_id = root.id;
             step.seq = base + 1 + Number(entry.seq);
             if (step.kind === 'message') step.from = 'agent';
@@ -247,8 +248,24 @@ async function conversationView(s, taskId, requester, now, baseUrl) {
 }
 
 /** A task event → agents.step@1. One event is one step: Actor writes a tool call and its result as two entries. */
+/** The plan lines Actor writes for itself (tasks/engine.js), which a person's session never shows. */
+const BOOKKEEPING = [
+    /^This is an? "[^"]*" task\.$/,
+    /^The agent starts with a plan, then works through it\.$/,
+    /^Settings: .*\.$/,
+];
+
 function stepOf(runId, seq, body) {
     const b = body && typeof body === 'object' ? body : {};
+    // 2026-11-16: the plan a person reads is the plan. Actor's own bookkeeping (the task's class, how the agent starts,
+    // the run settings: BOOKKEEPING) and the task and progress ledgers inside a plan are the model's and Actor's own task
+    // page's, never a session's Thought ("Task ledger: given … Progress: not done; not looping …"). A plan that was only
+    // bookkeeping is no step at all (null). The events stay as they are: agents.task-event@1 has no field for this.
+    if (b.step === 'plan' && typeof b.text === 'string') {
+        const text = b.text.split('\n').filter((l) => !/^(Task ledger|Progress):/.test(l.trim())).join('\n').trim();
+        if (!text || BOOKKEEPING.some((re) => re.test(text))) return null;
+        b.text = text;
+    }
     const step = {
         run_id: b.task_id || runId,
         seq: Number(b.seq == null ? seq : b.seq),
@@ -405,7 +422,7 @@ function createRunsRoutes(ctx) {
             WHERE e.task_id = $1 AND e.seq > $2 AND e.body->>'kind' = 'output'
             ORDER BY e.seq LIMIT $3`, [row.id, after, limit + 1]);
         const page = rows.slice(0, limit);
-        const steps = page.map((entry) => stepOf(row.id, entry.seq, parse(entry.body)));
+        const steps = page.map((entry) => stepOf(row.id, entry.seq, parse(entry.body))).filter(Boolean);
         res.json({ run_id: row.id, steps, next: rows.length > limit ? Number(page[page.length - 1].seq) : null });
     });
 
@@ -461,4 +478,4 @@ function createRunsRoutes(ctx) {
     return r;
 }
 
-module.exports = { createRunsRoutes, runOf, stepOf, viewOf, loadRunRow, conversationView, turnsOf, STATUS, STEP_KIND, TURN };
+module.exports = { BOOKKEEPING, createRunsRoutes, runOf, stepOf, viewOf, loadRunRow, conversationView, turnsOf, STATUS, STEP_KIND, TURN };
