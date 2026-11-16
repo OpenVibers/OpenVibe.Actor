@@ -28,9 +28,12 @@ function createCompareApi(ctx) {
         return next();
     };
 
-    r.get('/engines', (req, res) => {
+    r.get('/engines', async (req, res) => {
         res.set('Cache-Control', 'public, max-age=300');
-        res.json({ engines: ENGINES, harnesses: HARNESSES, models: `${String(config.baseUrl || '').replace(/\/+$/, '')}/api/v1/models`,
+        // The models a way can take: OpenVibe.AI's catalog as Actor reads it (aliases and exact ids that run now).
+        const catalog = models && typeof models.aiCatalog === 'function' ? await models.aiCatalog().catch(() => null) : null;
+        const list = (catalog || []).filter((m) => m && m.availability !== 'unavailable').slice(0, 600).map((m) => ({ id: m.id, ...(m.name ? { name: m.name } : {}) }));
+        res.json({ engines: ENGINES, harnesses: HARNESSES, models: list,
             note: 'POST /api/v1/tasks { task, engine: { kind, model?, harness? } } runs one task one way; POST /api/v1/comparisons runs it several ways side by side.' });
     });
 
