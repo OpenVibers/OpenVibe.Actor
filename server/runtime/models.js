@@ -595,6 +595,33 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         return j;
     }
 
+    /**
+     * Pictures (server/faces, 11-16): OpenVibe.AI's ai.image workflow, as the person (on_behalf_of: their allowance, on
+     * the image models AI's routing and the admin's setup choose). → { images: [{ b64 } | { url }], cost_usd }.
+     */
+    async function image({ prompt, n = 1, size = '1024x1024', subject = null, signal = null } = {}) {
+        const c = routerClient();
+        if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
+        const timeoutMs = 180_000;
+        const sig = signal || AbortSignal.timeout(timeoutMs);
+        let run;
+        try {
+            const created = await c.ai.runs.create('ai.image', { prompt: String(prompt || '').slice(0, 4000), n: Math.max(1, Math.min(4, Number(n) || 1)), size,
+                ...(ai.maxCostUsd != null ? { max_cost_usd: ai.maxCostUsd } : {}) }, {
+                wait: 120_000, ...(subject ? { onBehalfOf: { type: 'user', id: String(subject) } } : {}), options: { cache: false }, signal: sig,
+            });
+            run = created.run;
+            if (!['succeeded', 'cached', 'failed', 'cancelled'].includes(run.status)) run = await c.ai.runs.waitFor(run.id, { timeoutMs, signal: sig });
+        } catch (err) {
+            if (err instanceof ProviderError || err instanceof ModelError) throw err;
+            throw new ProviderError(`OpenVibe.AI: ${String((err && (err.message || err.code)) || 'request failed').slice(0, 300)}`, { status: err && err.status, code: 'actor.provider.error' });
+        }
+        if (run.status === 'failed' || run.status === 'cancelled') {
+            throw new ProviderError(`OpenVibe.AI's picture ${run.status}: ${String((run.error && (run.error.detail || run.error.code)) || run.status).slice(0, 300)}`, { code: 'actor.provider.error' });
+        }
+        return { images: (run.output && Array.isArray(run.output.images)) ? run.output.images : [], cost_usd: Number(run.usage && run.usage.cost_usd) || 0 };
+    }
+
     async function chatViaRouter({ tier, messages = [], tools = null, json = false, maxTokens = 4000, signal, onDelta = null, subject = null, target = null, latency = null, policy = null }) {
         const c = routerClient();
         if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
@@ -862,7 +889,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     return {
-        warm, chat, decide, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog, latencyClass,
+        warm, chat, decide, image, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog, latencyClass,
         withMetering, currentMetering,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },

@@ -346,6 +346,9 @@ async function createApp(opts = {}) {
     app.use('/api/v1', require('./http/run-policy-api').createRunPolicyApi(ctx));
     // Engines and comparisons (11-16): the ways a task can be worked, swapped and compared side by side.
     app.use('/api/v1', require('./compare/routes').createCompareApi(ctx));
+    // Faces: pictures for your Actor and your agents (11-16).
+    app.use('/api/v1', require('./faces/routes').createFacesApi(ctx));
+    app.use(require('./faces/routes').createFacesPages(ctx));
     // A2A (stage V2-11): another agent hands Actor a task. The card is /.well-known/agent.json, below.
     app.use(createA2APages(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
