@@ -303,7 +303,7 @@ async function faces(s, config, owner) {
         return {
             id: row.id,
             name: row.name,
-            ...faceOf(row),
+            ...faceOf(row, config && config.baseUrl),
             state,
             step: open ? taskStep(open.task) : null,
             asks,
