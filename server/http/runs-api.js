@@ -16,7 +16,9 @@
  * status from the newest turn (a finished turn waits for the person's next message).
  *   POST /api/v1/runs               actor.task.create  { text, agent?, idempotency_key? }: a new conversation
  *                                                      (a body with `skill` is the catalogue's skill run, below)
- *   POST /api/v1/runs/:id/messages  actor.task.create  { text }: the next turn, from the newest one
+ *   POST /api/v1/runs/:id/messages  actor.task.create  { text, model?, engine? }: the next turn, from the newest one;
+ *                                                      `engine` ({ kind, model?, harness? }, or 'auto') swaps the way the
+ *                                                      conversation is worked from this turn on (server/engines)
  *   POST /api/v1/runs/:id/stop      actor.task.create  stops the turn under way
  *   PATCH /api/v1/runs/:id          actor.task.create  names the conversation ({ title }; empty gives it back)
  *
@@ -46,6 +48,13 @@ function modelOf(b) {
     if (!clean || clean === 'openvibe/auto' || clean.length > 256) return null;
     return clean;
 }
+/**
+ * The way a run is worked (server/engines; 11-16, "swap between … the different ways"): the session's choice
+ * { kind, model?, harness? } or a kind's name; 'auto' gives it back to Actor. undefined: this body names none.
+ * tasks/create.js checks it and refuses a bad one in words.
+ */
+const engineIn = (b) => (b && typeof b === 'object' && b.engine !== undefined ? b.engine : undefined);
+const engineStored = (row) => { const e = row && row.engine; if (!e) return undefined; try { return typeof e === 'string' ? JSON.parse(e) : e; } catch { return undefined; } };
 // A conversation's step numbers, so one cursor reads them all: a turn's place × TURN, + 1 for the person's message,
 // + 1 + its own event number for each of its steps, and TURN − 1 for an answer kept only in its result.
 const TURN = 1000000;
@@ -321,8 +330,10 @@ function createRunsRoutes(ctx) {
             if (!text) return problem(req, res, 422, 'agents.run.start_needs_words', 'Say what the run is for ({ text }).');
             const key = String(b.idempotency_key || req.get('idempotency-key') || '');
             const model = modelOf(b);
+            const chosen = engineIn(b);
             const body = { task: text, mode: 'balanced',
                 ...(model ? { model } : {}),
+                ...(chosen !== undefined ? { engine: chosen } : {}),
                 ...(typeof b.agent === 'string' && AGENT_ID.test(b.agent) ? { agent_id: b.agent } : {}),
                 ...(IDEMPOTENCY.test(key) ? { idempotency_key: key } : {}) };
             const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body, personToken: bearerOf(req), timezone: tzOf(req) });
@@ -412,7 +423,10 @@ function createRunsRoutes(ctx) {
         }
         // The next turn keeps the model the conversation runs on, unless this message names another (a swap mid-session).
         const model = modelOf(req.body) || (typeof latest.model === 'string' && latest.model.trim() ? latest.model.trim() : null);
-        const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: { task: text, mode: latest.mode || 'balanced', ...(model ? { model } : {}) },
+        // And the way it is worked: kept from the newest turn, unless this message names another (the session's chip).
+        const named = engineIn(req.body);
+        const way = named !== undefined ? named : engineStored(latest);
+        const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: { task: text, mode: latest.mode || 'balanced', ...(model ? { model } : {}), ...(way !== undefined ? { engine: way } : {}) },
             parentId: latest.id, personToken: bearerOf(req), timezone: tzOf(req) });
         if (out.code) return failed(req, res, out);
         await started(req, out.task, text, rootId);
