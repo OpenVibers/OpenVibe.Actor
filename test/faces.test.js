@@ -73,6 +73,27 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
             let r = await t.get('/api/v1/agents/actor/face', { method: 'PUT', as: ada, headers: SAME, json: { face: faceId } });
             assert.strictEqual(r.status, 200, r.text);
             assert.strictEqual(r.json().face, `face:${faceId}`);
+            // Your Actor wears it (11-16): GET /me/actor names the picture by its full address (the menu shows it on
+            // every site), and the Actor's other settings still save while it wears one (they failed with "Choose a Media
+            // picture" before: the face's { face, url } was not a picture PATCH knew).
+            let me = await t.get('/api/v1/me/actor', { as: ada });
+            assert.strictEqual(me.status, 200, me.text);
+            assert.match(String(me.json().avatar_url), new RegExp(`^https?://[^/]+/faces/${faceId}$`), `the picture by its full address: ${JSON.stringify({ avatar: me.json().avatar, avatar_url: me.json().avatar_url })}`);
+            me = await t.get('/api/v1/me/actor', { method: 'PATCH', as: ada, headers: SAME, json: { name: 'Ada’s Actor' } });
+            assert.strictEqual(me.status, 200, `a rename while wearing a picture: ${me.text}`);
+            assert.strictEqual(me.json().avatar.face, faceId, 'the picture stays');
+            me = await t.get('/api/v1/me/actor', { method: 'PATCH', as: ada, headers: SAME, json: { avatar: { face: 'fac_someoneelse0000' } } });
+            assert.ok(me.status >= 400 && me.status < 500, 'a picture is chosen through PUT …/face, not written into PATCH');
+            // The menu's strip of faces shows the kept picture (it showed only https pictures before).
+            const wears = async () => (await t.get('/api/v1/me/agents/faces', { as: ada })).json().agents.filter((x) => String(x.avatar_url || '').endsWith(`/faces/${faceId}`));
+            assert.strictEqual((await wears()).length, 1, 'your Actor wears it in the strip');
+            // A drawn face chosen in the menu takes the picture off: the card and the strip of faces agree.
+            me = await t.get('/api/v1/me/actor', { method: 'PATCH', as: ada, headers: SAME, json: { avatar: { blob: { hue: 200, shape: 'drop' } } } });
+            assert.strictEqual(me.status, 200, me.text);
+            assert.strictEqual((await wears()).length, 0, 'the strip drops the picture with the card');
+            assert.strictEqual((await t.get('/api/v1/me/actor', { as: ada })).json().avatar_url, null);
+            // On again, for the checks below.
+            assert.strictEqual((await t.get('/api/v1/agents/actor/face', { method: 'PUT', as: ada, headers: SAME, json: { face: faceId } })).status, 200);
             r = await t.get(`/api/v1/agents/${second.json().id}/face`, { method: 'PUT', as: ada, headers: SAME, json: { face: faceId } });
             assert.strictEqual(r.status, 200, r.text);
             const got = (await t.get(`/api/v1/agents/${second.json().id}`, { as: ada })).json();
