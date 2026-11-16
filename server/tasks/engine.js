@@ -550,7 +550,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // decisions API or swap between and benchmark"). A harness is a coding run whatever the class says.
             const chosenEngine = engineOf(row);
             if (chosenEngine && chosenEngine.kind === 'harness') cls = 'code';
-            if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', text: `This is a "${cls}" task.` });
+            // 2026-11-16 (the owner, a session showing these as Thoughts: "the way it's laid out is like kind of ugly with the
+            // thinking"): Actor's own bookkeeping is `internal`: its task page reads it, a person's session does not.
+            if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', internal: true, text: `This is a "${cls}" task.` });
             // Asked in a public chat (chat/asks.js): the answer is posted where everyone reads it, so only what needs
             // nothing of the person's own — never their computers, robots or code on their machine.
             const chatContext = await s.db.maybe('SELECT * FROM actor_chat_tasks WHERE task_id = $1', [id]);
@@ -625,11 +627,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     return { ok: true, queued: true };
                 };
                 controls.set(id, control);
-                if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', agent: agentId, text: 'The agent starts with a plan, then works through it.' });
+                if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', internal: true, agent: agentId, text: 'The agent starts with a plan, then works through it.' });
                 // The run's settings on its card (plan 11c): what it may touch, the network, how it asks. A plan step in
                 // words (actor.task-event@2 has no settings step yet); the values are on the task (run_settings). It
                 // names no agent, so the task page keeps it inside this attempt instead of starting another.
-                if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', text: `Settings: ${runPolicy.describe(runSettings, taskLevel)}.` });
+                if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', internal: true, text: `Settings: ${runPolicy.describe(runSettings, taskLevel)}.` });
                 // A task that would start coding work on the person's machine asks through the same gate (levels.js):
                 // the level first, then the always-ask floor. Full access or auto-edits may let an edit through; a
                 // payment, password, deletion or a new recipient never does.
