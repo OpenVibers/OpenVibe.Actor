@@ -1417,6 +1417,7 @@ ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates |
             // your model, your keys, your machine.
             body: html`<h1>Who does the work</h1>
 <p class="ag-lede">For each task Actor picks one of these, the one that can do it at the lowest price for your mode, and a second model checks its answer before you see it. Leave it on <b>Balanced</b>, or pick another mode in the chat.</p>
+<p class="ag-lede"><a href="/compare">Compare the ways</a>: run one task through several of these, or any model, the Decisions API or a coding harness, side by side, each answer graded, with a leaderboard.</p>
 <ul class="ag-cards">${agents.map((a) => {
                 const can = a.can.filter((c) => c.startsWith('task:')).map((c) => c.slice(5));
                 const where = a.id === 'codes' ? 'On your own machine' : a.trust === 'first-party' ? 'On OpenVibe\'s own hardware' : a.id === 'openvibe-runtime' ? 'OpenVibe\'s code; its model runs at DeepSeek' : a.id === 'openai-agent' ? 'At OpenAI' : 'At the provider';

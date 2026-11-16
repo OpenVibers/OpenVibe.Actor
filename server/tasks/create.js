@@ -82,9 +82,13 @@ function turnFields(turnTools, turnConversation, turnModel, turnTier) {
     return { tools, conversation, model, tier };
 }
 
-async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, chatContext = null, afterInsert = null, parentId = null, forkOfStep = null, forkChange = null, assignmentOrigin = null, assignmentLevel = null, triggerId = null, personToken = null, timezone = null }) {
+async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, chatContext = null, afterInsert = null, parentId = null, forkOfStep = null, forkChange = null, assignmentOrigin = null, assignmentLevel = null, triggerId = null, personToken = null, timezone = null, comparisonId = null }) {
     // `settings` (plan 11c) rides beside the contract body like the turn fields, until Contracts carries it.
-    const { tools: turnTools, conversation: turnConversation, model: turnModel, tier: turnTier, settings: bodySettings, ...contractBody } = body || {};
+    // The engine (server/engines; 11-16) is Actor's own field, like settings: it is not in actor.task-create-request@1.
+    const { tools: turnTools, conversation: turnConversation, model: turnModel, tier: turnTier, settings: bodySettings, engine: bodyEngine, ...contractBody } = body || {};
+    const engineParsed = require('../engines').parseEngine(bodyEngine);
+    if (engineParsed.error) return { status: 422, code: 'actor.task.invalid', detail: engineParsed.error };
+    const chosenEngine = engineParsed.engine;
     const v = contracts.validate('actor.task-create-request@1', contractBody);
     if (!v.valid) return { status: 422, code: 'actor.task.invalid', detail: (v.errors || []).map((e) => `${e.path || e.instancePath || ''} ${e.message}`.trim()).join('; ').slice(0, 500) || 'invalid request' };
     const turn = turnFields(turnTools, turnConversation, turnModel, turnTier);
@@ -149,7 +153,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     }
     const ownSecret = webhooks.some((h) => !h.secret_ref);
 
-    const hash = crypto.createHash('sha256').update(JSON.stringify({ task: body.task, mode: body.mode || 'balanced', budget: [perTask, perDay], agent: body.agent || null, ...(body.agent_id ? { agent_id: body.agent_id } : {}), ...(body.level ? { level: body.level } : {}), ...(turn.tools != null ? { tools: turn.tools } : {}), ...(turn.conversation ? { conversation: turn.conversation } : {}), ...(turn.model ? { model: turn.model } : {}), ...(turn.tier ? { tier: turn.tier } : {}), ...(bodySettings ? { settings: askedSettings.value } : {}), ...(webhooks.length ? { webhooks } : {}) })).digest('hex');
+    const hash = crypto.createHash('sha256').update(JSON.stringify({ task: body.task, mode: body.mode || 'balanced', budget: [perTask, perDay], agent: body.agent || null, ...(body.agent_id ? { agent_id: body.agent_id } : {}), ...(body.level ? { level: body.level } : {}), ...(turn.tools != null ? { tools: turn.tools } : {}), ...(turn.conversation ? { conversation: turn.conversation } : {}), ...(turn.model ? { model: turn.model } : {}), ...(turn.tier ? { tier: turn.tier } : {}), ...(chosenEngine ? { engine: chosenEngine } : {}), ...(bodySettings ? { settings: askedSettings.value } : {}), ...(webhooks.length ? { webhooks } : {}) })).digest('hex');
     if (body.idempotency_key) {
         const prior = await store.byIdempotency(s, principal.requester, body.idempotency_key);
         if (prior) {
@@ -180,7 +184,11 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
         }
         const id = s.newId('tsk');
         const row = await store.insertTask(s, {
-            id, requester: principal.requester, via: principal.via || null, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced', agent: body.agent || null,
+            id, requester: principal.requester, via: principal.via || null, project_id: principal.project || null, task: body.task, mode: body.mode || 'balanced',
+            // A chosen engine pins the agent system it runs on (a harness runs through Codes); the agent engine's model
+            // is the run's model, as a turn's would be.
+            agent: (chosenEngine && ({ 'openai-agent': 'openai-agent', 'open-model': 'open-model', harness: 'codes' })[chosenEngine.kind]) || body.agent || null,
+            engine: chosenEngine, comparison_id: comparisonId || null,
             budget_task: budgetTask, budget_day: perDay, idem_key: body.idempotency_key || null, idem_hash: body.idempotency_key ? hash : null, created_at: s.iso(),
             webhooks, webhook_secret: ownSecret ? mintSecret() : null, parent_id: parentId,
             // A fork (stage V2-9) starts from its parent's checkpoint at this step, with the one change the person
@@ -192,7 +200,7 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
             agent_id: agentId, level,
             // A product conversation turn (one-engine slice): which conversation it answers, the tools it may
             // call, the model it asked for, and the content tier it answers under.
-            conversation: turn.conversation, tools: turn.tools, model: turn.model, tier: turn.tier,
+            conversation: turn.conversation, tools: turn.tools, model: (chosenEngine && chosenEngine.kind === 'agent' && chosenEngine.model) || turn.model, tier: turn.tier,
             run_settings: runSettings,
         });
         // What belongs with the task from its first moment (the chat's attached files), in the same transaction: the

@@ -48,6 +48,8 @@ const canvases = require('../canvases');
 // The connectors of a run (plan §Z.6): the owner's switches and the person's own.
 const connectors = require('../runtime/connectors');
 
+const { engineOf, label: engineLabel, createEngines } = require('../engines');
+
 const MAX_ATTEMPTS = 2;
 // The one loop's agent id on the event stream and in the result (the old runtime's id, kept for readers).
 const LOOP_AGENT = 'openvibe-runtime';
@@ -66,6 +68,8 @@ function parseTurnTools(value) {
 }
 
 function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null }) {
+    // The engines that answer without the loop (server/engines): one model, the Decisions API.
+    const standalone = createEngines({ models, log });
     const running = new Map();      // id → AbortController
     const waiting = [];
     // A question the loop asked before any tool ran (stage V2-8): the task waits in needs_you, the page shows the
@@ -542,6 +546,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await meter(c.cost_usd);
                 cls = c.class;
             }
+            // The engine the person chose (server/engines; the owner, 11-16: "use an agent or harness or model system or a
+            // decisions API or swap between and benchmark"). A harness is a coding run whatever the class says.
+            const chosenEngine = engineOf(row);
+            if (chosenEngine && chosenEngine.kind === 'harness') cls = 'code';
             if (!resume && !fork) await emit(id, { kind: 'output', step: 'plan', text: `This is a "${cls}" task.` });
             // Asked in a public chat (chat/asks.js): the answer is posted where everyone reads it, so only what needs
             // nothing of the person's own — never their computers, robots or code on their machine.
@@ -562,12 +570,35 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // creation. A turn always runs in the loop below, the path that honors the list — a code-classified
             // turn must not escape to the Codes agent.
             const turnAllowed = parseTurnTools(row.tools);
+            // One model, or the Decisions API: the engine answers on its own, without the loop or the router. Its answer
+            // is that engine's own (a comparison grades it), so the loop's check does not rewrite or refuse it.
+            if (chosenEngine && (chosenEngine.kind === 'model' || chosenEngine.kind === 'decisions') && !resume && !fork) {
+                const engineId = chosenEngine.kind === 'model' ? 'one-model' : 'decisions';
+                explanation.push({ selected: engineId, objective: 'chosen', reasons: [`${engineLabel(chosenEngine)}, chosen for this task`], candidates: [], decided_at: iso() });
+                await store.updateTask(s, id, { explanation });
+                await emit(id, { kind: 'output', step: 'plan', agent: engineId, text: `${engineLabel(chosenEngine)} takes it, as you chose.` });
+                const subject = String(row.requester || '').startsWith('user:') ? row.requester.slice(5) : null;
+                let out;
+                try {
+                    out = await standalone[chosenEngine.kind]({ task: row.task, subject, model: chosenEngine.model || null, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: engineId, ...e }) });
+                } catch (err) {
+                    if (signal.aborted) throw err;
+                    const why = String((err && err.message) || err).slice(0, 600);
+                    await emit(id, { kind: 'output', step: 'text', agent: engineId, text: why, is_error: true });
+                    return await setState(id, 'failed', { error_code: (err && /^actor\./.test(String(err.code)) ? err.code : 'actor.engine.failed'), error_detail: why, finished_at: iso() });
+                }
+                const result = { answer: out.text, sources: out.sources || [], agent: engineId, model: out.model || null, class: cls, engine: chosenEngine, ...(out.decision ? { decision: out.decision } : {}) };
+                return await setState(id, 'succeeded', { result, finished_at: iso() });
+            }
+            // A chosen agent system other than the loop (OpenAI's agent, the open model, a Codes harness) runs as chosen:
+            // the loop below never takes a task pinned elsewhere.
+            const pinnedAway = Boolean(row.agent && row.agent !== LOOP_AGENT && (row.agent !== 'codes' || (chosenEngine && chosenEngine.kind === 'harness')));
             // A person's direct coding task uses the loop that already runs scheduled agents. The machine work goes
             // through codes_task, on the same task, budget and timeline. An approved or explicitly chosen Codes
             // task follows that path too; service and personal agent runs keep their own tool policy.
             const unifiedCode = cls === 'code' && config.unifiedCodeRuns === true && !fromChat && !dayRun
                 && !row.via && (!row.agent || row.agent === 'codes') && String(row.requester || '').startsWith('user:');
-            if (loop && models && row.mode !== 'private' && (cls !== 'code' || chatPolicy || dayRun || turnAllowed || unifiedCode)) {
+            if (loop && models && row.mode !== 'private' && !pinnedAway && (cls !== 'code' || chatPolicy || dayRun || turnAllowed || unifiedCode)) {
                 const agentId = LOOP_AGENT;
                 if (unifiedCode) {
                     const paused = await askBeforeCodesTask('codes', cls);
@@ -882,7 +913,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 let out;
                 try {
                     // From chat the runtime is never offered the person's own robots or computers (no requester for its tools).
-                    out = await adapters.run[agentId]({ task: row.task, requester: fromChat ? null : row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }) });
+                    out = await adapters.run[agentId]({ task: row.task, requester: fromChat ? null : row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, emit: (e) => emit(id, { kind: 'output', agent: agentId, ...e }),
+                        // The harness the person chose (Codes validates it; absent, Codes' router picks).
+                        ...(agentId === 'codes' && chosenEngine && chosenEngine.harness ? { agent: chosenEngine.harness } : {}) });
                 } catch (err) {
                     if (signal.aborted) throw err;
                     const why = (err && err.message) || String(err);

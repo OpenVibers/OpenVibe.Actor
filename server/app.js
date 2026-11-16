@@ -344,6 +344,8 @@ async function createApp(opts = {}) {
     // The connectors (plan §Z.6): the person's own switches (/me/connectors) and the owner's (/admin/connectors).
     app.use('/api/v1', require('./http/connector-api').createConnectorApi(ctx));
     app.use('/api/v1', require('./http/run-policy-api').createRunPolicyApi(ctx));
+    // Engines and comparisons (11-16): the ways a task can be worked, swapped and compared side by side.
+    app.use('/api/v1', require('./compare/routes').createCompareApi(ctx));
     // A2A (stage V2-11): another agent hands Actor a task. The card is /.well-known/agent.json, below.
     app.use(createA2APages(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
@@ -353,6 +355,7 @@ async function createApp(opts = {}) {
     app.use(createAgentPages(ctx));
     app.use(createMemoryPages(ctx));
     app.use(createSkillPages(ctx));
+    app.use(require('./http/compare-pages').createComparePages(ctx));
     app.use(createConnectionsPages(ctx));
     app.use(createConsolePages(ctx, opts.bot || {}));
     // The owner's console (plan §Z.6): the connectors, for the owner of this site only.
