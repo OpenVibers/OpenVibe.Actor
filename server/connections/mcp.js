@@ -15,6 +15,8 @@
  * header the person named; it is never written to a log, a span or a page.
  */
 const { request, GuardedError } = require("../net/guarded-request");
+// MCP 2026-07-28 (stateless): the version and the method on every request, server/discover first.
+const mcpKit = require("openvibe-sdk/mcp");
 
 const PROTOCOL_VERSION = "2025-06-18";
 const CLIENT_INFO = { name: "openvibe.actor", version: "1.0" };
@@ -42,13 +44,19 @@ function parseAnswer(text) {
     throw new GuardedError("the server did not answer JSON", "actor.mcp.bad_answer");
 }
 
-/** One JSON-RPC call to the server → { result, headers }. */
-async function call(conn, method, params, { token = null, timeoutMs = DEFAULT_TIMEOUT_MS, id = null, session = null, lookup, isAllowed, ports } = {}) {
-    const payload = { jsonrpc: "2.0", method };
+/** One JSON-RPC call to the server → { result, headers }. `modern`: a 2026-07-28 request (no session). */
+async function call(conn, method, params, { token = null, timeoutMs = DEFAULT_TIMEOUT_MS, id = null, session = null, modern = false, lookup, isAllowed, ports } = {}) {
+    let payload = { jsonrpc: "2.0", method };
     if (id) payload.id = id;
     if (params) payload.params = params;
+    let headers = headersFor(conn, token, session);
+    if (modern) {
+        const built = mcpKit.modernRequest({ id: id || undefined, method, params: params || {}, clientInfo: CLIENT_INFO, capabilities: {} });
+        payload = built.body;
+        headers = { ...headersFor(conn, token, null), ...Object.fromEntries(Object.entries(built.headers).map(([k, v]) => [k.toLowerCase(), v])) };
+    }
     const res = await request(conn.url, {
-        method: "POST", json: payload, headers: headersFor(conn, token, session), timeoutMs, maxBytes: MAX_BYTES, lookup, isAllowed, ports,
+        method: "POST", json: payload, headers, timeoutMs, maxBytes: MAX_BYTES, lookup, isAllowed, ports,
     });
     if (res.status < 200 || res.status >= 300) throw new GuardedError("the MCP server answered " + res.status, "actor.mcp.http_error");
     const data = parseAnswer(res.body.toString("utf8"));
@@ -84,10 +92,38 @@ async function initialize(conn, { token = null, timeoutMs = DEFAULT_TIMEOUT_MS, 
     return { ...(result || {}), session };
 }
 
+// Which era each server speaks, as discover said, kept for its ttl (at most an hour) so a call does not ask again.
+const ERAS = new Map();
+const ERA_MAX_MS = 3600_000;
+
+/**
+ * The era a server speaks: "modern" when server/discover answers with 2026-07-28 among its versions, else "legacy"
+ * (a handshake-era server refuses or does not know the method). Remembered per URL for the answer's ttl.
+ */
+async function eraOf(conn, { token = null, timeoutMs = DEFAULT_TIMEOUT_MS, lookup, isAllowed, ports, now = Date.now } = {}) {
+    const kept = ERAS.get(conn.url);
+    if (kept && kept.until > now()) return kept.era;
+    let era = "legacy", ttl = 600_000;
+    try {
+        const { result } = await call(conn, "server/discover", {}, { token, timeoutMs, id: "discover-1", modern: true, lookup, isAllowed, ports });
+        const versions = result && Array.isArray(result.supportedVersions) ? result.supportedVersions : [];
+        if (versions.some((v) => mcpKit.MODERN_VERSIONS.includes(v))) {
+            era = "modern";
+            if (Number.isFinite(Number(result.ttlMs)) && Number(result.ttlMs) > 0) ttl = Math.min(Number(result.ttlMs), ERA_MAX_MS);
+        }
+    } catch (err) {
+        // A refused or unknown discover is the handshake era; the guard's own refusals (an address it will not reach) stand.
+        if (err && err.code === "actor.egress.refused") throw err;
+    }
+    ERAS.set(conn.url, { era, until: now() + ttl });
+    return era;
+}
+
 /** The tools the server offers, as Actor keeps them: name, description, input schema and the annotations. */
 async function listTools(conn, { token = null, timeoutMs = DEFAULT_TIMEOUT_MS, lookup, isAllowed, ports } = {}) {
-    const { session } = await initialize(conn, { token, timeoutMs, lookup, isAllowed, ports });
-    const result = await rpc(conn, "tools/list", {}, { token, timeoutMs, id: 2, session, lookup, isAllowed, ports });
+    const modern = (await eraOf(conn, { token, timeoutMs, lookup, isAllowed, ports })) === "modern";
+    const session = modern ? null : (await initialize(conn, { token, timeoutMs, lookup, isAllowed, ports })).session;
+    const result = await rpc(conn, "tools/list", {}, { token, timeoutMs, id: 2, session, modern, lookup, isAllowed, ports });
     const tools = Array.isArray(result && result.tools) ? result.tools : [];
     return tools.map((t) => ({
         name: String((t && t.name) || "").slice(0, 128),
@@ -99,9 +135,13 @@ async function listTools(conn, { token = null, timeoutMs = DEFAULT_TIMEOUT_MS, l
 
 /** One tool call. The text of the answer is the text blocks of the content, as one string. */
 async function callTool(conn, toolName, args = {}, { token = null, timeoutMs = DEFAULT_TIMEOUT_MS, lookup, isAllowed, ports } = {}) {
-    // A call opens its own session (a server that keeps sessions refuses a call without one).
-    const { session } = await initialize(conn, { token, timeoutMs, lookup, isAllowed, ports });
-    const result = await rpc(conn, "tools/call", { name: toolName, arguments: args || {} }, { token, timeoutMs, id: 3, session, lookup, isAllowed, ports });
+    // A handshake-era call opens its own session (a server that keeps sessions refuses a call without one); a
+    // 2026-07-28 call needs none.
+    const modern = (await eraOf(conn, { token, timeoutMs, lookup, isAllowed, ports })) === "modern";
+    const session = modern ? null : (await initialize(conn, { token, timeoutMs, lookup, isAllowed, ports })).session;
+    const result = await rpc(conn, "tools/call", { name: toolName, arguments: args || {} }, { token, timeoutMs, id: 3, session, modern, lookup, isAllowed, ports });
+    // 2026-07-28 lets a server ask the client for input mid-call; an agent's tool call cannot answer that here.
+    if (modern && !mcpKit.isComplete(result)) return { text: "The tool asked for input this agent cannot give here.", isError: true, data: null };
     const content = Array.isArray(result && result.content) ? result.content : [];
     const text = content.map((c) => (c && typeof c.text === "string" ? c.text : "")).filter(Boolean).join("\n");
     return {
@@ -111,4 +151,4 @@ async function callTool(conn, toolName, args = {}, { token = null, timeoutMs = D
     };
 }
 
-module.exports = { rpc, initialize, listTools, callTool, parseAnswer, headersFor, PROTOCOL_VERSION, MAX_BYTES, DEFAULT_TIMEOUT_MS };
+module.exports = { rpc, initialize, eraOf, ERAS, listTools, callTool, parseAnswer, headersFor, PROTOCOL_VERSION, MAX_BYTES, DEFAULT_TIMEOUT_MS };
