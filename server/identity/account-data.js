@@ -34,6 +34,9 @@ const TABLES = [
     // cascade).
     // One task worked several ways (migration 0080): the task's words, the ways and their grades.
     { table: 'actor_comparisons', subject: 'requester', value: (usr) => `user:${usr}`, file: 'comparisons.json', erase: 'delete' },
+    // Pictures made or uploaded for your agents (11-16): what they were, never the bytes in the export (they are at /faces/<id>).
+    { table: 'actor_faces', subject: 'owner', value: (usr) => `user:${usr}`, file: 'faces.json', erase: 'delete',
+        columns: ['id', 'owner', 'mime', 'prompt', 'style', 'created_at'] },
     { table: 'actor_artifacts', subject: 'owner', value: (usr) => `user:${usr}`, file: 'artifacts.json', erase: 'delete',
         columns: ['id', 'task_id', 'owner', 'name', 'mime', 'size', 'created_at'] },
     // The files they attached to their messages in the chat (plan L55 C2): the rows here (with what the run read of
