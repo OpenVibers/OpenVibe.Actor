@@ -26,11 +26,13 @@ const ENGINES = [
     { kind: 'agent', name: 'Actor\'s agent', blurb: 'Plans, uses OpenVibe\'s tools (search, Tools, your computers and robots), checks its answer. Pick its model.', options: ['model'] },
     { kind: 'model', name: 'One model', blurb: 'Any model on OpenVibe.Exchange answers in one call, with no tools: the quickest and cheapest way, and the way to compare models.', options: ['model'] },
     { kind: 'decisions', name: 'Decisions', blurb: 'OpenVibe.AI\'s Decisions API: a yes-or-no, pick-one or rate-it question answered with probabilities in one pass. For choosing, routing and grading.', options: ['model'] },
-    { kind: 'harness', name: 'A coding harness', blurb: 'Claude Code, Codex, OpenCode, Gemini or Muse through OpenVibe.Codes, on your own machine.', options: ['harness'] },
+    { kind: 'harness', name: 'A coding harness', blurb: 'Claude Code, Codex, OpenCode, Gemini, Muse or CodeBuddy (WorkBuddy\'s agent, on Tencent\'s Hy4) through OpenVibe.Codes, on your own machine.', options: ['harness'] },
     { kind: 'openai-agent', name: 'OpenAI agent', blurb: 'OpenAI\'s agent with its own live web search.', options: [] },
     { kind: 'open-model', name: 'Open model on OpenVibe', blurb: 'A small open model on OpenVibe\'s own server: nothing leaves OpenVibe.', options: [] },
 ];
-const HARNESSES = ['claude-code', 'codex', 'opencode', 'gemini', 'muse', 'qwen', 'goose', 'aider'];
+// codebuddy-code (2026-11-17): WorkBuddy's agent, run by Codes over ACP on the person's own WorkBuddy login (Hy4 flash is
+// free there to 30 November 2026).
+const HARNESSES = ['claude-code', 'codex', 'opencode', 'gemini', 'muse', 'codebuddy-code', 'qwen', 'goose', 'aider'];
 
 /**
  * A task's engine from a request: null (Actor chooses) or { kind, model?, harness? }, or { error } in words.
