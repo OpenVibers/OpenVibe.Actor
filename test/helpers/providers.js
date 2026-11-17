@@ -97,6 +97,7 @@ async function startProviders() {
                     return chatReply(res, { content: JSON.stringify({ ok: true, claims: [], reason: 'stand-in' }) }, usage(300, 20));
                 }
                 if (state.runtime === 'fail') { res.writeHead(500, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'stand-in model is down' } })); }
+                if (state.runtime === 'spent') { res.writeHead(402, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'The free AI allowance of this person is spent.' } })); }
                 if (state.runtime === 'hang') { hanging.add(res); return undefined; }
                 const tools = (body.messages || []).filter((m) => m.role === 'tool');
                 if (state.runtime === 'tool' && !tools.length && body.tools) {
@@ -110,6 +111,7 @@ async function startProviders() {
                 if (/You plan one task/.test(sys)) return chatReply(res, { content: JSON.stringify({ assumptions: [], steps: [{ goal: 'Do the task' }] }) }, usage(200, 30));
                 const j = judge(body, res, 'openai');
                 if (j !== null) return j;
+                if (state.runtime === 'spent') { res.writeHead(402, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'The free AI allowance of this person is spent.' } })); }
                 return chatReply(res, { content: 'nano answer' });
             }
             if (url.pathname === '/openai/responses') {

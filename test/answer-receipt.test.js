@@ -58,6 +58,16 @@ const { receiptStep } = require('../server/http/runs-api');
             const knows = contracts && typeof contracts.validate === 'function' && contracts.validate('agents.step@1', { run_id: 'x', seq: 1, kind: 'message', text: 'x', model: { id: 'm' }, started_at: '2026-11-17T00:00:00Z', ended_at: null, cost: null, child_run: null }).valid;
             if (knows) assert.deepStrictEqual(contracts.validate('agents.step@1', last).errors, []);
         });
+        await check('Chat mode (one model) carries its receipt too', async () => {
+            t.providers.reset();
+            const r = await t.get('/api/v1/runs', { bearer: kimB, json: { text: 'Say hello in French', engine: { kind: 'model' } }, headers: { 'idempotency-key': 'receipt-chat-0001' } });
+            assert.strictEqual(r.status, 201, r.text);
+            const row = await t.waitFor(r.json().id);
+            assert.strictEqual(row.state, 'succeeded', row.error_detail);
+            const steps = (await t.get(`/api/v1/runs/${row.id}/steps?conversation=1`, { bearer: kimB })).json().steps;
+            const last = steps.filter((x) => x.kind === 'message' && x.from === 'agent').pop();
+            assert.ok(last && last.cost && last.cost.by && last.cost.by.allowance, JSON.stringify(last));
+        });
     } finally {
         await t.close();
     }

@@ -645,10 +645,19 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await emit(id, { kind: 'output', step: 'plan', agent: engineId, text: `${engineLabel(chosenEngine)} takes it, as you chose.` });
                 const subject = String(row.requester || '').startsWith('user:') ? row.requester.slice(5) : null;
                 let out;
+                // Its model calls note their receipt like the loop's (models.js noteReceipt).
+                const runOne = () => standalone[chosenEngine.kind]({ task: row.task, subject, model: chosenEngine.model || null, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: engineId, ...e }) });
                 try {
-                    out = await standalone[chosenEngine.kind]({ task: row.task, subject, model: chosenEngine.model || null, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: engineId, ...e }) });
+                    out = await (models && typeof models.withMetering === 'function'
+                        ? models.withMetering({ taskId: id, task: 'actor.task', startedAt: now(), seq: 0, receipt: receiptCalls }, runOne) : runOne());
                 } catch (err) {
                     if (signal.aborted) throw err;
+                    // Chat mode finds a way too (plan §AD.17): the free AI spent and no key of theirs answered (models.js
+                    // tried them), the same words go to their own computer, as the loop's do.
+                    if (allowanceSpent(err)) {
+                        const taken = await ownComputerRoad(err, { cls, fromChat });
+                        if (taken) return taken;
+                    }
                     const why = String((err && err.message) || err).slice(0, 600);
                     await emit(id, { kind: 'output', step: 'text', agent: engineId, text: why, is_error: true });
                     return await setState(id, 'failed', { error_code: (err && /^actor\./.test(String(err.code)) ? err.code : 'actor.engine.failed'), error_detail: why, finished_at: iso() });
