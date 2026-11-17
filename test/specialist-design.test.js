@@ -58,6 +58,14 @@ function fakes({ down = false } = {}) {
         const b = await s.brief('design');
         assert.match(b, /^You are Design, OpenVibe's designer/);
         assert.match(b, /touch targets at least 44 px/);
+        // A process, not only rules (2026-11-17): plan first, start from ours, the still first, a machine check, a note;
+        // a review judges the result alone, ranked, with evidence, and says what it could not check.
+        assert.match(b, /most of the quality is decided before any code/);
+        assert.match(b, /Start from the best of ours/);
+        assert.match(b, /Check with a machine before judging with an eye: run openvibe_design_audit_page/);
+        assert.match(b, /judge the result, not the reasons/);
+        assert.match(b, /the layout and framing first, then hierarchy and density, then motion, then polish/);
+        assert.match(b, /say what you could not check/);
         assert.match(b, /OpenVibe's design rules \(3 of 4, updated 2026-11-17/);
         assert.match(b, /- no-fake-content: Never show content that is not real\./);
         assert.match(b, /- mark-for-waiting: Waiting uses the OpenVibe mark/);
