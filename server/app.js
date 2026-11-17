@@ -141,7 +141,8 @@ async function createApp(opts = {}) {
     });
     // Network notifications ("tell me when it's done"): off without a client secret, never able to fail a task.
     const notifier = opts.notifier || createNotifier({ config, fetchImpl, log });
-    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier, registry, checkpoints });
+    // The person's computers (made below) reach the engine through a getter: its route to their own computer (plan §AD.17).
+    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier, registry, checkpoints, computersOf: () => computers });
     // Triggers (plan §12 A-4): a Watch subscription the person owns, its card in the thread, and the run back as an
     // assignment root at the trigger's level. The engine reports every task state so the card's streak stays true.
     const triggers = opts.triggers || createTriggers({ s, config, engine, webhooks, stream, now: s.now, log, fetchImpl: providerFetch });
