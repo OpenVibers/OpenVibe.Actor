@@ -234,6 +234,14 @@ async function conversationSteps(s, turns, after, limit) {
                 out.push({ run_id: root.id, seq: base + TURN - 1, kind: 'message', from: 'agent', text: answer, started_at: at, ended_at: at, cost: null, child_run: null });
             }
         }
+        // The turn's receipt (agents.step@1 1.3.0, plan §AD.17): its answer, the last word of the turn, says how it ran:
+        // what it took, what paid by rung (OpenVibe's allowance, the person's key, their computer) and the model.
+        if (!store.OPEN.includes(turn.state)) {
+            let answerStep = null;
+            for (let k = out.length - 1; k >= 0 && out[k].seq > base; k--) if (out[k].kind === 'message' && out[k].from === 'agent') { answerStep = out[k]; break; }
+            const receipt = answerStep ? receiptStep(parse(turn.receipt)) : null;
+            if (receipt) Object.assign(answerStep, receipt);
+        }
     }
     const page = out.slice(0, limit);
     return { steps: page, next: out.length > limit ? Number(page[page.length - 1].seq) : null };
@@ -254,6 +262,26 @@ const BOOKKEEPING = [
     /^The agent starts with a plan, then works through it\.$/,
     /^Settings: .*\.$/,
 ];
+
+/** A turn's receipt (tasks.receipt, tasks/engine.js receiptOf) → agents.step@1 1.3.0's cost (with BY) and model, or null. */
+const RUNGS = ['machine', 'plan', 'key', 'allowance', 'credits'];
+function receiptStep(body) {
+    if (!body || !body.cost || typeof body.cost !== 'object') return null;
+    const n = (v, int) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? (int ? Math.round(x) : x) : 0; };
+    const by = {};
+    for (const k of RUNGS) {
+        const r = body.cost.by && body.cost.by[k];
+        if (r && typeof r === 'object') by[k] = { usd: n(r.usd), tokens: n(r.tokens, true), seconds: n(r.seconds) };
+    }
+    if (!Object.keys(by).length) return null;
+    const out = { cost: { usd: n(body.cost.usd), tokens: n(body.cost.tokens, true), seconds: n(body.cost.seconds), by } };
+    const m = body.model;
+    if (m && typeof m.id === 'string' && m.id.trim()) {
+        out.model = { id: m.id.trim().slice(0, 200) };
+        if (typeof m.provider === 'string' && /^[a-z][a-z0-9_-]{0,40}$/.test(m.provider)) out.model.provider = m.provider;
+    }
+    return out;
+}
 
 function stepOf(runId, seq, body) {
     const b = body && typeof body === 'object' ? body : {};
@@ -478,4 +506,4 @@ function createRunsRoutes(ctx) {
     return r;
 }
 
-module.exports = { BOOKKEEPING, createRunsRoutes, runOf, stepOf, viewOf, loadRunRow, conversationView, turnsOf, STATUS, STEP_KIND, TURN };
+module.exports = { BOOKKEEPING, createRunsRoutes, runOf, stepOf, receiptStep, viewOf, loadRunRow, conversationView, turnsOf, STATUS, STEP_KIND, TURN };

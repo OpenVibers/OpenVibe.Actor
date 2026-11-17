@@ -71,6 +71,25 @@ function parseTurnTools(value) {
 const allowanceSpent = (err) => Boolean(err) && (err.status === 402 || err.code === 'ai.allowance_spent'
     || /\bai\.allowance_spent\b|free AI allowance[^.]{0,80}\bspent\b/i.test(String(err.message || '')));
 
+/**
+ * A turn's model calls → its receipt (agents.step@1 1.3.0's cost and model): the totals, the spend by rung of the ladder
+ * (allowance, key, machine), and the model that wrote the answer (the last call that named one).
+ */
+function receiptOf(calls) {
+    const by = {};
+    let tokens = 0, usd = 0, ms = 0, model = null;
+    for (const c of calls || []) {
+        if (!c || !['machine', 'plan', 'key', 'allowance', 'credits'].includes(c.rung)) continue;
+        const r = by[c.rung] || (by[c.rung] = { tokens: 0, usd: 0, seconds: 0 });
+        r.tokens += c.tokens || 0; r.usd += c.usd || 0; r.seconds += (c.ms || 0) / 1000;
+        tokens += c.tokens || 0; usd += c.usd || 0; ms += c.ms || 0;
+        if (c.model) model = { id: c.model, ...(c.provider ? { provider: c.provider } : {}) };
+    }
+    const r6 = (n) => Math.round(n * 1e6) / 1e6, r1 = (n) => Math.round(n * 10) / 10;
+    for (const k of Object.keys(by)) by[k] = { tokens: by[k].tokens, usd: r6(by[k].usd), seconds: r1(by[k].seconds) };
+    return { cost: { usd: r6(usd), tokens, seconds: r1(ms / 1000), by }, model };
+}
+
 function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null, computersOf = null }) {
     // The engines that answer without the loop (server/engines): one model, the Decisions API.
     const standalone = createEngines({ models, log });
@@ -222,8 +241,12 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
      * "succeeded" while its trigger's card still said "0 runs" would be a state that never existed;
      * PGlite, which keeps every statement in order, would never have shown it.
      */
+    // The receipt calls of each task in flight (execute's receiptCalls): the turn's end writes its receipt with its state.
+    const turnReceipts = new Map();
     async function setState(id, state, { agentForEvent, ...patch } = {}) {
         const ended = ['succeeded', 'failed', 'cancelled'].includes(state);
+        const calls = ended ? turnReceipts.get(id) : null;
+        if (calls && calls.length) { patch.receipt = receiptOf(calls); calls.written = calls.length; }
         // The row as it will be once this state is written: the trigger's card and the notification read it.
         const before = await store.getTask(s, id);
         const row = before ? { ...before, ...patch, state } : null;
@@ -337,6 +360,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     async function execute(id, signal) {
         const row = await store.getTask(s, id);
         if (!row || row.state !== 'queued') return;
+        // The turn's receipt (agents.step@1 1.3.0): every model call notes what paid for it (models.js noteReceipt);
+        // written on the task (tasks.receipt) with the state that ends the turn, for the answer to carry.
+        const receiptCalls = [];
+        turnReceipts.set(id, receiptCalls);
+        const turnAt = now();
         let dayRun = day ? await day.run(id) : null;
         if (dayRun && dayRun.segment_at) {
             // An interrupted slice cannot get another full time allowance after a restart.
@@ -516,6 +544,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await emit(id, { kind: 'output', step: 'text', agent: 'codes', text: `${where} could not take it either: ${String((e2 && e2.message) || e2).slice(0, 400)}`, is_error: true });
                 return null;
             }
+            receiptCalls.push({ rung: 'machine', provider: 'machine', model: String(got.model || '').slice(0, 200), tokens: Math.max(0, Math.round(Number(got.tokens) || 0)), usd: 0, ms: Math.max(0, now() - turnAt) });
             const result = { answer: got.text, sources: got.sources || [], agent: 'codes', model: got.model || null, class: cls,
                 route: { road: 'own-computer', where, because: 'the free AI was used up' } };
             return await setState(id, 'succeeded', { result, finished_at: iso() });
@@ -685,7 +714,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // The AI meter (ai-metrics.md): every model call of this task carries its id and wall clock, wherever
                 // the call is made — the run, its plan, its check, its revision. A product without a model layer or
                 // a process without a meter simply runs the call.
-                const aiMetering = { taskId: id, task: 'actor.task', startedAt: now(), seq: 0 };
+                const aiMetering = { taskId: id, task: 'actor.task', startedAt: now(), seq: 0, receipt: receiptCalls };
                 const metered = (fn) => (typeof models.withMetering === 'function' ? models.withMetering(aiMetering, fn) : fn());
                 // The files attached to this message in the chat (plan L55 C2): text as data; images described first.
                 const attachments = await metered(() => inputs.forRun(s, id, { models, meter, signal, log }).catch((err) => { log.warn('[Actor] attachments:', (err && err.message) || err); return []; }));
@@ -1003,6 +1032,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             return await setState(id, 'failed', { error_code: 'actor.internal', error_detail: 'Something went wrong on Actor\'s side. Nothing more will be charged for this task.', finished_at: iso() });
         } finally {
             clearTimeout(timer);
+            turnReceipts.delete(id);
+            // A call after the state was written (a late check), or a turn that ended without one: written here.
+            if (receiptCalls.length && receiptCalls.written !== receiptCalls.length) await store.updateTask(s, id, { receipt: receiptOf(receiptCalls) }).catch((err) => log.warn('[Actor] receipt not written:', (err && err.message) || err));
         }
     }
 
@@ -1129,4 +1161,4 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, setTriggers, setMailReplies, setFabric, setDay, MAX_ATTEMPTS };
 }
 
-module.exports = { createEngine, MAX_ATTEMPTS };
+module.exports = { createEngine, MAX_ATTEMPTS, receiptOf };
