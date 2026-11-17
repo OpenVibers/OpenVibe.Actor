@@ -631,7 +631,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 // A draft answer: the writer's own reflection before it is delivered.
                 if (state.selfReflections < reflections && (!ctx.budgetLeft || ctx.budgetLeft() > 0)) {
                     state.selfReflections += 1;
-                    if (state.lastText) await ctx.emit({ step: 'text', text: clip(state.lastText, 2000) });
+                    // The draft is shown once: a review that keeps it word for word writes no second copy (11-17: the
+                    // owner saw the same answer twice in a session, tasks' events 15 and 16 identical).
+                    if (state.lastText && state.lastText !== state.shownText) { state.shownText = state.lastText; await ctx.emit({ step: 'text', text: clip(state.lastText, 2000) }); }
                     state.messages.push({ role: 'user', content: `Reflect before this is delivered. Check the draft claim by claim: which claims have no evidence? A live fact (a price, score, weather reading, count, current status, release, date) must cite an [E#] from this run. If one has no evidence and a tool can fetch it, call that tool now. If it cannot be verified, remove it or say plainly that it is unverified. Do this check in your head: your next reply goes to the person exactly as written, so it is only the final answer, keeping the citations, with no notes about the check or the draft and no heading such as "Final answer".` });
                     await saveCheckpoint(state, ctx);
                     continue;
@@ -646,7 +648,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 await saveCheckpoint(state, ctx);
                 break;
             }
-            if (r.text && r.text.trim()) await ctx.emit({ step: 'text', text: clip(r.text.trim(), 2000) });
+            if (r.text && r.text.trim() && r.text.trim() !== state.shownText) { state.shownText = r.text.trim(); await ctx.emit({ step: 'text', text: clip(r.text.trim(), 2000) }); }
             const actOut = await act(state, ctx, r.toolCalls);
             if (state.depth === 0 && state.brain && state.brain.progressLedger) {
                 state.plan.steps.forEach((s, i) => {
