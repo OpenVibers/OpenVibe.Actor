@@ -467,8 +467,25 @@ ${options.length ? html`<p class="ct-opts">${options.map((o) => html`<span class
 ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class="ct-own"><input name="answer" type="text" maxlength="2000" required placeholder="Or answer in your own words" aria-label="Your answer"><button class="ct-opt" type="submit">Answer</button></form>`}</div>`;
     }
 
+    // A spent free allowance, however it was said (the router's ai.allowance_spent, Exchange's 402).
+    const SPENT_RE = /\bai\.allowance_spent\b|free AI allowance[^.]{0,80}\bspent\b|Exchange HTTP 402\b/i;
+    /**
+     * OpenVibe's free AI is used up and nothing of the person's took the turn (the route tried their allowed keys and an
+     * online computer): the ways to keep going, never the raw 402 (the owner, 11-17: "guide the user to set up their
+     * different coding agents or the harnesses … or their own computer … rather than just being a lame ass message").
+     * The same three ways as Shared's session (ov-session.js SETUP), in Actor's own card.
+     */
+    function waysBlock(row, readOnly) {
+        const back = encodeURIComponent(`${config.baseUrl || 'https://openvibe.actor'}/chat/${row.id}`);
+        const way = (href, glyph, name, line) => html`<li><a class="ct-way" href="${href}"><span class="ct-way-g" aria-hidden="true">${raw(glyphs.svg(glyph, { size: 20 }))}</span><span class="ct-way-t"><b>${name}</b><small>${line}</small></span><span class="ct-way-go" aria-hidden="true">${raw(glyphs.svg('chevron', { size: 16 }))}</span></a></li>`;
+        const retry = readOnly ? '' : html`<form method="post" action="/chat" class="ct-retry"><input type="hidden" name="task" value="${row.task}"><input type="hidden" name="mode" value="best">${isFollow(row) ? html`<input type="hidden" name="parent" value="${row.parent_id}">` : ''}<button class="ct-opt" type="submit">Try again</button><a class="ct-act" href="/tasks/${row.id}?view=details">Details</a></form>`;
+        return html`<div class="ovt-card is-info ct-ways"><p><b>OpenVibe's free AI is used up for today.</b> It comes back at midnight UTC. Actor can keep going on something of yours:</p>
+<ul class="ct-ways-list">${way('/chat/model', 'key', 'Your own AI key', 'Anthropic, OpenAI, OpenRouter, Gemini and more: billed by the provider to you')}${way(`https://openvibe.link/add-computer?return_to=${back}`, 'computer','Your computer', 'Add it with OpenVibe Link: Actor hands the task to it')}${way('https://openvibe.codes/setup', 'code', 'Coding agents', 'Claude Code, Codex, OpenCode: signed in on your computer')}</ul>${retry}</div>`;
+    }
+
     function failedBlock(row, t, readOnly = false) {
         const err = t.error || {};
+        if (SPENT_RE.test(String(err.detail || '')) || err.code === 'ai.allowance_spent') return waysBlock(row, readOnly);
         const why = {
             'actor.agents.exhausted': 'No answer passed its check, so nothing unchecked was shown.',
             'actor.check.unavailable': 'The answer could not be checked, so it was not shown.',
