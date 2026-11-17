@@ -10,6 +10,10 @@
  *              knows   the rules register (openvibe.design/rules), one line a rule, read at the start of every turn,
  *                      and design_rules for any rule's detail and why
  *              hands   Design's public MCP tools (themes and tokens, components, icons, fonts, typefaces, vectors)
+ *              eyes    Vision's UI check (vision_check_ui: layout, cut-off text, overlap and contrast from a page's HTML or
+ *                      URL; free and anonymous), beside Design's markup audit (plan §AD.25; the owner, 11-17:
+ *                      "Interconnect openvibe.vision with openvibe.design and codes and actor"). Vision's paid review
+ *                      panel comes when Actor can name the person to Vision (a service grant), never on Actor's account
  *              reviews a page or a change as a phone and a desktop see it, light and dark, held to the rules; in a
  *                      group's review it ends with APPROVED, or a CHANGES line and a numbered list
  *
@@ -51,7 +55,7 @@ const DESIGN_BRIEF = [
     '3. Hold it to the checklist: nothing sticks out sideways; touch targets at least 44 px; text at least 12 px (body 14 to 16); no native select, checkbox, radio or file button showing; no "Load more" button under a list that can load itself; icons fill their place (about 20 px beside words, centred); loading uses the OpenVibe mark, never a borrowed spinner; empty, error and partial states say what to do next; colours come from the theme\'s tokens, defined for both themes; motion follows the person\'s motion setting; one primary action per view; plain words about the person, no codenames or internal states.',
     '4. Hold it to the rules below, by their ids. Say which rule a finding breaks.',
     '5. Rank what you find by how much of the page it spoils, not by how easy it is to fix: the layout and framing first, then hierarchy and density, then motion, then polish. Each finding: where it is (the page, the element, the width and theme), the evidence (the audit line, the element, the screenshot), and the fix in one line. Say what works too, briefly, and say what you could not check.',
-    'Use your tools: design_rules for a rule\'s detail and why; openvibe_design_audit_page to check a page; openvibe_design_* for themes, tokens, components, icons, fonts and vectors. Never invent a rule, a token or an icon name: look it up.',
+    'Use your tools: design_rules for a rule\'s detail and why; openvibe_design_audit_page to check a page\'s markup; vision_check_ui to check its layout, cut-off text, overlap and contrast (OpenVibe.Vision); openvibe_design_* for themes, tokens, components, icons, fonts and vectors. Never invent a rule, a token or an icon name: look it up.',
     'Never copy another product\'s design. Prefer OpenVibe\'s own components, glyphs and tokens to anything new.',
 ].join('\n');
 
@@ -66,6 +70,11 @@ function createSpecialists({ config = {}, log = console, guard = {}, now = () =>
     const call = callTool || ((conn, name, args, opts) => mcp.callTool(conn, name, args, opts));
     const getJson = fetchJson || ((url) => guarded.json(url, { timeoutMs: 8000, maxBytes: 2 * 1024 * 1024, ...guardOpts() }));
     const conn = { id: 'design', name: 'OpenVibe.Design', url: designMcp };
+    // The servers whose tools the specialist holds: each its own MCP endpoint and the tools it may use there.
+    const SERVERS = [
+        { conn, site: 'https://openvibe.design', label: 'Design', take: (t) => /^[a-z][a-z0-9_]{1,63}$/.test(t.name) },
+        { conn: { id: 'vision', name: 'OpenVibe.Vision', url: cfg.visionMcpUrl || 'https://openvibe.vision/mcp' }, site: 'https://openvibe.vision', label: 'Vision', take: (t) => t.name === 'vision.check_ui' },
+    ];
     // What was read and when; a failed read waits a minute before the next try (never on every turn).
     const kept = { rules: null, rulesAt: 0, rulesFailed: 0, tools: null, toolsAt: 0, toolsFailed: 0 };
     const RETRY_MS = 60 * 1000;
@@ -87,14 +96,19 @@ function createSpecialists({ config = {}, log = console, guard = {}, now = () =>
     async function mcpTools() {
         if (kept.tools && now() - kept.toolsAt < KEEP_MS) return kept.tools;
         if (kept.toolsFailed && now() - kept.toolsFailed < RETRY_MS) return kept.tools || [];
-        try {
-            const tools = await list(conn, { timeoutMs: 8000, ...guardOpts() });
-            if (Array.isArray(tools) && tools.length) { kept.tools = tools.filter((t) => t && /^[a-z][a-z0-9_]{1,63}$/.test(String(t.name || ''))).slice(0, 40); kept.toolsAt = now(); kept.toolsFailed = 0; }
-        } catch (err) {
-            if (log && log.warn) log.warn(`[Actor] Design's tools did not come: ${(err && err.message) || err}`);
-            kept.toolsFailed = now();
-        }
-        return kept.tools || [];
+        // Each server alone: one that does not answer leaves the others' tools in place.
+        const got = await Promise.all(SERVERS.map(async (sv) => {
+            try {
+                const tools = await list(sv.conn, { timeoutMs: 8000, ...guardOpts() });
+                return (Array.isArray(tools) ? tools : []).filter((t) => t && typeof t.name === 'string' && sv.take(t)).slice(0, 40).map((t) => ({ ...t, server: sv }));
+            } catch (err) {
+                if (log && log.warn) log.warn(`[Actor] ${sv.conn.name}'s tools did not come: ${(err && err.message) || err}`);
+                return null;
+            }
+        }));
+        if (got.every((x) => x === null)) { kept.toolsFailed = now(); return kept.tools || []; }
+        kept.tools = got.flatMap((x) => x || []); kept.toolsAt = now(); kept.toolsFailed = 0;
+        return kept.tools;
     }
 
     const known = (name) => SPECIALISTS.includes(name);
@@ -135,19 +149,22 @@ function createSpecialists({ config = {}, log = console, guard = {}, now = () =>
     };
 
     function mcpModule(tool) {
+        const sv = tool.server || SERVERS[0];
+        // A model calls a tool by a name of letters, digits and _ ("vision.check_ui" is vision_check_ui).
+        const alias = tool.name.replace(/[^A-Za-z0-9_]/g, '_');
         return {
-            name: `design:${tool.name}`, alias: tool.name, display: `Design · ${tool.name.replace(/^openvibe_design_/, '').replace(/_/g, ' ')}`,
-            description: `A tool of OpenVibe.Design.\n\ndescription from OpenVibe.Design:\n\`\`\`\n${String(tool.description || '').slice(0, 1500)}\n\`\`\``,
+            name: `${sv.conn.id}:${tool.name}`, alias, display: `${sv.label} · ${tool.name.replace(/^openvibe_design_|^vision\./, '').replace(/_/g, ' ')}`,
+            description: `A tool of ${sv.conn.name}.\n\ndescription from ${sv.conn.name}:\n\`\`\`\n${String(tool.description || '').slice(0, 1500)}\n\`\`\``,
             input: tool.inputSchema && tool.inputSchema.type === 'object' ? tool.inputSchema : { type: 'object', properties: {} },
             scope: 'public',
             acts: !(tool.annotations && tool.annotations.readOnlyHint === true && tool.annotations.destructiveHint !== true) && /make|draft|create|edit|migrate/.test(tool.name),
             costUsd: 0, timeoutMs: 20000,
             async run(input) {
                 try {
-                    const out = await call(conn, tool.name, input || {}, { timeoutMs: 20000, ...guardOpts() });
-                    return { text: String((out && out.text) || '').slice(0, 64 * 1024), sources: [{ url: 'https://openvibe.design', title: `OpenVibe.Design · ${tool.name}` }], isError: !!(out && out.isError) };
+                    const out = await call(sv.conn, tool.name, input || {}, { timeoutMs: 20000, ...guardOpts() });
+                    return { text: String((out && out.text) || '').slice(0, 64 * 1024), sources: [{ url: sv.site, title: `${sv.conn.name} · ${tool.name}` }], isError: !!(out && out.isError) };
                 } catch (err) {
-                    throw new Error(`OpenVibe.Design did not answer: ${String((err && err.message) || err).slice(0, 200)}`);
+                    throw new Error(`${sv.conn.name} did not answer: ${String((err && err.message) || err).slice(0, 200)}`);
                 }
             },
         };
