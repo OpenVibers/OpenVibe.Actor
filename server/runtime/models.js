@@ -404,6 +404,22 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         return aiTokens;
     }
 
+    /** OpenVibe.AI's spent free allowance, however it reached Actor (Exchange's 402, or the router's ai.allowance_spent). */
+    function isAllowanceSpent(err) {
+        if (!err) return false;
+        return err.status === 402 || err.code === 'ai.allowance_spent' || /\bai\.allowance_spent\b|free AI allowance[^.]{0,80}\bspent\b/i.test(String(err.message || ''));
+    }
+    /** The person's own key Actor may use when their allowance is spent: { provider, subject }, or null. */
+    async function ownKeyFor(subject) {
+        const bare = String(subject || '').replace(/^user:/, '');
+        if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(bare)) return null;
+        const keys = await allowedKeys(bare).catch(() => null);
+        if (!Array.isArray(keys) || !keys.length) return null;
+        const names = keys.map((k) => (typeof k === 'string' ? k : k && k.provider)).filter((k) => typeof k === 'string' && k);
+        const provider = names.find((k) => k !== 'link') || names.find((k) => k === 'link');
+        return provider ? { provider, subject: bare } : null;
+    }
+
     /**
      * The providers the person allowed THIS service to use their own key for, and that they hold a key for: names
      * only, never key material. Null when AI does not say (or does not know) — the person may not have allowed us.
@@ -814,6 +830,20 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                     ? await chatViaExchange(args)
                     : await chatViaRouter(args);
             } catch (err) {
+                // The free allowance is spent (OpenVibe.AI's ai.allowance_spent, said as a 402). The owner, 11-17: "all the
+                // different methods work interconnected": a key of the person's own that they allowed Actor answers
+                // instead, once, before the run fails. A provider key first; their own computer (link) after.
+                const own = isAllowanceSpent(err) && !(signal && signal.aborted) ? await ownKeyFor(args.subject) : null;
+                if (own) {
+                    try {
+                        r = await chatViaAi({ choice: { provider: own.provider, subject: own.subject, model: null }, messages, tools, json, maxTokens, signal, onDelta: args.onDelta, policy: policyOf });
+                        endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
+                        return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER, own_key: own.provider };
+                    } catch (err2) {
+                        failMetered(call, err2, signal);
+                        throw err2;
+                    }
+                }
                 failMetered(call, err, signal);
                 throw err;
             }
