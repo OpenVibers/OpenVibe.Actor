@@ -1186,6 +1186,17 @@ function createApi(ctx) {
     // action in their thread, so it takes actor.task.create. Another person's canvas is the same 404 as one that does
     // not exist. A page may post a plain form (same-origin); JSON callers get JSON.
     const canvasWantsJson = (req) => String(req.get('accept') || '').includes('application/json') || String(req.get('content-type') || '').includes('application/json');
+    // What your answers used (2026-11-17, the owner: "usage stats and tokens … cost"): today and the last ?days= (at most
+    // 30, what Actor keeps), by how each was paid (OpenVibe's free AI, your key, your plan, your computer, credits) and by
+    // model, with the free tier's daily limit. The Vibe session's usage sheet reads it.
+    r.get('/me/usage', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
+        const days = req.query.days == null ? store.RETENTION_DAYS : Number.parseInt(String(req.query.days), 10);
+        if (!Number.isInteger(days) || days < 1 || days > store.RETENTION_DAYS) return problem(req, res, 400, 'actor.usage.invalid', `days must be 1 to ${store.RETENTION_DAYS}.`);
+        const out = await store.usageOf(s, req.principal.requester, days);
+        const tier = config.allowance || {};
+        res.set('Cache-Control', 'private, no-store');
+        res.json({ ...out, limit: { per_day_usd: Number(tier.perDayUsd) || null, tasks_per_day: Number(tier.tasksPerDay) || null } });
+    });
     r.get('/me/canvases', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
         const requester = req.principal.requester;
         if (req.query.thread != null) {
