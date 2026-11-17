@@ -70,7 +70,7 @@ const names = DEFS.map((d) => d.function.name);
         assert.strictEqual(unknown.ok, false);
         assert.match(unknown.error, /tools.delete_everything is not a function/);
         const many = await runCode(`let n = 0; try { for (;;) { await tools.dns_lookup({ domain: 'x' }); n++; } } catch (e) { return [n, e.message]; }`, { names, call: fakeCall([]), limits: { calls: 5 } });
-        assert.deepStrictEqual(many.value, [5, 'a script makes at most 5 tool calls']);
+        assert.deepStrictEqual(many.value, [5, 'a script makes at most 5 calls']);
         const big = await runCode(`return 'x'.repeat(20000)`, { names, call: fakeCall([]) });
         assert.deepStrictEqual([big.ok, /returned \d+ bytes/.test(big.error)], [false, true]);
         const slow = await runCode('await new Promise(() => {});', { names, call: fakeCall([]), limits: { ms: 1500 } });
