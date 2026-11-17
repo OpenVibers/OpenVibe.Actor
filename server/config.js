@@ -32,6 +32,8 @@ function load(env = process.env) {
         codesSessionBridge: env.ACTOR_CODES_SESSION_BRIDGE == null ? !selfHosted : bool(env.ACTOR_CODES_SESSION_BRIDGE),
         // Hosted direct coding tasks use the shared runtime; the self-hosted build has no Codes service.
         unifiedCodeRuns: env.ACTOR_UNIFIED_CODE_RUNS == null ? !selfHosted : bool(env.ACTOR_UNIFIED_CODE_RUNS),
+        // What an agent turn on the free AI takes, about (11-17: 11,134 and 10,986 tokens): less left and it never starts there.
+        freeTurnTokens: Math.max(1000, Number(env.ACTOR_FREE_TURN_TOKENS) || 12000),
         a4ModelSwitch: env.ACTOR_A4_MODEL_SWITCH == null ? !selfHosted : bool(env.ACTOR_A4_MODEL_SWITCH),
         fabric: { enabled: bool(env.ACTOR_WORK_FABRIC) },
         port,

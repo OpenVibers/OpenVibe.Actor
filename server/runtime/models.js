@@ -459,6 +459,28 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         } catch { return null; }
     }
 
+    /**
+     * A person's free allowance left today (OpenVibe.AI GET /api/v1/allowance/:subject, a first-party service's read):
+     * { tier, unlimited, tokens, used, left, resets_at }, or null when AI is not configured or does not answer. The
+     * engine checks a turn fits before it starts one on the free AI (plan §AD.17).
+     */
+    async function allowanceFor(subject) {
+        // Only where model calls go through OpenVibe.AI's router: there a person's allowance pays; Actor's own provider
+        // keys draw on nothing of theirs.
+        if (!routerOn()) return null;
+        const tokens = aiTokenClient();
+        const bare = String(subject || '').replace(/^user:/, '');
+        if (!tokens || !/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(bare)) return null;
+        try {
+            const res = await fetchImpl(trimSlash(ai.url) + '/api/v1/allowance/' + encodeURIComponent(bare), {
+                headers: { accept: 'application/json', ...(await tokens.authHeaders()) }, signal: AbortSignal.timeout(4000),
+            });
+            if (!res.ok) return null;
+            const j = await res.json();
+            return j && j.allowance && typeof j.allowance === 'object' ? j.allowance : null;
+        } catch { return null; }
+    }
+
     // ── OpenVibe.AI's model catalog (PLAN G-P9), behind ACTOR_AI_CATALOG ───────────────────────────
     // GET /v1/models, read with the same service token, for the aliases and exact ids a person may pick. Cached for
     // about five minutes, failures included: a failed read is today's behaviour for the next few minutes, never a
@@ -947,7 +969,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     return {
-        warm, chat, decide, image, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog, latencyClass,
+        warm, chat, decide, image, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, allowanceFor, ownKeyFor, aiCatalog, latencyClass,
         withMetering, currentMetering,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },
