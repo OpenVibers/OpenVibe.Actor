@@ -18,6 +18,7 @@
     if (root) root.OpenVibeTaskEvents = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     'use strict';
+    var SPENT_RE = /\bai\.allowance_spent\b|free AI allowance[^.]{0,80}\bspent\b|Exchange HTTP 402\b/i;
     var MAX_TEXT = 6000;
     var MAX_INPUT = 300;
 
@@ -198,7 +199,9 @@
             // real second try. A result does not: the pairs of a repeated search are call, result, call, result.
             last = null;
             if (e.step === 'text') {
-                out.push(withAgent(e.is_error ? { t: 'note', level: 'error', text: text } : { t: 'text', text: text }, e));
+                // A spent free allowance says so in words, never as the router's raw 402 with the person's id in it.
+                var said = e.is_error && SPENT_RE.test(text) ? 'OpenVibe\'s free AI is used up for today.' : text;
+                out.push(withAgent(e.is_error ? { t: 'note', level: 'error', text: said } : { t: 'text', text: said }, e));
                 continue;
             }
             if (e.step === 'resume') { out.push(withAgent({ t: 'note', level: 'info', text: 'Resumed: ' + text }, e)); continue; }
