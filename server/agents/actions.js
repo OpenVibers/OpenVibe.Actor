@@ -159,6 +159,18 @@ function stepFor(name, input) {
                 payload: safeInput({ machine: a.machine, action, url: a.url, ref: a.ref, selector: a.selector, text: a.text, key: a.key, desk: a.desk }, { removeText: action === 'fill' }),
             };
         }
+        case 'computer_page_check': {
+            // Plan §AD.25: it opens one page in the agent's browser and draws it at a few widths: approved like opening it,
+            // and one exact address may be always allowed.
+            const widths = Array.isArray(a.widths) && a.widths.length ? a.widths.slice(0, 3).join(' and ') : '390 and 1280';
+            return {
+                act: 'act',
+                kind: 'computer.browser',
+                summary: `Check ${quoted(a.url, 200)} at ${widths} px in your browser`,
+                target: raw(a.url) ? exactTarget(`check ${word(a.url)} on ${machineWord(a)}`) : null,
+                payload: safeInput({ machine: a.machine, url: a.url, widths: a.widths, themes: a.themes, desk: a.desk }),
+            };
+        }
         case 'setup_save_key':
             // Plan §AB.44: the key the person granted this task, saved into the one Setup row they chose; never shown.
             return {
