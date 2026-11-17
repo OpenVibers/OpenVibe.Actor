@@ -31,14 +31,22 @@ const SEARCH_DEF = { type: 'function', function: {
 } };
 const CODE_DEF = { type: 'function', function: {
     name: 'tools_code',
-    description: 'Run JavaScript that calls this run\'s tools and return only what you need. Each tool is an async function on `tools`, called with one object, the way tools_search shows it: `const page = await tools.openvibe_design_audit_page({ url }); return page.findings.filter((f) => f.severity === "high");`. Chain several calls, loop, filter and join in one step; console.log lines come back too. Only the returned value (8 KB at most) reaches you, so return what the answer needs, not whole pages. No network, files or require: only `tools`. 30 seconds and 30 tool calls a script. A tool that changes something asks the person first, as when you call it yourself.',
+    description: 'Run JavaScript that calls this run\'s tools and return only what you need. Each tool is an async function on `tools`, called with one object, the way tools_search shows it: `const page = await tools.openvibe_design_audit_page({ url }); return page.findings.filter((f) => f.severity === "high");`. Chain several calls, loop, filter and join in one step; console.log lines come back too. Only the returned value (8 KB at most) reaches you, so return what the answer needs, not whole pages. To boil a long result down inside the script, `await ask(question, data)` asks a small model about that data alone and answers its words (summarise, classify, pick out): `const gist = await ask("Which of these jobs are remote?", page.results)`. No network, files or require: only `tools` and `ask`. 30 seconds and 30 calls a script. A tool that changes something asks the person first, as when you call it yourself.',
     parameters: { type: 'object', properties: { code: { type: 'string', description: 'the body of an async function: use await, and return the value you need' } }, required: ['code'] },
 } };
 
 
-/** A script over the run's own tools: `tools.<name>(input)` for each name, every call decided by `call(name, input)`. */
-function runCode(code, { names = [], call, limits = {} } = {}) {
-    return sdk.runCode(code, { tools: names, call: (kind, name, input) => call(name, input), limits });
+/**
+ * A script over the run's own tools: `tools.<name>(input)` for each name, every call decided by `call(name, input)`.
+ * `ask(question, data)` (plan §AD.26, the recursive model call the owner sent on 11-17): with `onAsk`, a script may hand a
+ * slice of data to a small model and get its words back, so a long result is boiled down before anything reaches the
+ * run's own context. `onAsk(question, data)` answers { ok, value } or { ok: false, error }.
+ */
+function runCode(code, { names = [], call, onAsk = null, limits = {} } = {}) {
+    return sdk.runCode(code, {
+        tools: names, functions: onAsk ? ['ask'] : [], limits,
+        call: (kind, name, input) => (kind === 'function' ? (name === 'ask' && onAsk ? onAsk(input[0], input[1]) : { ok: false, error: `there is no function ${name}` }) : call(name, input)),
+    });
 }
 
 module.exports = { runCode, signatureOf: sdk.signatureOf, searchTools: sdk.searchTools, typeOf: sdk.typeOf, SEARCH_DEF, CODE_DEF, LIMITS: sdk.LIMITS };
