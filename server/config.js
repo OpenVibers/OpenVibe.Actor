@@ -182,6 +182,10 @@ function load(env = process.env) {
             // OpenVibe.Bot: the person's own robots (list_my_robots, robot_steps). Empty turns the robot tools off.
             botUrl: trim(env.ACTOR_BOT_URL != null ? env.ACTOR_BOT_URL : (selfHosted ? '' : 'http://127.0.0.1:4630')),
             botPublicUrl: trim(env.ACTOR_BOT_PUBLIC_URL || 'https://openvibe.bot'),
+            // OpenVibe.Vision's review panel judges a page Link drew for the Design bot (plan §AD.25). Empty turns it off
+            // (a picture is then read by the vision model alone); the panel's models are comma separated (none: AI picks).
+            visionUrl: trim(env.ACTOR_VISION_URL != null ? env.ACTOR_VISION_URL : (selfHosted ? '' : 'http://127.0.0.1:5130')),
+            visionReviewModels: String(env.ACTOR_VISION_REVIEW_MODELS || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 3),
             // OpenVibe.Codes: the `codes` agent runs a person's coding task on their own machine. Empty turns it off.
             codesUrl: trim(env.ACTOR_CODES_URL != null ? env.ACTOR_CODES_URL : (selfHosted ? '' : 'http://127.0.0.1:4900')),
             codesPublicUrl: trim(env.ACTOR_CODES_PUBLIC_URL || 'https://openvibe.codes'),

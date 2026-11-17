@@ -81,6 +81,41 @@ const tokens = { authHeaders: async () => ({ Authorization: 'Bearer svc-token' }
         assert.strictEqual(tool.acts, true, 'it opens a page: an act');
     });
 
+    await ok('Vision\'s review panel judges the pictures when it is there; its findings say how many models saw each', async () => {
+        const { createVisionReview } = require('../server/agents/vision-review');
+        const sent = [];
+        const fetchImpl = async (url, init) => {
+            sent.push({ url, init, body: JSON.parse(init.body) });
+            const w = JSON.parse(init.body).viewport.w;
+            return new Response(JSON.stringify({ review: { panel: [{ ok: true }, { ok: true }], merged: w === 390
+                ? [{ severity: 'high', says: 'The grey box runs off the right edge.', fix: 'Let it wrap at 390 px.', rule: 'works-at-320', agreement: 2 }]
+                : [] } }), { status: 201, headers: { 'content-type': 'application/json' } });
+        };
+        const vr = createVisionReview({ config: { services: { visionUrl: 'http://vision.test/', visionReviewModels: ['m1', 'm2'] }, oauth: {} }, fetchImpl, tokens: { authHeaders: async () => ({ Authorization: 'Bearer svc' }) } });
+        const opened = require('../server/runtime/tools/_openvibe');
+        const bot = fakeBot();
+        const pcs = createComputers({ config, fetchImpl: bot.fetchImpl, tokens });
+        const real = opened.serviceFor;
+        opened.serviceFor = () => ({ pcs });
+        delete require.cache[require.resolve('../server/runtime/tools/computer_page_check')];
+        const tool = require('../server/runtime/tools/computer_page_check');
+        opened.serviceFor = real;
+        let modelCalls = 0;
+        const ctx = { requester: `user:${ME}`, config, models: { chat: async () => { modelCalls += 1; return { text: 'x', cost_usd: 0 }; } }, meter: async () => {}, state: {}, visionReview: vr };
+        const out = await tool.run({ machine: PC, url: 'https://shop.example/', themes: ['dark'] }, ctx);
+        assert.strictEqual(out.data.judged_by, 'OpenVibe.Vision\'s review panel');
+        assert.strictEqual(out.data.views[0].seen, 'high: The grey box runs off the right edge. Fix: Let it wrap at 390 px. [works-at-320] (2 of 2 models)');
+        assert.strictEqual(out.data.views[1].seen, 'nothing wrong (2 models looked)');
+        assert.strictEqual(modelCalls, 0, 'the panel judged: no lone vision model');
+        assert.deepStrictEqual([sent[0].url, sent[0].init.headers.Authorization, sent[0].init.headers['X-OV-Subject'], sent[0].body.models, sent[0].body.theme], ['http://vision.test/api/v1/ui-review', 'Bearer svc', ME, ['m1', 'm2'], 'dark']);
+        assert.match(sent[0].body.image, /^data:image\/jpeg;base64,/);
+        // Vision down: the vision model alone, said so.
+        const down = createVisionReview({ config: { services: { visionUrl: 'http://vision.test' }, oauth: {} }, fetchImpl: async () => { throw new Error('ECONNREFUSED'); }, tokens: { authHeaders: async () => ({}) } });
+        const out2 = await tool.run({ machine: PC, url: 'https://shop.example/', themes: ['dark'] }, { ...ctx, visionReview: down });
+        assert.strictEqual(out2.data.judged_by, 'a vision model');
+        assert.strictEqual(modelCalls, 2, 'each picture read by the vision model instead');
+    });
+
     console.log(results.length ? `\n${results.length} failed` : '\nall passed');
     process.exit(results.length ? 1 : 0);
 })();
