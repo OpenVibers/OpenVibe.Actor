@@ -465,6 +465,9 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
      * engine checks a turn fits before it starts one on the free AI (plan §AD.17).
      */
     async function allowanceFor(subject) {
+        // Only where model calls go through OpenVibe.AI's router: there a person's allowance pays; Actor's own provider
+        // keys draw on nothing of theirs.
+        if (!routerOn()) return null;
         const tokens = aiTokenClient();
         const bare = String(subject || '').replace(/^user:/, '');
         if (!tokens || !/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(bare)) return null;
