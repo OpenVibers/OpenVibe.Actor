@@ -281,7 +281,9 @@ async function pay(ctx, row, { personToken = null } = {}) {
 
 /** Mark the approval approved, once; a concurrent click that already did answers the same row. */
 async function approvePaid(s, owner, row) {
-    return await s.db.one("UPDATE actor_approvals SET state = 'approved', decided_at = $2, decided_by = $3, decision_scope = 'once' WHERE id = $1 AND state = 'pending' RETURNING *", [row.id, s.iso(), owner])
+    // maybe, not one: a concurrent click that already approved it leaves no pending row, and `one` threw where the
+    // fallback below was meant to answer (PostgreSQL CI, 11-17, "two clicks at once pay once").
+    return await s.db.maybe("UPDATE actor_approvals SET state = 'approved', decided_at = $2, decided_by = $3, decision_scope = 'once' WHERE id = $1 AND state = 'pending' RETURNING *", [row.id, s.iso(), owner])
         || await get(s, owner, row.id) || row;
 }
 
