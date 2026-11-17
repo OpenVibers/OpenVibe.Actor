@@ -829,6 +829,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         allowedTools: unifiedCode && !turnAllowed ? ['codes_task'] : turnAllowed,
                         // A specialist (plan §AD.25): Design's brief and tools on this loop.
                         specialist: chosenEngine && chosenEngine.kind === 'agent' && chosenEngine.specialist ? chosenEngine.specialist : null,
+                        // Code mode (plan §AD.26): asked for on the engine, and Design's own way unless turned off (it carries
+                        // Design's and Vision's tools, and a review chains them).
+                        codeMode: !!(chosenEngine && chosenEngine.kind === 'agent' && (chosenEngine.code === true || (chosenEngine.specialist === 'design' && chosenEngine.code !== false))),
                     })));
                     // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
                     // ('running' is the closest state there is today), its wall clock waits with it, and its
