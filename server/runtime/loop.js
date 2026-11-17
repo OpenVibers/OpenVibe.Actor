@@ -43,6 +43,7 @@ const learn = require('./brain/learn');
 const skillTools = require('../skills/tools');
 // Code mode (plan §AD.26): the read-only tools behind tools_search and tools_code, run in a sandbox.
 const CODE_MODE = require('./code-mode');
+const { contextView } = require('./context-edit');
 const CODE_NOTE = '\n\nThis run works in code mode. The tools that only read are not listed one by one: tools_search finds them, with the exact way to call each, and tools_code runs a script that calls them and returns only what you need. Prefer one script that does several steps (look up, filter, join, compare) to many small calls, and return the few facts the answer needs. Tools that change something are listed directly: call them yourself.';
 
 const MAX_ANSWER_TOKENS = 5000;
@@ -306,6 +307,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     }
     const loopCfg = config.loop || {};
     const resultChars = loopCfg.toolResultChars || 6000;
+    const contextOpts = { triggerChars: loopCfg.contextTriggerChars == null ? 60000 : loopCfg.contextTriggerChars, keepRecent: loopCfg.contextKeepTools || 8 };
     const maxCalls = loopCfg.maxToolCallsPerTurn || 8;
     const selfReflections = loopCfg.selfReflections == null ? 2 : loopCfg.selfReflections;
 
@@ -383,11 +385,15 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const n = (state.deltaCalls = (state.deltaCalls || 0) + 1);
         // Only while someone reads the answer as it is written: a task nobody watches calls the model as before.
         const onDelta = ctx.delta && (typeof ctx.delta.wanted !== 'function' || ctx.delta.wanted()) ? (text) => ctx.delta({ text, n }) : null;
+        // What the model is sent: older tool results cut to an excerpt once the conversation is long (context editing);
+        // the run's own messages and evidence stay whole.
+        const view = contextView(state.messages, contextOpts);
+        if (view.cleared) state.contextSaved = { cuts: ((state.contextSaved && state.contextSaved.cuts) || 0) + view.cleared, chars: ((state.contextSaved && state.contextSaved.chars) || 0) + view.savedChars };
         let r;
         try {
             r = await chatForDay(ctx, {
                 tier: state.tier,
-                messages: state.messages,
+                messages: view.messages,
                 tools: defs && defs.length ? defs : null,
                 maxTokens: MAX_ANSWER_TOKENS,
                 signal: state.signal,

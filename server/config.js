@@ -293,6 +293,10 @@ function load(env = process.env) {
             selfReflections: Math.max(0, int(env.ACTOR_LOOP_SELF_REFLECTIONS, 2)),
             checkReflections: Math.min(2, Math.max(0, int(env.ACTOR_LOOP_CHECK_REFLECTIONS, 2))),
             toolResultChars: Math.max(500, int(env.ACTOR_LOOP_TOOL_RESULT_CHARS, 6000)),
+            // Context editing (server/runtime/context-edit.js): past this many characters of conversation, tool results
+            // older than the most recent ACTOR_LOOP_CONTEXT_KEEP are sent cut to an excerpt (0 turns it off).
+            contextTriggerChars: Math.max(0, int(env.ACTOR_LOOP_CONTEXT_TRIGGER_CHARS, 60000)),
+            contextKeepTools: Math.max(1, int(env.ACTOR_LOOP_CONTEXT_KEEP, 8)),
             // Sub-agents (stage V2-7), "best" mode only: a self-contained sub-goal runs as a child loop with a share
             // of what is left of the budget and a cap on its model calls. At most 4 at once, depth 1.
             subAgents: env.ACTOR_LOOP_SUB_AGENTS !== '0',
