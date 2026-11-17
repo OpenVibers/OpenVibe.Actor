@@ -39,8 +39,14 @@ function fakes({ down = false } = {}) {
     const s = createSpecialists({
         log: { warn() {} }, now: () => t,
         fetchJson: async (url) => { asked.rules++; assert.strictEqual(url, 'https://openvibe.design/api/v1/rules'); if (down) throw new Error('ECONNREFUSED'); return RULES; },
-        listTools: async (conn) => { asked.list++; assert.strictEqual(conn.url, 'https://openvibe.design/mcp'); if (down) throw new Error('ECONNREFUSED'); return TOOLS; },
-        callTool: async (conn, name, args) => { asked.calls.push([name, args]); return { text: JSON.stringify({ icons: [{ name: 'gear' }] }), isError: false }; },
+        listTools: async (conn) => {
+            asked.list++;
+            if (down) throw new Error('ECONNREFUSED');
+            if (conn.url === 'https://openvibe.vision/mcp') return [{ name: 'vision.check_ui', description: 'Check a page or screenshot for layout and accessibility faults.', inputSchema: { type: 'object', properties: { url: { type: 'string' } } }, annotations: { readOnlyHint: true } }, { name: 'vision.blur_faces', description: 'not for design' }];
+            assert.strictEqual(conn.url, 'https://openvibe.design/mcp');
+            return TOOLS;
+        },
+        callTool: async (conn, name, args) => { asked.calls.push([name, args, conn.id]); return { text: JSON.stringify(conn.id === 'vision' ? { check: { findings: [{ kind: 'low_contrast' }] } } : { icons: [{ name: 'gear' }] }), isError: false }; },
     });
     return { s, asked, later: (ms) => { t += ms; } };
 }
@@ -76,13 +82,16 @@ function fakes({ down = false } = {}) {
     await ok('the tools: design_rules and Design\'s MCP tools (a bad name dropped), each answered by Design', async () => {
         const { s, asked } = fakes();
         const t = await s.tools('design');
-        assert.deepStrictEqual(t.definitions.map((d) => d.function.name), ['design_rules', 'openvibe_design_icon_search', 'openvibe_design_make_vector']);
+        assert.deepStrictEqual(t.definitions.map((d) => d.function.name), ['design_rules', 'openvibe_design_icon_search', 'openvibe_design_make_vector', 'vision_check_ui'], 'Design\'s tools and Vision\'s UI check (none of Vision\'s other tools)');
+        const ui = await t.byAlias.get('vision_check_ui').run({ url: 'https://openvibe.live/' });
+        assert.match(ui.text, /low_contrast/);
+        assert.deepStrictEqual(asked.calls.pop(), ['vision.check_ui', { url: 'https://openvibe.live/' }, 'vision'], 'called on Vision by its own name');
         const rules = await t.byAlias.get('design_rules').run({ query: 'touch targets' });
         assert.deepStrictEqual(JSON.parse(rules.text).rules.map((r) => r.id), ['targets-44']);
         const byId = JSON.parse((await t.byAlias.get('design_rules').run({ query: 'no-fake-content' })).text).rules[0];
         assert.deepStrictEqual([byId.id, byId.why], ['no-fake-content', 'Pages looked full and said nothing.']);
         const icon = await t.byAlias.get('openvibe_design_icon_search').run({ query: 'settings' });
-        assert.deepStrictEqual(asked.calls, [['openvibe_design_icon_search', { query: 'settings' }]]);
+        assert.deepStrictEqual(asked.calls, [['openvibe_design_icon_search', { query: 'settings' }, 'design']]);
         assert.match(icon.text, /gear/);
         assert.deepStrictEqual([t.byAlias.get('openvibe_design_icon_search').acts, t.byAlias.get('openvibe_design_make_vector').acts], [false, true], 'a read is no act; making is');
         assert.deepStrictEqual((await s.tools('chef')).definitions, []);
@@ -91,7 +100,7 @@ function fakes({ down = false } = {}) {
     await ok('read once in ten minutes; Design down leaves a brief that says the rules were not checked', async () => {
         const { s, asked, later } = fakes();
         await s.brief('design'); await s.tools('design'); await s.brief('design'); await s.tools('design');
-        assert.deepStrictEqual([asked.rules, asked.list], [1, 1]);
+        assert.deepStrictEqual([asked.rules, asked.list], [1, 2], 'Design and Vision asked once each');
         later(11 * 60 * 1000);
         await s.brief('design');
         assert.strictEqual(asked.rules, 2, 'asked again after ten minutes');
@@ -129,7 +138,7 @@ function fakes({ down = false } = {}) {
         assert.match(sys, /You are Design, OpenVibe's designer/);
         assert.match(sys, /- targets-44: Touch targets are at least 44 px\./);
         assert.ok(work[0].tools.some((t) => t.function.name === 'design_rules') && work[0].tools.some((t) => t.function.name === 'openvibe_design_icon_search'), 'offered');
-        assert.deepStrictEqual(asked.calls, [['openvibe_design_icon_search', { query: 'settings' }]], 'called on Design');
+        assert.deepStrictEqual(asked.calls, [['openvibe_design_icon_search', { query: 'settings' }, 'design']], 'called on Design');
         assert.match(out.text, /gear glyph/);
         await loop.close(out.state);
 
