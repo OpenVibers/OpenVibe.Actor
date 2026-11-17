@@ -41,6 +41,9 @@ const { snapshot: snapshotState, restore: restoreState } = require('./checkpoint
 const { stripSecrets, redactText } = require('./checkpoints');
 const learn = require('./brain/learn');
 const skillTools = require('../skills/tools');
+// Code mode (plan §AD.26): the read-only tools behind tools_search and tools_code, run in a sandbox.
+const CODE_MODE = require('./code-mode');
+const CODE_NOTE = '\n\nThis run works in code mode. The tools that only read are not listed one by one: tools_search finds them, with the exact way to call each, and tools_code runs a script that calls them and returns only what you need. Prefer one script that does several steps (look up, filter, join, compare) to many small calls, and return the few facts the answer needs. Tools that change something are listed directly: call them yourself.';
 
 const MAX_ANSWER_TOKENS = 5000;
 const MAX_SUB_AGENTS = 4;
@@ -225,6 +228,53 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const empty = { definitions: [], byAlias: new Map() };
         if (!name || !specialists || mode === 'private') return empty;
         try { return await specialists.tools(name); } catch (err) { if (log && log.warn) log.warn('[Actor] specialist tools unavailable:', (err && err.message) || err); return empty; }
+    }
+    /**
+     * Code mode (plan §AD.26): the read-only tools of this run go behind tools_search and tools_code; a tool that acts,
+     * and the delegate, stay direct, so every act is still the model's own call with its approval and checkpoint. The
+     * hidden list is kept off the checkpoint (non-enumerable): a resume builds it again from what is offered.
+     */
+    function applyCodeMode(state, ctx, defs) {
+        const reads = defs.filter((t) => t && t.function && t.function.name !== DELEGATE.function.name && !isActing(t.function.name, ctx));
+        if (reads.length < 2) return false;
+        Object.defineProperty(state, 'codeTools', { value: reads, enumerable: false, writable: true, configurable: true });
+        state.tools = defs.filter((t) => !reads.includes(t)).concat([CODE_MODE.SEARCH_DEF, CODE_MODE.CODE_DEF]);
+        state.allow = new Set(state.tools.map((t) => t.function.name));
+        state.codeMode = true;
+        return true;
+    }
+    /** tools_code: the script runs in the sandbox; each tool it calls runs here, shown and kept as evidence like any call. */
+    async function runScript(state, ctx, p) {
+        const used = [];
+        let n = 0;
+        const ran = await CODE_MODE.runCode(String((p.args && p.args.code) || ''), { names: (state.codeTools || []).map((d) => d.function.name), call: async (name, input) => {
+            n += 1;
+            const shown = displayName(name, ctx);
+            const args = eventArgs(name, input);
+            const callId = `${p.call.id}.${n}`;
+            await ctx.emit({ step: 'tool_call', tool: shown, call_id: callId, args, input: summarize(args) });
+            const startedAt = now();
+            let out;
+            try {
+                out = await registry.run(name, input, ctx);
+            } catch (err) {
+                await spanCall(ctx.trace, { kind: 'tool', name, startedAt, ms: now() - startedAt, ok: false, errorCode: codeOf(err, 'actor.tool.failed'), step: state.calls });
+                await ctx.emit({ step: 'tool_result', tool: shown, call_id: callId, text: clip(String((err && err.message) || err), 600), is_error: true });
+                return { ok: false, error: String((err && err.message) || err) };
+            }
+            await spanCall(ctx.trace, { kind: 'tool', name, startedAt, ms: now() - startedAt, ok: !(out && out.isError), errorCode: out && out.isError ? 'actor.tool.failed' : null, step: state.calls });
+            const o = out || {};
+            const item = state.ledger.add({ tool: shown, input, text: o.text, data: o.data, sources: o.sources, artifacts: o.artifacts, refs: o.refs, secret: o.secret === true });
+            used.push(item.id);
+            await ctx.emit({ step: 'tool_result', tool: shown, call_id: callId, full_output: o.secret ? '[redacted]' : o.text, ui_sources: o.secret ? [] : o.sources, text: clip(o.text, 600), is_error: !!o.isError });
+            if (o.isError) return { ok: false, error: clip(o.text, 400) };
+            if (o.secret === true) return { ok: true, value: '[a secret: it is not handed to a script]' };
+            let value = o.data != null ? o.data : o.text;
+            if (o.data == null && typeof o.text === 'string') { try { value = JSON.parse(o.text); } catch { /* words */ } }
+            return { ok: true, value };
+        } });
+        const body = ran.ok ? { result: ran.value, logs: ran.logs, tool_calls: ran.calls, evidence: used } : { error: ran.error, logs: ran.logs, tool_calls: ran.calls, evidence: used };
+        return { text: JSON.stringify(body), isError: !ran.ok, sources: [], data: null };
     }
     async function specialistBrief(name) {
         if (!name || !specialists) return '';
@@ -421,6 +471,12 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                     throw err;
                 }
             }
+            // Code mode's two tools (plan §AD.26).
+            if (p.name === CODE_MODE.SEARCH_DEF.function.name) {
+                const found = CODE_MODE.searchTools(state.codeTools || [], p.args && p.args.query, p.args && p.args.limit);
+                return { text: JSON.stringify(found.length ? { tools: found } : { tools: [], note: 'nothing matches: try other words' }), sources: [], data: null };
+            }
+            if (p.name === CODE_MODE.CODE_DEF.function.name) return runScript(state, ctx, p);
             const startedAt = now();
             try {
                 const out = await registry.run(p.name, p.args, ctx);
@@ -912,7 +968,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
      * a span; and drives on from the step it stopped at. A checkpoint whose last step already answered is delivered
      * without another model call.
      */
-    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, connectorSwitches = null, runPolicy = null , specialist = null}) {
+    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, connectorSwitches = null, runPolicy = null , specialist = null, codeMode = false}) {
         const source = resume && resume.state ? resume.state : (fork && fork.checkpoint && fork.checkpoint.state);
         const restored = restoreState(source);
         if (!restored) throw Object.assign(new Error('the saved step could not be read'), { code: 'actor.checkpoint.invalid' });
@@ -981,6 +1037,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         const delegate = savedNames.includes(DELEGATE.function.name) && mode === 'best' && !(config.loop && config.loop.subAgents === false);
         if (delegate) state.tools.push(DELEGATE);
         state.allow = new Set(state.tools.map((t) => t.function.name));
+        // Code mode (plan §AD.26): the read-only tools offered now go behind the two tools again.
+        if (codeMode || state.codeMode) applyCodeMode(state, ctx, state.tools.concat(offeredAll.filter((d) => !state.tools.includes(d) && !isActing(d.function.name, ctx))));
         if (!state.brain) state.brain = {};
         if (!state.brain.escalations) state.brain.escalations = createEscalations();
         if (!state.plan || !Array.isArray(state.plan.steps)) state.plan = { assumptions: [], steps: [] };
@@ -1081,9 +1139,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         }
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, allowedTools = null, connectorSwitches = null, runPolicy = null, specialist = null }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, allowedTools = null, connectorSwitches = null, runPolicy = null, specialist = null, codeMode = false }) {
         if (resume || fork) {
-            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta, latency, spend, day, connectorSwitches, runPolicy, specialist });
+            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta, latency, spend, day, connectorSwitches, runPolicy, specialist, codeMode });
         }
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
@@ -1195,12 +1253,13 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 state.allow = new Set(state.tools.map((t) => t.function.name));
                 if (unknown.length) await emit({ step: 'plan', text: `The caller allowed ${unknown.length === 1 ? 'a tool' : 'tools'} this run does not offer (${unknown.slice(0, 8).join(', ')}): it runs without ${unknown.length === 1 ? 'it' : 'them'}.` });
             }
+            const coded = codeMode ? applyCodeMode(state, ctx, state.tools) : false;
             state.messages.push({
                 role: 'system',
                 content: SYSTEM({
                     date: today(now), plan: planText(state.plan, state.brain), maxCalls,
                     note: ordered.note, ledger: ledgerText(state.brain.ledger, state.brain.progress),
-                }) + (await specialistBrief(specialist)) + (allowedTools && allowedTools.length === 1 && allowedTools[0] === 'codes_task'
+                }) + (await specialistBrief(specialist)) + (coded ? CODE_NOTE : '') + (allowedTools && allowedTools.length === 1 && allowedTools[0] === 'codes_task'
                     ? '\n\nThis task changes code on the person\'s machine. Use codes_task with the repository URL and the requested change. If the tool is unavailable, say what setup is missing; do not claim a code change happened.' : ''),
             });
             // A follow-up (stage V2-5b): the conversation it continues, as it went, then the new question.

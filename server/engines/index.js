@@ -60,7 +60,13 @@ function parseEngine(value) {
         if (!SPECIALISTS.includes(v.specialist)) return { error: `engine.specialist: one of ${SPECIALISTS.join(', ')}` };
         out.specialist = v.specialist;
     }
-    for (const k of Object.keys(v)) if (!['kind', 'model', 'harness', 'specialist'].includes(k)) return { error: `engine.${k} is not an engine option` };
+    // Code mode (plan §AD.26): the agent engine's read-only tools behind tools_search and tools_code.
+    if (v.code != null) {
+        if (v.kind !== 'agent') return { error: 'engine.code: only the agent engine works in code mode' };
+        if (typeof v.code !== 'boolean') return { error: 'engine.code: true or false' };
+        out.code = v.code;
+    }
+    for (const k of Object.keys(v)) if (!['kind', 'model', 'harness', 'specialist', 'code'].includes(k)) return { error: `engine.${k} is not an engine option` };
     return { engine: out };
 }
 
