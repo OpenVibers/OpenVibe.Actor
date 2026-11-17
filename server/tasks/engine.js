@@ -22,6 +22,8 @@ const store = require('./store');
 const stills = require('./stills');
 const looks = require('../agents/looks');
 const modelPrefs = require('../runtime/model-prefs');
+// The one order a turn is routed by (plan §AD.17): Actor walks it; the Frame answers it for the composer's chip.
+const roads = require('openvibe-sdk/agents/roads');
 // The person's own model choice rides with the models layer (plan L55 C3). A stand-in models object (a test's)
 // does not carry it, and a run then keeps today's behaviour.
 const withChoice = (models, choice, fn) => (models && typeof models.withChoice === 'function' ? models.withChoice(choice, fn) : fn());
@@ -637,30 +639,43 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // turn must not escape to the Codes agent.
             const turnAllowed = parseTurnTools(row.tools);
             // A turn that cannot finish never starts on the free AI (plan §AD.17; 11-17: two probe turns spent 22k free
-            // tokens and answered nothing, each refused halfway). When what is left today is less than an agent turn
-            // takes, the person's own key takes it, else their computer, else it says so at once and spends nothing.
+            // tokens and answered nothing, each refused halfway). The road is the one order every surface shares
+            // (openvibe-sdk/agents/roads, which the Frame answers for the composer's chip too): the person's own pick,
+            // the free AI when the turn fits what is left today, their key, their computer (taking the road there
+            // dispatches the turn), else it says so at once and spends nothing. Each rung is asked only when reached.
             // One model (Chat mode) is one small call and is not held; a coding run is Codes', not the allowance's.
             let freeShortKey = null;
             const loopTurn = !(chosenEngine && ['model', 'decisions', 'harness'].includes(chosenEngine.kind)) && cls !== 'code';
             if (!resume && !fork && loopTurn && runsOn !== 'computer' && !fromChat && row.mode !== 'private' && String(row.requester || '').startsWith('user:')
                 && models && typeof models.allowanceFor === 'function') {
-                const pref = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
-                const left = pref && pref.provider ? null : await models.allowanceFor(row.requester);
                 const need = Math.max(1000, Number(config.freeTurnTokens) || 12000);
-                if (left && !left.unlimited && left.left != null && Number(left.left) < need) {
-                    const leftWords = `${Number(left.left).toLocaleString('en-US')} tokens`;
-                    const own = typeof models.ownKeyFor === 'function' ? await models.ownKeyFor(row.requester).catch(() => null) : null;
-                    if (own) {
-                        freeShortKey = own;
-                        await emit(id, { kind: 'output', step: 'plan', text: `OpenVibe's free AI has ${leftWords} left today, not enough for this, so your own ${own.provider === 'link' ? 'computer\'s model' : `${own.provider} key`} takes it.` });
-                    } else {
+                let leftWords = '';
+                let taken = null;
+                const road = await roads.walk({
+                    mode: 'agent', need,
+                    choice: () => modelPrefs.choiceFor(s, row.requester).catch(() => null),
+                    allowance: async () => {
+                        const a = await models.allowanceFor(row.requester);
+                        if (a && a.left != null) leftWords = `${Number(a.left).toLocaleString('en-US')} tokens`;
+                        return a;
+                    },
+                    key: () => (typeof models.ownKeyFor === 'function' ? models.ownKeyFor(row.requester).catch(() => null) : null),
+                    computer: async () => {
                         const short = Object.assign(new Error(`The free AI allowance is spent for a task this size: ${leftWords} left today.`), { code: 'ai.allowance_spent' });
-                        const taken = await ownComputerRoad(short, { cls, fromChat });
-                        if (taken) return taken;
-                        const detail = `OpenVibe's free AI has ${leftWords} left today, and a task like this takes about ${need.toLocaleString('en-US')}: the free AI allowance is spent for anything this size until midnight UTC. Add your own AI key or your computer to keep going.`;
-                        await emit(id, { kind: 'output', step: 'text', text: detail, is_error: true });
-                        return await setState(id, 'failed', { error_code: 'ai.allowance_spent', error_detail: detail, finished_at: iso() });
-                    }
+                        taken = await ownComputerRoad(short, { cls, fromChat });
+                        return taken || null;
+                    },
+                });
+                if (road.road === 'key') {
+                    const own = road.value;
+                    freeShortKey = own;
+                    await emit(id, { kind: 'output', step: 'plan', text: `OpenVibe's free AI has ${leftWords} left today, not enough for this, so your own ${own.provider === 'link' ? 'computer\'s model' : `${own.provider} key`} takes it.` });
+                } else if (road.road === 'computer') {
+                    return taken;
+                } else if (road.road === 'none') {
+                    const detail = `OpenVibe's free AI has ${leftWords} left today, and a task like this takes about ${need.toLocaleString('en-US')}: the free AI allowance is spent for anything this size until midnight UTC. Add your own AI key or your computer to keep going.`;
+                    await emit(id, { kind: 'output', step: 'text', text: detail, is_error: true });
+                    return await setState(id, 'failed', { error_code: 'ai.allowance_spent', error_detail: detail, finished_at: iso() });
                 }
             }
             // One model, or the Decisions API: the engine answers on its own, without the loop or the router. Its answer
