@@ -16,6 +16,8 @@
  */
 const { serviceAuth } = require('openvibe-contracts');
 
+const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
+
 function createVisionReview({ config, fetchImpl = globalThis.fetch, tokens: override = null } = {}) {
     const svc = (config && config.services) || {};
     const base = String(svc.visionUrl || '').replace(/\/+$/, '');
@@ -35,7 +37,7 @@ function createVisionReview({ config, fetchImpl = globalThis.fetch, tokens: over
             r = await fetchImpl(`${base}/api/v1/ui-review`, {
                 method: 'POST', redirect: 'error',
                 signal: signal || AbortSignal.timeout(90_000),
-                headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(subject ? { 'X-OV-Subject': subject } : {}), ...(await tokens.authHeaders()) },
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(USER_SUBJECT.test(String(subject || '')) ? { 'X-OV-Subject': subject } : {}), ...(await tokens.authHeaders()) },
                 body: JSON.stringify({ image: `data:image/jpeg;base64,${contentB64}`, viewport: { w: Number(width) || 1280, h: Number(height) || 800 }, ...(theme ? { theme } : {}), ...(models.length ? { models } : {}) }),
             });
         } catch (err) {
