@@ -85,6 +85,8 @@ const TABLES = [
             'fork_of_step', 'fork_change', 'resumes', 'agent_id', 'level', 'assignment_id',
             // The way the person chose (an engine) and the comparison a task is one side of (migration 0080).
             'engine', 'comparison_id',
+            // An answer's receipt (migration 0082): what a turn took and what paid for it, by rung.
+            'receipt',
             // The catalogue skill a task was started from (migration 0057): its slug, name and the subject's title.
             'skill_slug', 'skill_name', 'skill_subject_title',
             // A product conversation turn (one-engine slice): which conversation it answers, the tools it may call and

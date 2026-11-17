@@ -83,7 +83,7 @@ async function listTasks(s, requester, { limit = 20, before = null, via = null }
 async function updateTask(s, id, patch) {
     const cols = Object.keys(patch);
     if (!cols.length) return getTask(s, id);
-    const json = new Set(['result', 'explanation', 'fork_change']);
+    const json = new Set(['result', 'explanation', 'fork_change', 'receipt']);
     const sets = cols.map((c, i) => `${c} = $${i + 2}${json.has(c) ? '::jsonb' : ''}`);
     const vals = cols.map((c) => (json.has(c) && patch[c] != null ? JSON.stringify(patch[c]) : patch[c]));
     await s.db.query(`UPDATE tasks SET ${sets.join(', ')} WHERE id = $1`, [id, ...vals]);

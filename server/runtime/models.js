@@ -303,6 +303,28 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         return meterStore.getStore() || null;
     }
 
+    /**
+     * An answer's receipt (agents.step@1 1.3.0, plan §AD.17): every model call of a task notes the rung of the ladder
+     * that paid for it (allowance: OpenVibe's; key: the person's own provider key; machine: their computer), its model
+     * and what it took. Kept on the task's metering context, read by the engine when the turn ends; a call outside a task
+     * notes nothing, and a note never delays or fails a call.
+     */
+    const PROVIDER_RE = /^[a-z][a-z0-9_-]{0,40}$/;
+    function noteReceipt(r, rung, provider, at) {
+        const m = currentMetering();
+        if (!m || !Array.isArray(m.receipt) || !r) return;
+        try {
+            const u = r.usage || {};
+            const tokens = Math.max(0, Math.round(Number(u.input) || 0)) + Math.max(0, Math.round(Number(u.output) || 0));
+            const p = String(provider || '').toLowerCase();
+            m.receipt.push({
+                rung, provider: PROVIDER_RE.test(p) ? p : null, model: String(r.resolved_model || r.model || '').slice(0, 200),
+                tokens, usd: Math.max(0, Number(r.cost_usd) || 0), ms: Math.max(0, now() - at),
+            });
+            if (m.receipt.length > 500) m.receipt.shift();
+        } catch { /* a receipt never fails a call */ }
+    }
+
     /** Start one call's record; null (never a throw) when there is no meter, no task or a bad shape. */
     function startMetered({ provider, model, place, streamed }) {
         if (!meter) return null;
@@ -803,6 +825,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         // The content tier of the run (one-engine slice): it rides on the choice, so every call of the run answers on
         // that tier. A caller may also name it directly.
         const policyOf = policy || (choice && choice.policy) || null;
+        const callAt = now();
         if (choice && choice.provider) {
             // OpenVibe.AI records every call it serves (ai.call.recorded@1) itself: Actor reporting it too would count
             // it twice. Only the calls Actor makes straight to a provider, below, are Actor's to report.
@@ -815,6 +838,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                 throw err;
             }
             endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
+            noteReceipt(r, choice.provider === 'link' ? 'machine' : 'key', choice.provider === 'link' ? 'machine' : choice.provider, callAt);
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER, latency_class: null };
         }
         // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
@@ -838,6 +862,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                     try {
                         r = await chatViaAi({ choice: { provider: own.provider, subject: own.subject, model: null }, messages, tools, json, maxTokens, signal, onDelta: args.onDelta, policy: policyOf });
                         endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
+                        noteReceipt(r, own.provider === 'link' ? 'machine' : 'key', own.provider === 'link' ? 'machine' : own.provider, callAt);
                         return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER, own_key: own.provider };
                     } catch (err2) {
                         failMetered(call, err2, signal);
@@ -848,6 +873,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                 throw err;
             }
             endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
+            noteReceipt(r, 'allowance', null, callAt);
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }
         await warm();
@@ -873,7 +899,9 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             throw err;
         }
         endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
-        return { ...r, cost_usd: r.cost_usd || priceUsage(d.rates, r.usage || {}), tier, provider: d.provider, family: d.family };
+        const priced = { ...r, cost_usd: r.cost_usd || priceUsage(d.rates, r.usage || {}), tier, provider: d.provider, family: d.family };
+        noteReceipt(priced, 'allowance', d.provider, callAt);
+        return priced;
     }
 
     /** GET /api/v1/agents: the model each tier resolves to, and every model the keys reach (sync after warm). */

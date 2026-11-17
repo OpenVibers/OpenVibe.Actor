@@ -62,6 +62,18 @@ const SPENT = 'OpenVibe.Exchange HTTP 402: The free AI allowance for usr_01KKT9A
             assert.match(row.error_detail, /free AI allowance/, 'the first failure stands');
         });
 
+        await check('Chat mode (one model) finds a way too: the free AI spent, a computer online takes it', async () => {
+            state.machines = [{ id: 'dev_1', name: 'Studio PC', online: true }]; state.codes = 'ok'; state.codesAsked = [];
+            t.providers.reset(); t.providers.state.runtime = 'spent';
+            const r = await t.get('/api/v1/tasks', { as: ada, json: { task: 'Say hello in French', engine: { kind: 'model' } }, headers: SAME });
+            assert.ok(r.status < 300, r.text);
+            const row = await t.waitFor(r.json().id);
+            t.providers.reset();
+            assert.strictEqual(row.state, 'succeeded', row.error_detail);
+            assert.deepStrictEqual(resultOf(row).route, { road: 'own-computer', where: 'Studio PC', because: 'the free AI was used up' });
+            assert.deepStrictEqual(state.codesAsked, ['Say hello in French']);
+        });
+
         await check('another failure is never rerouted', async () => {
             state.codes = 'ok'; state.loop = 'broken'; state.codesAsked = [];
             const row = await t.waitFor(await create('Say hi'));
