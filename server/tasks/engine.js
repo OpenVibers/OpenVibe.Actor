@@ -636,6 +636,33 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // creation. A turn always runs in the loop below, the path that honors the list — a code-classified
             // turn must not escape to the Codes agent.
             const turnAllowed = parseTurnTools(row.tools);
+            // A turn that cannot finish never starts on the free AI (plan §AD.17; 11-17: two probe turns spent 22k free
+            // tokens and answered nothing, each refused halfway). When what is left today is less than an agent turn
+            // takes, the person's own key takes it, else their computer, else it says so at once and spends nothing.
+            // One model (Chat mode) is one small call and is not held; a coding run is Codes', not the allowance's.
+            let freeShortKey = null;
+            const loopTurn = !(chosenEngine && ['model', 'decisions', 'harness'].includes(chosenEngine.kind)) && cls !== 'code';
+            if (!resume && !fork && loopTurn && runsOn !== 'computer' && !fromChat && row.mode !== 'private' && String(row.requester || '').startsWith('user:')
+                && models && typeof models.allowanceFor === 'function') {
+                const pref = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
+                const left = pref && pref.provider ? null : await models.allowanceFor(row.requester);
+                const need = Math.max(1000, Number(config.freeTurnTokens) || 12000);
+                if (left && !left.unlimited && left.left != null && Number(left.left) < need) {
+                    const leftWords = `${Number(left.left).toLocaleString('en-US')} tokens`;
+                    const own = typeof models.ownKeyFor === 'function' ? await models.ownKeyFor(row.requester).catch(() => null) : null;
+                    if (own) {
+                        freeShortKey = own;
+                        await emit(id, { kind: 'output', step: 'plan', text: `OpenVibe's free AI has ${leftWords} left today, not enough for this, so your own ${own.provider === 'link' ? 'computer\'s model' : `${own.provider} key`} takes it.` });
+                    } else {
+                        const short = Object.assign(new Error(`The free AI allowance is spent for a task this size: ${leftWords} left today.`), { code: 'ai.allowance_spent' });
+                        const taken = await ownComputerRoad(short, { cls, fromChat });
+                        if (taken) return taken;
+                        const detail = `OpenVibe's free AI has ${leftWords} left today, and a task like this takes about ${need.toLocaleString('en-US')}: the free AI allowance is spent for anything this size until midnight UTC. Add your own AI key or your computer to keep going.`;
+                        await emit(id, { kind: 'output', step: 'text', text: detail, is_error: true });
+                        return await setState(id, 'failed', { error_code: 'ai.allowance_spent', error_detail: detail, finished_at: iso() });
+                    }
+                }
+            }
             // One model, or the Decisions API: the engine answers on its own, without the loop or the router. Its answer
             // is that engine's own (a comparison grades it), so the loop's check does not rewrite or refuse it.
             if (chosenEngine && (chosenEngine.kind === 'model' || chosenEngine.kind === 'decisions') && !resume && !fork) {
@@ -730,6 +757,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // The person's own model choice for this run (plan L55 C3): their own key, through OpenVibe.AI.
                 // Every model call of the run — the loop's, the plan's, the check's — reads it, and no other run's does.
                 let choice = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
+                // Not enough free AI left for this turn (above): the person's own key takes every call of it.
+                if (freeShortKey && !(choice && choice.provider)) choice = { provider: freeShortKey.provider, subject: freeShortKey.subject, model: null };
                 if (dayRun) choice = await day.modelChoice(id);
                 // "Runs on: my computer": the model on the person's computer, whatever else they chose above it (a
                 // model id they gave for their computer is kept).
