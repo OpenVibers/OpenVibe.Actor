@@ -219,7 +219,17 @@ async function spanCall(trace, { kind, name, tier = null, family = null, started
     });
 }
 
-function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null, connectors = null, skillRun = null, media = null }) {
+function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null, connectors = null, skillRun = null, media = null, specialists = null }) {
+    /** A specialist's tools (plan §AD.25): empty without one, in private mode, or when the service is not there. */
+    async function specialistTools(name, mode) {
+        const empty = { definitions: [], byAlias: new Map() };
+        if (!name || !specialists || mode === 'private') return empty;
+        try { return await specialists.tools(name); } catch (err) { if (log && log.warn) log.warn('[Actor] specialist tools unavailable:', (err && err.message) || err); return empty; }
+    }
+    async function specialistBrief(name) {
+        if (!name || !specialists) return '';
+        try { const b = await specialists.brief(name); return b ? `\n\n${b}` : ''; } catch { return ''; }
+    }
     /** The connector tools of this person (stage V2-11): empty when there are none or no person. */
     async function connectorTools({ requester, mode }) {
         const empty = { definitions: [], byAlias: new Map() };
@@ -902,7 +912,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
      * a span; and drives on from the step it stopped at. A checkpoint whose last step already answered is delivered
      * without another model call.
      */
-    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, connectorSwitches = null, runPolicy = null }) {
+    async function continueFrom({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, connectorSwitches = null, runPolicy = null , specialist = null}) {
         const source = resume && resume.state ? resume.state : (fork && fork.checkpoint && fork.checkpoint.state);
         const restored = restoreState(source);
         if (!restored) throw Object.assign(new Error('the saved step could not be read'), { code: 'actor.checkpoint.invalid' });
@@ -957,9 +967,10 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // The connector tools of this person (stage V2-11), at most the checkpoint's allow-list.
         const dynamic = day ? { definitions: [], byAlias: new Map() } : await connectorTools({ requester, mode });
         const installed = day ? { definitions: [], byAlias: new Map() } : await installedSkillTools({ requester, agentId, mode });
-        ctx.dynamicTools = new Map([...dynamic.byAlias, ...installed.byAlias]);
+        const craft = await specialistTools(specialist, mode);
+        ctx.dynamicTools = new Map([...dynamic.byAlias, ...installed.byAlias, ...craft.byAlias]);
         const offeredAll = offered.concat(dynamic.definitions.filter(d => require('../chat-apps/policy').allowed(dynamic.byAlias.get(d.function.name), chatPolicy)),
-            installed.definitions.filter(d => require('../chat-apps/policy').allowed(installed.byAlias.get(d.function.name), chatPolicy)));
+            installed.definitions.filter(d => require('../chat-apps/policy').allowed(installed.byAlias.get(d.function.name), chatPolicy)), craft.definitions);
         const byName = new Map(offeredAll.map((d) => [d.function.name, d]));
         const allowedNames = state.allow instanceof Set ? state.allow : new Set(Array.isArray(state.allow) ? state.allow : []);
         const savedNames = Array.isArray(state.tools) && state.tools.length ? state.tools : [...allowedNames];
@@ -1070,9 +1081,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         }
     }
 
-    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, allowedTools = null, connectorSwitches = null, runPolicy = null }) {
+    async function run({ task, requester = null, taskId = null, mode = 'balanced', signal, emit, meter, budgetLeft, waitForPerson = null, requestApproval = null, assign = null, closeAssignment = null, chatPolicy = null, approveChatTool = null, context = [], personText = null, agentId = null, notifyTask = null, askPerson = null, control = null, resume = null, fork = null, spent = null, waits = null, waitEvent = null, attachments = [], delta = null, personToken = null, timezone = null, triggers = null, level = null, latency = null, spend = null, day = null, allowedTools = null, connectorSwitches = null, runPolicy = null, specialist = null }) {
         if (resume || fork) {
-            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta, latency, spend, day, connectorSwitches, runPolicy });
+            return await continueFrom({ task, requester, taskId, mode, signal, emit, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, context, personText, agentId, notifyTask, askPerson, control, resume, fork, spent, waits, waitEvent, delta, latency, spend, day, connectorSwitches, runPolicy, specialist });
         }
         const tier = mode === 'best' && models.resolve('best').available ? 'best' : 'smart';
         if (!models.resolve(tier).available) throw Object.assign(new Error(models.resolve(tier).reason || 'no model is available for the loop'), { code: 'actor.model.unavailable' });
@@ -1160,9 +1171,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             // The connections of this person (stage V2-11): the MCP tools they turned on and ask_agent for their agents.
             const dynamic = day ? { definitions: [], byAlias: new Map() } : await connectorTools({ requester, mode });
             const installed = day ? { definitions: [], byAlias: new Map() } : await installedSkillTools({ requester, agentId, mode });
-            ctx.dynamicTools = new Map([...dynamic.byAlias, ...installed.byAlias]);
+            // A specialist's tools (plan §AD.25): Design's rules and its MCP tools, beside the person's own.
+            const craft = await specialistTools(specialist, mode);
+            ctx.dynamicTools = new Map([...dynamic.byAlias, ...installed.byAlias, ...craft.byAlias]);
             const offeredAll = offered.concat(dynamic.definitions.filter(d => require('../chat-apps/policy').allowed(dynamic.byAlias.get(d.function.name), chatPolicy)),
-                installed.definitions.filter(d => require('../chat-apps/policy').allowed(installed.byAlias.get(d.function.name), chatPolicy)));
+                installed.definitions.filter(d => require('../chat-apps/policy').allowed(installed.byAlias.get(d.function.name), chatPolicy)), craft.definitions);
             let statsRows = [];
             if (stats) { try { statsRows = await stats.tools(); } catch { statsRows = []; } }
             const ordered = orderTools(offeredAll, statsRows);
@@ -1187,7 +1200,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 content: SYSTEM({
                     date: today(now), plan: planText(state.plan, state.brain), maxCalls,
                     note: ordered.note, ledger: ledgerText(state.brain.ledger, state.brain.progress),
-                }) + (allowedTools && allowedTools.length === 1 && allowedTools[0] === 'codes_task'
+                }) + (await specialistBrief(specialist)) + (allowedTools && allowedTools.length === 1 && allowedTools[0] === 'codes_task'
                     ? '\n\nThis task changes code on the person\'s machine. Use codes_task with the repository URL and the requested change. If the tool is unavailable, say what setup is missing; do not claim a code change happened.' : ''),
             });
             // A follow-up (stage V2-5b): the conversation it continues, as it went, then the new question.
