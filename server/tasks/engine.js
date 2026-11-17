@@ -67,7 +67,11 @@ function parseTurnTools(value) {
     } catch { return null; }
 }
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null }) {
+// OpenVibe.AI's spent free allowance, however it reached the loop (Exchange's 402, the router's ai.allowance_spent).
+const allowanceSpent = (err) => Boolean(err) && (err.status === 402 || err.code === 'ai.allowance_spent'
+    || /\bai\.allowance_spent\b|free AI allowance[^.]{0,80}\bspent\b/i.test(String(err.message || '')));
+
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null, computersOf = null }) {
     // The engines that answer without the loop (server/engines): one model, the Decisions API.
     const standalone = createEngines({ models, log });
     const running = new Map();      // id → AbortController
@@ -483,6 +487,39 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             await tellPerson(row, 'needs_you', { what: String(shown), kind: 'approve', url });
             return { asked: true, decision, ask, url };
         };
+        /**
+         * The next road when the free AI is spent (plan §AD.17): one of the person's computers is online and lets their
+         * agent use it, so Codes runs the task there (Codes picks a coding agent signed in on it). Null when there is no
+         * such road (a public chat, private mode, a service's run, no computer online, Codes off) or it failed too;
+         * the task then fails with the allowance's own words and the menu's setup card.
+         */
+        async function ownComputerRoad(err, { cls, fromChat }) {
+            if (fromChat || row.mode === 'private' || !String(row.requester || '').startsWith('user:')) return null;
+            if (!adapters.run || typeof adapters.run.codes !== 'function') return null;
+            const computers = typeof computersOf === 'function' ? computersOf() : null;
+            if (!computers || computers.enabled === false || typeof computers.mine !== 'function') return null;
+            let mine = null;
+            try { mine = await computers.mine(row.requester.slice(5)); } catch { mine = null; }
+            const online = Array.isArray(mine) ? mine.filter((m) => m && m.online) : [];
+            if (!online.length) return null;
+            const where = String(online[0].name || 'your computer').slice(0, 60);
+            const paused = await askBeforeCodesTask('codes', cls);
+            if (paused) return paused;
+            await emit(id, { kind: 'output', step: 'handoff', agent: 'codes', text: `OpenVibe's free AI is used up for today, so ${where} takes it: a coding agent there, on your own sign-in.` });
+            explanation.push({ selected: 'codes', objective: 'route', reasons: [`the free AI was used up (${String((err && err.message) || '').slice(0, 120)}), and ${where} is online`], candidates: [], decided_at: iso() });
+            await store.updateTask(s, id, { explanation });
+            let got;
+            try {
+                got = await adapters.run.codes({ task: row.task, requester: row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, emit: (e) => emit(id, { kind: 'output', agent: 'codes', ...e }) });
+            } catch (e2) {
+                if (signal.aborted) throw e2;
+                await emit(id, { kind: 'output', step: 'text', agent: 'codes', text: `${where} could not take it either: ${String((e2 && e2.message) || e2).slice(0, 400)}`, is_error: true });
+                return null;
+            }
+            const result = { answer: got.text, sources: got.sources || [], agent: 'codes', model: got.model || null, class: cls,
+                route: { road: 'own-computer', where, because: 'the free AI was used up' } };
+            return await setState(id, 'succeeded', { result, finished_at: iso() });
+        }
         const askBeforeCodesTask = async (agentId, cls) => {
             const repo = codesRepoIn(row.task);
             if (!taskAgent || !repo) return null;
@@ -737,6 +774,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     if (signal && signal.aborted) throw err;
                     // The person chose "Stop the task" on an interrupted action (stage V2-9): end it cancelled, not failed.
                     if (err && err.code === 'actor.task.cancelled') return await setState(id, 'cancelled', { finished_at: iso() });
+                    // The route always finds a way (plan §AD.17; the owner, 11-17: "it can use different harnesses …
+                    // smart"): OpenVibe's free AI is spent and no key of the person's answered (runtime/models.js tried
+                    // them), so the same task goes to their own computer through Codes, on the sign-ins there.
+                    if (allowanceSpent(err)) {
+                        controls.delete(id);
+                        const taken = await ownComputerRoad(err, { cls, fromChat });
+                        if (taken) return taken;
+                    }
                     const detail = (err && err.message) || String(err);
                     const code = err && err.code === 'actor.model.unavailable' ? 'actor.model.unavailable'
                         : err && err.code === 'actor.budget.exceeded' ? 'actor.budget.exceeded'
