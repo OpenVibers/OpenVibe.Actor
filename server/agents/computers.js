@@ -39,7 +39,8 @@ const MAX_READ = 64 * 1024;
 const SCREEN_WIDTH = 1280;
 const INPUT_ACTIONS = new Set(['move', 'click', 'double_click', 'right_click', 'scroll', 'type', 'key']);
 const POINT_ACTIONS = new Set(['move', 'click', 'double_click', 'right_click']);
-const BROWSER_ACTIONS = new Set(['open', 'click', 'fill', 'press', 'back', 'read', 'close']);
+// check (plan §AD.25): Link's page_check, the page drawn as a phone and a desktop, dark and light (computer_page_check).
+const BROWSER_ACTIONS = new Set(['open', 'click', 'fill', 'press', 'back', 'read', 'close', 'check']);
 const PAGE_TEXT = 3500;
 const PAGE_LINKS = 25;
 // With the page's elements as refs (Link v0.21.0) the links are among them, so the text gets less room and the links
@@ -419,6 +420,17 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
         const a = args && typeof args === 'object' ? args : {};
         if (!BROWSER_ACTIONS.has(a.action)) return { error: `action is one of ${[...BROWSER_ACTIONS].join(', ')}` };
         const value = { action: a.action, ...onDesk(a) };
+        if (a.action === 'check') {
+            if (typeof a.url !== 'string' || !/^https?:\/\//i.test(a.url) || a.url.length > 2048) return { error: 'check needs url: an http or https address' };
+            const widths = Array.isArray(a.widths) && a.widths.length ? a.widths.slice(0, 3).map((x) => Math.round(Number(x))) : [390, 1280];
+            if (!widths.every((x) => x >= 320 && x <= 1920)) return { error: 'widths are one to three widths from 320 to 1920' };
+            const themes = Array.isArray(a.themes) && a.themes.length ? [...new Set(a.themes.filter((t) => t === 'dark' || t === 'light'))] : ['dark', 'light'];
+            if (!themes.length) return { error: 'themes are dark, light or both' };
+            const r = await command(subject, machine, 'browser', { action: 'page_check', url: a.url, widths, themes, shots: true, ...onDesk(a) }, { signal, windowMs: ACT_WINDOW_MS });
+            if (r.error) return r;
+            const d = r.data || {};
+            return { url: d.url, title: d.title, views: Array.isArray(d.views) ? d.views : [] };
+        }
         if (a.action === 'open') {
             if (typeof a.url !== 'string' || !/^https?:\/\//i.test(a.url) || a.url.length > 2048) return { error: 'open needs url: an http or https address' };
             value.url = a.url;
