@@ -130,7 +130,9 @@ async function createApp(opts = {}) {
     // is one OpenVibe.Run function job as the person. Both are off without their service URL and Actor's secret.
     const skillRun = opts.skillRun || require('./skills/run').createSkillRun({ config, projects, fetchImpl: providerFetch, log });
     const media = opts.media || require('./media/client').createMedia({ config, fetchImpl: providerFetch, log });
-    const loop = opts.loop || createLoop({ config, models, registry, log, store: s, stats, checkpoints, connectors, skillRun, media });
+    // Specialists (plan §AD.25): Design's brief and tools on the same loop.
+    const specialists = opts.specialists || require('./specialists').createSpecialists({ config, log, guard: opts.guard || {} });
+    const loop = opts.loop || createLoop({ config, models, registry, log, store: s, stats, checkpoints, connectors, skillRun, media, specialists });
     const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: providerFetch, log, agentCard: (taskId) => agentCards.cardForTaskId(s, taskId) });
     // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.
     // A webhook naming a project secret (ADR-056) is signed by OpenVibe.Network (server/net/secret-signer.js).

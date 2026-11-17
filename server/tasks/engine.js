@@ -827,6 +827,8 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         latency: await latencyClass(id),
                         // A product conversation turn (one-engine slice): the tools this run may call.
                         allowedTools: unifiedCode && !turnAllowed ? ['codes_task'] : turnAllowed,
+                        // A specialist (plan §AD.25): Design's brief and tools on this loop.
+                        specialist: chosenEngine && chosenEngine.kind === 'agent' && chosenEngine.specialist ? chosenEngine.specialist : null,
                     })));
                     // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
                     // ('running' is the closest state there is today), its wall clock waits with it, and its
