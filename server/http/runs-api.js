@@ -286,12 +286,29 @@ function approvalStep(runId, seq, a) {
     };
 }
 
-/** One conversation's run, read by any of its turns' ids (the first turn's id is the run's). */
-async function conversationView(s, taskId, requester, now, baseUrl) {
+/**
+ * How much the conversation does on its own (agents.run@1 1.5.0 `level`): the level its next turn runs at, the agent's own
+ * (a conversation never goes below it), what asks at every level, and that the person may change it here.
+ */
+async function levelOf(s, config, turns) {
+    const contacts = require('../agents/contacts');
+    const levels = require('../agents/levels');
+    const last = turns[turns.length - 1];
+    try {
+        const agent = await contacts.agentForTask(s, config, last);
+        const now = await contacts.effectiveLevelFor(s, last, agent);
+        return { now, agent: levels.LEVELS.includes(agent && agent.level) ? agent.level : 'ask', always_asks: levels.ALWAYS_ASK.slice(), can_set: true };
+    } catch { return null; }
+}
+
+/** One conversation's run, read by any of its turns' ids (the first turn's id is the run's). With `config`, its level too. */
+async function conversationView(s, taskId, requester, now, baseUrl, config = null) {
     const rootId = await canvases.threadForTask(s, taskId);
     const turns = rootId ? await turnsOf(s, rootId, requester) : [];
     if (!turns.length) return null;
-    return conversationOf(turns, await namesFor(s, requester, turns), now, baseUrl);
+    const run = conversationOf(turns, await namesFor(s, requester, turns), now, baseUrl);
+    if (config) { const level = await levelOf(s, config, turns); if (level) run.level = level; }
+    return run;
 }
 
 /** A task event → agents.step@1. One event is one step: Actor writes a tool call and its result as two entries. */
@@ -514,7 +531,7 @@ function createRunsRoutes(ctx) {
             parentId: latest.id, personToken: bearerOf(req), timezone: tzOf(req) });
         if (out.code) return failed(req, res, out);
         await started(req, out.task, text, rootId);
-        return res.status(202).json({ ok: true, run: await conversationView(s, rootId, req.principal.requester, s.now(), config.baseUrl) });
+        return res.status(202).json({ ok: true, run: await conversationView(s, rootId, req.principal.requester, s.now(), config.baseUrl, config) });
     });
 
     // Rename (plan §AD.8, the session's ⋯ menu): the person names the conversation; an empty title gives it back its first
@@ -522,13 +539,28 @@ function createRunsRoutes(ctx) {
     r.patch('/:id', principal.requireCapability('actor.task.create'), own, async (req, res) => {
         const row = await load(req, res);
         if (!row) return;
-        const raw = req.body && Object.prototype.hasOwnProperty.call(req.body, 'title') ? req.body.title : undefined;
-        if (raw !== null && typeof raw !== 'string') return problem(req, res, 422, 'agents.run.title_needed', 'Send the new name ({ title }).');
-        const title = raw == null ? null : (oneLine(raw, 200) || null);
+        const body = req.body && typeof req.body === 'object' ? req.body : {};
+        const hasTitle = Object.prototype.hasOwnProperty.call(body, 'title');
+        const hasLevel = Object.prototype.hasOwnProperty.call(body, 'level');
+        const raw = hasTitle ? body.title : undefined;
+        if (!hasLevel && raw !== null && typeof raw !== 'string') return problem(req, res, 422, 'agents.run.title_needed', 'Send the new name ({ title }).');
+        if (hasTitle && raw !== null && typeof raw !== 'string') return problem(req, res, 422, 'agents.run.title_needed', 'Send the new name ({ title }).');
+        const levels = require('../agents/levels');
+        if (hasLevel && !levels.LEVELS.includes(body.level)) return problem(req, res, 422, 'agents.run.level', `level is one of ${levels.LEVELS.join(', ')}`);
         const rootId = (await canvases.threadForTask(s, row.id)) || row.id;
-        const updated = await s.db.maybe('UPDATE tasks SET title = $1 WHERE id = $2 AND requester = $3 RETURNING id', [title, rootId, req.principal.requester]);
-        if (!updated) return notFound(req, res);
-        return res.json(await conversationView(s, rootId, req.principal.requester, s.now(), config.baseUrl));
+        if (hasTitle) {
+            const title = raw == null ? null : (oneLine(raw, 200) || null);
+            const updated = await s.db.maybe('UPDATE tasks SET title = $1 WHERE id = $2 AND requester = $3 RETURNING id', [title, rootId, req.principal.requester]);
+            if (!updated) return notFound(req, res);
+        }
+        if (hasLevel) {
+            // The conversation's level (the composer's chip, 11-18): every turn of it, so the walk up its turns
+            // (contacts.effectiveLevelFor) finds this one and not an older, higher one. The agent's own stays the floor.
+            const turns = await turnsOf(s, rootId, req.principal.requester);
+            if (!turns.length) return notFound(req, res);
+            await s.db.query('UPDATE tasks SET level = $1 WHERE id = ANY($2::text[]) AND requester = $3', [body.level, turns.map((t) => t.id), req.principal.requester]);
+        }
+        return res.json(await conversationView(s, rootId, req.principal.requester, s.now(), config.baseUrl, config));
     });
 
     // Stop: the turn under way stops; the conversation stays, ready for the next message.
