@@ -101,6 +101,9 @@ async function start() {
         const jobs = require('./utils/jobs');
         ctx.skillJobs = [
             jobs.every('actor-skill-curator', 24 * 3600_000, () => require('./skills/curator').run(ctx.s, { log: console }), { initialDelayMs: 60_000, log: console }),
+            // OpenVibe's own Experts checked on their own examples (plan §AD.28 item 9): a new version is checked once,
+            // a few at a time, only where the Decisions API is configured. About a cent an Expert.
+            jobs.every('actor-expert-checks', 6 * 3600_000, () => require('./agents/expert-checks').run(ctx.s, { models: ctx.models, log: console }), { initialDelayMs: 120_000, log: console }),
         ];
         extra.push(() => { for (const stop of ctx.skillJobs) stop(); });
     }
