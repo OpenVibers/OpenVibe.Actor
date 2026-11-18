@@ -49,6 +49,9 @@ ${rows.map((x) => html`<tr><th scope="row">${x.label}</th><td>${x.runs}</td><td>
         res.set('Cache-Control', signed(req) ? 'private, no-store' : 'public, max-age=60');
         const mine = signed(req) ? await comparisons.list(requesterOf(req), { limit: 10 }) : [];
         const leaderboard = await comparisons.leaderboard({}).catch(() => []);
+        // The model suggestions: every model OpenVibe.AI runs now (its catalog), else a short list.
+        const catalog = models && typeof models.aiCatalog === 'function' ? await models.aiCatalog().catch(() => null) : null;
+        const suggest = (catalog || []).filter((m) => m && m.availability !== 'unavailable').slice(0, 600).map((m) => m.id);
         const problem = typeof req.query.problem === 'string' ? req.query.problem.slice(0, 300) : null;
         page(req, res, html`<header class="cmp-head"><p class="cmp-kicker">Compare</p><h1>One task, several ways</h1>
 <p class="cmp-lede">Run the same task through Actor's agent on any model, one model on its own, the Decisions API, a coding harness, OpenAI's agent or the open model, side by side. Each answer is graded on the same rubric, and the leaderboard shows which way wins, how fast and for how much.</p></header>
@@ -58,7 +61,7 @@ ${signed(req) ? html`<form class="cmp-form" method="post" action="/compare">
 <fieldset class="cmp-ways"><legend>The ways (2 to 6)</legend>
 ${Array.from({ length: ROWS }, (_, i) => wayRow(i, DEFAULT_ROWS[i] || {}))}
 <p class="cmp-add-row"><button class="ovk-btn ovk-btn--quiet cmp-add" type="button" hidden>Add a way</button></p>
-<datalist id="cmp-opts">${['auto', 'deepseek/deepseek-flash', 'openai/gpt-5.2', 'anthropic/claude-sonnet-5-5', 'google/gemini-3-pro', ...HARNESSES].map((x) => html`<option value="${x}"></option>`)}</datalist>
+<datalist id="cmp-opts">${['auto', ...(suggest.length ? suggest : ['deepseek/deepseek-flash', 'openai/gpt-5.2', 'anthropic/claude-sonnet-5-5']), ...HARNESSES].map((x) => html`<option value="${x}"></option>`)}</datalist>
 </fieldset>
 <ul class="cmp-kinds">${ENGINES.map((e) => html`<li><b>${e.name}</b> ${e.blurb}</li>`)}</ul>
 <p class="cmp-go"><button class="ovk-btn ovk-btn--primary" type="submit">Compare them</button><small>Each way is one of your tasks, paid from your allowance like any other.</small></p>

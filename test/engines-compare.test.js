@@ -145,6 +145,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.deepStrictEqual(b.engines.map((x) => x.label), ['One model', 'Decisions', 'One model · cheap/one'], 'best score first');
             const list = (await t.get('/api/v1/engines')).json();
             assert.deepStrictEqual(list.engines.map((x) => x.kind), ['agent', 'model', 'decisions', 'harness', 'openai-agent', 'open-model']);
+            assert.ok(Array.isArray(list.models), 'the models a way can take (OpenVibe.AI\'s catalog)');
         });
 
         await check('the pages: the form and leaderboard, and the sides with the best marked', async () => {
