@@ -131,6 +131,19 @@ const json = (body) => ({ ok: true, status: 200, headers: new Map([['content-typ
             assert.strictEqual(no.json().approval.state, 'declined');
             const after = (await t.get(`/api/v1/runs/${id}/steps?conversation=1`, { as: ada })).json().steps.find((x) => x.kind === 'approval');
             assert.deepStrictEqual([after.result.answer, after.result.answer_label], ['decline', 'Declined']);
+
+            // 11-18: the codes_task tool's request ({ repo, instruction }, no task) failed "must have required property
+            // 'task'" when approved. Approving it now starts the work as the conversation's next turn.
+            const tool = await approvals.request(t.ctx.s, { owner: `user:${ada.subject}`, taskId: id, kind: 'codes.task', summary: 'Start a coding task on your machine',
+                payload: { repo: 'OpenVibers/demo', instruction: 'Write wordstats.py and its unittest, then run it' } });
+            assert.strictEqual(approvals.codesWork({ repo: 'OpenVibers/demo', instruction: 'Write it' }), 'Write it\n\nIn OpenVibers/demo.');
+            const yes = await t.get(`/api/v1/runs/${id}/approvals/${tool.id}`, { headers: { authorization: `Bearer ${t.network.userToken(ada)}` }, method: 'POST', json: { answer: 'approve' } });
+            assert.strictEqual(yes.status, 200, yes.text);
+            assert.strictEqual(yes.json().approval.state, 'approved');
+            assert.ok(/^tsk_/.test(yes.json().started.id), 'the coding task started');
+            const next = await t.ctx.s.db.one('SELECT parent_id, task FROM tasks WHERE id = $1', [yes.json().started.id]);
+            assert.strictEqual(next.parent_id, id, 'as the conversation\'s next turn');
+            assert.match(next.task, /Write wordstats\.py[\s\S]*In OpenVibers\/demo\./);
         } finally { await t.close(); }
     });
     done();
