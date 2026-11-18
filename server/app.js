@@ -362,6 +362,8 @@ async function createApp(opts = {}) {
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.ACTOR_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));
     app.use(createAgentPages(ctx));
     // The Experts (plan §D): the gallery, an Expert's page and its install screen; openvibe.expert sends its paths here.
+    // Your own Experts first: /experts/mine and /experts/new are theirs, not an Expert's id.
+    app.use(require('./http/expert-make-pages').createExpertMakePages(ctx));
     app.use(require('./http/expert-pages').createExpertPages(ctx));
     app.use(createMemoryPages(ctx));
     app.use(createSkillPages(ctx));
