@@ -13,6 +13,26 @@ function titleFor(name, input) {
     const t = oneLine(target(input));
     const label = (kind, verb) => ({ kind, title: oneLine(`${verb}${t ? ` ${t}` : ''}`, 160) });
     if (/web.?search|search_web/.test(tool)) return label('search', 'Searched the web for');
+    // 11-18 (the owner's phone: rows that said "Performed an action"): Actor's own tools, in words.
+    const hostOf = (u) => { try { return new URL(String(u)).hostname; } catch { return ''; } };
+    const i = input && typeof input === 'object' ? input : {};
+    if (tool === 'read_page') return { kind: 'fetch', title: `Read ${hostOf(i.url) || 'a page'}` };
+    if (tool === 'read_pages') { const n = Array.isArray(i.urls) ? i.urls.length : 0; return { kind: 'fetch', title: n ? `Read ${n} page${n === 1 ? '' : 's'}${n ? `: ${[...new Set(i.urls.map(hostOf).filter(Boolean))].slice(0, 3).join(', ')}` : ''}` : 'Read pages' }; }
+    if (tool === 'fetch_data') return { kind: 'fetch', title: `Checked the data at ${hostOf(i.url) || 'a service'}` };
+    if (tool === 'search_sites') return label('search', 'Searched those sites for');
+    if (tool === 'weather_now') return { kind: 'fetch', title: oneLine(`Checked the weather${i.place ? ` in ${i.place}` : ''}`, 160) };
+    if (tool === 'market_quote') return { kind: 'fetch', title: oneLine(`Looked up the price of ${i.symbol || i.query || i.asset || 'it'}`, 160) };
+    if (tool === 'currency_convert') return { kind: 'fetch', title: oneLine(`Converted ${[i.amount, i.from].filter((x) => x != null && x !== '').join(' ') || 'money'}${i.to ? ` to ${i.to}` : ''}`, 160) };
+    if (/^(geocode|place_info)$/.test(tool)) return { kind: 'fetch', title: oneLine(`Looked up ${i.place || i.query || 'the place'}`, 160) };
+    if (tool === 'wikipedia') return { kind: 'read', title: oneLine(`Read Wikipedia on ${i.title || i.query || 'it'}`, 160) };
+    if (/^(time_in|convert_time)$/.test(tool)) return { kind: 'fetch', title: 'Checked the time' };
+    if (tool === 'calculate') return { kind: 'run', title: oneLine(`Calculated${i.expression ? ` ${i.expression}` : ''}`, 160) };
+    if (tool === 'codes_task') return { kind: 'agent', title: oneLine(`Started a coding task${i.repo ? ` in ${i.repo}` : ''}`, 160) };
+    if (/^make_(chart|file)$/.test(tool)) return { kind: 'edit', title: tool === 'make_chart' ? 'Made a chart' : 'Made a file' };
+    if (tool === 'remember') return { kind: 'plan', title: 'Remembered it' };
+    if (tool === 'recall') return { kind: 'read', title: 'Looked in its notes' };
+    if (tool === 'sports_scores') return { kind: 'fetch', title: 'Checked the scores' };
+    if (tool === 'notify_phone') return { kind: 'run', title: 'Sent you a notification' };
     if (/fetch|browse_url|open_url/.test(tool)) {
         let host = t; try { host = new URL(t).hostname; } catch { /* plain target */ }
         return { kind: 'fetch', title: `Fetched${host ? ` ${host}` : ' a page'}` };
@@ -26,6 +46,12 @@ function titleFor(name, input) {
     if (/ask|question|approval/.test(tool)) return label('ask', 'Asked about');
     if (/agent|task|delegate/.test(tool)) return label('agent', 'Asked an agent to work on');
     return null;
+}
+/** A tool's name as words, with what it worked on: "Used sports scores", "Used email draft: to Ada". */
+function toolWords(name, input) {
+    const words = String(name || 'a tool').replace(/^.*[./]/, '').replace(/[_-]+/g, ' ').trim() || 'a tool';
+    const t = oneLine(target(input), 80);
+    return oneLine(`Used ${words}${t ? `: ${t}` : ''}`, 160);
 }
 function sourcesIn(value) {
     const found = new Map();
@@ -84,7 +110,8 @@ function createMapper(state, { clean = (x) => x, fallback = async () => null } =
             const cacheKey = require('node:crypto').createHash('sha256').update(JSON.stringify([l.name, target(l.input || l.what)])).digest('hex');
             state.titles = state.titles || {};
             if (!label && state.titles[cacheKey]) label = state.titles[cacheKey];
-            if (!label) label = { kind: 'run', title: oneLine(await fallback(l.name, l.input || l.what)) || 'Performed an action' };
+            // The last word is the tool's own name, never "Performed an action" (11-18).
+            if (!label) label = { kind: 'run', title: oneLine(await fallback(l.name, l.input || l.what)) || toolWords(l.name, l.input || l.what) };
             label = clean(label);
             state.titles[cacheKey] = label;
             if (!state.group || state.group.kind !== label.kind || state.group.parent !== (l.parent || null)) {
@@ -163,4 +190,4 @@ function createMapper(state, { clean = (x) => x, fallback = async () => null } =
     }
     return { push, events };
 }
-module.exports = { initial, createMapper, titleFor, sourcesIn, oneLine, target };
+module.exports = { initial, createMapper, titleFor, toolWords, sourcesIn, oneLine, target };

@@ -267,15 +267,15 @@ function spanLabel(span) {
 /** The saved steps of a finished task, each with a "Fork from here" of its own. */
 function savedStepsBlock(row, saved, spans) {
     if (!saved || !saved.length) return '';
-    return html`<section class="saved" id="steps" aria-labelledby="h-steps">
-<h2 id="h-steps">Steps saved</h2>
+    // 11-18 (the owner's phone: a Fork button on every saved step, the page full of them): folded to one line until opened.
+    return html`<details class="saved saved-fold" id="steps"><summary><h2 id="h-steps">Steps saved</h2><span class="muted small">${saved.length} · fork one to run on from it</span></summary>
 <p class="muted small">Every step is checkpointed. Fork any step to run on from it with one change: another tier, one tool off the allowed list, or an edited instruction.</p>
 <ol class="saved-list">${saved.map((cp) => {
         const here = (spans || []).filter((sp) => Number(sp.step) === Number(cp.step));
         const last = here[here.length - 1];
         return html`<li class="saved-step"><span class="saved-n">Step ${cp.step}</span><span class="saved-what">${last ? spanLabel(last) : 'saved'}</span><span class="muted small saved-at">${time(cp.created_at)}</span><a class="sc-btn saved-fork" href="/tasks/${row.id}/fork?step=${cp.step}">Fork from here</a></li>`;
     })}</ol>
-</section>`;
+</details>`;
 }
 
 /** The fork dialog: one change, the estimate first, and the task's own allowance in plain words. */
@@ -314,19 +314,19 @@ function relatedRunsBlock(row, { forks = [], others = [] } = {}) {
     for (const f of forks) {
         if (seen.has(f.id)) continue;
         seen.add(f.id);
-        links.push(html`<li><a href="/tasks/${f.id}">Fork from step ${f.fork_of_step}</a> <span class="muted small">${shortText(f.task, 70)}</span> ${compareLink(row, f)}</li>`);
+        links.push(html`<li class="rel-row"><a class="rel-what" href="/tasks/${f.id}"><b>Fork from step ${f.fork_of_step}</b><span class="muted small">${shortText(f.task, 70)}</span></a><a class="sc-btn rel-cmp" href="/tasks/${row.id}/compare/${f.id}">Compare</a></li>`);
     }
     for (const o of others) {
         if (seen.has(o.id)) continue;
         seen.add(o.id);
-        links.push(html`<li>${compareLink(row, o)} <span class="muted small">${shortText(o.task, 70)}</span></li>`);
+        links.push(html`<li class="rel-row"><a class="rel-what" href="/tasks/${o.id}"><b>${shortText(o.task, 70)}</b></a><a class="sc-btn rel-cmp" href="/tasks/${row.id}/compare/${o.id}">Compare</a></li>`);
     }
     if (!links.length) return '';
-    return html`<section class="related-runs" id="related" aria-labelledby="h-related">
-<h2 id="h-related">${forks.length ? 'Forks and other runs' : 'Compare this run'}</h2>
+    // 11-18: folded to one line ("Compare with another run · 4"), each run's words once and a small Compare.
+    return html`<details class="related-runs rel-fold" id="related"><summary><h2 id="h-related">${forks.length ? 'Forks and other runs' : 'Compare with another run'}</h2><span class="muted small">${links.length}</span></summary>
 <p class="muted small">The two answers side by side, with their cost, time, steps and the claims that differ.</p>
 <ul class="related-list">${links}</ul>
-</section>`;
+</details>`;
 }
 
 /**
