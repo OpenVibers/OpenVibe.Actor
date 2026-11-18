@@ -96,7 +96,7 @@ function validate(input, config, current = null) {
 }
 
 const get = (s, owner, id) => ID.test(id) ? s.db.maybe('SELECT * FROM actor_agents WHERE id = $1 AND owner = $2', [id, owner]) : null;
-const list = (s, owner) => s.db.many('SELECT * FROM actor_agents WHERE owner = $1 ORDER BY id DESC', [owner]);
+const list = (s, owner) => s.db.many('SELECT * FROM actor_agents WHERE owner = $1 AND trial_of IS NULL ORDER BY id DESC', [owner]);
 const memory = (s, owner, id) => memoryStore.forAgent(s, owner, id);
 
 async function create(s, config, owner, input) {
@@ -108,7 +108,7 @@ async function create(s, config, owner, input) {
         const day = s.iso().slice(0, 10);
         await s.db.query('INSERT INTO spend_daily (requester, day, usd, tasks) VALUES ($1, $2, 0, 0) ON CONFLICT (requester, day) DO NOTHING', [owner, day]);
         await s.db.query('SELECT requester FROM spend_daily WHERE requester = $1 AND day = $2 FOR UPDATE', [owner, day]);
-        const count = Number(await s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1', [owner]));
+        const count = Number(await s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1 AND trial_of IS NULL', [owner]));
         if (count >= config.agents.maxPerOwner) return { limit: true };
         const now = s.iso();
         const row = await s.db.maybe(`INSERT INTO actor_agents (id, owner, name, instructions, mode, budget_per_run_usd, daily_runs_max, schedule, schedule_at, schedule_dow, quiet_from, quiet_to, next_run_at, status, created_at, updated_at, send_to_vibe, soul)
