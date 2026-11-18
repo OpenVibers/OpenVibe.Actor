@@ -40,7 +40,10 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.match(chosen.text, /<h2>Create: Job search<\/h2>/);
             assert.match(chosen.text, /value="Job search"/);
             assert.match(chosen.text, /Find job listings posted in the last day for &lt;the role you want/);
-            assert.match(chosen.text, /<option value="daily" selected>/);
+            // 11-18: choices are chips: the template's schedule is the checked one, and the form opens by itself.
+            assert.match(chosen.text, /<input type="radio" name="schedule" value="daily" checked>/);
+            assert.match(chosen.text, /<details class="pa-panel pa-fold" id="create" open>/);
+            assert.ok(!/<select name="(mode|schedule|status|schedule_dow)"/.test(chosen.text), 'no native selects in the form');
             const base = { name: 'Job search', mode: 'balanced', budget_per_run_usd: '0.02', daily_runs_max: '1', schedule: 'daily', schedule_at: '08:00', schedule_dow: '', status: 'active' };
             const unfilled = await t.get('/me/agents', { as: a, form: { ...base, instructions: 'Find jobs: <the role you want>.' }, headers: SAME });
             assert.strictEqual(unfilled.status, 422);
