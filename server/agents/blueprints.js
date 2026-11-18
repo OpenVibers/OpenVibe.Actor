@@ -279,6 +279,30 @@ async function update(s, config, owner, agentId, body = {}) {
     return installOf(s, owner, agentId);
 }
 
+/**
+ * The gallery (openvibe.expert, plan §D item 6): the public, published blueprints with their latest version, for anyone,
+ * signed in or not. OpenVibe's own first, then the newest.
+ */
+async function gallery(s, { limit = 100 } = {}) {
+    const n = Math.max(1, Math.min(200, Number(limit) || 100));
+    const rows = await s.db.many(`SELECT b.*, v.doc AS latest_doc FROM agent_blueprints b
+        JOIN agent_blueprint_versions v ON v.blueprint_id = b.id AND v.version = b.latest
+        WHERE b.visibility = 'public' AND b.deleted_at IS NULL AND b.latest IS NOT NULL
+        ORDER BY (b.owner = 'service:actor') DESC, b.updated_at DESC, b.id LIMIT $1`, [n]);
+    return rows.map((row) => ({ row: rowOut(row), doc: parse(row.latest_doc) })).filter((x) => x.doc);
+}
+
+/** A gallery card: what a list shows of one Expert (its whole document is one more read). */
+function card(row, doc) {
+    const soul = doc.soul || {};
+    return {
+        id: row.id, name: doc.name, summary: doc.summary, tags: doc.tags || [], face: doc.face || null,
+        who: soul.who || null, author: doc.author, official: row.owner === 'service:actor', version: Number(row.latest),
+        licence: doc.licence || null, starters: (doc.starters || []).slice(0, 6), inputs: (doc.inputs || []).map((i) => ({ id: i.id, label: i.label || i.id })),
+        installs: Number(row.installs) || 0, remixes: Number(row.remixes) || 0, forked_from: row.forked_from || null, updated_at: row.updated_at,
+    };
+}
+
 function wire(row, doc) {
     return {
         id: row.id,
@@ -309,4 +333,4 @@ function installWire(inst) {
     };
 }
 
-module.exports = { create, list, get, saveDraft, publish, remix, asks, install, update, installOf, wire, installWire, contactOf, BlueprintError };
+module.exports = { create, list, get, saveDraft, publish, remix, asks, install, update, installOf, wire, installWire, contactOf, BlueprintError, check, gallery, card };
