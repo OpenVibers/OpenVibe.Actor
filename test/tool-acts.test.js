@@ -30,6 +30,7 @@ const EXPECTED = {
     market_quote: false,
     place_info: false,
     read_page: false,
+    decide: false,
     read_pages: false,
     fetch_data: false,
     recall: false,
