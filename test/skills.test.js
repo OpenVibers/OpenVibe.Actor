@@ -152,7 +152,17 @@ const RULES = [
             assert.deepStrictEqual([row.skill_slug, row.skill_name, row.skill_subject_title], ['research-brief', 'A research brief, with its sources', 'Local transport']);
             const pending = await t.get(`/api/v1/tasks/${run.id}/retry`, { as: alice, json: {}, headers: SAME });
             assert.strictEqual(pending.status, 409, 'an active task cannot run twice from Retry');
-            await t.ctx.s.db.query("UPDATE tasks SET state = 'failed', finished_at = $2 WHERE id = $1", [run.id, t.ctx.s.iso()]);
+            // Stop it the way a person does and wait until it has stopped (a direct write to the row raced the engine, which
+            // could still write its own state after it on PostgreSQL's timing).
+            await t.get(`/api/v1/tasks/${run.id}/cancel`, { as: alice, json: {}, headers: SAME });
+            const until = Date.now() + 15_000;
+            let state = null;
+            while (Date.now() < until) {
+                state = (await t.ctx.s.db.maybe('SELECT state FROM tasks WHERE id = $1', [run.id])).state;
+                if (['failed', 'cancelled', 'succeeded'].includes(state)) break;
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            assert.ok(['failed', 'cancelled', 'succeeded'].includes(state), `the task stopped (it is ${state})`);
             const retried = await t.get(`/api/v1/tasks/${run.id}/retry`, { as: alice, json: { mode: 'best' }, headers: SAME });
             assert.strictEqual(retried.status, 201, retried.text);
             const next = await t.ctx.s.db.maybe('SELECT skill_slug, skill_subject_title, mode FROM tasks WHERE id = $1', [retried.json().run.id]);

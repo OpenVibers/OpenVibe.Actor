@@ -95,6 +95,9 @@ function receiptOf(calls) {
 function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null, computersOf = null }) {
     // The engines that answer without the loop (server/engines): one model, the Decisions API.
     const standalone = createEngines({ models, log });
+    // The router asks the Decisions API only where it is configured (models.decideReady); a stand-in models object
+    // (a test's) without it never does.
+    const decisionsHere = () => Boolean(models && typeof models.decide === 'function' && typeof models.decideReady === 'function' && models.decideReady());
     const running = new Map();      // id → AbortController
     const waiting = [];
     // A question the loop asked before any tool ran (stage V2-8): the task waits in needs_you, the page shows the
@@ -614,10 +617,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             } else if (ownWork) {
                 // Pinned to Codes: a coding task, without paying a model to say so.
                 cls = 'code';
-            } else if (row.mode === 'private' || !adapters.checkers.deepseek) {
+            } else if (row.mode === 'private' || (!adapters.checkers.deepseek && !decisionsHere())) {
                 cls = heuristic(row.task);
             } else {
-                const c = await classify(row.task, { chat: adapters.checkers.deepseek, signal });
+                // The Decisions API first (plan §AD.27 item 6), then the cheap model, then the heuristic.
+                const c = await classify(row.task, { chat: adapters.checkers.deepseek || null, decide: decisionsHere() ? models.decide : null, signal });
                 await meter(c.cost_usd);
                 cls = c.class;
             }
