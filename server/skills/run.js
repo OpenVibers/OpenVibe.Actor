@@ -23,7 +23,17 @@
 const { serviceAuth } = require('openvibe-contracts');
 
 const SCOPE = 'run.job.submit run.job.read run.job.cancel';
-const ARTIFACT = { name: 'openvibe-skill-runner', version: '1.0.0' };
+// 1.1.0: what every Link since v0.71 declares. A Link worker before v0.81 admits only its exact declared version, so a
+// job naming 1.0.0 found no machine at all once Links moved their runner to 1.1.0; 1.1.0 takes the same { tool, entry,
+// input } args. From v0.81 a runner also serves the earlier minors.
+const ARTIFACT = { name: 'openvibe-skill-runner', version: '1.1.0' };
+// script_run (plan §AD.26 item 6): inline code needs 1.1.0; with a packages bundle (`modules`), 1.2.0 (Link v0.81).
+const SCRIPT_ARTIFACT = { name: 'openvibe-skill-runner', version: '1.1.0' };
+const SCRIPT_PACKAGES_ARTIFACT = { name: 'openvibe-skill-runner', version: '1.2.0' };
+const SCRIPT_WALL_MAX = 10 * 60_000;
+const SCRIPT_MEM_MAX = 1024 * 1024 * 1024;
+const SCRIPT_SOURCE_MAX = 64 * 1024;
+const PACKAGES_INPUT = 'packages.tgz';
 const TTL_MS = 120_000;
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'expired']);
 const PROJECT = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -89,6 +99,47 @@ function bodyProblem(body) {
         }
     }
     if (!body.inputs.some((p) => p.name === body.args.entry)) return 'the tool entry is not one of the pinned code inputs';
+    return null;
+}
+
+/**
+ * The run.job-create-request@1 body for one script (script_run): its code inline with its sha256, its packages bundle
+ * as the one pinned input when it has one, no network, the minutes and memory asked (never above the caps).
+ */
+function scriptBody({ code, input, minutes = 2, memMb = 512, packages = null }) {
+    const crypto = require('crypto');
+    const source = String(code == null ? '' : code);
+    const wall = Math.min(SCRIPT_WALL_MAX, Math.max(10_000, Math.round(Number(minutes) * 60_000) || 120_000));
+    const mem = Math.min(SCRIPT_MEM_MAX, Math.max(64, Number(memMb) || 512) * 1024 * 1024);
+    const withPackages = !!(packages && packages.media_id);
+    return {
+        class: 'function',
+        artifact: { ...(withPackages ? SCRIPT_PACKAGES_ARTIFACT : SCRIPT_ARTIFACT) },
+        args: {
+            tool: 'script_run', source, sha256: crypto.createHash('sha256').update(source).digest('hex'),
+            ...(withPackages ? { modules: PACKAGES_INPUT } : {}),
+            input: input === undefined ? {} : input,
+        },
+        ...(withPackages ? { inputs: [{ name: PACKAGES_INPUT, media_id: packages.media_id, sha256: packages.sha256 }] } : {}),
+        limits: { wall_ms: wall, cpu_ms: wall, mem_bytes: mem },
+        ttl_ms: wall + TTL_MS,
+        egress: 'none',
+        requirements: {
+            kind: 'run.function', mobility: 'job', latency_class: 'background', objective: 'balanced',
+            trust: [...TRUST],
+            capabilities: ['worker:function'],
+            resources: { egress: 'none', memory_mb: Math.ceil(mem / (1024 * 1024)) },
+        },
+    };
+}
+
+/** Why a script body may not be sent, or null. */
+function scriptProblem(body) {
+    const src = body && body.args && body.args.source;
+    if (!src || Buffer.byteLength(src) > SCRIPT_SOURCE_MAX) return `the code must be 1 to ${SCRIPT_SOURCE_MAX / 1024} KB`;
+    for (const pin of body.inputs || []) {
+        if (!MEDIA.test(String(pin.media_id || '')) || !HASH.test(String(pin.sha256 || ''))) return 'the packages bundle is missing its Media id or sha256';
+    }
     return null;
 }
 
@@ -158,6 +209,11 @@ function createSkillRun({ config, fetchImpl = globalThis.fetch, tokens: tokensOv
         if (!billTo) {
             return { ok: false, error: 'OpenVibe.Run bills a project of yours. Make one at https://openvibe.network/developer, then try again.' };
         }
+        return submitAndWait({ subject, billTo, body, signal, onJob, what: 'skill run' });
+    }
+
+    /** Submit one job body and wait for its end (shared by a skill's tool and script_run). */
+    async function submitAndWait({ subject, billTo, body, signal = null, onJob = null, what = 'skill run' }) {
         let sent;
         try {
             sent = await call('POST', '/jobs', { subject, project: billTo, body, signal });
@@ -181,7 +237,7 @@ function createSkillRun({ config, fetchImpl = globalThis.fetch, tokens: tokensOv
                 }
                 if (signal && signal.aborted) {
                     await call('POST', `/jobs/${encodeURIComponent(jobId)}/cancel`, { subject, project: billTo, signal }).catch(() => null);
-                    return { ok: false, job_id: jobId, error: 'The task was cancelled, so the skill run was cancelled too.' };
+                    return { ok: false, job_id: jobId, error: `The task was cancelled, so the ${what} was cancelled too.` };
                 }
                 if (job.state === 'queued' && now() >= placementUntil) {
                     await call('POST', `/jobs/${encodeURIComponent(jobId)}/cancel`, { subject, project: billTo }).catch(() => null);
@@ -197,7 +253,7 @@ function createSkillRun({ config, fetchImpl = globalThis.fetch, tokens: tokensOv
         } catch (err) {
             if (signal && signal.aborted) {
                 await call('POST', `/jobs/${encodeURIComponent(jobId)}/cancel`, { subject, project: billTo }).catch(() => null);
-                return { ok: false, job_id: jobId, error: 'The task was cancelled, so the skill run was cancelled too.' };
+                return { ok: false, job_id: jobId, error: `The task was cancelled, so the ${what} was cancelled too.` };
             }
             return { ok: false, job_id: jobId, error: `OpenVibe.Run did not answer: ${clip((err && err.message) || err, 240)}` };
         }
@@ -211,10 +267,29 @@ function createSkillRun({ config, fetchImpl = globalThis.fetch, tokens: tokensOv
             return {
                 ok: false, job_id: jobId, wall_ms: wall, exit, state: job.state,
                 result: job.result == null ? null : job.result,
-                error: `The skill run ${job.state === 'expired' ? 'ran out of time' : job.state}${job.error && job.error.detail ? `: ${String(job.error.detail).slice(0, 200)}` : '.'}`,
+                error: `The ${what} ${job.state === 'expired' ? 'ran out of time' : job.state}${job.error && job.error.detail ? `: ${String(job.error.detail).slice(0, 200)}` : '.'}`,
             };
         }
         return { ok: true, job_id: jobId, wall_ms: wall, exit, usage_seconds: Number(usage.seconds) || 0, result: job.result };
+    }
+
+    /**
+     * Run one script (script_run, plan §AD.26 item 6) as the person: no network, its packages as a pinned bundle, the
+     * same placement, billing and waiting as a skill's tool. → the same shape as execute().
+     */
+    async function executeScript({ subject, project = null, code, input, minutes, memMb, packages = null, signal = null, onJob = null } = {}) {
+        if (!enabled) return { ok: false, error: 'OpenVibe.Run is not connected on this server, so nothing could run.' };
+        if (!USER.test(String(subject || ''))) return { ok: false, error: 'A script runs as a signed-in person; this run has none.' };
+        const body = scriptBody({ code, input, minutes, memMb, packages });
+        const bad = scriptProblem(body);
+        if (bad) return { ok: false, error: bad };
+        const billTo = await projectFor(subject, project);
+        if (!billTo) return { ok: false, error: 'OpenVibe.Run bills a project of yours. Make one at https://openvibe.network/developer, then try again.' };
+        const out = await submitAndWait({ subject, billTo, body, signal, onJob, what: 'script' });
+        if (out.no_node) {
+            return { ...out, error: `No machine is offering to run scripts right now. Run them on your own computer: ${link} — add it to OpenVibe and turn the skill runner on there, then try again. Nothing ran anywhere else.` };
+        }
+        return out;
     }
 
     function noNode() {
@@ -224,7 +299,7 @@ function createSkillRun({ config, fetchImpl = globalThis.fetch, tokens: tokensOv
         };
     }
 
-    return { enabled, execute, jobBody, limitsOf, egressOf, projectFor };
+    return { enabled, execute, executeScript, jobBody, limitsOf, egressOf, projectFor };
 }
 
-module.exports = { createSkillRun, jobBody, limitsOf, egressOf, bodyProblem, ARTIFACT, TTL_MS, TRUST, SCOPE };
+module.exports = { createSkillRun, jobBody, scriptBody, scriptProblem, limitsOf, egressOf, bodyProblem, ARTIFACT, SCRIPT_ARTIFACT, SCRIPT_PACKAGES_ARTIFACT, SCRIPT_WALL_MAX, TTL_MS, TRUST, SCOPE };

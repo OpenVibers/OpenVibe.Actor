@@ -10,7 +10,7 @@
  * `{ error }`; `enabled` is false without Media's URL or Actor's client secret, and publishing a sandbox skill then
  * says so plainly instead of listing code it cannot store.
  *
- *   createMedia({ config, fetchImpl, tokens? }) → { enabled, tenant, put(text, { name, mimeType? }) }
+ *   createMedia({ config, fetchImpl, tokens? }) → { enabled, tenant, put(text, { name, mimeType? }), putBytes(buffer, …) }
  */
 const crypto = require('crypto');
 const sharp = require('sharp');
@@ -69,6 +69,21 @@ function createMedia({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         }
     }
 
+    /** Store bytes as they are (script_run's packages bundle, plan §AD.26), private: { id, sha256 } or { error }. */
+    async function putBytes(bytes, { name = 'file.bin', mimeType = 'application/octet-stream' } = {}) {
+        if (!enabled) return { error: 'OpenVibe.Media is not connected on this server, so nothing could be stored.' };
+        if (!Buffer.isBuffer(bytes) || !bytes.length) return { error: 'There is nothing to store.' };
+        const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+        try {
+            const object = await objects.upload(bytes, { kind: 'file', visibility: 'private', mimeType, contentHash: sha256, filename: String(name).split('/').pop() });
+            const id = object && object.id;
+            if (!MEDIA_ID.test(String(id || ''))) return { error: 'OpenVibe.Media answered without an object id.' };
+            return { id, sha256 };
+        } catch (err) {
+            return { error: `OpenVibe.Media could not store it: ${String((err && (err.message || err.code)) || err).slice(0, 240)}` };
+        }
+    }
+
     /** Re-encode a person's one photo so EXIF and other metadata never leave Actor. */
     async function putPhoto(input, { mimeType = '' } = {}) {
         if (!enabled) return { error: 'OpenVibe.Media is unavailable, so the photo was not stored.' };
@@ -93,7 +108,7 @@ function createMedia({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         } catch { return null; }
     }
 
-    return { enabled, tenant, put, putPhoto, photoUrl };
+    return { enabled, tenant, put, putBytes, putPhoto, photoUrl };
 }
 
 module.exports = { createMedia, sanitizePhoto, MEDIA_ID };

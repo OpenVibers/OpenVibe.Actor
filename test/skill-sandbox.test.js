@@ -344,7 +344,7 @@ function runOf(fetchImpl, { waitMs = 1000, clock = { t: 0 } } = {}) {
         const body = jobBody({ tool, code, input: { title: 'A title' } });
         assert.deepStrictEqual(body, {
             class: 'function',
-            artifact: { name: 'openvibe-skill-runner', version: '1.0.0' },
+            artifact: { name: 'openvibe-skill-runner', version: '1.1.0' },
             args: { tool: 'slugify', entry: 'code-1.js', input: { title: 'A title' } },
             inputs: [{ name: 'code-1.js', media_id: MED, sha256: sha(CLEAN) }],
             limits: { wall_ms: 10000, cpu_ms: 10000, mem_bytes: 134217728 },

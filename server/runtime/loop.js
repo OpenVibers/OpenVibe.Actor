@@ -1051,7 +1051,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         if (fork) state.answered = false;
         const ctx = {
             config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, artifacts, personToken, timezone, triggers, level, latency, spend, day,
-            store, media, now, agentId, personText: personText == null ? String(task) : String(personText),
+            store, media, skillRun, now, agentId, personText: personText == null ? String(task) : String(personText),
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),
@@ -1227,7 +1227,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         };
         const ctx = {
             config, log, models, signal, requester, taskId, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, chatPolicy, approveChatTool, artifacts, personToken, timezone, triggers, level, latency, spend, day,
-            store, media, now, agentId, personText: personText == null ? String(task) : String(personText),
+            store, media, skillRun, now, agentId, personText: personText == null ? String(task) : String(personText),
             trace: createTracer({ store, taskId, log, now }),
             readOutside: () => state.readOutside === true, notifyTask,
             emit: async (e) => emit(e),
