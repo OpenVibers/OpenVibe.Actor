@@ -82,6 +82,26 @@ const AGENTS = 'application/vnd.openvibe.agents.run+json';
             assert.match(read.preview.text, /Rundown got episodes/);
         });
 
+        await check('a conversation with one of the person\'s own agents keeps that agent on the next message (11-18)', async () => {
+            const mo = t.network.addUser('mo');
+            const moB = t.network.userToken(mo);
+            const made = await t.get('/api/v1/agents', { as: mo, method: 'POST', headers: { 'sec-fetch-site': 'same-origin' }, json: { name: 'Gardener', level: 'ask', instructions: 'You answer garden questions. Keep it short.' } });
+            assert.strictEqual(made.status, 201, made.text);
+            const agent = made.json();
+            await t.ctx.s.db.query('UPDATE actor_agents SET daily_runs_max = 24 WHERE id = $1', [agent.id]);
+            answer('Water them in the morning.');
+            const r = await t.get('/api/v1/runs', { bearer: moB, json: { text: 'When do I water tomatoes?', agent: agent.id } });
+            assert.strictEqual(r.status, 201, r.text);
+            const first = r.json().id;
+            await t.waitFor(first);
+            answer('About an inch a week.');
+            const next = await t.get(`/api/v1/runs/${first}/messages`, { bearer: moB, json: { text: 'How much water?' } });
+            assert.strictEqual(next.status, 202, next.text);
+            const turns = await t.ctx.s.db.many('SELECT id, agent_id FROM tasks WHERE requester = $1 ORDER BY created_at, id', [`user:${mo.subject}`]);
+            assert.deepStrictEqual(turns.slice(-2).map((x) => x.agent_id), [agent.id, agent.id], 'the second turn runs as the Gardener, not the Vibe');
+            await t.waitFor(turns.at(-1).id);
+        });
+
         await check('the steps are every turn in order, the person\'s messages included, on one cursor', async () => {
             const r = await t.get(`/api/v1/runs/${runId}/steps?conversation=1`, { bearer: kimB });
             assert.strictEqual(r.status, 200, r.text);

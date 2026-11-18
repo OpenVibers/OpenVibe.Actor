@@ -104,6 +104,12 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     // The contact this thread runs as (A-1). A person's task defaults to their Vibe, created on first read; a personal
     // agent's own run keeps that agent. The thread's level may raise the agent's, never lower it.
     let agentId = typeof body.agent_id === 'string' ? body.agent_id : null;
+    // A follow-up keeps the agent its conversation runs as (11-18: the next message after one to one of the person's own
+    // agents ran as their Vibe, because only the model and the way of working were carried on).
+    if (!agentId && parentId) {
+        const before = await store.getTask(s, parentId);
+        if (before && before.requester === principal.requester && typeof before.agent_id === 'string' && before.agent_id) agentId = before.agent_id;
+    }
     if (!agentId && /^agent:agt_/.test(String(principal.via || ''))) agentId = String(principal.via).slice(6);
     if (!agentId && /^chat-app:agt_/.test(String(principal.via || ''))) agentId = String(principal.via).slice(9);
     if (!agentId && String(principal.requester || '').startsWith('user:')) {
