@@ -40,11 +40,13 @@ const EXPECTED = {
     sports_scores: false,
     time_in: false,
     video_analyze: false,
+    my_apps_search: false,   // plan §L.2: the tools in the person's own apps, through Connect
     weather_now: false,
     wikipedia: false,
     // Acting: a robot moves, a command runs, a file or memory is written, a task or hand-off starts, or a generic
     // OpenVibe.Tools tool may do any of those.
     codes_task: true,
+    my_apps_run: true,   // a script over the person's apps: with a write grant it may change something
     computer_browser: true,
     computer_page_check: true,   // plan §AD.25: it opens a page in the agent's browser, as computer_browser open does
     computer_desk: true,
