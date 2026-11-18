@@ -193,7 +193,9 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         } finally { t.config.loop.selfReflections = saved; }
     });
 
-    await check('a checker that cannot run never delivers the answer unchecked', async () => {
+    // Changed 11-18 (the owner's "Show off" run: a paid answer was written, then withheld because the checker gave no
+    // verdict): an answer no checker could judge is delivered, marked as not checked, with the reason in its check step.
+    await check('a checker that cannot run delivers the answer marked as not checked', async () => {
         t.providers.reset();
         const saved = t.config.loop.selfReflections;
         t.config.loop.selfReflections = 0;
@@ -203,8 +205,12 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             const id = (await create({ task: 'Say hello' })).json().id;
             await t.waitFor(id);
             const task = (await t.get(`/api/v1/tasks/${id}`, { as: kim })).json();
-            assert.strictEqual(task.state, 'failed');
-            assert.strictEqual(task.error.code, 'actor.check.unavailable');
+            assert.strictEqual(task.state, 'succeeded', JSON.stringify(task.error || null));
+            assert.strictEqual(task.result.answer, 'A simple answer with no live facts.');
+            assert.strictEqual(task.result.checked, false);
+            const events = await t.get(`/api/v1/tasks/${id}/events`, { as: kim });
+            const steps = [...events.text.matchAll(/^data: (.*)$/gm)].map((m) => JSON.parse(m[1]));
+            assert.ok(steps.some((e) => e.step === 'check' && /^Not checked: /.test(e.text)), 'the check step says it was not checked, and why');
         } finally { t.config.loop.selfReflections = saved; }
     });
 

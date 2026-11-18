@@ -228,7 +228,13 @@ async function conversationSteps(s, turns, after, limit) {
         }
         if (!store.OPEN.includes(turn.state) && rows.length <= limit && base + TURN - 1 > after) {
             const answer = summaryOf(turn);
-            const spoke = answer && await s.db.maybe(`SELECT 1 AS yes FROM task_events e WHERE e.task_id = $1 AND e.body->>'kind' = 'output' AND e.body->>'step' = 'text' LIMIT 1`, [turn.id]);
+            // The answer is left out only when the turn already said it as its last text step. Any text step used to be
+            // enough (11-18: one model's "Asking a model, one call, no tools." stood in for the answer, the menu showed
+            // no answer and, the person's message being the last word, Network kept the run "Writing an answer").
+            const said = answer && await s.db.maybe(`SELECT e.body->>'text' AS text FROM task_events e WHERE e.task_id = $1 AND e.body->>'kind' = 'output'
+                AND e.body->>'step' = 'text' AND coalesce(e.body->>'is_error', 'false') <> 'true' ORDER BY e.seq DESC LIMIT 1`, [turn.id]);
+            const head = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+            const spoke = Boolean(said && head(said.text) && head(said.text) === head(answer));
             if (answer && !spoke) {
                 const at = iso(turn.finished_at || turn.created_at);
                 out.push({ run_id: root.id, seq: base + TURN - 1, kind: 'message', from: 'agent', text: answer, started_at: at, ended_at: at, cost: null, child_run: null });

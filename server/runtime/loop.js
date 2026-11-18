@@ -223,6 +223,22 @@ async function spanCall(trace, { kind, name, tier = null, family = null, started
     });
 }
 
+/**
+ * A tool that fails twice the same way (the same error once its numbers and quoted words are set aside) is down for
+ * the rest of the task (11-18: Open-Meteo was down and the agent asked it for five cities in turn, five failures
+ * and five model turns before it moved on). Plain objects, so a checkpoint keeps them.
+ */
+function noteFailure(state, tool, text) {
+    const sig = String(text || '').replace(/"[^"]*"|'[^']*'|\d+(?:[.,]\d+)*/g, '…').replace(/\s+/g, ' ').trim().slice(0, 160);
+    if (!sig) return;
+    state.toolErrors = state.toolErrors || {};
+    const seen = state.toolErrors[tool];
+    if (seen && seen.sig === sig) {
+        seen.n += 1;
+        if (seen.n >= 2) { state.downTools = state.downTools || {}; state.downTools[tool] = String(text || '').slice(0, 160); }
+    } else state.toolErrors[tool] = { sig, n: 1 };
+}
+
 function createLoop({ config, models, registry, log = console, now = () => Date.now(), store = null, stats = null, checkpoints = null, connectors = null, skillRun = null, media = null, specialists = null }) {
     /** A specialist's tools (plan §AD.25): empty without one, in private mode, or when the service is not there. */
     async function specialistTools(name, mode) {
@@ -399,7 +415,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         state.plan.steps.forEach((s, i) => {
             if (s.state !== 'done' && s.state !== 'active') s.state = i === 0 || state.plan.steps.slice(0, i).every((x) => x.state === 'done') ? 'active' : 'pending';
         });
-        return ctx.emit({ step: 'plan', text: planText(state.plan, state.brain) });
+        // An unchanged plan is not said again (11-18: the same "Assumptions: …" eight times in one run, each a Thought block).
+        const text = planText(state.plan, state.brain);
+        if (text === state.lastPlanText) return Promise.resolve();
+        state.lastPlanText = text;
+        return ctx.emit({ step: 'plan', text });
     }
 
     /** The next sub-goal the progress ledger names: the plan's step in hand, else the last thing the model said it does. */
@@ -475,6 +495,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             if (state.allow && !state.allow.has(fn.name)) planned.push({ call, name: fn.name, args, skipped: 'that tool is not offered for this task' });
             else if (state.brain && state.brain.withheld === fn.name) planned.push({ call, name: fn.name, args, skipped: 'that tool is not making progress; use another tool for this step' });
             else if (fn.name === DELEGATE.function.name && ++delegated > MAX_SUB_AGENTS) planned.push({ call, name: fn.name, args, skipped: `at most ${MAX_SUB_AGENTS} sub-agents at once; hand the rest over in the next turn` });
+            else if (state.downTools && state.downTools[fn.name]) planned.push({ call, name: fn.name, args, skipped: `${fn.name} failed twice the same way (${state.downTools[fn.name]}), so it is down for this task: use another tool, or answer without it and say what could not be fetched` });
             else if (n >= 3) { looping = true; planned.push({ call, name: fn.name, args, skipped: 'the same tool and input were already called twice' }); }
             else planned.push({ call, name: fn.name, args });
         }
@@ -560,7 +581,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             const item = state.ledger.add({ tool: shown, input: p.args, text: out.text, data: out.data, sources: out.sources, artifacts: out.artifacts, refs: out.refs, secret: out.secret === true });
             state.messages.push({ role: 'tool', tool_call_id: p.call.id, content: JSON.stringify({ evidence: item.id, tool: shown, result: clip(out.text, resultChars), ...(out.secret === true ? { secret: true } : {}) }) });
             await ctx.emit({ step: 'tool_result', tool: shown, call_id: p.call.id, full_output: out.secret ? '[redacted]' : out.text, ui_sources: out.secret ? [] : out.sources, text: clip(out.text, 600), is_error: out.isError || undefined, ...(out.artifacts && out.artifacts.length ? { artifacts: out.artifacts } : {}), ...(out.computer !== undefined ? { computer: out.computer } : {}) });
-            if (out.isError) { errorResults += 1; lastTool = p.name; } else okResults += 1;
+            if (out.isError) { errorResults += 1; lastTool = p.name; noteFailure(state, p.name, out.text); } else okResults += 1;
             if (state.brain) {
                 state.brain.toolRuns = (state.brain.toolRuns || 0) + 1;
                 state.brain.tools.add(p.name);
@@ -1428,4 +1449,4 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     return { run, revise, escalate, close, planText, SYSTEM };
 }
 
-module.exports = { createLoop, planText, SYSTEM, withoutMeta, splitCheck, DELEGATE, MAX_SUB_AGENTS };
+module.exports = { createLoop, planText, SYSTEM, withoutMeta, splitCheck, DELEGATE, MAX_SUB_AGENTS, noteFailure };
