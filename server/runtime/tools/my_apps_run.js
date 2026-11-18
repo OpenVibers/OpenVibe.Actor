@@ -22,6 +22,7 @@ module.exports = {
     },
     scope: 'person',
     acts: true,
+    needs: { files: 'none', network: false },   // OpenVibe's own Connect, as the person: not the open network, no files
     connector: 'openvibe',
     costUsd: 0,
     timeoutMs: 130_000,

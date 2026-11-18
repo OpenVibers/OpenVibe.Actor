@@ -28,6 +28,7 @@ const EXPECTED = {
     ask_location: null,
     ask_photo: null,
     codes_task: 'codes.task',
+    my_apps_run: 'actor.action',   // only a script that touches the floor asks in Actor; Connect's grants decide the rest
     computer_browser: 'computer.browser',
     computer_page_check: 'computer.browser',
     computer_desk: 'computer.desk',
@@ -86,6 +87,7 @@ const SAMPLE = {
     spend_vibes: { to: 'bo', amount: 12, reason: 'thanks for the stream' },
     files_save: { path: 'notes/2026', name: 'notes.txt', text: 'x' },
     shared_node_check: { repo: 'https://git.openvibe.codes/OpenVibers/OpenVibe.Actor', ref: 'main' },
+    my_apps_run: { code: 'return await tools.github_issue_delete({ number: 4 });' },
 };
 
 (async () => {

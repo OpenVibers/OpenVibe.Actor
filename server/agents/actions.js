@@ -309,6 +309,21 @@ function stepFor(name, input) {
             };
         }
 
+        // ── The person's own OpenVibe apps through Connect (my_apps_run, plan §L.2) ──
+        // Connect decides each call by the grants the person gave Actor on their Apps page (a read grant reaches only
+        // read-only tools) and asks the person itself before a send, a delete or a pay. Actor asks first too when the
+        // script touches the always-ask floor (money, a password, a deletion, a new recipient); a plain read never asks.
+        case 'my_apps_run': {
+            const code = typeof a.code === 'string' ? a.code : '';
+            const first = text(code.split('\n').find((l) => l.trim()) || '', 160);
+            const summary = `Use your OpenVibe apps: ${quoted(first, 160) || 'a script'}`;
+            // Tool names are identifiers (github_issue_delete, sendMail): read them as words.
+            const words = code.slice(0, 4000).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_.$]/g, ' ');
+            const categories = levels.classify({ summary: words, payload: null });
+            if (!categories.length) return null;
+            return { act: 'act', kind: 'actor.action', category: categories[0], summary, target: null, payload: safeInput({ code: code.slice(0, 2000) }) };
+        }
+
         // ── A generic OpenVibe.Tools tool: a lookup stays a lookup, a consequential one asks ──
         case 'run_tool': {
             const tool = text(a.tool, 80);
