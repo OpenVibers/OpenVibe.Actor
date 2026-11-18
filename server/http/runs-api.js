@@ -248,7 +248,7 @@ async function conversationSteps(s, turns, after, limit) {
         // What the turn asked before acting (actor_approvals): a card with the choices, right after its answer, at the
         // turn's last seq; once answered it says how. Approving a coding task makes it the conversation's next turn.
         if (!store.OPEN.includes(turn.state) && base + TURN > after) {
-            const asked = await s.db.maybe(`SELECT id, kind, summary, target, state, decision_scope, agent_id, created_at, decided_at, expires_at
+            const asked = await s.db.maybe(`SELECT id, kind, summary, payload, target, state, decision_scope, agent_id, created_at, decided_at, expires_at
                 FROM actor_approvals WHERE task_id = $1 ORDER BY created_at DESC LIMIT 1`, [turn.id]);
             if (asked) out.push(approvalStep(root.id, base + TURN, asked));
         }
@@ -267,6 +267,19 @@ async function conversationSteps(s, turns, after, limit) {
 
 const APPROVAL_DONE = { approved: 'Approved', declined: 'Declined', expired: 'Expired: nothing ran' };
 /** An actor_approvals row as the session surface's approval step (ov-session approvalNode): the choices, or the answer. */
+/** What an approval is for, in its own words: a coding task says the work and where (11-18, the owner's phone: the card
+ *  said "Start this coding task on your machine?" over "Start a coding task on your machine", nothing about what). */
+function approvalWords(a) {
+    if (a.kind === 'codes.task' && a.payload) {
+        try {
+            const p = typeof a.payload === 'string' ? JSON.parse(a.payload) : a.payload;
+            const work = require('../agents/approvals').codesWork(p, a.summary);
+            if (work && work.trim() && !/^start a coding task on your machine\.?$/i.test(work.trim())) return work.trim();
+        } catch { /* the summary below */ }
+    }
+    return String(a.summary || '');
+}
+
 function approvalStep(runId, seq, a) {
     const kinds = require('../agents/kinds');
     const at = iso(a.decided_at || a.created_at);
@@ -282,7 +295,7 @@ function approvalStep(runId, seq, a) {
     return {
         run_id: runId, seq, kind: 'approval', from: 'agent',
         title: a.kind === 'codes.task' ? 'Start this coding task on your machine?' : 'It asks before it goes on',
-        text: clip(String(a.summary || ''), 2000), started_at: at, ended_at: at, cost: null, child_run: null, result,
+        text: clip(String(approvalWords(a)), 2000), started_at: at, ended_at: at, cost: null, child_run: null, result,
     };
 }
 
