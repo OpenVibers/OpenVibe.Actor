@@ -1068,9 +1068,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     continue;
                 }
                 await setState(id, 'verifying', { agentForEvent: agentId });
-                let verdict = await check({ task: row.task, answer: out.text, sources: out.sources || [], evidence: out.evidence || [], agentId, mode: row.mode, checkers: adapters.checkers, signal, now: () => now() });
+                // Work on the person's own machine with no allowance left to pay a checker (tasks/create.js ownMachine):
+                // delivered as written, and it says so, rather than failing on a cent the person was never asked for.
+                let verdict = agentId === 'codes' && budgetLeft() <= 1e-9
+                    ? { ok: false, unavailable: true, reason: 'nothing was left of today\'s free allowance for a second opinion, and the work ran on your machine', cost_usd: 0 }
+                    : await check({ task: row.task, answer: out.text, sources: out.sources || [], evidence: out.evidence || [], agentId, mode: row.mode, checkers: adapters.checkers, signal, now: () => now() });
                 await meter(verdict.cost_usd);
-                await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
+                if (!verdict.unavailable) await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
                 if (verdict.unavailable) {
                     await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `Not checked: ${verdict.reason}. The answer is shown as it was written.` });
                     verdict = { ...verdict, ok: true, unchecked: true };
