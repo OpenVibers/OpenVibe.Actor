@@ -34,6 +34,7 @@ const TOOL_WORDS = {
     'ov:live.chat.post': 'posts in your chat',
     'ov:media.clip.create': 'makes clips of your stream',
     'ov:finance.read': 'reads your money on OpenVibe Finance (accounts, months, bills, goals), once you allow it on your Apps page',
+    'ov:finance.write': 'sorts your transactions and adds rules on OpenVibe Finance (never deletes, never moves money), once you allow read and write on your Apps page',
     'harness:auto': 'writes code with a coding agent',
 };
 const EVENT_WORDS = { 'live.stream.started': 'starts when you go live' };
