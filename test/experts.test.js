@@ -26,9 +26,9 @@ const docs = files.map((f) => JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf
 const SAME = { 'sec-fetch-site': 'same-origin' };
 
 (async () => {
-    await check('the twelve documents: valid, with a soul and starters, compiled, the money ones never pay', async () => {
-        assert.strictEqual(docs.length, 12, files.join(' '));
-        assert.strictEqual(new Set(docs.map((d) => d.id)).size, 12, 'ids are unique');
+    await check('the thirteen documents: valid, with a soul and starters, compiled, the money ones never pay', async () => {
+        assert.strictEqual(docs.length, 13, files.join(' '));
+        assert.strictEqual(new Set(docs.map((d) => d.id)).size, 13, 'ids are unique');
         for (const [i, d] of docs.entries()) {
             const at = files[i];
             assert.deepStrictEqual(contracts.validate('agents.blueprint@1', d).errors, [], at);
@@ -43,7 +43,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.ok(out.loop.system.includes(d.soul.who) || out.loop.system.length > 200, `${at}: compiles`);
         }
         const by = Object.fromEntries(docs.map((d) => [d.id, d]));
-        for (const id of ['bp_purchase_researcher', 'bp_subscription_auditor', 'bp_budget_coach', 'bp_job_researcher', 'bp_compute_buyer', 'bp_debt_planner', 'bp_can_i_afford_it']) {
+        for (const id of ['bp_purchase_researcher', 'bp_subscription_auditor', 'bp_budget_coach', 'bp_job_researcher', 'bp_compute_buyer', 'bp_debt_planner', 'bp_can_i_afford_it', 'bp_category_helper']) {
             assert.ok(by[id].soul.never.some((n) => /\b(Buys|Cancels|Moves money|Applies|Signs up)\b/.test(n)), `${id} says what it never does with money or accounts`);
             assert.strictEqual(by[id].rules.level, 'ask');
         }
@@ -54,6 +54,9 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.match(by[id].knows.instructions, /my_apps_search[\s\S]*my_apps_run/, `${id} knows how`);
             assert.match(by[id].knows.instructions, /Never ask for a bank login or a password/, `${id} never asks for a login`);
         }
+        // The Category helper also writes (a write grant: sorts and adds rules), and never changes the person's own.
+        assert.deepStrictEqual(by.bp_category_helper.hands.tools.map((t) => t.tool), ['ov:finance.read', 'ov:finance.write']);
+        assert.ok(by.bp_category_helper.soul.never.some((n) => /Changes a category the person set/.test(n)));
         for (const id of ['bp_stream_producer', 'bp_stream_moderator', 'bp_clip_finder']) {
             const post = by[id].hands.tools.find((t) => t.tool === 'ov:live.chat.post');
             assert.strictEqual(post && post.mode, 'ask', `${id} posts in chat only with a yes`);
@@ -65,10 +68,10 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         const s = t.ctx.s;
         await check('boot published them: public versions of service:actor; a second seed changes nothing', async () => {
             const rows = await s.db.many("SELECT id, owner, visibility, latest FROM agent_blueprints WHERE owner = 'service:actor' ORDER BY id");
-            assert.strictEqual(rows.length, 12);
+            assert.strictEqual(rows.length, 13);
             assert.ok(rows.every((r) => r.visibility === 'public' && Number(r.latest) === 1));
             const again = await stock.seed(s, { log: { warn() {}, info() {} } });
-            assert.deepStrictEqual([again.published, again.same, again.skipped], [[], 12, []]);
+            assert.deepStrictEqual([again.published, again.same, again.skipped], [[], 13, []]);
         });
 
         await check('a changed file is the next version; the first stays as it was; an id someone else owns is skipped', async () => {
