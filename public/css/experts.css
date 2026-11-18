@@ -86,3 +86,33 @@ html[data-ov-motion="off"] .ex-switch, html[data-ov-motion="off"] .ex-switch::af
 .ex-start:active { transform: scale(.96); }
 html[data-ov-motion="off"] .ex-start { transition: none; }
 html[data-ov-motion="off"] .ex-start:active { transform: none; }
+
+/* Your Experts (11-18): the list of your own, and the make and edit forms. */
+.ex-top { display: grid; gap: 6px; margin: 4px 0 16px; }
+.ex-top h1 { margin: 0; }
+.ex-mine { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-width: 760px; }
+.ex-mine-row { display: grid; gap: 2px; min-height: 56px; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--border, #1f2937);
+    background: var(--surface, transparent); color: inherit; text-decoration: none; transition: border-color .12s ease, transform .12s ease; }
+.ex-mine-row b { font-size: 16px; }
+.ex-mine-row span { color: var(--text-secondary, #9aa4b2); font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-mine-row:hover { border-color: var(--accent, #5b8cff); }
+.ex-mine-row:active { transform: scale(.99); }
+.ex-empty { color: var(--text-secondary, #9aa4b2); max-width: 60ch; }
+.ex-said { padding: 10px 14px; border-radius: 12px; background: var(--accent-soft, rgba(91, 140, 255, .12)); color: var(--text, #e8ecf3); max-width: 640px; }
+.ex-field textarea, .ex-field select { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border, #1f2937); background: var(--bg-input, #0f1626);
+    color: inherit; font: inherit; font-weight: 400; min-height: 44px; }
+.ex-field textarea { resize: vertical; line-height: 1.5; }
+.ex-field textarea:focus-visible, .ex-field select:focus-visible { outline: 2px solid var(--accent, #5b8cff); outline-offset: 1px; }
+html[data-ov-motion="off"] .ex-mine-row { transition: none; }
+html[data-ov-motion="off"] .ex-mine-row:active { transform: none; }
+/* Who sees it: three chips over radio buttons (no native select; the radios stay for keyboards and readers). */
+.ex-vis { border: 0; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.ex-vis legend { font-weight: 600; padding: 0; margin-bottom: 6px; }
+.ex-vis-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ex-vis-opt { position: relative; display: inline-flex; }
+.ex-vis-opt input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.ex-vis-opt span { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--border, #1f2937);
+    color: var(--text-secondary, #9aa4b2); font-size: 14px; transition: background .12s ease, color .12s ease; }
+.ex-vis-opt input:checked + span { background: var(--accent, #5b8cff); border-color: transparent; color: var(--accent-contrast, #fff); }
+.ex-vis-opt input:focus-visible + span { outline: 2px solid var(--accent, #5b8cff); outline-offset: 2px; }
+html[data-ov-motion="off"] .ex-vis-opt span { transition: none; }

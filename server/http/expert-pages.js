@@ -107,7 +107,7 @@ ${doc.soul && doc.soul.who ? html`<span class="ex-who">${doc.soul.who}</span>` :
 <span class="ex-sum">${doc.summary}</span>
 ${(doc.starters || []).length ? html`<span class="ex-try">${raw(glyphs.svg('spark', { size: 14 }))}<span>${doc.starters[0].label}</span></span>` : ''}
 </a></li>`)}</ul>`}
-<p class="ex-foot">Make your own on <a href="/me/agents">Actor</a>: say what it is for, give it a soul, and share it here.</p>`;
+<p class="ex-foot"><a href="/experts/new">Make your own Expert</a>: say what it is for, give it a soul (or bring a SOUL.md), and share it here. <a href="/experts/mine">Yours</a>.</p>`;
         page(req, res, {
             title: 'Experts: agents with a personality and a job', index: true, cache: PUBLIC_CACHE, crumbs: [{ label: 'Experts' }],
             description: 'OpenVibe\'s Experts: a purchase researcher, a stream producer, a security reviewer and more. Read who each is and what it may do, then install it as your own agent.',
@@ -128,7 +128,8 @@ ${soul.who ? html`<p class="ex-who">${soul.who}</p>` : ''}
 <p class="ex-sum">${doc.summary}</p>
 <p class="ex-meta">${authorLine(row, doc)}</p></div>
 <div class="ex-cta"><form method="post" action="/experts/${row.id}/try"><input type="hidden" name="starter" value="0"><button type="submit" class="ex-btn ex-btn--primary">${raw(glyphs.svg('chat', { size: 18 }))}<span>Try it</span></button></form>
-<a class="ex-btn" href="/experts/${row.id}/install">${raw(glyphs.svg('plus', { size: 18 }))}<span>Install</span></a></div>
+<a class="ex-btn" href="/experts/${row.id}/install">${raw(glyphs.svg('plus', { size: 18 }))}<span>Install</span></a>
+${doc.licence ? html`<form method="post" action="/experts/${row.id}/remix"><button type="submit" class="ex-btn">${raw(glyphs.svg('copy', { size: 18 }))}<span>Remix</span></button></form>` : ''}</div>
 </header>
 ${(doc.starters || []).length ? html`<section class="ex-sec"><h2>${raw(glyphs.svg('spark', { size: 18 }))}<span>Try it now</span></h2>
 <p class="ex-note">A chat with ${doc.name} that uses sample details instead of yours. It may not use your apps, computer or memory, and nothing is installed.</p>
