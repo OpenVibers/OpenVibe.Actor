@@ -860,6 +860,20 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         const steps = out && out.state && out.state.brain && out.state.brain.steps
                             || out && out.brain && out.brain.steps || [];
                         if (!steps.some((step) => step.tool === 'codes_task' && step.ok === true)) {
+                            // The loop's codes_task stopped to ask its owner (the approval gate made a request in this
+                            // turn): the turn waits for that yes, it did not fail (11-18: "did not run … Connect your
+                            // machine" sat above the card asking to start it).
+                            const asked = await s.db.maybe(`SELECT id FROM actor_approvals WHERE task_id = $1 AND state = 'pending' ORDER BY created_at DESC LIMIT 1`, [id]).catch(() => null);
+                            if (asked) {
+                                const said = 'It needs your yes before it starts: approve the coding task below, and it starts on your machine.';
+                                await emit(id, { kind: 'output', step: 'text', agent: agentId, text: said });
+                                controls.delete(id);
+                                await loop.close(out && out.state).catch(() => {});
+                                const result = { answer: said, sources: [], agent: agentId, model: null, class: cls,
+                                    approval: { id: asked.id, url: `${String(config.baseUrl || '').replace(/\/$/, '')}/me/approvals/${asked.id}` },
+                                    checked: { by: 'none', cross_family: false, reason: 'Nothing was run: its owner decides first.' } };
+                                return await setState(id, 'succeeded', { result, finished_at: iso() });
+                            }
                             const detail = 'OpenVibe.Codes did not run this task. Connect your machine on openvibe.link/machines, or retry after Codes is available.';
                             await emit(id, { kind: 'output', step: 'text', agent: agentId, text: detail, is_error: true });
                             controls.delete(id);
