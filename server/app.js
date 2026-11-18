@@ -194,6 +194,8 @@ async function createApp(opts = {}) {
     // each one is scanned before it is offered. The seed publishes them as listings of publisher kind 'openvibe'.
     ctx.skills = require('./skills');
     await require('./skills/seed').seed(s, { log, media });
+    // OpenVibe's own Experts (plan §D item 10): the blueprints in experts/, published as public versions of service:actor.
+    await require('./agents/stock').seed(s, { log });
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;

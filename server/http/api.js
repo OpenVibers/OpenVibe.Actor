@@ -52,6 +52,7 @@ const stills = require('../tasks/stills');
 const replay = require('../tasks/replay');
 const canvases = require('../canvases');
 const skills = require('../skills');
+const bpKit = require('openvibe-sdk/agents/blueprint');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_ID = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -312,6 +313,31 @@ function createApi(ctx) {
     };
     const bpRoute = (fn) => async (req, res) => { try { await fn(req, res); } catch (e) { bpFail(req, res, e); } };
     const bpVersion = (req) => (req.query.version != null && /^[1-9][0-9]{0,5}$/.test(String(req.query.version)) ? Number(req.query.version) : null);
+    // ── The gallery, signed out (openvibe.expert, plan §D item 6; 2026-11-18) ──
+    // The public, published blueprints: OpenVibe's own Experts (experts/, server/agents/stock.js) and what people chose
+    // to share. Anyone may read them; the list is kept a minute, so a busy gallery costs one query a minute. One Expert
+    // is its latest published version (or ?version=) with the asks its install screen shows; a link-only one answers
+    // to its address too, and a private one is 404.
+    let galleryKept = null;
+    r.get('/gallery', limits.reads('actor.gallery.read'), async (req, res) => {
+        try {
+            if (!galleryKept || Date.now() - galleryKept.at > 60_000) galleryKept = { at: Date.now(), cards: (await blueprints.gallery(s)).map((x) => blueprints.card(x.row, x.doc)) };
+        } catch (err) {
+            if (!galleryKept) return problem(req, res, 503, 'actor.gallery.unavailable', 'The gallery could not be read just now.');
+        }
+        res.set('Cache-Control', 'public, max-age=60');
+        res.json({ experts: galleryKept.cards });
+    });
+    r.get('/gallery/:id', limits.reads('actor.gallery.read'), async (req, res) => {
+        let got = null;
+        try { got = await blueprints.get(s, null, req.params.id, { version: bpVersion(req) }); } catch (err) {
+            return problem(req, res, 503, 'actor.gallery.unavailable', 'The gallery could not be read just now.');
+        }
+        if (!got || got.doc.state === 'draft') return problem(req, res, 404, 'actor.blueprint.not_found', 'No such published Expert.');
+        res.set('Cache-Control', 'public, max-age=60');
+        res.json({ ...blueprints.card(got.row, got.doc), blueprint: got.doc, asks: bpKit.asks(got.doc) });
+    });
+
     r.get('/blueprints', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), bpRoute(async (req, res) => {
         const scope = req.query.scope === 'public' ? 'public' : 'mine';
         const rows = await blueprints.list(s, req.principal.requester, { scope, limit: req.query.limit });

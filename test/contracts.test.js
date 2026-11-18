@@ -71,6 +71,10 @@ const ROUTE_EXTENSIONS = new Map([
     // What the person's answers used (2026-11-17): their own tasks' receipts summed, so the task read decides it.
     ['GET /api/v1/me/usage', 'actor.task.read'],
     ['GET /api/v1/skills', null],
+    // The Experts' gallery (openvibe.expert, plan §D item 6; 2026-11-18): public, published blueprints are documents
+    // anybody may read, as the skills catalogue is.
+    ['GET /api/v1/gallery', null],
+    ['GET /api/v1/gallery/:id', null],
     ['GET /api/v1/skills/:id', null],
     ['POST /api/v1/me/agents/:id/skills', 'actor.agent.manage'],
     ['DELETE /api/v1/me/agents/:id/skills/:listingId', 'actor.agent.manage'],
