@@ -281,14 +281,14 @@ async function update(s, config, owner, agentId, body = {}) {
 
 /**
  * The gallery (openvibe.expert, plan §D item 6): the public, published blueprints with their latest version, for anyone,
- * signed in or not. OpenVibe's own first, then the newest.
+ * signed in or not. OpenVibe's own first, by name, then the newest.
  */
 async function gallery(s, { limit = 100 } = {}) {
     const n = Math.max(1, Math.min(200, Number(limit) || 100));
     const rows = await s.db.many(`SELECT b.*, v.doc AS latest_doc FROM agent_blueprints b
         JOIN agent_blueprint_versions v ON v.blueprint_id = b.id AND v.version = b.latest
         WHERE b.visibility = 'public' AND b.deleted_at IS NULL AND b.latest IS NOT NULL
-        ORDER BY (b.owner = 'service:actor') DESC, b.updated_at DESC, b.id LIMIT $1`, [n]);
+        ORDER BY (b.owner = 'service:actor') DESC, CASE WHEN b.owner = 'service:actor' THEN v.doc->>'name' END, b.updated_at DESC, b.id LIMIT $1`, [n]);
     return rows.map((row) => ({ row: rowOut(row), doc: parse(row.latest_doc) })).filter((x) => x.doc);
 }
 
