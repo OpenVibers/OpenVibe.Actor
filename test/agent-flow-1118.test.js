@@ -144,6 +144,21 @@ const json = (body) => ({ ok: true, status: 200, headers: new Map([['content-typ
             const next = await t.ctx.s.db.one('SELECT parent_id, task FROM tasks WHERE id = $1', [yes.json().started.id]);
             assert.strictEqual(next.parent_id, id, 'as the conversation\'s next turn');
             assert.match(next.task, /Write wordstats\.py[\s\S]*In OpenVibers\/demo\./);
+
+            // 11-18 (the owner's phone): "Approve and start" answered "You have used today's free allowance ($0.05)" in red.
+            // The work runs on the person's machine through Codes (nothing Actor meters), so a spent allowance and the
+            // operator's cap never refuse it; it reserves nothing, and a model answer is still refused.
+            const day = new Date().toISOString().slice(0, 10);
+            await t.ctx.s.db.query("UPDATE spend_daily SET usd = 100, tasks = 1000 WHERE day = $1", [day]);
+            await t.ctx.s.db.query("INSERT INTO spend_daily (requester, day, usd, tasks) VALUES ($1, $2, 100, 1000), ('*', $2, 100000, 1000) ON CONFLICT (requester, day) DO UPDATE SET usd = EXCLUDED.usd, tasks = EXCLUDED.tasks", [`user:${ada.subject}`, day]);
+            const spent = await approvals.request(t.ctx.s, { owner: `user:${ada.subject}`, taskId: id, kind: 'codes.task', summary: 'Start a coding task on your machine', payload: { task: 'Add a README' } });
+            const ok = await t.get(`/api/v1/runs/${id}/approvals/${spent.id}`, { headers: { authorization: `Bearer ${t.network.userToken(ada)}` }, method: 'POST', json: { answer: 'approve' } });
+            assert.strictEqual(ok.status, 200, ok.text);
+            const own = await t.ctx.s.db.one('SELECT agent, budget_task FROM tasks WHERE id = $1', [ok.json().started.id]);
+            assert.deepStrictEqual([own.agent, Number(own.budget_task)], ['codes', 0], 'on the person\'s machine, reserving nothing');
+            const { createTask } = require('../server/tasks/create');
+            const refused = await createTask({ s: t.ctx.s, config: t.config, engine: { submit() {} }, principal: { requester: `user:${ada.subject}` }, body: { task: 'What is the weather?', mode: 'balanced' } });
+            assert.ok([429, 503].includes(refused.status), `a model answer is still refused (${refused.status} ${refused.code})`);
         } finally { await t.close(); }
     });
     done();

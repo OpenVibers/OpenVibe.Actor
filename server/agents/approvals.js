@@ -172,7 +172,7 @@ async function decide(ctx, owner, id, decision, { idempotent = false, personToke
     // ask again. The always-ask floor still applies (the text may still be a deletion or a payment).
     // Approved in a conversation (runs-api's approval step): the coding task is that conversation's next turn, so its work
     // shows where the person said yes.
-    const out = await createTask({ s, config, engine, webhooks, ...(parentId ? { parentId } : {}), principal: { requester: owner, via: null, project: null }, body: { task: work, agent: 'codes', mode: 'balanced', level: 'full' } });
+    const out = await createTask({ s, config, engine, webhooks, ...(parentId ? { parentId } : {}), principal: { requester: owner, via: null, project: null }, body: { task: work, agent: 'codes', mode: 'balanced', level: 'full' }, ownMachine: true });
     if (!out.task) return { error: out.detail || 'The task could not start.', status: out.status || 422 };
     const allow = always ? await allows.grant(s, owner, row.agent_id, row.kind, row.target) : { row: null };
     if (always && !allow.row) return { error: allow.error || 'This step could not be allowed.', status: 422 };
