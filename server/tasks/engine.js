@@ -614,10 +614,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             } else if (ownWork) {
                 // Pinned to Codes: a coding task, without paying a model to say so.
                 cls = 'code';
-            } else if (row.mode === 'private' || !adapters.checkers.deepseek) {
+            } else if (row.mode === 'private' || (!adapters.checkers.deepseek && !(models && typeof models.decide === 'function'))) {
                 cls = heuristic(row.task);
             } else {
-                const c = await classify(row.task, { chat: adapters.checkers.deepseek, signal });
+                // The Decisions API first (plan §AD.27 item 6), then the cheap model, then the heuristic.
+                const c = await classify(row.task, { chat: adapters.checkers.deepseek || null, decide: models && typeof models.decide === 'function' ? models.decide : null, signal });
                 await meter(c.cost_usd);
                 cls = c.class;
             }
