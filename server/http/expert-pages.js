@@ -19,6 +19,7 @@ const { sameOrigin } = require('./principal');
 const { html, raw } = require('../render/html');
 const { send } = require('../render/layout');
 const blueprints = require('../agents/blueprints');
+const checks = require('../agents/expert-checks');
 const { createTask } = require('../tasks/create');
 const bp = require('openvibe-sdk/agents/blueprint');
 const glyphs = require('openvibe-shared/glyphs');
@@ -123,6 +124,9 @@ ${(doc.starters || []).length ? html`<span class="ex-try">${raw(glyphs.svg('spar
         const { row, doc } = got;
         const soul = doc.soul || {};
         const asks = bp.asks(doc);
+        // Checked on its own examples (plan §AD.28 item 9): the mean and each graded answer, when this version has them.
+        const check = await checks.scoreOf(s, row.id, Number(doc.version) || row.latest).catch(() => null);
+        const graded = new Map(((check && check.rows) || []).map((x) => [x.example, x]));
         const body = html`<header class="ex-head">
 ${face(doc, 72)}
 <div class="ex-head-t"><h1>${doc.name}</h1>
@@ -147,7 +151,8 @@ ${(soul.believes || []).length ? html`<section class="ex-sec"><h2>${raw(glyphs.s
 <section class="ex-sec"><h2>${raw(glyphs.svg('key', { size: 18 }))}<span>What it may use</span></h2>
 <ul class="ex-list">${asks.map((a) => html`<li>${askWords(a)}</li>`)}</ul></section>
 ${(doc.knows.examples || []).length ? html`<section class="ex-sec"><h2>${raw(glyphs.svg('spark', { size: 18 }))}<span>Try it with</span></h2>
-<ul class="ex-tries">${doc.knows.examples.map((e) => html`<li><p class="ex-ask">“${e.ask}”</p><p class="ex-good">${e.good}</p></li>`)}</ul></section>` : ''}
+${check ? html`<p class="ex-check"><b>Checked on these: ${check.mean.toFixed(1)} of 5</b><small>Its answers from its instructions alone, graded against what a good answer does by the Decisions API, ${new Date(check.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}.</small></p>` : ''}
+<ul class="ex-tries">${doc.knows.examples.map((e, i) => html`<li><p class="ex-ask">“${e.ask}”</p><p class="ex-good">${e.good}</p>${graded.has(i) ? html`<details class="ex-graded"><summary>${graded.get(i).level}, ${graded.get(i).score.toFixed(1)} of 5: read its answer</summary><p>${graded.get(i).answer.slice(0, 1500)}</p></details>` : ''}</li>`)}</ul></section>` : ''}
 ${doc.memory && doc.memory.remember ? html`<section class="ex-sec"><h2>${raw(glyphs.svg('brain', { size: 18 }))}<span>What it remembers</span></h2>
 <p>${doc.memory.remember} You can read and forget each thing it keeps.</p></section>` : ''}
 <p class="ex-back"><a href="/experts">All the Experts</a></p>`;

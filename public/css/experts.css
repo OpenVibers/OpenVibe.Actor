@@ -116,3 +116,10 @@ html[data-ov-motion="off"] .ex-mine-row:active { transform: none; }
 .ex-vis-opt input:checked + span { background: var(--accent, #5b8cff); border-color: transparent; color: var(--accent-contrast, #fff); }
 .ex-vis-opt input:focus-visible + span { outline: 2px solid var(--accent, #5b8cff); outline-offset: 2px; }
 html[data-ov-motion="off"] .ex-vis-opt span { transition: none; }
+/* Checked on its own examples (plan §AD.28 item 9). */
+.ex-check { display: grid; gap: 2px; margin: 0 0 10px; }
+.ex-check b { font-size: 1.05rem; }
+.ex-check small { color: var(--text-secondary, #9aa4b2); font-size: 13px; line-height: 1.45; }
+.ex-graded { margin: 6px 0 0; }
+.ex-graded summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--accent, #5b8cff); font-weight: 600; font-size: 14px; }
+.ex-graded p { margin: 4px 0 0; white-space: pre-wrap; color: var(--text-secondary, #9aa4b2); font-size: 14px; line-height: 1.5; max-height: 18em; overflow: auto; }
