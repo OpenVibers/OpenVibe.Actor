@@ -1,6 +1,7 @@
 'use strict';
 /**
- * OpenVibe's first ten Experts (plan §D item 10) and the signed-out gallery (openvibe.expert, §D item 6).
+ * OpenVibe's own Experts (plan §D item 10: the first ten; §L.2, 11-18: Debt planner and Can I afford it?, and the four money
+ * ones read OpenVibe Finance as the person) and the signed-out gallery (openvibe.expert, §D item 6).
  *
  * - The documents in experts/ are agents.blueprint@1 and pass the SDK's own rules. Each has a soul, starters and the
  *   floor in words. Each compiles to a prompt. The money ones never pay, and the live ones never post on their own.
@@ -25,9 +26,9 @@ const docs = files.map((f) => JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf
 const SAME = { 'sec-fetch-site': 'same-origin' };
 
 (async () => {
-    await check('the ten documents: valid, with a soul and starters, compiled, the money ones never pay', async () => {
-        assert.strictEqual(docs.length, 10, files.join(' '));
-        assert.strictEqual(new Set(docs.map((d) => d.id)).size, 10, 'ids are unique');
+    await check('the twelve documents: valid, with a soul and starters, compiled, the money ones never pay', async () => {
+        assert.strictEqual(docs.length, 12, files.join(' '));
+        assert.strictEqual(new Set(docs.map((d) => d.id)).size, 12, 'ids are unique');
         for (const [i, d] of docs.entries()) {
             const at = files[i];
             assert.deepStrictEqual(contracts.validate('agents.blueprint@1', d).errors, [], at);
@@ -42,9 +43,16 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.ok(out.loop.system.includes(d.soul.who) || out.loop.system.length > 200, `${at}: compiles`);
         }
         const by = Object.fromEntries(docs.map((d) => [d.id, d]));
-        for (const id of ['bp_purchase_researcher', 'bp_subscription_auditor', 'bp_budget_coach', 'bp_job_researcher', 'bp_compute_buyer']) {
+        for (const id of ['bp_purchase_researcher', 'bp_subscription_auditor', 'bp_budget_coach', 'bp_job_researcher', 'bp_compute_buyer', 'bp_debt_planner', 'bp_can_i_afford_it']) {
             assert.ok(by[id].soul.never.some((n) => /\b(Buys|Cancels|Moves money|Applies|Signs up)\b/.test(n)), `${id} says what it never does with money or accounts`);
             assert.strictEqual(by[id].rules.level, 'ask');
+        }
+        // The money ones read the person's own numbers on OpenVibe Finance (through Connect, as the person, only with a
+        // grant on their Apps page) and never ask for a bank login.
+        for (const id of ['bp_budget_coach', 'bp_subscription_auditor', 'bp_debt_planner', 'bp_can_i_afford_it']) {
+            assert.deepStrictEqual(by[id].hands.tools, [{ tool: 'ov:finance.read', mode: 'allow' }], `${id} reads OpenVibe Finance`);
+            assert.match(by[id].knows.instructions, /my_apps_search[\s\S]*my_apps_run/, `${id} knows how`);
+            assert.match(by[id].knows.instructions, /Never ask for a bank login or a password/, `${id} never asks for a login`);
         }
         for (const id of ['bp_stream_producer', 'bp_stream_moderator', 'bp_clip_finder']) {
             const post = by[id].hands.tools.find((t) => t.tool === 'ov:live.chat.post');
@@ -57,10 +65,10 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
         const s = t.ctx.s;
         await check('boot published them: public versions of service:actor; a second seed changes nothing', async () => {
             const rows = await s.db.many("SELECT id, owner, visibility, latest FROM agent_blueprints WHERE owner = 'service:actor' ORDER BY id");
-            assert.strictEqual(rows.length, 10);
+            assert.strictEqual(rows.length, 12);
             assert.ok(rows.every((r) => r.visibility === 'public' && Number(r.latest) === 1));
             const again = await stock.seed(s, { log: { warn() {}, info() {} } });
-            assert.deepStrictEqual([again.published, again.same, again.skipped], [[], 10, []]);
+            assert.deepStrictEqual([again.published, again.same, again.skipped], [[], 12, []]);
         });
 
         await check('a changed file is the next version; the first stays as it was; an id someone else owns is skipped', async () => {

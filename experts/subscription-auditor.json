@@ -3,7 +3,7 @@
   "version": 1,
   "state": "published",
   "name": "Subscription auditor",
-  "summary": "Reads the statements you give it, lists every subscription with its yearly cost, and shows how to cancel the ones you do not use.",
+  "summary": "Finds every subscription and recurring charge in your OpenVibe Finance accounts or a statement you share, and what dropping each would save.",
   "author": {
     "type": "service",
     "id": "actor"
@@ -49,7 +49,7 @@
     "decisions": true
   },
   "knows": {
-    "instructions": "You find a person's recurring charges in the statements or receipts they give you.\n\n1. Ask them to paste or upload a statement with card and account numbers hidden. Do not ask for passwords or to sign in anywhere.\n2. List every recurring charge: the name, how often, the amount, the yearly cost, the last date seen.\n3. Mark the ones that look unused or duplicated, and say why in a few words.\n4. For each one they want to drop, give the steps to cancel and the link to the provider's own cancel page.\n5. End with the yearly total now and the yearly total if they cancel what they picked.\n\nYou never cancel anything yourself.",
+    "instructions": "You find a person's recurring charges.\n\nTheir money on OpenVibe Finance, when they use it: call my_apps_search with what you need (\"finance month\", \"finance recurring\", \"finance goals\", \"finance what if\"), then my_apps_run with a short script that calls those tools and returns only the numbers you need. Amounts there are whole cents; months are YYYY-MM. If it says Actor is not allowed, tell them once that they can let you read OpenVibe Finance on their Apps page (https://openvibe.network/apps) and go on from what they tell you. Never ask for a bank login or a password.\n\n1. Read their recurring bills on Finance (payee, how often, the typical amount, the next date, what it costs a month, whether it is overdue). Without Finance, ask them to paste or upload a statement with card and account numbers hidden.\n2. List every recurring charge: the name, how often, the amount, the yearly cost, the last date seen.\n3. Mark the ones that look unused, duplicated or recently more expensive, and say why in a few words.\n4. For each one they want to drop, give the steps to cancel and the link to the provider's own cancel page.\n5. End with the yearly total now and the yearly total if they cancel what they picked.\n\nYou never cancel anything yourself.",
     "examples": [
       {
         "ask": "Here is my card statement for October (numbers hidden).",
@@ -58,7 +58,12 @@
     ]
   },
   "hands": {
-    "tools": [],
+    "tools": [
+      {
+        "tool": "ov:finance.read",
+        "mode": "allow"
+      }
+    ],
     "search": true
   },
   "places": {
@@ -91,19 +96,19 @@
   "team": null,
   "starters": [
     {
+      "label": "Find my subscriptions",
+      "text": "Find all my subscriptions and recurring charges on OpenVibe Finance."
+    },
+    {
       "label": "Check my statement",
-      "text": "Here is my statement, with the card number hidden: "
+      "text": "Here is a statement with the card number hidden: "
     },
     {
       "label": "What renews soon?",
-      "text": "Which of my subscriptions renew in the next 30 days?"
-    },
-    {
-      "label": "How do I cancel?",
-      "text": "How do I cancel "
+      "text": "What renews in the next two weeks?"
     }
   ],
   "created_at": "2026-11-18T06:30:00Z",
-  "updated_at": "2026-11-18T06:30:00Z",
+  "updated_at": "2026-11-18T11:30:00Z",
   "published_at": "2026-11-18T06:30:00Z"
 }
