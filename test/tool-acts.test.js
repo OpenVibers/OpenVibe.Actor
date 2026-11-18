@@ -30,6 +30,8 @@ const EXPECTED = {
     market_quote: false,
     place_info: false,
     read_page: false,
+    read_pages: false,
+    fetch_data: false,
     recall: false,
     search_openvibe: false,
     openvibe_updates: false,
