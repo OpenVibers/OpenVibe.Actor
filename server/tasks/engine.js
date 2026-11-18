@@ -598,7 +598,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             }
             // A task with no budget spends nothing: not even a classification call. A resumed task whose saved step is
             // already an answer is still delivered (it owes nothing more).
-            if (budget <= 0 && !(resume && resume.state && resume.state.answered)) {
+            // A task pinned to Codes (an approved coding task, tasks/create.js ownMachine) runs on the person's machine and
+            // costs Actor nothing, so a $0 budget is its own, not a refusal (11-18: "This task has a $0 budget, so nothing
+            // ran" after Approve, the day's free AI spent).
+            const ownWork = row.agent === 'codes';
+            if (budget <= 0 && !ownWork && !(resume && resume.state && resume.state.answered)) {
                 return await setState(id, 'failed', { error_code: 'actor.budget.exceeded', error_detail: 'This task has a $0 budget, so nothing ran. Give it a budget above $0.', finished_at: iso() });
             }
             // What kind of task this is. Private mode never sends the text anywhere to find out. A resumed run already
@@ -607,6 +611,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             if (resume || fork) {
                 cls = 'answer';
                 await emit(id, { kind: 'output', step: 'plan', text: resume ? `Continuing from step ${resume.step}.` : `Starting from step ${fork.step} of the original run.` });
+            } else if (ownWork) {
+                // Pinned to Codes: a coding task, without paying a model to say so.
+                cls = 'code';
             } else if (row.mode === 'private' || !adapters.checkers.deepseek) {
                 cls = heuristic(row.task);
             } else {
@@ -714,7 +721,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // through codes_task, on the same task, budget and timeline. An approved or explicitly chosen Codes
             // task follows that path too; service and personal agent runs keep their own tool policy.
             const unifiedCode = cls === 'code' && config.unifiedCodeRuns === true && !fromChat && !dayRun
-                && !row.via && (!row.agent || row.agent === 'codes') && String(row.requester || '').startsWith('user:');
+                && !row.via && (!row.agent || row.agent === 'codes') && String(row.requester || '').startsWith('user:')
+                // An approved coding task on the free AI's spent day ($0, ownWork): the loop would need a model to call
+                // codes_task, so it goes straight to the Codes adapter, which needs none.
+                && !(ownWork && budget <= 1e-9);
             if (loop && models && row.mode !== 'private' && !pinnedAway && (cls !== 'code' || chatPolicy || dayRun || turnAllowed || unifiedCode)) {
                 const agentId = LOOP_AGENT;
                 if (unifiedCode) {

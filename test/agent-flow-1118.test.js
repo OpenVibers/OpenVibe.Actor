@@ -156,6 +156,13 @@ const json = (body) => ({ ok: true, status: 200, headers: new Map([['content-typ
             assert.strictEqual(ok.status, 200, ok.text);
             const own = await t.ctx.s.db.one('SELECT agent, budget_task FROM tasks WHERE id = $1', [ok.json().started.id]);
             assert.deepStrictEqual([own.agent, Number(own.budget_task)], ['codes', 0], 'on the person\'s machine, reserving nothing');
+            // 11-18, after #604: that $0 task failed "This task has a $0 budget, so nothing ran". Pinned to Codes, it is a
+            // coding task without a classifier call, and it goes to the Codes adapter (no model), never refused for $0.
+            const ran = await t.waitFor(ok.json().started.id);
+            assert.notStrictEqual(ran.error_code, 'actor.budget.exceeded', `${ran.state}: ${ran.error_detail}`);
+            const said = (await t.ctx.s.db.many("SELECT body->>'text' AS text FROM task_events WHERE task_id = $1 AND body->>'kind' = 'output'", [ok.json().started.id])).map((x) => x.text).join(' | ');
+            assert.match(said, /This is a "code" task/, said);
+            assert.ok(!/\$0 budget/.test(said + String(ran.error_detail || '')), said);
             const { createTask } = require('../server/tasks/create');
             const refused = await createTask({ s: t.ctx.s, config: t.config, engine: { submit() {} }, principal: { requester: `user:${ada.subject}` }, body: { task: 'What is the weather?', mode: 'balanced' } });
             assert.ok([429, 503].includes(refused.status), `a model answer is still refused (${refused.status} ${refused.code})`);
