@@ -1109,7 +1109,7 @@ function createApi(ctx) {
             if (!req.principal || req.principal.kind !== 'user') return problem(req, res, 404, 'agents.run.not_found', 'No such run.');
             // A whole conversation (Network's frame asks for it): the first turn's id, the newest turn's state.
             if (req.query.conversation === '1') {
-                const view = await runsApi.conversationView(s, task.id, req.principal.requester, s.now(), config.baseUrl);
+                const view = await runsApi.conversationView(s, task.id, req.principal.requester, s.now(), config.baseUrl, config);
                 return view ? res.json(view) : problem(req, res, 404, 'agents.run.not_found', 'No such run.');
             }
             const run = await runsApi.loadRunRow(s, task.id, req.principal.requester);
