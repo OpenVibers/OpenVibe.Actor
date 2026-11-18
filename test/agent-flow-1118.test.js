@@ -98,5 +98,40 @@ const json = (body) => ({ ok: true, status: 200, headers: new Map([['content-typ
             assert.ok(steps.some((x) => x.kind === 'message' && x.from === 'agent' && /here and ready/.test(x.text || '')), JSON.stringify(steps.map((x) => [x.kind, x.from, String(x.text || '').slice(0, 40)])));
         } finally { await t.close(); }
     });
+    await check('an approval is a card in the conversation, answered there; another conversation\'s is not', async () => {
+        const t = await boot();
+        try {
+            const ada = t.network.addUser('ada-approve');
+            const db = t.ctx.s.db;
+            const id = 'tsk_01M7P78K4FGZ6J3PNXDMT9N9JA';
+            const at = new Date().toISOString();
+            await db.exec(`INSERT INTO tasks SELECT * FROM jsonb_populate_record(NULL::tasks, $1::jsonb)`, [JSON.stringify({
+                id, requester: `user:${ada.subject}`, project_id: 'prj_01M7A6T4Y2ZNWTMM8VR6HW5T17', task: 'Test code something', mode: 'balanced', state: 'succeeded',
+                budget_task: 0.05, budget_day: 0.5, last_seq: 2, webhooks: [], level: 'ask', created_at: at, finished_at: at,
+                result: { answer: 'Your agent wants to start a coding task on your machine.', agent: 'openvibe-runtime', class: 'code' },
+            })]);
+            await db.exec('INSERT INTO task_events (task_id, seq, body) VALUES ($1, 1, $2::jsonb)', [id, JSON.stringify({ kind: 'state', state: 'running', seq: 1, task_id: id, at })]);
+            const approvals = require('../server/agents/approvals');
+            const ask = await approvals.request(t.ctx.s, { owner: `user:${ada.subject}`, taskId: id, kind: 'codes.task', summary: 'Write wordstats.py and its unittest, then run it', payload: { task: 'Write wordstats.py and its unittest, then run it' } });
+            const steps = (await t.get(`/api/v1/runs/${id}/steps?conversation=1`, { as: ada })).json().steps;
+            const card = steps.find((x) => x.kind === 'approval');
+            assert.ok(card, JSON.stringify(steps.map((x) => x.kind)));
+            assert.strictEqual(card.result.approval, ask.id);
+            assert.deepStrictEqual(card.result.options.map((o) => o.id), ['approve', 'decline']);
+            assert.strictEqual(card.title, 'Start this coding task on your machine?');
+            assert.ok(steps.indexOf(card) > steps.findIndex((x) => x.kind === 'message' && x.from === 'agent'), 'the card follows the answer');
+
+            const bo = t.network.addUser('bo-approve');
+            const theirs = await t.get(`/api/v1/runs/${id}/approvals/${ask.id}`, { headers: { authorization: `Bearer ${t.network.userToken(bo)}` }, method: 'POST', json: { answer: 'approve' } });
+            assert.ok([403, 404].includes(theirs.status), `another person never answers it (${theirs.status})`);
+            const bad = await t.get(`/api/v1/runs/${id}/approvals/${ask.id}`, { headers: { authorization: `Bearer ${t.network.userToken(ada)}` }, method: 'POST', json: { answer: 'maybe' } });
+            assert.strictEqual(bad.status, 422);
+            const no = await t.get(`/api/v1/runs/${id}/approvals/${ask.id}`, { headers: { authorization: `Bearer ${t.network.userToken(ada)}` }, method: 'POST', json: { answer: 'decline' } });
+            assert.strictEqual(no.status, 200, no.text);
+            assert.strictEqual(no.json().approval.state, 'declined');
+            const after = (await t.get(`/api/v1/runs/${id}/steps?conversation=1`, { as: ada })).json().steps.find((x) => x.kind === 'approval');
+            assert.deepStrictEqual([after.result.answer, after.result.answer_label], ['decline', 'Declined']);
+        } finally { await t.close(); }
+    });
     done();
 })();
