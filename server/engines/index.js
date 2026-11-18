@@ -110,7 +110,8 @@ function createEngines({ models, log = console } = {}) {
     async function model({ task, subject = null, model: id = null, signal, meter, budgetLeft, emit }) {
         if (!models || typeof models.chat !== 'function') throw fail('No model layer is set up on this server.', 'actor.engine.unavailable');
         if (budgetLeft() <= 0) throw fail('The task reached its budget.', 'actor.budget.exceeded');
-        await emit({ step: 'text', text: id ? `Asking ${id}, one call, no tools.` : 'Asking a model, one call, no tools.' });
+        // A status line is a plan step: as a text step it stood in for the answer, and the menu never showed the answer.
+        await emit({ step: 'plan', text: id ? `Asking ${id}, one call, no tools.` : 'Asking a model, one call, no tools.' });
         const choice = id ? { model: id, ...(subject ? { subject } : {}) } : (subject ? { subject } : null);
         const r = await withPerson(choice, () => models.chat({ tier: 'smart', messages: [{ role: 'system', content: ONE_MODEL_SYSTEM() }, { role: 'user', content: task }], maxTokens: 3000, signal, subject }));
         await meter(Number(r.cost_usd) || 0);

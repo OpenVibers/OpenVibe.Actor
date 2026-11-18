@@ -166,7 +166,9 @@ async function turnsOf(s, rootId, requester) {
     if (!path.length) return [];
     // Each turn's last words (its newest text step): what the thread shows as the answer, and so the preview.
     const rows = await s.db.many(`SELECT r.*, (SELECT e.body->>'text' FROM task_events e WHERE e.task_id = r.id AND e.body->>'kind' = 'output'
-            AND e.body->>'step' = 'text' ORDER BY e.seq DESC LIMIT 1) AS last_text
+            AND e.body->>'step' = 'text' ORDER BY e.seq DESC LIMIT 1) AS last_text,
+            (SELECT a.id FROM actor_approvals a WHERE a.task_id = r.id AND a.state = 'pending' AND a.expires_at > to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS')
+              ORDER BY a.created_at DESC LIMIT 1) AS pending_approval
         FROM (${RUN_ROW_SELECT} WHERE t.id = ANY($1::text[]) AND t.requester = $2) r`, [path.map((x) => x.id), requester]);
     const byId = new Map(rows.map((row) => [row.id, row]));
     return path.map((x) => byId.get(x.id)).filter(Boolean);
@@ -191,6 +193,9 @@ function conversationOf(turns, names, now, baseUrl) {
     const open = store.OPEN.includes(last.state);
     // A finished answer is the person's turn, as in any chat; failing and stopping still say so.
     if (last.state === 'succeeded') { run.status = 'waiting'; run.waiting = { for: 'message' }; }
+    // A turn that asked before acting waits for that yes, in the conversation itself (the owner, 11-18: "make these
+    // approvals just built into the chat … it'll wait for the user to approve").
+    if (!open && last.pending_approval) { run.status = 'waiting'; run.waiting = { for: 'approval', approval: last.pending_approval }; }
     if (open) run.doing = { text: 'Working on it', glyph: 'spark' };
     const said = open ? null : (last.last_text || summaryOf(last));
     run.preview = open || !said
@@ -228,11 +233,24 @@ async function conversationSteps(s, turns, after, limit) {
         }
         if (!store.OPEN.includes(turn.state) && rows.length <= limit && base + TURN - 1 > after) {
             const answer = summaryOf(turn);
-            const spoke = answer && await s.db.maybe(`SELECT 1 AS yes FROM task_events e WHERE e.task_id = $1 AND e.body->>'kind' = 'output' AND e.body->>'step' = 'text' LIMIT 1`, [turn.id]);
+            // The answer is left out only when the turn already said it as its last text step. Any text step used to be
+            // enough (11-18: one model's "Asking a model, one call, no tools." stood in for the answer, the menu showed
+            // no answer and, the person's message being the last word, Network kept the run "Writing an answer").
+            const said = answer && await s.db.maybe(`SELECT e.body->>'text' AS text FROM task_events e WHERE e.task_id = $1 AND e.body->>'kind' = 'output'
+                AND e.body->>'step' = 'text' AND coalesce(e.body->>'is_error', 'false') <> 'true' ORDER BY e.seq DESC LIMIT 1`, [turn.id]);
+            const head = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+            const spoke = Boolean(said && head(said.text) && head(said.text) === head(answer));
             if (answer && !spoke) {
                 const at = iso(turn.finished_at || turn.created_at);
                 out.push({ run_id: root.id, seq: base + TURN - 1, kind: 'message', from: 'agent', text: answer, started_at: at, ended_at: at, cost: null, child_run: null });
             }
+        }
+        // What the turn asked before acting (actor_approvals): a card with the choices, right after its answer, at the
+        // turn's last seq; once answered it says how. Approving a coding task makes it the conversation's next turn.
+        if (!store.OPEN.includes(turn.state) && base + TURN > after) {
+            const asked = await s.db.maybe(`SELECT id, kind, summary, target, state, decision_scope, agent_id, created_at, decided_at, expires_at
+                FROM actor_approvals WHERE task_id = $1 ORDER BY created_at DESC LIMIT 1`, [turn.id]);
+            if (asked) out.push(approvalStep(root.id, base + TURN, asked));
         }
         // The turn's receipt (agents.step@1 1.3.0, plan §AD.17): its answer, the last word of the turn, says how it ran:
         // what it took, what paid by rung (OpenVibe's allowance, the person's key, their computer) and the model.
@@ -245,6 +263,27 @@ async function conversationSteps(s, turns, after, limit) {
     }
     const page = out.slice(0, limit);
     return { steps: page, next: out.length > limit ? Number(page[page.length - 1].seq) : null };
+}
+
+const APPROVAL_DONE = { approved: 'Approved', declined: 'Declined', expired: 'Expired: nothing ran' };
+/** An actor_approvals row as the session surface's approval step (ov-session approvalNode): the choices, or the answer. */
+function approvalStep(runId, seq, a) {
+    const kinds = require('../agents/kinds');
+    const at = iso(a.decided_at || a.created_at);
+    const pending = a.state === 'pending' && !(a.expires_at && Date.parse(a.expires_at) < Date.now());
+    const options = [{ id: 'approve', label: a.kind === 'codes.task' ? 'Approve and start' : 'Approve' }];
+    if (a.agent_id && a.target && kinds.allowable(a.kind)) options.push({ id: 'approve_always', label: 'Always for this' });
+    options.push({ id: 'decline', label: 'Decline' });
+    const result = { approval: a.id, kind: a.kind, options };
+    if (!pending) {
+        result.answer = a.state === 'approved' ? 'approve' : a.state === 'declined' ? 'decline' : a.state;
+        result.answer_label = `${APPROVAL_DONE[a.state] || a.state}${a.decision_scope === 'always' ? ' · always for this' : ''}`;
+    }
+    return {
+        run_id: runId, seq, kind: 'approval', from: 'agent',
+        title: a.kind === 'codes.task' ? 'Start this coding task on your machine?' : 'It asks before it goes on',
+        text: clip(String(a.summary || ''), 2000), started_at: at, ended_at: at, cost: null, child_run: null, result,
+    };
 }
 
 /** One conversation's run, read by any of its turns' ids (the first turn's id is the run's). */
@@ -493,6 +532,27 @@ function createRunsRoutes(ctx) {
     });
 
     // Stop: the turn under way stops; the conversation stays, ready for the next message.
+    // An approval answered in the conversation (Network's /api/frame/runs/:ref/approvals/:id, the session surface's card):
+    // { answer: 'approve' | 'approve_always' | 'decline' }. Only an approval one of this conversation's turns asked for.
+    r.post('/:id/approvals/:approval', principal.requireCapability('actor.task.create'), own, limits.budget('actor.task.create'), async (req, res) => {
+        if (!TASK_ID.test(req.params.id) || !/^apr_[0-9A-HJKMNP-TV-Z]{26}$/.test(req.params.approval)) return notFound(req, res);
+        const answer = String((req.body && (req.body.answer || req.body.decision)) || '');
+        if (!['approve', 'approve_always', 'decline'].includes(answer)) return problem(req, res, 422, 'agents.approval.answer', 'answer is approve, approve_always or decline');
+        const rootId = await canvases.threadForTask(s, req.params.id);
+        const turns = rootId ? await turnsOf(s, rootId, req.principal.requester) : [];
+        if (!turns.length) return notFound(req, res);
+        const asked = await s.db.maybe('SELECT id, task_id FROM actor_approvals WHERE id = $1 AND owner = $2', [req.params.approval, req.principal.requester]);
+        if (!asked || !turns.some((t) => t.id === asked.task_id)) return problem(req, res, 404, 'agents.approval.not_found', 'No such approval in this conversation.');
+        const approvals = require('../agents/approvals');
+        const out = await approvals.decide(ctx, req.principal.requester, asked.id, answer, { personToken: bearerOf(req), parentId: turns[turns.length - 1].id });
+        if (out.error) return problem(req, res, out.status || 422, 'agents.approval.refused', out.error);
+        return res.json({
+            approval: { id: out.row.id, state: out.row.state, scope: out.row.decision_scope || null },
+            ...(out.task ? { started: { id: out.task.id } } : {}), ...(out.note ? { note: out.note } : {}),
+            run: await conversationView(s, req.params.id, req.principal.requester, s.now(), config.baseUrl),
+        });
+    });
+
     r.post('/:id/stop', principal.requireCapability('actor.task.create'), own, async (req, res) => {
         const row = await load(req, res);
         if (!row) return;

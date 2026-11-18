@@ -24,6 +24,9 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/runs/:id', 'actor.task.read'],
     ['GET /api/v1/runs/:id/steps', 'actor.task.read'],
     ['GET /api/v1/runs/:id/events', 'actor.task.read'],
+    // An approval answered in the conversation (2026-11-18: "approvals just built into the chat"): it starts or declines
+    // the person's own work, as actor.task.create already grants.
+    ['POST /api/v1/runs/:id/approvals/:approval', 'actor.task.create'],
     // Conversations through the run API (2026-11-15: "your Actor answers everywhere"): start one with words, send the
     // next message, stop it. They create work for the person's own Actor, as actor.task.create already grants.
     ['POST /api/v1/runs {text}', 'actor.task.create'],

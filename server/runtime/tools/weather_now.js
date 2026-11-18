@@ -17,6 +17,9 @@ const CACHE = new Cache();
 
 const GEOCODE = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
+// When Open-Meteo's forecast does not answer (11-18: down for hours while its geocoding worked, and an agent asked it for
+// five cities in a row), MET Norway's free, keyless locationforecast answers instead, read into Open-Meteo's shape.
+const MET_NO = 'https://api.met.no/weatherapi/locationforecast/2.0/compact';
 
 /** The WMO weather codes Open-Meteo answers with, in words. */
 const WEATHER = {
@@ -32,6 +35,8 @@ const WEATHER = {
 /** The places that use the US system. */
 const US_FIRST = new Set(['US', 'LR', 'MM']);
 
+/** One decimal for people to read (util's round keeps ten digits: "4.2253228 mph"). */
+const shown = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : v);
 const cToF = (c) => (c * 9) / 5 + 32;
 const kmhToMph = (k) => k * 0.621371;
 const mmToIn = (m) => m / 25.4;
@@ -60,6 +65,74 @@ async function forecast(ctx, hit, days, signal) {
     const { data } = await requestJson(ctx, url, { signal, label: 'Open-Meteo forecast' });
     if (!data || !data.current) throw new ToolError('Open-Meteo answered without current conditions', 'tool.bad_answer');
     return data;
+}
+
+/** MET Norway's symbol (clearsky_day, lightrainshowers_night …) as the nearest WMO weather code describe() knows. */
+function wmoOf(symbol) {
+    const k = String(symbol || '').replace(/_(day|night|polartwilight)$/, '');
+    if (!k) return null;
+    if (k.includes('thunder')) return 95;
+    if (k.includes('heavysnow')) return 75;
+    if (k.includes('lightsnow')) return 71;
+    if (k.includes('snow')) return 73;
+    if (k.includes('sleet')) return 66;
+    if (k.includes('heavyrain')) return 65;
+    if (k.includes('rainshowers')) return 80;
+    if (k.includes('lightrain')) return 61;
+    if (k.includes('rain')) return 63;
+    if (k === 'fog') return 45;
+    if (k === 'cloudy') return 3;
+    if (k === 'partlycloudy') return 2;
+    if (k === 'fair') return 1;
+    if (k === 'clearsky') return 0;
+    return null;
+}
+
+/** The forecast from MET Norway, in the shape build() reads (Open-Meteo's): current conditions and days by UTC date. */
+async function metNoForecast(ctx, hit, days, signal) {
+    const url = MET_NO + '?lat=' + Number(hit.latitude).toFixed(4) + '&lon=' + Number(hit.longitude).toFixed(4);
+    const { data } = await requestJson(ctx, url, { signal, label: 'MET Norway forecast' });
+    const series = data && data.properties && Array.isArray(data.properties.timeseries) ? data.properties.timeseries : [];
+    if (!series.length) throw new ToolError('MET Norway answered without a forecast', 'tool.bad_answer');
+    const first = series[0];
+    const now = (first.data && first.data.instant && first.data.instant.details) || {};
+    const next = (first.data && (first.data.next_1_hours || first.data.next_6_hours)) || {};
+    const byDay = new Map();
+    for (const t of series) {
+        const day = String(t.time || '').slice(0, 10);
+        if (!day) continue;
+        if (!byDay.has(day)) { if (byDay.size >= days) break; byDay.set(day, { max: -Infinity, min: Infinity, rain: 0, codes: [] }); }
+        const d = byDay.get(day);
+        const temp = t.data && t.data.instant && t.data.instant.details && t.data.instant.details.air_temperature;
+        if (Number.isFinite(temp)) { d.max = Math.max(d.max, temp); d.min = Math.min(d.min, temp); }
+        const one = t.data && t.data.next_1_hours;
+        if (one && one.details && Number.isFinite(one.details.precipitation_amount)) d.rain += one.details.precipitation_amount;
+        const code = wmoOf(one && one.summary && one.summary.symbol_code);
+        if (code != null) d.codes.push(code);
+    }
+    const dates = [...byDay.keys()];
+    const fin = (v) => (Number.isFinite(v) ? v : null);
+    return {
+        timezone: hit.timezone || 'UTC',
+        current: {
+            time: String(first.time || '').replace(/:00Z$/, '').replace('Z', ''),
+            temperature_2m: fin(now.air_temperature),
+            relative_humidity_2m: fin(now.relative_humidity),
+            apparent_temperature: null,
+            weather_code: wmoOf(next.summary && next.summary.symbol_code),
+            wind_speed_10m: Number.isFinite(now.wind_speed) ? now.wind_speed * 3.6 : null,
+            precipitation: next.details && Number.isFinite(next.details.precipitation_amount) ? next.details.precipitation_amount : null,
+        },
+        daily: {
+            time: dates,
+            weather_code: dates.map((d) => { const c = byDay.get(d).codes; return c.length ? Math.max(...c) : null; }),
+            temperature_2m_max: dates.map((d) => fin(byDay.get(d).max)),
+            temperature_2m_min: dates.map((d) => fin(byDay.get(d).min)),
+            precipitation_sum: dates.map((d) => Math.round(byDay.get(d).rain * 10) / 10),
+            precipitation_probability_max: dates.map(() => null),
+        },
+        source: 'met.no',
+    };
 }
 
 module.exports = {
@@ -94,8 +167,18 @@ module.exports = {
         try {
             const result = await memo(CACHE, key, TTL_MS, async () => {
                 const hit = await geocode(ctx, place, ctx.signal);
-                const data = await forecast(ctx, hit, days, ctx.signal);
-                return build(hit, data, days);
+                let data;
+                try { data = await forecast(ctx, hit, days, ctx.signal); }
+                catch (err) {
+                    if (ctx.signal && ctx.signal.aborted) throw err;
+                    data = await metNoForecast(ctx, hit, days, ctx.signal);
+                }
+                const out = build(hit, data, days);
+                if (data.source === 'met.no' && out && typeof out === 'object') {
+                    if (typeof out.text === 'string') out.text += ' (Forecast from MET Norway: Open-Meteo did not answer.)';
+                    out.sources = [...(Array.isArray(out.sources) ? out.sources : []), source('https://api.met.no/weatherapi/locationforecast/2.0/documentation', 'MET Norway: locationforecast')];
+                }
+                return out;
             });
             return result;
         } catch (err) {
@@ -111,10 +194,10 @@ function build(hit, data, days) {
     const usFirst = US_FIRST.has(String(hit.country_code || '').toUpperCase());
     const temp = (celsius) => {
         const f = cToF(celsius);
-        return usFirst ? round(f) + ' °F (' + round(celsius) + ' °C)' : round(celsius) + ' °C (' + round(f) + ' °F)';
+        return usFirst ? shown(f) + ' °F (' + shown(celsius) + ' °C)' : shown(celsius) + ' °C (' + shown(f) + ' °F)';
     };
-    const wind = (kmh) => usFirst ? round(kmhToMph(kmh)) + ' mph (' + round(kmh) + ' km/h)' : round(kmh) + ' km/h (' + round(kmhToMph(kmh)) + ' mph)';
-    const rain = (mm) => usFirst ? round(mmToIn(mm)) + ' in (' + round(mm) + ' mm)' : round(mm) + ' mm (' + round(mmToIn(mm)) + ' in)';
+    const wind = (kmh) => usFirst ? shown(kmhToMph(kmh)) + ' mph (' + shown(kmh) + ' km/h)' : shown(kmh) + ' km/h (' + shown(kmhToMph(kmh)) + ' mph)';
+    const rain = (mm) => usFirst ? shown(mmToIn(mm)) + ' in (' + shown(mm) + ' mm)' : shown(mm) + ' mm (' + shown(mmToIn(mm)) + ' in)';
 
     const where = [hit.name, hit.admin1 && hit.admin1 !== hit.name ? hit.admin1 : null, hit.country].filter(Boolean).join(', ');
     const lines = [];
@@ -147,7 +230,7 @@ function build(hit, data, days) {
             precipitation_in: amount == null ? null : round(mmToIn(amount)),
             precipitation_probability: chance == null ? null : chance,
         });
-        const bits = [describe(code), round(min) + ' to ' + round(max) + ' °C (' + round(cToF(min)) + ' to ' + round(cToF(max)) + ' °F)'];
+        const bits = [describe(code), shown(min) + ' to ' + shown(max) + ' °C (' + shown(cToF(min)) + ' to ' + shown(cToF(max)) + ' °F)'];
         if (amount != null) bits.push(rain(amount) + ' of rain');
         if (chance != null) bits.push(chance + '% chance of rain');
         lines.push('- ' + dayName(times[i]) + ' ' + times[i] + ': ' + bits.join(', ') + '.');

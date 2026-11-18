@@ -91,7 +91,7 @@ function floorOf(row) {
  * and only from the person's own session. A service that decides for them (the Action Center) never pays: there is
  * no person behind the service token, and the approval stays pending until the person approves it themselves.
  */
-async function decide(ctx, owner, id, decision, { idempotent = false, personToken = null } = {}) {
+async function decide(ctx, owner, id, decision, { idempotent = false, personToken = null, parentId = null } = {}) {
     const { s, config, engine, webhooks } = ctx;
     const row = await get(s, owner, id);
     if (!row) return { error: 'No such request of yours.', status: 404 };
@@ -165,7 +165,9 @@ async function decide(ctx, owner, id, decision, { idempotent = false, personToke
     const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
     // The person just approved this exact work, so the thread starts at full access: the engine's approval gate must not
     // ask again. The always-ask floor still applies (the text may still be a deletion or a payment).
-    const out = await createTask({ s, config, engine, webhooks, principal: { requester: owner, via: null, project: null }, body: { task: payload.task, agent: 'codes', mode: 'balanced', level: 'full' } });
+    // Approved in a conversation (runs-api's approval step): the coding task is that conversation's next turn, so its work
+    // shows where the person said yes.
+    const out = await createTask({ s, config, engine, webhooks, ...(parentId ? { parentId } : {}), principal: { requester: owner, via: null, project: null }, body: { task: payload.task, agent: 'codes', mode: 'balanced', level: 'full' } });
     if (!out.task) return { error: out.detail || 'The task could not start.', status: out.status || 422 };
     const allow = always ? await allows.grant(s, owner, row.agent_id, row.kind, row.target) : { row: null };
     if (always && !allow.row) return { error: allow.error || 'This step could not be allowed.', status: 422 };

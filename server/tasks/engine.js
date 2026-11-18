@@ -936,6 +936,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         }
                         if (contested.length) await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Sources disagree on ${contested.length} point${contested.length === 1 ? '' : 's'}; both sides are shown with the answer.` });
                     }
+                    // A checker that could not run (no checker answered, a provider error) no longer throws the answer away
+                    // (11-18: a paid demo answer was written and then withheld because the checker gave no verdict). It is
+                    // delivered, marked as not checked, and the step says why.
+                    if (verdict.unavailable) {
+                        await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `Not checked: ${verdict.reason}. The answer is shown as it was written.` });
+                        verdict = { ...verdict, ok: true, unchecked: true };
+                    }
                     if (verdict.ok) {
                         // Confidence and the challenge (stage V2-8): grade every claim, counter-search the high-stakes
                         // ones at likely/unverified. It spends against the same task budget, and the page shows it.
@@ -996,6 +1003,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         };
                         // The files and charts travel with each tool result that made them (the loop's tool_result events),
                         // and the result carries them all; a live page shows them as they land.
+                        if (verdict.unchecked) result.checked = false;
                         return await setState(id, 'succeeded', { result, finished_at: iso() });
                     }
                     if (verdict.unavailable) {
@@ -1060,13 +1068,18 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     continue;
                 }
                 await setState(id, 'verifying', { agentForEvent: agentId });
-                const verdict = await check({ task: row.task, answer: out.text, sources: out.sources || [], evidence: out.evidence || [], agentId, mode: row.mode, checkers: adapters.checkers, signal, now: () => now() });
+                let verdict = await check({ task: row.task, answer: out.text, sources: out.sources || [], evidence: out.evidence || [], agentId, mode: row.mode, checkers: adapters.checkers, signal, now: () => now() });
                 await meter(verdict.cost_usd);
                 await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
+                if (verdict.unavailable) {
+                    await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `Not checked: ${verdict.reason}. The answer is shown as it was written.` });
+                    verdict = { ...verdict, ok: true, unchecked: true };
+                }
                 if (verdict.ok) {
                     let answer = out.text;
                     if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id, out);
                     const result = { answer, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, artifacts: Array.isArray(out.artifacts) ? out.artifacts : [], checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };
+                    if (verdict.unchecked) result.checked = false;
                     return await setState(id, 'succeeded', { result, finished_at: iso() });
                 }
                 if (verdict.unavailable) {

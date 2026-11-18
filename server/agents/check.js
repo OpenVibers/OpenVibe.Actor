@@ -69,7 +69,8 @@ async function check({ task, answer, sources = [], evidence = [], agentId, mode,
         try {
             const r = await c.chat({
                 messages: [{ role: 'system', content: `${SYSTEM}\nToday is ${today} (UTC). A date on or before today is in the past or present, never in the future; recent releases, prices and events up to today are possible.` }, { role: 'user', content: `=== Task ===\n${String(task).slice(0, 6000)}\n\n=== The agent's answer (prose to the person) ===\n${String(answer).slice(0, 12000)}\n=== End of answer ===${cited}${tools}` }],
-                json: true, maxTokens: 160, signal,
+                // 600, not 160: a reasoning model spent 160 on thinking and answered nothing, and the answer was withheld.
+                json: true, maxTokens: 600, signal,
             });
             cost += r.cost_usd || 0;
             let parsed = null;
