@@ -85,3 +85,5 @@
 
 /* Signed out, the cards say what they will hold (a preview, not data): a dashed edge marks them as empty frames. */
 .cn-preview .cn-card { border-style: dashed; }
+/* Design rule 201: the intro is one line on a computer, at most two on a phone. */
+@media (max-width: 640px) { .cn-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
