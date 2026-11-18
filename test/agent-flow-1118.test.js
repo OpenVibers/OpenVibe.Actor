@@ -137,6 +137,9 @@ const json = (body) => ({ ok: true, status: 200, headers: new Map([['content-typ
             const tool = await approvals.request(t.ctx.s, { owner: `user:${ada.subject}`, taskId: id, kind: 'codes.task', summary: 'Start a coding task on your machine',
                 payload: { repo: 'OpenVibers/demo', instruction: 'Write wordstats.py and its unittest, then run it' } });
             assert.strictEqual(approvals.codesWork({ repo: 'OpenVibers/demo', instruction: 'Write it' }), 'Write it\n\nIn OpenVibers/demo.');
+            // 11-18: the card says the work and where, not "Start a coding task on your machine" twice.
+            const cardNow = (await t.get(`/api/v1/runs/${id}/steps?conversation=1`, { as: ada })).json().steps.filter((x) => x.kind === 'approval').pop();
+            assert.match(cardNow.text, /^Write wordstats\.py and its unittest, then run it\n\nIn OpenVibers\/demo\.$/, cardNow.text);
             const yes = await t.get(`/api/v1/runs/${id}/approvals/${tool.id}`, { headers: { authorization: `Bearer ${t.network.userToken(ada)}` }, method: 'POST', json: { answer: 'approve' } });
             assert.strictEqual(yes.status, 200, yes.text);
             assert.strictEqual(yes.json().approval.state, 'approved');
