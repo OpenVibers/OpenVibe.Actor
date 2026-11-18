@@ -33,6 +33,7 @@ function titleFor(name, input) {
     if (tool === 'recall') return { kind: 'read', title: 'Looked in its notes' };
     if (tool === 'sports_scores') return { kind: 'fetch', title: 'Checked the scores' };
     if (tool === 'notify_phone') return { kind: 'run', title: 'Sent you a notification' };
+    if (tool === 'decide') return { kind: 'plan', title: oneLine(`Weighed up: ${i.question || 'the choice'}`, 160) };
     if (/fetch|browse_url|open_url/.test(tool)) {
         let host = t; try { host = new URL(t).hostname; } catch { /* plain target */ }
         return { kind: 'fetch', title: `Fetched${host ? ` ${host}` : ' a page'}` };
