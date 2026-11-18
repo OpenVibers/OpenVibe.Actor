@@ -74,3 +74,15 @@
 }
 html[data-ov-motion="off"] .ex-card, html[data-ov-motion="off"] .ex-tag, html[data-ov-motion="off"] .ex-btn,
 html[data-ov-motion="off"] .ex-switch, html[data-ov-motion="off"] .ex-switch::after { transition: none; }
+
+/* Try it (11-18): the forms around the buttons take no room of their own, so the buttons sit in the row as links do. */
+.ex-cta form, .ex-starts form { display: contents; }
+.ex-cta button.ex-btn { font: inherit; cursor: pointer; }
+.ex-starts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ex-start { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--border, #1f2937);
+    background: var(--surface, transparent); color: var(--text, #e8ecf3); font: inherit; font-size: 14px; cursor: pointer;
+    transition: transform .12s ease, border-color .12s ease; }
+.ex-start:hover { border-color: var(--accent, #5b8cff); }
+.ex-start:active { transform: scale(.96); }
+html[data-ov-motion="off"] .ex-start { transition: none; }
+html[data-ov-motion="off"] .ex-start:active { transform: none; }

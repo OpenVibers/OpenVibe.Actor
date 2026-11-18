@@ -19,6 +19,7 @@ const { sameOrigin } = require('./principal');
 const { html, raw } = require('../render/html');
 const { send } = require('../render/layout');
 const blueprints = require('../agents/blueprints');
+const { createTask } = require('../tasks/create');
 const bp = require('openvibe-sdk/agents/blueprint');
 const glyphs = require('openvibe-shared/glyphs');
 const kit = require('openvibe-shared/kit');
@@ -72,7 +73,7 @@ function authorLine(row, doc) {
 }
 
 function createExpertPages(ctx) {
-    const { config, s } = ctx;
+    const { config, s, engine } = ctx;
     const r = asyncRouter();
     r.use('/experts', express.urlencoded({ extended: false, limit: '32kb' }));
     const signed = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
@@ -126,8 +127,12 @@ ${face(doc, 72)}
 ${soul.who ? html`<p class="ex-who">${soul.who}</p>` : ''}
 <p class="ex-sum">${doc.summary}</p>
 <p class="ex-meta">${authorLine(row, doc)}</p></div>
-<p class="ex-cta"><a class="ex-btn ex-btn--primary" href="/experts/${row.id}/install">${raw(glyphs.svg('plus', { size: 18 }))}<span>Install</span></a></p>
+<div class="ex-cta"><form method="post" action="/experts/${row.id}/try"><input type="hidden" name="starter" value="0"><button type="submit" class="ex-btn ex-btn--primary">${raw(glyphs.svg('chat', { size: 18 }))}<span>Try it</span></button></form>
+<a class="ex-btn" href="/experts/${row.id}/install">${raw(glyphs.svg('plus', { size: 18 }))}<span>Install</span></a></div>
 </header>
+${(doc.starters || []).length ? html`<section class="ex-sec"><h2>${raw(glyphs.svg('spark', { size: 18 }))}<span>Try it now</span></h2>
+<p class="ex-note">A chat with ${doc.name} that uses sample details instead of yours. It may not use your apps, computer or memory, and nothing is installed.</p>
+<div class="ex-starts">${doc.starters.slice(0, 4).map((st, i) => html`<form method="post" action="/experts/${row.id}/try"><input type="hidden" name="starter" value="${String(i)}"><button type="submit" class="ex-start">${st.label}</button></form>`)}</div></section>` : ''}
 <section class="ex-sec"><h2>${raw(glyphs.svg('chat', { size: 18 }))}<span>How it talks</span></h2>
 <p>${talks(soul)}${(soul.quirks || []).length ? html`. ${soul.quirks.join(' ')}` : '.'}</p>
 ${soul.pushback ? html`<p><b>When it disagrees:</b> ${soul.pushback}</p>` : ''}</section>
@@ -173,6 +178,34 @@ ${(doc.inputs || []).map((i) => html`<label class="ex-field"><span>${i.label || 
         const got = await load(req.params.id);
         if (!got || got.doc.state === 'draft') return notFound(req, res);
         installForm(req, res, got.row, got.doc);
+    });
+
+    // Try it (plan §AD.28 item 9): a chat with a trial of this Expert (its persona, nothing it may do granted, sample
+    // details for its inputs; blueprints.trial), its first message one of its starters. Nothing is installed.
+    r.post('/experts/:id/try', async (req, res) => {
+        if (!signed(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent(`/experts/${req.params.id}`)}`);
+        if (!sameOrigin(req, config.baseUrl)) return res.status(403).type('text/plain').send('A try must come from openvibe.actor itself.');
+        const got = await load(req.params.id);
+        if (!got || got.doc.state === 'draft') return notFound(req, res);
+        const starters = Array.isArray(got.doc.starters) ? got.doc.starters : [];
+        const i = Number.parseInt(String((req.body && req.body.starter) || '0'), 10);
+        const start = starters[Number.isInteger(i) && i >= 0 && i < starters.length ? i : 0];
+        const text = (start && start.text) || 'Hello. What can you do for me?';
+        const sorry = (message, status) => page(req, res, { title: `Try ${got.doc.name}`, crumbs: [{ label: 'Experts', href: '/experts' }, { label: got.doc.name, href: `/experts/${got.row.id}` }],
+            body: html`<h1>Try ${got.doc.name}</h1><p>${message}</p><p><a class="ex-btn" href="/experts/${got.row.id}/install">Install it</a> <a class="ex-btn" href="/experts/${got.row.id}">Back</a></p>` }, status);
+        let tried;
+        try {
+            tried = await blueprints.trial(s, config, owner(req), got.row.id, { username: req.viewer.username || null });
+        } catch (e) {
+            if (e instanceof blueprints.BlueprintError) return sorry(e.message, e.status >= 400 && e.status < 500 ? e.status : 422);
+            throw e;
+        }
+        if (!tried) return notFound(req, res);
+        const out = await createTask({ s, config, engine, principal: { requester: owner(req), project: null }, body: { task: text, mode: 'balanced', agent_id: tried.agent.id },
+            personToken: req.token || (req.viewer && req.viewer.token) || null,
+            timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null });
+        if (out.code) return sorry(out.code === 'actor.budget.day_spent' || out.code === 'actor.allowance.exhausted' ? 'You have used today\'s free allowance. It comes back at midnight UTC.' : (out.detail || 'That could not start. Try again in a moment.'), out.status === 429 || out.status === 503 ? out.status : 422);
+        return res.redirect(303, `/chat/${out.task.id}`);
     });
 
     r.post('/experts/:id/install', async (req, res) => {

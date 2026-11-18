@@ -123,7 +123,8 @@ async function ensureVibe(s, config, owner) {
 
 async function list(s, config, owner) {
     await ensureVibe(s, config, owner);
-    return s.db.many('SELECT * FROM actor_agents WHERE owner = $1 ORDER BY is_vibe DESC, created_at, id', [owner]);
+    // A trial of an Expert (migration 0083) is not one of the person's agents.
+    return s.db.many('SELECT * FROM actor_agents WHERE owner = $1 AND trial_of IS NULL ORDER BY is_vibe DESC, created_at, id', [owner]);
 }
 
 const get = (s, owner, id) => (ID.test(String(id || '')) ? s.db.maybe('SELECT * FROM actor_agents WHERE id = $1 AND owner = $2', [id, owner]) : null);
@@ -161,7 +162,7 @@ async function create(s, config, owner, input, extra = null) {
     if (typeof instructions !== 'string' || !instructions.trim() || instructions.length > maxInstructions) return { error: `instructions must be 1–${maxInstructions} characters.` };
     // Vibe comes first even when the first thing a person does is create another contact.
     await ensureVibe(s, config, owner);
-    const count = Number(await s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1', [owner]));
+    const count = Number(await s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1 AND trial_of IS NULL', [owner]));
     if (count >= config.agents.maxPerOwner) return { limit: true, error: 'Agent limit reached.' };
     const now = s.iso();
     const row = await s.db.maybe(`INSERT INTO actor_agents

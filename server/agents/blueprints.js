@@ -252,6 +252,47 @@ async function install(s, config, owner, id, body = {}) {
     return { agent: made.row, install: await installOf(s, owner, made.row.id) };
 }
 
+/** What an input holds in a trial: sample data (plan §AD.28 item 9, "try it with sample data before installing"). */
+function sampleInput(inp, username) {
+    if (inp.default != null) return inp.default;
+    switch (inp.type) {
+    case 'channel': return username || 'openvibe';
+    case 'choice': return Array.isArray(inp.choices) && inp.choices.length ? inp.choices[0] : '';
+    case 'number': return 1;
+    case 'boolean': return false;
+    case 'url': return 'https://openvibe.live';
+    case 'repository': return 'https://github.com/octocat/Hello-World';
+    default: return inp.placeholder || inp.example || 'an example';
+    }
+}
+
+const TRIAL_HOURS = 24;
+const TRIALS_A_DAY = 10;
+
+/**
+ * Try an Expert before installing it: a trial agent with its persona and nothing it may do granted (no apps, no
+ * computer, no memory, level ask), hidden from the person's agents (migration 0083), its inputs filled with sample data.
+ * A trial of the same Expert less than a day old is reused. → { agent, reused } (BlueprintError when it cannot be tried).
+ */
+async function trial(s, config, owner, id, { username = null } = {}) {
+    const got = await get(s, owner, id);
+    if (!got || got.doc.state === 'draft') return null;
+    if (got.state === 'retired') fail(409, 'actor.blueprint.retired', 'That version takes no new tries.');
+    const kept = await s.db.maybe('SELECT * FROM actor_agents WHERE owner = $1 AND trial_of = $2 AND trial_until > now() ORDER BY created_at DESC LIMIT 1', [owner, id]);
+    if (kept) return { agent: kept, reused: true };
+    const lately = Number(await s.db.value("SELECT count(*) FROM actor_agents WHERE owner = $1 AND trial_of IS NOT NULL AND created_at::timestamptz > now() - interval '1 day'", [owner]));
+    if (lately >= TRIALS_A_DAY) fail(429, 'actor.blueprint.trials', `You have tried ${TRIALS_A_DAY} Experts today. Install the ones you like, or try more tomorrow.`);
+    const inputs = {};
+    for (const inp of Array.isArray(got.doc.inputs) ? got.doc.inputs : []) if (inp && inp.id) inputs[inp.id] = sampleInput(inp, username);
+    let fields;
+    try { fields = contactOf(got.doc, inputs); } catch (e) { fail(422, 'actor.blueprint.untryable', 'This one needs your own details first: install it to try it.'); }
+    const made = await contacts.create(s, config, owner, { ...fields, computer: null, apps: [], memory: null, level: 'ask' }, { fromBlueprint: true });
+    if (!made.row) fail(made.limit ? 429 : 422, made.limit ? 'actor.agent.limit' : 'actor.agent.invalid', made.error || 'The trial could not be made.');
+    await s.db.query(`UPDATE actor_agents SET trial_of = $3, trial_until = now() + interval '${TRIAL_HOURS} hours', apps = '[]'::jsonb, computer = NULL, memory_scope = NULL, level = 'ask'
+        WHERE id = $1 AND owner = $2`, [made.row.id, owner, id]);
+    return { agent: await s.db.maybe('SELECT * FROM actor_agents WHERE id = $1', [made.row.id]), reused: false };
+}
+
 async function installOf(s, owner, agentId) {
     return s.db.maybe('SELECT * FROM agent_installs WHERE agent_id = $1 AND owner = $2', [agentId, owner]);
 }
@@ -333,4 +374,4 @@ function installWire(inst) {
     };
 }
 
-module.exports = { create, list, get, saveDraft, publish, remix, asks, install, update, installOf, wire, installWire, contactOf, BlueprintError, check, gallery, card };
+module.exports = { create, list, get, saveDraft, publish, remix, asks, install, trial, sampleInput, update, installOf, wire, installWire, contactOf, BlueprintError, check, gallery, card };
