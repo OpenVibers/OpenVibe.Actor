@@ -303,6 +303,28 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         return meterStore.getStore() || null;
     }
 
+    /**
+     * An answer's receipt (agents.step@1 1.3.0, plan §AD.17): every model call of a task notes the rung of the ladder
+     * that paid for it (allowance: OpenVibe's; key: the person's own provider key; machine: their computer), its model
+     * and what it took. Kept on the task's metering context, read by the engine when the turn ends; a call outside a task
+     * notes nothing, and a note never delays or fails a call.
+     */
+    const PROVIDER_RE = /^[a-z][a-z0-9_-]{0,40}$/;
+    function noteReceipt(r, rung, provider, at) {
+        const m = currentMetering();
+        if (!m || !Array.isArray(m.receipt) || !r) return;
+        try {
+            const u = r.usage || {};
+            const tokens = Math.max(0, Math.round(Number(u.input) || 0)) + Math.max(0, Math.round(Number(u.output) || 0));
+            const p = String(provider || '').toLowerCase();
+            m.receipt.push({
+                rung, provider: PROVIDER_RE.test(p) ? p : null, model: String(r.resolved_model || r.model || '').slice(0, 200),
+                tokens, usd: Math.max(0, Number(r.cost_usd) || 0), ms: Math.max(0, now() - at),
+            });
+            if (m.receipt.length > 500) m.receipt.shift();
+        } catch { /* a receipt never fails a call */ }
+    }
+
     /** Start one call's record; null (never a throw) when there is no meter, no task or a bad shape. */
     function startMetered({ provider, model, place, streamed }) {
         if (!meter) return null;
@@ -404,6 +426,22 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         return aiTokens;
     }
 
+    /** OpenVibe.AI's spent free allowance, however it reached Actor (Exchange's 402, or the router's ai.allowance_spent). */
+    function isAllowanceSpent(err) {
+        if (!err) return false;
+        return err.status === 402 || err.code === 'ai.allowance_spent' || /\bai\.allowance_spent\b|free AI allowance[^.]{0,80}\bspent\b/i.test(String(err.message || ''));
+    }
+    /** The person's own key Actor may use when their allowance is spent: { provider, subject }, or null. */
+    async function ownKeyFor(subject) {
+        const bare = String(subject || '').replace(/^user:/, '');
+        if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(bare)) return null;
+        const keys = await allowedKeys(bare).catch(() => null);
+        if (!Array.isArray(keys) || !keys.length) return null;
+        const names = keys.map((k) => (typeof k === 'string' ? k : k && k.provider)).filter((k) => typeof k === 'string' && k);
+        const provider = names.find((k) => k !== 'link') || names.find((k) => k === 'link');
+        return provider ? { provider, subject: bare } : null;
+    }
+
     /**
      * The providers the person allowed THIS service to use their own key for, and that they hold a key for: names
      * only, never key material. Null when AI does not say (or does not know) — the person may not have allowed us.
@@ -418,6 +456,28 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             if (!res.ok) return null;
             const j = await res.json();
             return Array.isArray(j.providers) ? j.providers : null;
+        } catch { return null; }
+    }
+
+    /**
+     * A person's free allowance left today (OpenVibe.AI GET /api/v1/allowance/:subject, a first-party service's read):
+     * { tier, unlimited, tokens, used, left, resets_at }, or null when AI is not configured or does not answer. The
+     * engine checks a turn fits before it starts one on the free AI (plan §AD.17).
+     */
+    async function allowanceFor(subject) {
+        // Only where model calls go through OpenVibe.AI's router: there a person's allowance pays; Actor's own provider
+        // keys draw on nothing of theirs.
+        if (!routerOn()) return null;
+        const tokens = aiTokenClient();
+        const bare = String(subject || '').replace(/^user:/, '');
+        if (!tokens || !/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(bare)) return null;
+        try {
+            const res = await fetchImpl(trimSlash(ai.url) + '/api/v1/allowance/' + encodeURIComponent(bare), {
+                headers: { accept: 'application/json', ...(await tokens.authHeaders()) }, signal: AbortSignal.timeout(4000),
+            });
+            if (!res.ok) return null;
+            const j = await res.json();
+            return j && j.allowance && typeof j.allowance === 'object' ? j.allowance : null;
         } catch { return null; }
     }
 
@@ -595,6 +655,33 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         return j;
     }
 
+    /**
+     * Pictures (server/faces, 11-16): OpenVibe.AI's ai.image workflow, as the person (on_behalf_of: their allowance, on
+     * the image models AI's routing and the admin's setup choose). → { images: [{ b64 } | { url }], cost_usd }.
+     */
+    async function image({ prompt, n = 1, size = '1024x1024', subject = null, signal = null } = {}) {
+        const c = routerClient();
+        if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
+        const timeoutMs = 180_000;
+        const sig = signal || AbortSignal.timeout(timeoutMs);
+        let run;
+        try {
+            const created = await c.ai.runs.create('ai.image', { prompt: String(prompt || '').slice(0, 4000), n: Math.max(1, Math.min(4, Number(n) || 1)), size,
+                ...(ai.maxCostUsd != null ? { max_cost_usd: ai.maxCostUsd } : {}) }, {
+                wait: 120_000, ...(subject ? { onBehalfOf: { type: 'user', id: String(subject) } } : {}), options: { cache: false }, signal: sig,
+            });
+            run = created.run;
+            if (!['succeeded', 'cached', 'failed', 'cancelled'].includes(run.status)) run = await c.ai.runs.waitFor(run.id, { timeoutMs, signal: sig });
+        } catch (err) {
+            if (err instanceof ProviderError || err instanceof ModelError) throw err;
+            throw new ProviderError(`OpenVibe.AI: ${String((err && (err.message || err.code)) || 'request failed').slice(0, 300)}`, { status: err && err.status, code: 'actor.provider.error' });
+        }
+        if (run.status === 'failed' || run.status === 'cancelled') {
+            throw new ProviderError(`OpenVibe.AI's picture ${run.status}: ${String((run.error && (run.error.detail || run.error.code)) || run.status).slice(0, 300)}`, { code: 'actor.provider.error' });
+        }
+        return { images: (run.output && Array.isArray(run.output.images)) ? run.output.images : [], cost_usd: Number(run.usage && run.usage.cost_usd) || 0 };
+    }
+
     async function chatViaRouter({ tier, messages = [], tools = null, json = false, maxTokens = 4000, signal, onDelta = null, subject = null, target = null, latency = null, policy = null }) {
         const c = routerClient();
         if (!c) throw new ModelError('OpenVibe.AI is not configured on this server (no Network client secret)', { code: 'actor.model.unavailable' });
@@ -760,6 +847,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         // The content tier of the run (one-engine slice): it rides on the choice, so every call of the run answers on
         // that tier. A caller may also name it directly.
         const policyOf = policy || (choice && choice.policy) || null;
+        const callAt = now();
         if (choice && choice.provider) {
             // OpenVibe.AI records every call it serves (ai.call.recorded@1) itself: Actor reporting it too would count
             // it twice. Only the calls Actor makes straight to a provider, below, are Actor's to report.
@@ -772,6 +860,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                 throw err;
             }
             endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
+            noteReceipt(r, choice.provider === 'link' ? 'machine' : 'key', choice.provider === 'link' ? 'machine' : choice.provider, callAt);
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER, latency_class: null };
         }
         // The router (the AI layer): the tier names a policy on AI and the person's allowance pays. No provider key.
@@ -787,10 +876,26 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
                     ? await chatViaExchange(args)
                     : await chatViaRouter(args);
             } catch (err) {
+                // The free allowance is spent (OpenVibe.AI's ai.allowance_spent, said as a 402). The owner, 11-17: "all the
+                // different methods work interconnected": a key of the person's own that they allowed Actor answers
+                // instead, once, before the run fails. A provider key first; their own computer (link) after.
+                const own = isAllowanceSpent(err) && !(signal && signal.aborted) ? await ownKeyFor(args.subject) : null;
+                if (own) {
+                    try {
+                        r = await chatViaAi({ choice: { provider: own.provider, subject: own.subject, model: null }, messages, tools, json, maxTokens, signal, onDelta: args.onDelta, policy: policyOf });
+                        endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
+                        noteReceipt(r, own.provider === 'link' ? 'machine' : 'key', own.provider === 'link' ? 'machine' : own.provider, callAt);
+                        return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER, own_key: own.provider };
+                    } catch (err2) {
+                        failMetered(call, err2, signal);
+                        throw err2;
+                    }
+                }
                 failMetered(call, err, signal);
                 throw err;
             }
             endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
+            noteReceipt(r, 'allowance', null, callAt);
             return { ...r, tier, provider: AI_PROVIDER, family: AI_PROVIDER };
         }
         await warm();
@@ -816,7 +921,9 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
             throw err;
         }
         endMetered(call, { usage: r.usage, toolCalls: r.toolCalls, taskEnd });
-        return { ...r, cost_usd: r.cost_usd || priceUsage(d.rates, r.usage || {}), tier, provider: d.provider, family: d.family };
+        const priced = { ...r, cost_usd: r.cost_usd || priceUsage(d.rates, r.usage || {}), tier, provider: d.provider, family: d.family };
+        noteReceipt(priced, 'allowance', d.provider, callAt);
+        return priced;
     }
 
     /** GET /api/v1/agents: the model each tier resolves to, and every model the keys reach (sync after warm). */
@@ -862,7 +969,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     return {
-        warm, chat, decide, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, aiCatalog, latencyClass,
+        warm, chat, decide, image, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, allowanceFor, ownKeyFor, aiCatalog, latencyClass,
         withMetering, currentMetering,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },

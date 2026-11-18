@@ -130,7 +130,9 @@ async function createApp(opts = {}) {
     // is one OpenVibe.Run function job as the person. Both are off without their service URL and Actor's secret.
     const skillRun = opts.skillRun || require('./skills/run').createSkillRun({ config, projects, fetchImpl: providerFetch, log });
     const media = opts.media || require('./media/client').createMedia({ config, fetchImpl: providerFetch, log });
-    const loop = opts.loop || createLoop({ config, models, registry, log, store: s, stats, checkpoints, connectors, skillRun, media });
+    // Specialists (plan §AD.25): Design's brief and tools on the same loop.
+    const specialists = opts.specialists || require('./specialists').createSpecialists({ config, log, guard: opts.guard || {} });
+    const loop = opts.loop || createLoop({ config, models, registry, log, store: s, stats, checkpoints, connectors, skillRun, media, specialists });
     const adapters = opts.adapters || createAdapters({ config, rates: catalog.RATES, fetchImpl: providerFetch, log, agentCard: (taskId) => agentCards.cardForTaskId(s, taskId) });
     // Task webhooks (plan T17): the only connections to an address a caller chose, through server/net/webhook-post.js.
     // A webhook naming a project secret (ADR-056) is signed by OpenVibe.Network (server/net/secret-signer.js).
@@ -141,7 +143,8 @@ async function createApp(opts = {}) {
     });
     // Network notifications ("tell me when it's done"): off without a client secret, never able to fail a task.
     const notifier = opts.notifier || createNotifier({ config, fetchImpl, log });
-    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier, registry, checkpoints });
+    // The person's computers (made below) reach the engine through a getter: its route to their own computer (plan §AD.17).
+    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier, registry, checkpoints, computersOf: () => computers });
     // Triggers (plan §12 A-4): a Watch subscription the person owns, its card in the thread, and the run back as an
     // assignment root at the trigger's level. The engine reports every task state so the card's streak stays true.
     const triggers = opts.triggers || createTriggers({ s, config, engine, webhooks, stream, now: s.now, log, fetchImpl: providerFetch });
@@ -191,6 +194,8 @@ async function createApp(opts = {}) {
     // each one is scanned before it is offered. The seed publishes them as listings of publisher kind 'openvibe'.
     ctx.skills = require('./skills');
     await require('./skills/seed').seed(s, { log, media });
+    // OpenVibe's own Experts (plan §D item 10): the blueprints in experts/, published as public versions of service:actor.
+    await require('./agents/stock').seed(s, { log });
 
     // Account export and deletion (ADR-033, ./identity/account-data.js): the two tables that hold a person's rows.
     // The sender posts to Network's internal export/deletion routes with this service's own client-credentials token;
@@ -346,6 +351,9 @@ async function createApp(opts = {}) {
     app.use('/api/v1', require('./http/run-policy-api').createRunPolicyApi(ctx));
     // Engines and comparisons (11-16): the ways a task can be worked, swapped and compared side by side.
     app.use('/api/v1', require('./compare/routes').createCompareApi(ctx));
+    // Faces: pictures for your Actor and your agents (11-16).
+    app.use('/api/v1', require('./faces/routes').createFacesApi(ctx));
+    app.use(require('./faces/routes').createFacesPages(ctx));
     // A2A (stage V2-11): another agent hands Actor a task. The card is /.well-known/agent.json, below.
     app.use(createA2APages(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
@@ -353,6 +361,8 @@ async function createApp(opts = {}) {
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.ACTOR_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));
     app.use(createAgentPages(ctx));
+    // The Experts (plan §D): the gallery, an Expert's page and its install screen; openvibe.expert sends its paths here.
+    app.use(require('./http/expert-pages').createExpertPages(ctx));
     app.use(createMemoryPages(ctx));
     app.use(createSkillPages(ctx));
     app.use(require('./http/compare-pages').createComparePages(ctx));

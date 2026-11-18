@@ -82,7 +82,7 @@ function turnFields(turnTools, turnConversation, turnModel, turnTier) {
     return { tools, conversation, model, tier };
 }
 
-async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, chatContext = null, afterInsert = null, parentId = null, forkOfStep = null, forkChange = null, assignmentOrigin = null, assignmentLevel = null, triggerId = null, personToken = null, timezone = null, comparisonId = null }) {
+async function createTask({ s, config, engine, principal, body, webhooks: webhookQueue = null, beforeInsert = null, chatContext = null, afterInsert = null, parentId = null, forkOfStep = null, forkChange = null, assignmentOrigin = null, assignmentLevel = null, triggerId = null, personToken = null, timezone = null, comparisonId = null, ownMachine = false }) {
     // `settings` (plan 11c) rides beside the contract body like the turn fields, until Contracts carries it.
     // The engine (server/engines; 11-16) is Actor's own field, like settings: it is not in actor.task-create-request@1.
     const { tools: turnTools, conversation: turnConversation, model: turnModel, tier: turnTier, settings: bodySettings, engine: bodyEngine, ...contractBody } = body || {};
@@ -169,13 +169,19 @@ async function createTask({ s, config, engine, principal, body, webhooks: webhoo
     // concurrent creations cannot all pass on the same reading and overrun the person's or the operator's cap.
     const out = await s.tx(async () => {
         const { mine, all } = await store.lockSpendToday(s, principal.requester);
-        if (mine.tasks >= tier.tasksPerDay) return { status: 429, code: 'actor.allowance.exhausted', detail: `The free tier runs ${tier.tasksPerDay} tasks a day; it resets at midnight UTC.`, retryAfter };
+        // Work the person approved for their own machine (agents/approvals.js, a codes.task): OpenVibe.Codes and the
+        // person's own keys do it, nothing Actor meters (its rate card is 0), so neither the free allowance nor the
+        // operator's cap refuses it (11-18: "Approve and start" answered "You have used today's free allowance" in red).
+        // With the allowance spent it reserves nothing, and the engine leaves out the paid second opinion, saying so.
+        const own = ownMachine === true && body.agent === 'codes';
+        const ownFree = own && (mine.tasks >= tier.tasksPerDay || perDay - mine.usd - mine.reserved <= 1e-9);
+        if (!ownFree && mine.tasks >= tier.tasksPerDay) return { status: 429, code: 'actor.allowance.exhausted', detail: `The free tier runs ${tier.tasksPerDay} tasks a day; it resets at midnight UTC.`, retryAfter };
         const remaining = perDay - mine.usd - mine.reserved;
-        if (remaining <= 1e-9 || (requestedTaskUsd != null && requestedTaskUsd > remaining + 1e-9)) {
+        if (!ownFree && (remaining <= 1e-9 || (requestedTaskUsd != null && requestedTaskUsd > remaining + 1e-9))) {
             return { status: 429, code: 'actor.budget.day_spent', detail: `You have used today's free allowance (${usd(perDay)}). It comes back at midnight UTC. To keep going now, add your own model key at ${config.baseUrl}/chat/model: Actor runs on it, and it does not count against the free allowance.`, retryAfter };
         }
-        const budgetTask = requestedTaskUsd == null ? Math.round(Math.min(perTask, remaining) * 1e6) / 1e6 : requestedTaskUsd;
-        if (all.usd >= config.spendCapUsdPerDay || all.usd + all.reserved + perTask > config.spendCapUsdPerDay + 1e-9) {
+        const budgetTask = ownFree ? 0 : requestedTaskUsd == null ? Math.round(Math.min(perTask, remaining) * 1e6) / 1e6 : requestedTaskUsd;
+        if (!ownFree && (all.usd >= config.spendCapUsdPerDay || all.usd + all.reserved + perTask > config.spendCapUsdPerDay + 1e-9)) {
             return { status: 503, code: 'actor.capacity.spent', detail: 'Actor has used today\'s free capacity across everyone. It resets at midnight UTC.', retryAfter };
         }
         if (beforeInsert) {

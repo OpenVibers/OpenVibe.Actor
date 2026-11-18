@@ -23,14 +23,18 @@ const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
 const HARNESS_ID = /^[a-z][a-z0-9-]{0,39}$/;
 
 const ENGINES = [
-    { kind: 'agent', name: 'Actor\'s agent', blurb: 'Plans, uses OpenVibe\'s tools (search, Tools, your computers and robots), checks its answer. Pick its model.', options: ['model'] },
+    { kind: 'agent', name: 'Actor\'s agent', blurb: 'Plans, uses OpenVibe\'s tools (search, Tools, your computers and robots), checks its answer. Pick its model, or a specialist (Design).', options: ['model', 'specialist'] },
     { kind: 'model', name: 'One model', blurb: 'Any model on OpenVibe.Exchange answers in one call, with no tools: the quickest and cheapest way, and the way to compare models.', options: ['model'] },
     { kind: 'decisions', name: 'Decisions', blurb: 'OpenVibe.AI\'s Decisions API: a yes-or-no, pick-one or rate-it question answered with probabilities in one pass. For choosing, routing and grading.', options: ['model'] },
-    { kind: 'harness', name: 'A coding harness', blurb: 'Claude Code, Codex, OpenCode, Gemini or Muse through OpenVibe.Codes, on your own machine.', options: ['harness'] },
+    { kind: 'harness', name: 'A coding harness', blurb: 'Claude Code, Codex, OpenCode, Gemini, Muse or CodeBuddy (WorkBuddy\'s agent, on Tencent\'s Hy4) through OpenVibe.Codes, on your own machine.', options: ['harness'] },
     { kind: 'openai-agent', name: 'OpenAI agent', blurb: 'OpenAI\'s agent with its own live web search.', options: [] },
     { kind: 'open-model', name: 'Open model on OpenVibe', blurb: 'A small open model on OpenVibe\'s own server: nothing leaves OpenVibe.', options: [] },
 ];
-const HARNESSES = ['claude-code', 'codex', 'opencode', 'gemini', 'muse', 'qwen', 'goose', 'aider'];
+// codebuddy-code (2026-11-17): WorkBuddy's agent, run by Codes over ACP on the person's own WorkBuddy login (Hy4 flash is
+// free there to 30 November 2026).
+// The agent engine's specialists (plan §AD.25, server/specialists): a craft's brief and tools on Actor's own loop.
+const { SPECIALISTS } = require('../specialists/names');
+const HARNESSES = ['claude-code', 'codex', 'opencode', 'gemini', 'muse', 'codebuddy-code', 'qwen', 'goose', 'aider'];
 
 /**
  * A task's engine from a request: null (Actor chooses) or { kind, model?, harness? }, or { error } in words.
@@ -51,7 +55,18 @@ function parseEngine(value) {
         if (typeof v.harness !== 'string' || !HARNESS_ID.test(v.harness)) return { error: 'engine.harness: a harness id, like claude-code, codex or opencode' };
         out.harness = v.harness;
     }
-    for (const k of Object.keys(v)) if (!['kind', 'model', 'harness'].includes(k)) return { error: `engine.${k} is not an engine option` };
+    if (v.specialist != null && v.specialist !== '') {
+        if (v.kind !== 'agent') return { error: 'engine.specialist: only the agent engine takes a specialist' };
+        if (!SPECIALISTS.includes(v.specialist)) return { error: `engine.specialist: one of ${SPECIALISTS.join(', ')}` };
+        out.specialist = v.specialist;
+    }
+    // Code mode (plan §AD.26): the agent engine's read-only tools behind tools_search and tools_code.
+    if (v.code != null) {
+        if (v.kind !== 'agent') return { error: 'engine.code: only the agent engine works in code mode' };
+        if (typeof v.code !== 'boolean') return { error: 'engine.code: true or false' };
+        out.code = v.code;
+    }
+    for (const k of Object.keys(v)) if (!['kind', 'model', 'harness', 'specialist', 'code'].includes(k)) return { error: `engine.${k} is not an engine option` };
     return { engine: out };
 }
 
@@ -66,6 +81,7 @@ function engineOf(row) {
 function label(e) {
     if (!e) return 'Actor chooses';
     const base = (ENGINES.find((x) => x.kind === e.kind) || { name: e.kind }).name;
+    if (e.specialist) return `${e.specialist.charAt(0).toUpperCase()}${e.specialist.slice(1)}${e.model ? ` · ${e.model}` : ''}`;
     return e.model ? `${base} · ${e.model}` : e.harness ? `${base} · ${e.harness}` : base;
 }
 /** A stable key for the leaderboard: kind, then its model or harness. */
@@ -94,7 +110,8 @@ function createEngines({ models, log = console } = {}) {
     async function model({ task, subject = null, model: id = null, signal, meter, budgetLeft, emit }) {
         if (!models || typeof models.chat !== 'function') throw fail('No model layer is set up on this server.', 'actor.engine.unavailable');
         if (budgetLeft() <= 0) throw fail('The task reached its budget.', 'actor.budget.exceeded');
-        await emit({ step: 'text', text: id ? `Asking ${id}, one call, no tools.` : 'Asking a model, one call, no tools.' });
+        // A status line is a plan step: as a text step it stood in for the answer, and the menu never showed the answer.
+        await emit({ step: 'plan', text: id ? `Asking ${id}, one call, no tools.` : 'Asking a model, one call, no tools.' });
         const choice = id ? { model: id, ...(subject ? { subject } : {}) } : (subject ? { subject } : null);
         const r = await withPerson(choice, () => models.chat({ tier: 'smart', messages: [{ role: 'system', content: ONE_MODEL_SYSTEM() }, { role: 'user', content: task }], maxTokens: 3000, signal, subject }));
         await meter(Number(r.cost_usd) || 0);

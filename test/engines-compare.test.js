@@ -98,6 +98,26 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
             assert.strictEqual((await t.get('/api/v1/tasks', { as: ada, headers: SAME, json: { task: 'x', engine: { kind: 'model', harness: 'codex' } } })).status, 422, 'refused in words');
         });
 
+        await check('a conversation keeps its engine, and a message swaps it', async () => {
+            const started = await t.get('/api/v1/runs', { as: ada, headers: SAME, json: { text: 'Is 17 a prime number?', engine: { kind: 'model', model: 'openai/gpt-5.2' } } });
+            assert.strictEqual(started.status, 201, started.text);
+            const runId = started.json().id;
+            const first = await t.waitFor(runId);
+            assert.deepStrictEqual(typeof first.engine === 'string' ? JSON.parse(first.engine) : first.engine, { kind: 'model', model: 'openai/gpt-5.2' });
+            const turn = async (body) => {
+                const r = await t.get(`/api/v1/runs/${runId}/messages`, { as: ada, headers: SAME, json: body });
+                assert.strictEqual(r.status, 202, r.text);
+                const rows = await t.ctx.s.db.many('SELECT * FROM tasks WHERE requester = $1 ORDER BY created_at DESC, id DESC LIMIT 1', [`user:${ada.subject}`]);
+                const row = await t.waitFor(rows[0].id);
+                return typeof row.engine === 'string' ? JSON.parse(row.engine) : row.engine;
+            };
+            assert.deepStrictEqual(await turn({ text: 'And 19?' }), { kind: 'model', model: 'openai/gpt-5.2' }, 'kept from the turn before');
+            assert.deepStrictEqual(await turn({ text: 'Is 21 prime?', engine: 'decisions' }), { kind: 'decisions' }, 'swapped mid-conversation');
+            assert.strictEqual(await turn({ text: 'Thanks', engine: 'auto' }), null, 'auto gives it back to Actor');
+            const bad = await t.get(`/api/v1/runs/${runId}/messages`, { as: ada, headers: SAME, json: { text: 'x', engine: { kind: 'warp' } } });
+            assert.strictEqual(bad.status, 422, 'refused in words');
+        });
+
         let cmp;
         await check('a comparison: the same task several ways, graded at once, the best marked', async () => {
             const r = await t.get('/api/v1/comparisons', { as: ada, headers: SAME, json: { task: 'Is 17 a prime number?', engines: [{ kind: 'model' }, { kind: 'model', model: 'cheap/one' }, { kind: 'decisions' }] } });

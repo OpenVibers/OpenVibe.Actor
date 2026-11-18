@@ -128,13 +128,40 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
     }
     const why = (r) => (r.data && (r.data.detail || r.data.title)) || `OpenVibe.Codes answered ${r.status}`;
 
+    /**
+     * A private repository on OpenVibe Git for work that names none: in the person's namespace, named from the words and
+     * this task's id (so a retry finds the same one instead of making another), begun with a README. → its https address,
+     * or null when Git cannot (not connected, no username, refused).
+     */
+    async function scratchRepo(task, person, taskId, emit) {
+        let git;
+        try { git = require('../runtime/tools/_git').gitFor({ config, fetch: fetchImpl }); } catch { return null; }
+        if (!git || !git.enabled) return null;
+        const username = await git.username(person).catch(() => null);
+        if (!username) return null;
+        const STOP = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'into', 'make', 'build', 'write', 'create', 'please', 'some', 'code', 'test', 'small', 'simple']);
+        const words = String(task).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter((w) => w.length > 2 && !STOP.has(w)).slice(0, 4).join('-') || 'work';
+        const tail = String(taskId || Date.now().toString(36)).toLowerCase().replace(/[^a-z0-9]/g, '').slice(-6);
+        const name = `${words}-${tail}`.slice(0, 80);
+        const site = String((config.services && config.services.gitPublicUrl) || 'https://git.openvibe.codes').replace(/\/+$/, '');
+        const out = await git.call('POST', '/repos', person, { name, owner_username: username, description: `Made by Actor for: ${String(task).replace(/\s+/g, ' ').slice(0, 200)}`, visibility: 'private', starter: 'empty' }).catch((err) => ({ ok: false, error: String(err && err.message) }));
+        const exists = !out.ok && /exist|taken|already/i.test(String(out.error || ''));
+        if (!out.ok && !exists) return null;
+        const url = (out.ok && out.data && out.data.html_url) || `${site}/${username}/${name}`;
+        try { await emit({ step: 'text', text: `${exists ? 'Working in' : 'Made a private repository for this work:'} ${url}` }); } catch { /* the step is a courtesy */ }
+        return url;
+    }
+
     async function adapter({ task, requester, signal, emit, taskId = null, agent = null }) {
         if (!enabled) throw new ProviderError('OpenVibe.Codes is not connected to this server', { code: 'actor.agent.unavailable' });
         const subject = personOf(requester);
         if (!subject || !USER_SUBJECT.test(subject)) {
             throw new ProviderError(`Coding tasks run on your own machine through OpenVibe.Codes, so they need you signed in on openvibe.actor. You can also start one yourself at ${pages}/run`, { code: 'actor.agent.unavailable' });
         }
-        const repo = repoIn(task);
+        let repo = repoIn(task);
+        // Nothing named: the work gets a private repository of its own on OpenVibe Git, in the person's namespace
+        // (11-18: "Test code something" never reached Codes, because nothing could run without a repository).
+        if (!repo) repo = await scratchRepo(task, subject, taskId, emit);
         if (!repo) throw new ProviderError('Name the repository to work on, as its https address (for example https://github.com/you/project), and say what to change.', { code: 'actor.task.no_repo' });
         const harness = typeof agent === 'string' && HARNESS.test(agent) ? agent : null;
         if (agent != null && !harness) throw new ProviderError(`No coding agent is called "${String(agent).slice(0, 40)}".`, { code: 'actor.task.bad_agent' });

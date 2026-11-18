@@ -22,6 +22,8 @@ const store = require('./store');
 const stills = require('./stills');
 const looks = require('../agents/looks');
 const modelPrefs = require('../runtime/model-prefs');
+// The one order a turn is routed by (plan §AD.17): Actor walks it; the Frame answers it for the composer's chip.
+const roads = require('openvibe-sdk/agents/roads');
 // The person's own model choice rides with the models layer (plan L55 C3). A stand-in models object (a test's)
 // does not carry it, and a run then keeps today's behaviour.
 const withChoice = (models, choice, fn) => (models && typeof models.withChoice === 'function' ? models.withChoice(choice, fn) : fn());
@@ -67,7 +69,30 @@ function parseTurnTools(value) {
     } catch { return null; }
 }
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null }) {
+// OpenVibe.AI's spent free allowance, however it reached the loop (Exchange's 402, the router's ai.allowance_spent).
+const allowanceSpent = (err) => Boolean(err) && (err.status === 402 || err.code === 'ai.allowance_spent'
+    || /\bai\.allowance_spent\b|free AI allowance[^.]{0,80}\bspent\b/i.test(String(err.message || '')));
+
+/**
+ * A turn's model calls → its receipt (agents.step@1 1.3.0's cost and model): the totals, the spend by rung of the ladder
+ * (allowance, key, machine), and the model that wrote the answer (the last call that named one).
+ */
+function receiptOf(calls) {
+    const by = {};
+    let tokens = 0, usd = 0, ms = 0, model = null;
+    for (const c of calls || []) {
+        if (!c || !['machine', 'plan', 'key', 'allowance', 'credits'].includes(c.rung)) continue;
+        const r = by[c.rung] || (by[c.rung] = { tokens: 0, usd: 0, seconds: 0 });
+        r.tokens += c.tokens || 0; r.usd += c.usd || 0; r.seconds += (c.ms || 0) / 1000;
+        tokens += c.tokens || 0; usd += c.usd || 0; ms += c.ms || 0;
+        if (c.model) model = { id: c.model, ...(c.provider ? { provider: c.provider } : {}) };
+    }
+    const r6 = (n) => Math.round(n * 1e6) / 1e6, r1 = (n) => Math.round(n * 10) / 10;
+    for (const k of Object.keys(by)) by[k] = { tokens: by[k].tokens, usd: r6(by[k].usd), seconds: r1(by[k].seconds) };
+    return { cost: { usd: r6(usd), tokens, seconds: r1(ms / 1000), by }, model };
+}
+
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null, computersOf = null }) {
     // The engines that answer without the loop (server/engines): one model, the Decisions API.
     const standalone = createEngines({ models, log });
     const running = new Map();      // id → AbortController
@@ -218,8 +243,12 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
      * "succeeded" while its trigger's card still said "0 runs" would be a state that never existed;
      * PGlite, which keeps every statement in order, would never have shown it.
      */
+    // The receipt calls of each task in flight (execute's receiptCalls): the turn's end writes its receipt with its state.
+    const turnReceipts = new Map();
     async function setState(id, state, { agentForEvent, ...patch } = {}) {
         const ended = ['succeeded', 'failed', 'cancelled'].includes(state);
+        const calls = ended ? turnReceipts.get(id) : null;
+        if (calls && calls.length) { patch.receipt = receiptOf(calls); calls.written = calls.length; }
         // The row as it will be once this state is written: the trigger's card and the notification read it.
         const before = await store.getTask(s, id);
         const row = before ? { ...before, ...patch, state } : null;
@@ -333,6 +362,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     async function execute(id, signal) {
         const row = await store.getTask(s, id);
         if (!row || row.state !== 'queued') return;
+        // The turn's receipt (agents.step@1 1.3.0): every model call notes what paid for it (models.js noteReceipt);
+        // written on the task (tasks.receipt) with the state that ends the turn, for the answer to carry.
+        const receiptCalls = [];
+        turnReceipts.set(id, receiptCalls);
+        const turnAt = now();
         let dayRun = day ? await day.run(id) : null;
         if (dayRun && dayRun.segment_at) {
             // An interrupted slice cannot get another full time allowance after a restart.
@@ -483,6 +517,40 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             await tellPerson(row, 'needs_you', { what: String(shown), kind: 'approve', url });
             return { asked: true, decision, ask, url };
         };
+        /**
+         * The next road when the free AI is spent (plan §AD.17): one of the person's computers is online and lets their
+         * agent use it, so Codes runs the task there (Codes picks a coding agent signed in on it). Null when there is no
+         * such road (a public chat, private mode, a service's run, no computer online, Codes off) or it failed too;
+         * the task then fails with the allowance's own words and the menu's setup card.
+         */
+        async function ownComputerRoad(err, { cls, fromChat }) {
+            if (fromChat || row.mode === 'private' || !String(row.requester || '').startsWith('user:')) return null;
+            if (!adapters.run || typeof adapters.run.codes !== 'function') return null;
+            const computers = typeof computersOf === 'function' ? computersOf() : null;
+            if (!computers || computers.enabled === false || typeof computers.mine !== 'function') return null;
+            let mine = null;
+            try { mine = await computers.mine(row.requester.slice(5)); } catch { mine = null; }
+            const online = Array.isArray(mine) ? mine.filter((m) => m && m.online) : [];
+            if (!online.length) return null;
+            const where = String(online[0].name || 'your computer').slice(0, 60);
+            const paused = await askBeforeCodesTask('codes', cls);
+            if (paused) return paused;
+            await emit(id, { kind: 'output', step: 'handoff', agent: 'codes', text: `OpenVibe's free AI is used up for today, so ${where} takes it: a coding agent there, on your own sign-in.` });
+            explanation.push({ selected: 'codes', objective: 'route', reasons: [`the free AI was used up (${String((err && err.message) || '').slice(0, 120)}), and ${where} is online`], candidates: [], decided_at: iso() });
+            await store.updateTask(s, id, { explanation });
+            let got;
+            try {
+                got = await adapters.run.codes({ task: row.task, requester: row.requester, taskId: id, cls, mode: row.mode, signal, meter, budgetLeft, waitForPerson, requestApproval, assign, closeAssignment, emit: (e) => emit(id, { kind: 'output', agent: 'codes', ...e }) });
+            } catch (e2) {
+                if (signal.aborted) throw e2;
+                await emit(id, { kind: 'output', step: 'text', agent: 'codes', text: `${where} could not take it either: ${String((e2 && e2.message) || e2).slice(0, 400)}`, is_error: true });
+                return null;
+            }
+            receiptCalls.push({ rung: 'machine', provider: 'machine', model: String(got.model || '').slice(0, 200), tokens: Math.max(0, Math.round(Number(got.tokens) || 0)), usd: 0, ms: Math.max(0, now() - turnAt) });
+            const result = { answer: got.text, sources: got.sources || [], agent: 'codes', model: got.model || null, class: cls,
+                route: { road: 'own-computer', where, because: 'the free AI was used up' } };
+            return await setState(id, 'succeeded', { result, finished_at: iso() });
+        }
         const askBeforeCodesTask = async (agentId, cls) => {
             const repo = codesRepoIn(row.task);
             if (!taskAgent || !repo) return null;
@@ -530,7 +598,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             }
             // A task with no budget spends nothing: not even a classification call. A resumed task whose saved step is
             // already an answer is still delivered (it owes nothing more).
-            if (budget <= 0 && !(resume && resume.state && resume.state.answered)) {
+            // A task pinned to Codes (an approved coding task, tasks/create.js ownMachine) runs on the person's machine and
+            // costs Actor nothing, so a $0 budget is its own, not a refusal (11-18: "This task has a $0 budget, so nothing
+            // ran" after Approve, the day's free AI spent).
+            const ownWork = row.agent === 'codes';
+            if (budget <= 0 && !ownWork && !(resume && resume.state && resume.state.answered)) {
                 return await setState(id, 'failed', { error_code: 'actor.budget.exceeded', error_detail: 'This task has a $0 budget, so nothing ran. Give it a budget above $0.', finished_at: iso() });
             }
             // What kind of task this is. Private mode never sends the text anywhere to find out. A resumed run already
@@ -539,6 +611,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             if (resume || fork) {
                 cls = 'answer';
                 await emit(id, { kind: 'output', step: 'plan', text: resume ? `Continuing from step ${resume.step}.` : `Starting from step ${fork.step} of the original run.` });
+            } else if (ownWork) {
+                // Pinned to Codes: a coding task, without paying a model to say so.
+                cls = 'code';
             } else if (row.mode === 'private' || !adapters.checkers.deepseek) {
                 cls = heuristic(row.task);
             } else {
@@ -570,6 +645,46 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // creation. A turn always runs in the loop below, the path that honors the list — a code-classified
             // turn must not escape to the Codes agent.
             const turnAllowed = parseTurnTools(row.tools);
+            // A turn that cannot finish never starts on the free AI (plan §AD.17; 11-17: two probe turns spent 22k free
+            // tokens and answered nothing, each refused halfway). The road is the one order every surface shares
+            // (openvibe-sdk/agents/roads, which the Frame answers for the composer's chip too): the person's own pick,
+            // the free AI when the turn fits what is left today, their key, their computer (taking the road there
+            // dispatches the turn), else it says so at once and spends nothing. Each rung is asked only when reached.
+            // One model (Chat mode) is one small call and is not held; a coding run is Codes', not the allowance's.
+            let freeShortKey = null;
+            const loopTurn = !(chosenEngine && ['model', 'decisions', 'harness'].includes(chosenEngine.kind)) && cls !== 'code';
+            if (!resume && !fork && loopTurn && runsOn !== 'computer' && !fromChat && row.mode !== 'private' && String(row.requester || '').startsWith('user:')
+                && models && typeof models.allowanceFor === 'function') {
+                const need = Math.max(1000, Number(config.freeTurnTokens) || 12000);
+                let leftWords = '';
+                let taken = null;
+                const road = await roads.walk({
+                    mode: 'agent', need,
+                    choice: () => modelPrefs.choiceFor(s, row.requester).catch(() => null),
+                    allowance: async () => {
+                        const a = await models.allowanceFor(row.requester);
+                        if (a && a.left != null) leftWords = `${Number(a.left).toLocaleString('en-US')} tokens`;
+                        return a;
+                    },
+                    key: () => (typeof models.ownKeyFor === 'function' ? models.ownKeyFor(row.requester).catch(() => null) : null),
+                    computer: async () => {
+                        const short = Object.assign(new Error(`The free AI allowance is spent for a task this size: ${leftWords} left today.`), { code: 'ai.allowance_spent' });
+                        taken = await ownComputerRoad(short, { cls, fromChat });
+                        return taken || null;
+                    },
+                });
+                if (road.road === 'key') {
+                    const own = road.value;
+                    freeShortKey = own;
+                    await emit(id, { kind: 'output', step: 'plan', text: `OpenVibe's free AI has ${leftWords} left today, not enough for this, so your own ${own.provider === 'link' ? 'computer\'s model' : `${own.provider} key`} takes it.` });
+                } else if (road.road === 'computer') {
+                    return taken;
+                } else if (road.road === 'none') {
+                    const detail = `OpenVibe's free AI has ${leftWords} left today, and a task like this takes about ${need.toLocaleString('en-US')}: the free AI allowance is spent for anything this size until midnight UTC. Add your own AI key or your computer to keep going.`;
+                    await emit(id, { kind: 'output', step: 'text', text: detail, is_error: true });
+                    return await setState(id, 'failed', { error_code: 'ai.allowance_spent', error_detail: detail, finished_at: iso() });
+                }
+            }
             // One model, or the Decisions API: the engine answers on its own, without the loop or the router. Its answer
             // is that engine's own (a comparison grades it), so the loop's check does not rewrite or refuse it.
             if (chosenEngine && (chosenEngine.kind === 'model' || chosenEngine.kind === 'decisions') && !resume && !fork) {
@@ -579,10 +694,19 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await emit(id, { kind: 'output', step: 'plan', agent: engineId, text: `${engineLabel(chosenEngine)} takes it, as you chose.` });
                 const subject = String(row.requester || '').startsWith('user:') ? row.requester.slice(5) : null;
                 let out;
+                // Its model calls note their receipt like the loop's (models.js noteReceipt).
+                const runOne = () => standalone[chosenEngine.kind]({ task: row.task, subject, model: chosenEngine.model || null, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: engineId, ...e }) });
                 try {
-                    out = await standalone[chosenEngine.kind]({ task: row.task, subject, model: chosenEngine.model || null, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: engineId, ...e }) });
+                    out = await (models && typeof models.withMetering === 'function'
+                        ? models.withMetering({ taskId: id, task: 'actor.task', startedAt: now(), seq: 0, receipt: receiptCalls }, runOne) : runOne());
                 } catch (err) {
                     if (signal.aborted) throw err;
+                    // Chat mode finds a way too (plan §AD.17): the free AI spent and no key of theirs answered (models.js
+                    // tried them), the same words go to their own computer, as the loop's do.
+                    if (allowanceSpent(err)) {
+                        const taken = await ownComputerRoad(err, { cls, fromChat });
+                        if (taken) return taken;
+                    }
                     const why = String((err && err.message) || err).slice(0, 600);
                     await emit(id, { kind: 'output', step: 'text', agent: engineId, text: why, is_error: true });
                     return await setState(id, 'failed', { error_code: (err && /^actor\./.test(String(err.code)) ? err.code : 'actor.engine.failed'), error_detail: why, finished_at: iso() });
@@ -597,7 +721,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // through codes_task, on the same task, budget and timeline. An approved or explicitly chosen Codes
             // task follows that path too; service and personal agent runs keep their own tool policy.
             const unifiedCode = cls === 'code' && config.unifiedCodeRuns === true && !fromChat && !dayRun
-                && !row.via && (!row.agent || row.agent === 'codes') && String(row.requester || '').startsWith('user:');
+                && !row.via && (!row.agent || row.agent === 'codes') && String(row.requester || '').startsWith('user:')
+                // An approved coding task on the free AI's spent day ($0, ownWork): the loop would need a model to call
+                // codes_task, so it goes straight to the Codes adapter, which needs none.
+                && !(ownWork && budget <= 1e-9);
             if (loop && models && row.mode !== 'private' && !pinnedAway && (cls !== 'code' || chatPolicy || dayRun || turnAllowed || unifiedCode)) {
                 const agentId = LOOP_AGENT;
                 if (unifiedCode) {
@@ -648,13 +775,15 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // The AI meter (ai-metrics.md): every model call of this task carries its id and wall clock, wherever
                 // the call is made — the run, its plan, its check, its revision. A product without a model layer or
                 // a process without a meter simply runs the call.
-                const aiMetering = { taskId: id, task: 'actor.task', startedAt: now(), seq: 0 };
+                const aiMetering = { taskId: id, task: 'actor.task', startedAt: now(), seq: 0, receipt: receiptCalls };
                 const metered = (fn) => (typeof models.withMetering === 'function' ? models.withMetering(aiMetering, fn) : fn());
                 // The files attached to this message in the chat (plan L55 C2): text as data; images described first.
                 const attachments = await metered(() => inputs.forRun(s, id, { models, meter, signal, log }).catch((err) => { log.warn('[Actor] attachments:', (err && err.message) || err); return []; }));
                 // The person's own model choice for this run (plan L55 C3): their own key, through OpenVibe.AI.
                 // Every model call of the run — the loop's, the plan's, the check's — reads it, and no other run's does.
                 let choice = await modelPrefs.choiceFor(s, row.requester).catch(() => null);
+                // Not enough free AI left for this turn (above): the person's own key takes every call of it.
+                if (freeShortKey && !(choice && choice.provider)) choice = { provider: freeShortKey.provider, subject: freeShortKey.subject, model: null };
                 if (dayRun) choice = await day.modelChoice(id);
                 // "Runs on: my computer": the model on the person's computer, whatever else they chose above it (a
                 // model id they gave for their computer is kept).
@@ -708,6 +837,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         latency: await latencyClass(id),
                         // A product conversation turn (one-engine slice): the tools this run may call.
                         allowedTools: unifiedCode && !turnAllowed ? ['codes_task'] : turnAllowed,
+                        // A specialist (plan §AD.25): Design's brief and tools on this loop.
+                        specialist: chosenEngine && chosenEngine.kind === 'agent' && chosenEngine.specialist ? chosenEngine.specialist : null,
+                        // Code mode (plan §AD.26): asked for on the engine, and Design's own way unless turned off (it carries
+                        // Design's and Vision's tools, and a review chains them).
+                        codeMode: !!(chosenEngine && chosenEngine.kind === 'agent' && (chosenEngine.code === true || (chosenEngine.specialist === 'design' && chosenEngine.code !== false))),
                     })));
                     // The run parked (plan A2): the wait is open, so the task is not finished. It stays open
                     // ('running' is the closest state there is today), its wall clock waits with it, and its
@@ -726,6 +860,20 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         const steps = out && out.state && out.state.brain && out.state.brain.steps
                             || out && out.brain && out.brain.steps || [];
                         if (!steps.some((step) => step.tool === 'codes_task' && step.ok === true)) {
+                            // The loop's codes_task stopped to ask its owner (the approval gate made a request in this
+                            // turn): the turn waits for that yes, it did not fail (11-18: "did not run … Connect your
+                            // machine" sat above the card asking to start it).
+                            const asked = await s.db.maybe(`SELECT id FROM actor_approvals WHERE task_id = $1 AND state = 'pending' ORDER BY created_at DESC LIMIT 1`, [id]).catch(() => null);
+                            if (asked) {
+                                const said = 'It needs your yes before it starts: approve the coding task below, and it starts on your machine.';
+                                await emit(id, { kind: 'output', step: 'text', agent: agentId, text: said });
+                                controls.delete(id);
+                                await loop.close(out && out.state).catch(() => {});
+                                const result = { answer: said, sources: [], agent: agentId, model: null, class: cls,
+                                    approval: { id: asked.id, url: `${String(config.baseUrl || '').replace(/\/$/, '')}/me/approvals/${asked.id}` },
+                                    checked: { by: 'none', cross_family: false, reason: 'Nothing was run: its owner decides first.' } };
+                                return await setState(id, 'succeeded', { result, finished_at: iso() });
+                            }
                             const detail = 'OpenVibe.Codes did not run this task. Connect your machine on openvibe.link/machines, or retry after Codes is available.';
                             await emit(id, { kind: 'output', step: 'text', agent: agentId, text: detail, is_error: true });
                             controls.delete(id);
@@ -737,6 +885,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     if (signal && signal.aborted) throw err;
                     // The person chose "Stop the task" on an interrupted action (stage V2-9): end it cancelled, not failed.
                     if (err && err.code === 'actor.task.cancelled') return await setState(id, 'cancelled', { finished_at: iso() });
+                    // The route always finds a way (plan §AD.17; the owner, 11-17: "it can use different harnesses …
+                    // smart"): OpenVibe's free AI is spent and no key of the person's answered (runtime/models.js tried
+                    // them), so the same task goes to their own computer through Codes, on the sign-ins there.
+                    if (allowanceSpent(err)) {
+                        controls.delete(id);
+                        const taken = await ownComputerRoad(err, { cls, fromChat });
+                        if (taken) return taken;
+                    }
                     const detail = (err && err.message) || String(err);
                     const code = err && err.code === 'actor.model.unavailable' ? 'actor.model.unavailable'
                         : err && err.code === 'actor.budget.exceeded' ? 'actor.budget.exceeded'
@@ -804,6 +960,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         }
                         if (contested.length) await emit(id, { kind: 'output', step: 'text', agent: agentId, text: `Sources disagree on ${contested.length} point${contested.length === 1 ? '' : 's'}; both sides are shown with the answer.` });
                     }
+                    // A checker that could not run (no checker answered, a provider error) no longer throws the answer away
+                    // (11-18: a paid demo answer was written and then withheld because the checker gave no verdict). It is
+                    // delivered, marked as not checked, and the step says why.
+                    if (verdict.unavailable) {
+                        await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `Not checked: ${verdict.reason}. The answer is shown as it was written.` });
+                        verdict = { ...verdict, ok: true, unchecked: true };
+                    }
                     if (verdict.ok) {
                         // Confidence and the challenge (stage V2-8): grade every claim, counter-search the high-stakes
                         // ones at likely/unverified. It spends against the same task budget, and the page shows it.
@@ -864,6 +1027,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         };
                         // The files and charts travel with each tool result that made them (the loop's tool_result events),
                         // and the result carries them all; a live page shows them as they land.
+                        if (verdict.unchecked) result.checked = false;
                         return await setState(id, 'succeeded', { result, finished_at: iso() });
                     }
                     if (verdict.unavailable) {
@@ -928,13 +1092,22 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     continue;
                 }
                 await setState(id, 'verifying', { agentForEvent: agentId });
-                const verdict = await check({ task: row.task, answer: out.text, sources: out.sources || [], evidence: out.evidence || [], agentId, mode: row.mode, checkers: adapters.checkers, signal, now: () => now() });
+                // Work on the person's own machine with no allowance left to pay a checker (tasks/create.js ownMachine):
+                // delivered as written, and it says so, rather than failing on a cent the person was never asked for.
+                let verdict = agentId === 'codes' && budgetLeft() <= 1e-9
+                    ? { ok: false, unavailable: true, reason: 'nothing was left of today\'s free allowance for a second opinion, and the work ran on your machine', cost_usd: 0 }
+                    : await check({ task: row.task, answer: out.text, sources: out.sources || [], evidence: out.evidence || [], agentId, mode: row.mode, checkers: adapters.checkers, signal, now: () => now() });
                 await meter(verdict.cost_usd);
-                await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
+                if (!verdict.unavailable) await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
+                if (verdict.unavailable) {
+                    await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `Not checked: ${verdict.reason}. The answer is shown as it was written.` });
+                    verdict = { ...verdict, ok: true, unchecked: true };
+                }
                 if (verdict.ok) {
                     let answer = out.text;
                     if (row.via && /^agent:agt_/.test(row.via)) answer = await absorbClosingLines(answer, row, id, out);
                     const result = { answer, sources: out.sources || [], agent: agentId, model: out.model || catalog.modelOf(agent, config) || null, class: cls, artifacts: Array.isArray(out.artifacts) ? out.artifacts : [], checked: { by: verdict.by, cross_family: !!verdict.cross, reason: verdict.reason } };
+                    if (verdict.unchecked) result.checked = false;
                     return await setState(id, 'succeeded', { result, finished_at: iso() });
                 }
                 if (verdict.unavailable) {
@@ -958,6 +1131,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             return await setState(id, 'failed', { error_code: 'actor.internal', error_detail: 'Something went wrong on Actor\'s side. Nothing more will be charged for this task.', finished_at: iso() });
         } finally {
             clearTimeout(timer);
+            turnReceipts.delete(id);
+            // A call after the state was written (a late check), or a turn that ended without one: written here.
+            if (receiptCalls.length && receiptCalls.written !== receiptCalls.length) await store.updateTask(s, id, { receipt: receiptOf(receiptCalls) }).catch((err) => log.warn('[Actor] receipt not written:', (err && err.message) || err));
         }
     }
 
@@ -1084,4 +1260,4 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
     return { submit, cancel, stop, status, answer, assume, steer, resumeInterrupted, resumeWithEvent, resumeWithNotice, failTask, notifyWaitTimeout, setWaits, setTriggers, setMailReplies, setFabric, setDay, MAX_ATTEMPTS };
 }
 
-module.exports = { createEngine, MAX_ATTEMPTS };
+module.exports = { createEngine, MAX_ATTEMPTS, receiptOf };

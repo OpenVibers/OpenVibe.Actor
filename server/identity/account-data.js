@@ -34,6 +34,9 @@ const TABLES = [
     // cascade).
     // One task worked several ways (migration 0080): the task's words, the ways and their grades.
     { table: 'actor_comparisons', subject: 'requester', value: (usr) => `user:${usr}`, file: 'comparisons.json', erase: 'delete' },
+    // Pictures made or uploaded for your agents (11-16): what they were, never the bytes in the export (they are at /faces/<id>).
+    { table: 'actor_faces', subject: 'owner', value: (usr) => `user:${usr}`, file: 'faces.json', erase: 'delete',
+        columns: ['id', 'owner', 'mime', 'prompt', 'style', 'created_at'] },
     { table: 'actor_artifacts', subject: 'owner', value: (usr) => `user:${usr}`, file: 'artifacts.json', erase: 'delete',
         columns: ['id', 'task_id', 'owner', 'name', 'mime', 'size', 'created_at'] },
     // The files they attached to their messages in the chat (plan L55 C2): the rows here (with what the run read of
@@ -82,6 +85,8 @@ const TABLES = [
             'fork_of_step', 'fork_change', 'resumes', 'agent_id', 'level', 'assignment_id',
             // The way the person chose (an engine) and the comparison a task is one side of (migration 0080).
             'engine', 'comparison_id',
+            // An answer's receipt (migration 0082): what a turn took and what paid for it, by rung.
+            'receipt',
             // The catalogue skill a task was started from (migration 0057): its slug, name and the subject's title.
             'skill_slug', 'skill_name', 'skill_subject_title',
             // A product conversation turn (one-engine slice): which conversation it answers, the tools it may call and

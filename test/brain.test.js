@@ -62,6 +62,16 @@ const call = (name, args = {}) => ({ function: { name, arguments: JSON.stringify
         const short = normalize({ ambiguity: 0.2, risk: 'low', kind: 'answer' }, { task: 'Explain mutexes', mode: 'balanced' });
         assert.strictEqual(short.risk, 'low');
         assert.strictEqual(normalize({ question: { text: 'x', options: ['only one'] } }, { task: 'x' }).question, null, 'a question needs two options');
+        // The owner's phone, 11-17: "What is on today?" came back as the question "<one question>". A template copied back
+        // is no question: the run goes on with its assumptions.
+        const copied = normalize({ ambiguity: 0.9, risk: 'high', deliverable: '<one sentence: what done means>', constraints: ['...'], assumptions: ['…', 'today means UTC'],
+            question: { text: '<one question>', options: ['<answer 1>', '<answer 2>'] } }, { task: 'What is on today?', mode: 'best' });
+        assert.strictEqual(copied.question, null, 'a placeholder is not a question');
+        assert.strictEqual(copied.deliverable, 'What is on today?', 'nor a deliverable');
+        assert.deepStrictEqual([copied.constraints, copied.assumptions], [[], ['today means UTC']], 'nor a constraint or an assumption');
+        assert.strictEqual(normalize({ ambiguity: 0.9, risk: 'high', question: { text: 'Which city?', options: ['<answer 1>', 'Porto', '...'] } }, { task: 'x' }).question, null, 'one real option is not a choice');
+        assert.deepStrictEqual(normalize({ ambiguity: 0.9, risk: 'high', question: { text: 'Which city?', options: ['Lisbon', '[city]', 'Porto'] } }, { task: 'x' }).question.options, ['Lisbon', 'Porto']);
+        assert.ok(!/<one question>|<answer \d>/.test(require('../server/runtime/brain/understand').SYSTEM || ''), 'the prompt shows no placeholder to copy');
         assert.strictEqual(normalize({ ambiguity: 0.9, risk: 'high', question: { text: 'x', options: ['1', '2', '3', '4', '5'] } }, { task: 'x' }).question.options.length, 4, 'at most four');
     });
 

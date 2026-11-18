@@ -24,6 +24,9 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/runs/:id', 'actor.task.read'],
     ['GET /api/v1/runs/:id/steps', 'actor.task.read'],
     ['GET /api/v1/runs/:id/events', 'actor.task.read'],
+    // An approval answered in the conversation (2026-11-18: "approvals just built into the chat"): it starts or declines
+    // the person's own work, as actor.task.create already grants.
+    ['POST /api/v1/runs/:id/approvals/:approval', 'actor.task.create'],
     // Conversations through the run API (2026-11-15: "your Actor answers everywhere"): start one with words, send the
     // next message, stop it. They create work for the person's own Actor, as actor.task.create already grants.
     ['POST /api/v1/runs {text}', 'actor.task.create'],
@@ -65,7 +68,13 @@ const ROUTE_EXTENSIONS = new Map([
     ['POST /api/v1/me/agents/import', 'actor.agent.manage'],
     // The skills registry (plan HO2, ADR-058): the catalogue is public (a skill is a document anybody may read),
     // and the installs of one of the person's own agents are guarded by the agent capability they already hold.
+    // What the person's answers used (2026-11-17): their own tasks' receipts summed, so the task read decides it.
+    ['GET /api/v1/me/usage', 'actor.task.read'],
     ['GET /api/v1/skills', null],
+    // The Experts' gallery (openvibe.expert, plan §D item 6; 2026-11-18): public, published blueprints are documents
+    // anybody may read, as the skills catalogue is.
+    ['GET /api/v1/gallery', null],
+    ['GET /api/v1/gallery/:id', null],
     ['GET /api/v1/skills/:id', null],
     ['POST /api/v1/me/agents/:id/skills', 'actor.agent.manage'],
     ['DELETE /api/v1/me/agents/:id/skills/:listingId', 'actor.agent.manage'],

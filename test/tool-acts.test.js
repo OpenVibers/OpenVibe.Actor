@@ -30,6 +30,9 @@ const EXPECTED = {
     market_quote: false,
     place_info: false,
     read_page: false,
+    decide: false,
+    read_pages: false,
+    fetch_data: false,
     recall: false,
     search_openvibe: false,
     openvibe_updates: false,
@@ -43,6 +46,7 @@ const EXPECTED = {
     // OpenVibe.Tools tool may do any of those.
     codes_task: true,
     computer_browser: true,
+    computer_page_check: true,   // plan §AD.25: it opens a page in the agent's browser, as computer_browser open does
     computer_desk: true,
     computer_input: true,
     computer_run: true,

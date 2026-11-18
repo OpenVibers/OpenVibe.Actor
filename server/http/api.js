@@ -52,6 +52,7 @@ const stills = require('../tasks/stills');
 const replay = require('../tasks/replay');
 const canvases = require('../canvases');
 const skills = require('../skills');
+const bpKit = require('openvibe-sdk/agents/blueprint');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_ID = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -312,6 +313,31 @@ function createApi(ctx) {
     };
     const bpRoute = (fn) => async (req, res) => { try { await fn(req, res); } catch (e) { bpFail(req, res, e); } };
     const bpVersion = (req) => (req.query.version != null && /^[1-9][0-9]{0,5}$/.test(String(req.query.version)) ? Number(req.query.version) : null);
+    // ── The gallery, signed out (openvibe.expert, plan §D item 6; 2026-11-18) ──
+    // The public, published blueprints: OpenVibe's own Experts (experts/, server/agents/stock.js) and what people chose
+    // to share. Anyone may read them; the list is kept a minute, so a busy gallery costs one query a minute. One Expert
+    // is its latest published version (or ?version=) with the asks its install screen shows; a link-only one answers
+    // to its address too, and a private one is 404.
+    let galleryKept = null;
+    r.get('/gallery', limits.reads('actor.gallery.read'), async (req, res) => {
+        try {
+            if (!galleryKept || Date.now() - galleryKept.at > 60_000) galleryKept = { at: Date.now(), cards: (await blueprints.gallery(s)).map((x) => blueprints.card(x.row, x.doc)) };
+        } catch (err) {
+            if (!galleryKept) return problem(req, res, 503, 'actor.gallery.unavailable', 'The gallery could not be read just now.');
+        }
+        res.set('Cache-Control', 'public, max-age=60');
+        res.json({ experts: galleryKept.cards });
+    });
+    r.get('/gallery/:id', limits.reads('actor.gallery.read'), async (req, res) => {
+        let got = null;
+        try { got = await blueprints.get(s, null, req.params.id, { version: bpVersion(req) }); } catch (err) {
+            return problem(req, res, 503, 'actor.gallery.unavailable', 'The gallery could not be read just now.');
+        }
+        if (!got || got.doc.state === 'draft') return problem(req, res, 404, 'actor.blueprint.not_found', 'No such published Expert.');
+        res.set('Cache-Control', 'public, max-age=60');
+        res.json({ ...blueprints.card(got.row, got.doc), blueprint: got.doc, asks: bpKit.asks(got.doc) });
+    });
+
     r.get('/blueprints', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), bpRoute(async (req, res) => {
         const scope = req.query.scope === 'public' ? 'public' : 'mine';
         const rows = await blueprints.list(s, req.principal.requester, { scope, limit: req.query.limit });
@@ -1109,7 +1135,7 @@ function createApi(ctx) {
             if (!req.principal || req.principal.kind !== 'user') return problem(req, res, 404, 'agents.run.not_found', 'No such run.');
             // A whole conversation (Network's frame asks for it): the first turn's id, the newest turn's state.
             if (req.query.conversation === '1') {
-                const view = await runsApi.conversationView(s, task.id, req.principal.requester, s.now(), config.baseUrl);
+                const view = await runsApi.conversationView(s, task.id, req.principal.requester, s.now(), config.baseUrl, config);
                 return view ? res.json(view) : problem(req, res, 404, 'agents.run.not_found', 'No such run.');
             }
             const run = await runsApi.loadRunRow(s, task.id, req.principal.requester);
@@ -1186,6 +1212,17 @@ function createApi(ctx) {
     // action in their thread, so it takes actor.task.create. Another person's canvas is the same 404 as one that does
     // not exist. A page may post a plain form (same-origin); JSON callers get JSON.
     const canvasWantsJson = (req) => String(req.get('accept') || '').includes('application/json') || String(req.get('content-type') || '').includes('application/json');
+    // What your answers used (2026-11-17, the owner: "usage stats and tokens … cost"): today and the last ?days= (at most
+    // 30, what Actor keeps), by how each was paid (OpenVibe's free AI, your key, your plan, your computer, credits) and by
+    // model, with the free tier's daily limit. The Vibe session's usage sheet reads it.
+    r.get('/me/usage', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
+        const days = req.query.days == null ? store.RETENTION_DAYS : Number.parseInt(String(req.query.days), 10);
+        if (!Number.isInteger(days) || days < 1 || days > store.RETENTION_DAYS) return problem(req, res, 400, 'actor.usage.invalid', `days must be 1 to ${store.RETENTION_DAYS}.`);
+        const out = await store.usageOf(s, req.principal.requester, days);
+        const tier = config.allowance || {};
+        res.set('Cache-Control', 'private, no-store');
+        res.json({ ...out, limit: { per_day_usd: Number(tier.perDayUsd) || null, tasks_per_day: Number(tier.tasksPerDay) || null } });
+    });
     r.get('/me/canvases', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
         const requester = req.principal.requester;
         if (req.query.thread != null) {
