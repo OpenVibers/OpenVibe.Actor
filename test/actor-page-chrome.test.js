@@ -63,6 +63,18 @@ if (!playwright || !fs.existsSync('/usr/bin/google-chrome') || process.env.OV_SK
             await page.locator('[data-ovk-sheet="#ay-brain"]').click();
             await page.waitForSelector('#ay-brain[open]');
             await page.locator('#ay-brain [data-ovk-close]').click();
+            // The status bar tucks away while scrolling down and comes back on the way up (the owner, 11-15: it sat over
+            // the card under it and cut "Add earnings").
+            const room=await page.evaluate(()=>document.documentElement.scrollHeight-innerHeight);
+            if(room>300){
+                await page.evaluate(()=>window.scrollTo(0,0));
+                await page.waitForTimeout(100);
+                await page.evaluate(()=>window.scrollTo(0,Math.min(600,document.documentElement.scrollHeight-innerHeight)));
+                await page.waitForFunction(()=>document.querySelector('.ay-bar').classList.contains('is-tucked'),null,{timeout:3000});
+                await page.evaluate(()=>window.scrollBy(0,-200));
+                await page.waitForFunction(()=>!document.querySelector('.ay-bar').classList.contains('is-tucked'),null,{timeout:3000});
+                await page.evaluate(()=>window.scrollTo(0,0));
+            }
             const added=(await t.ctx.day.goals(a.owner)).find(g=>g.text==='Watch the price of a desk lamp');
             await t.ctx.day.removeGoal(a.owner,added.id);
             assert.deepEqual(errors,[]);

@@ -159,6 +159,27 @@ function stepFor(name, input) {
                 payload: safeInput({ machine: a.machine, action, url: a.url, ref: a.ref, selector: a.selector, text: a.text, key: a.key, desk: a.desk }, { removeText: action === 'fill' }),
             };
         }
+        case 'computer_page_check': {
+            // Plan §AD.25: it opens one page in the agent's browser and draws it at a few widths: approved like opening it,
+            // and one exact address may be always allowed.
+            const widths = Array.isArray(a.widths) && a.widths.length ? a.widths.slice(0, 3).join(' and ') : '390 and 1280';
+            return {
+                act: 'act',
+                kind: 'computer.browser',
+                summary: `Check ${quoted(a.url, 200)} at ${widths} px in your browser`,
+                target: raw(a.url) ? exactTarget(`check ${word(a.url)} on ${machineWord(a)}`) : null,
+                payload: safeInput({ machine: a.machine, url: a.url, widths: a.widths, themes: a.themes, desk: a.desk }),
+            };
+        }
+        case 'setup_save_key':
+            // Plan §AB.44: the key the person granted this task, saved into the one Setup row they chose; never shown.
+            return {
+                act: 'act',
+                kind: 'setup.key',
+                summary: 'Save the new key in your OpenVibe Setup',
+                target: exactTarget('save the key you asked me to set up'),
+                payload: safeInput({ machine: a.machine, desk: a.desk }),
+            };
         case 'computer_desk': {
             const action = text(a.action, 20) || 'status';
             if (action === 'status') return null;
@@ -177,6 +198,40 @@ function stepFor(name, input) {
                 summary: `Move your robot ${text(a.robot, 80)}: ${quoted(commandOf(a.steps).join(', '), 220)}`,
                 target: raw(a.robot) ? exactTarget(`robot ${word(a.robot)}`) : null,
                 payload: safeInput({ robot: a.robot, steps: a.steps }),
+            };
+
+        // ── OpenVibe.Git: the person's own repositories (plan §AD.10 step 1) ──
+        case 'git_repo_create':
+            return {
+                act: 'act',
+                kind: 'code',
+                summary: `Create the repository ${quoted(a.name, 80)} on OpenVibe.Git${a.private ? ' (private)' : ''}`,
+                target: raw(a.name) ? exactTarget(`new repository ${word(a.name)}`) : null,
+                payload: safeInput({ name: a.name, description: a.description, private: a.private, starter: a.starter }),
+            };
+        case 'git_files_write':
+            return {
+                act: 'edit',
+                kind: 'code',
+                summary: `Commit ${Array.isArray(a.files) ? Math.min(a.files.length, 200) : 0} file(s) to ${text(a.repo, 120)}${a.branch ? ` on ${text(a.branch, 80)}` : ''}: ${quoted(a.message, 160)}`,
+                target: raw(a.repo) ? exactTarget(`repository ${word(a.repo)}${a.branch ? ` branch ${word(a.branch)}` : ''}`) : null,
+                payload: safeInput({ repo: a.repo, branch: a.branch, base: a.base, message: a.message, files: a.files }),
+            };
+        case 'space_site_from_repo':
+            return {
+                act: 'act',
+                kind: 'publish',
+                summary: `Put ${text(a.repo, 120)} on the web as a website${a.folder ? ` (its ${text(a.folder, 60)} folder)` : ''}; each push arrives as a preview you make live`,
+                target: raw(a.repo) ? exactTarget(`website from ${word(a.repo)}`) : null,
+                payload: safeInput({ repo: a.repo, branch: a.branch, folder: a.folder, name: a.name }),
+            };
+        case 'git_change_open':
+            return {
+                act: 'act',
+                kind: 'code',
+                summary: `Open a change on ${text(a.repo, 120)} from ${text(a.head, 80)} into ${text(a.base, 80)}: ${quoted(a.title, 160)}`,
+                target: raw(a.repo) ? exactTarget(`changes of ${word(a.repo)}`) : null,
+                payload: safeInput({ repo: a.repo, head: a.head, base: a.base, title: a.title, body: a.body }),
             };
 
         // ── OpenVibe.Space: the person's own spaces ──

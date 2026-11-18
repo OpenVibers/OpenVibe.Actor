@@ -24,6 +24,16 @@ const ROUTE_EXTENSIONS = new Map([
     ['GET /api/v1/runs/:id', 'actor.task.read'],
     ['GET /api/v1/runs/:id/steps', 'actor.task.read'],
     ['GET /api/v1/runs/:id/events', 'actor.task.read'],
+    // An approval answered in the conversation (2026-11-18: "approvals just built into the chat"): it starts or declines
+    // the person's own work, as actor.task.create already grants.
+    ['POST /api/v1/runs/:id/approvals/:approval', 'actor.task.create'],
+    // Conversations through the run API (2026-11-15: "your Actor answers everywhere"): start one with words, send the
+    // next message, stop it. They create work for the person's own Actor, as actor.task.create already grants.
+    ['POST /api/v1/runs {text}', 'actor.task.create'],
+    ['POST /api/v1/runs/:id/messages', 'actor.task.create'],
+    ['POST /api/v1/runs/:id/stop', 'actor.task.create'],
+    // Rename a conversation (plan §AD.8): the person's own conversation, the same grant as sending it a message.
+    ['PATCH /api/v1/runs/:id', 'actor.task.create'],
     ['GET /api/v1/tasks/:id/trace', 'actor.task.read'],
     ['GET /api/v1/stats/tools', null],
     ['GET /api/v1/stats/models', null],
@@ -58,7 +68,13 @@ const ROUTE_EXTENSIONS = new Map([
     ['POST /api/v1/me/agents/import', 'actor.agent.manage'],
     // The skills registry (plan HO2, ADR-058): the catalogue is public (a skill is a document anybody may read),
     // and the installs of one of the person's own agents are guarded by the agent capability they already hold.
+    // What the person's answers used (2026-11-17): their own tasks' receipts summed, so the task read decides it.
+    ['GET /api/v1/me/usage', 'actor.task.read'],
     ['GET /api/v1/skills', null],
+    // The Experts' gallery (openvibe.expert, plan §D item 6; 2026-11-18): public, published blueprints are documents
+    // anybody may read, as the skills catalogue is.
+    ['GET /api/v1/gallery', null],
+    ['GET /api/v1/gallery/:id', null],
     ['GET /api/v1/skills/:id', null],
     ['POST /api/v1/me/agents/:id/skills', 'actor.agent.manage'],
     ['DELETE /api/v1/me/agents/:id/skills/:listingId', 'actor.agent.manage'],
@@ -95,7 +111,10 @@ function codeRoutes() {
     for (const m of RUNS_SRC.matchAll(/^\s*r\.(get|post|put|patch|delete)\('([^']+)'(.*)$/gm)) {
         const guard = m[3].match(/requireCapability\('([a-z0-9._]+)'\)/);
         const read = m[3].match(/limits\.reads\('([a-z0-9._]+)'\)/);
-        out.set(`${m[1].toUpperCase()} /api/v1/runs${m[2] === '/' ? '' : m[2]}`, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });
+        // POST / starts a conversation ({ text }); a body with `skill` goes on to the catalogue's skill run, which keeps
+        // POST /api/v1/runs and its own guard. The conversation start is listed as POST /api/v1/runs {text}.
+        const key = `${m[1].toUpperCase()} /api/v1/runs${m[2] === '/' ? '' : m[2]}`;
+        out.set(out.has(key) ? `${key} {text}` : key, { guard: guard ? guard[1] : null, limit: read ? read[1] : null });
     }
     return out;
 }

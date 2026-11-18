@@ -22,14 +22,14 @@ function subjectRef(requester) {
 
 async function insertTask(s, t) {
     await s.db.query(
-        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret, timeout_ms, parent_id, fork_of_step, fork_change, agent_id, level, assignment_id, conversation, tools, model, tier, run_settings)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18::jsonb, $19, $20, $21, $22::jsonb, $23::jsonb, $24, $25, $26::jsonb)`,
+        `INSERT INTO tasks (id, requester, project_id, task, mode, agent, budget_task, budget_day, state, idem_key, idem_hash, created_at, via, webhooks, webhook_secret, timeout_ms, parent_id, fork_of_step, fork_change, agent_id, level, assignment_id, conversation, tools, model, tier, run_settings, engine, comparison_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18::jsonb, $19, $20, $21, $22::jsonb, $23::jsonb, $24, $25, $26::jsonb, $27::jsonb, $28)`,
         [t.id, t.requester, t.project_id || null, t.task, t.mode, t.agent || null, t.budget_task, t.budget_day, t.idem_key || null, t.idem_hash || null, t.created_at, t.via || null,
             t.webhooks && t.webhooks.length ? JSON.stringify(t.webhooks) : null, t.webhook_secret || null, t.timeout_ms || null, t.parent_id || null,
             t.fork_of_step == null ? null : Number(t.fork_of_step), t.fork_change ? JSON.stringify(t.fork_change) : null,
             t.agent_id || null, t.level || 'ask', t.assignment_id || null,
             t.conversation ? JSON.stringify(t.conversation) : null, t.tools != null ? JSON.stringify(t.tools) : null, t.model || null, t.tier || null,
-            t.run_settings ? JSON.stringify(t.run_settings) : null]);
+            t.run_settings ? JSON.stringify(t.run_settings) : null, t.engine ? JSON.stringify(t.engine) : null, t.comparison_id || null]);
     await addSpend(s, t.requester, 0, { tasks: 1 });
     return getTask(s, t.id);
 }
@@ -83,7 +83,7 @@ async function listTasks(s, requester, { limit = 20, before = null, via = null }
 async function updateTask(s, id, patch) {
     const cols = Object.keys(patch);
     if (!cols.length) return getTask(s, id);
-    const json = new Set(['result', 'explanation', 'fork_change']);
+    const json = new Set(['result', 'explanation', 'fork_change', 'receipt']);
     const sets = cols.map((c, i) => `${c} = $${i + 2}${json.has(c) ? '::jsonb' : ''}`);
     const vals = cols.map((c) => (json.has(c) && patch[c] != null ? JSON.stringify(patch[c]) : patch[c]));
     await s.db.query(`UPDATE tasks SET ${sets.join(', ')} WHERE id = $1`, [id, ...vals]);
@@ -239,6 +239,72 @@ async function spendToday(s, requester) {
 }
 
 /** The last `days` days of a requester's spend, oldest first, each day present (0 when nothing ran). */
+/**
+ * What a person's answers used (2026-11-17, the owner on the Vibe session: "display usage stats and tokens and all that
+ * for each harness or API balances or cost"): today and the days Actor keeps, from each task's receipt (agents.step@1
+ * 1.3.0: tokens and dollars by rung, and the model) and the dollars from spend_daily. A receipt covers its own task's
+ * model calls only, so summing them counts each call once. Tasks from before receipts (2026-11-16) count in the dollars
+ * and the tasks, not in the tokens.
+ */
+const USAGE_RUNGS = ['allowance', 'key', 'plan', 'machine', 'credits'];
+function sumUsage(rows, today) {
+    const n = (v) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? x : 0; };
+    const blank = () => ({ usd: 0, tokens: 0, tasks: 0, by: {} });
+    const out = { today: blank(), period: blank(), models: new Map() };
+    for (const row of rows || []) {
+        let r = null;
+        try { r = parse(row.receipt); } catch { r = null; }
+        const c = r && r.cost && typeof r.cost === 'object' ? r.cost : null;
+        const day = String(row.created_at || '').slice(0, 10);
+        const into = day === today ? [out.today, out.period] : [out.period];
+        for (const t of into) {
+            t.tasks += 1;
+            if (!c) continue;
+            t.tokens += n(c.tokens);
+            for (const k of USAGE_RUNGS) {
+                const b = c.by && c.by[k];
+                if (!b) continue;
+                const was = t.by[k] || (t.by[k] = { usd: 0, tokens: 0, tasks: 0 });
+                was.usd += n(b.usd); was.tokens += n(b.tokens); was.tasks += 1;
+            }
+        }
+        const m = r && r.model && typeof r.model.id === 'string' ? r.model : null;
+        if (m && c) {
+            const id = m.id.slice(0, 200);
+            const was = out.models.get(id) || { id, provider: typeof m.provider === 'string' ? m.provider.slice(0, 40) : null, usd: 0, tokens: 0, tasks: 0 };
+            was.usd += n(c.usd); was.tokens += n(c.tokens); was.tasks += 1;
+            out.models.set(id, was);
+        }
+    }
+    const r6 = (x) => Math.round(x * 1e6) / 1e6;
+    const tidy = (t) => {
+        const by = {};
+        for (const k of USAGE_RUNGS) if (t.by[k]) by[k] = { usd: r6(t.by[k].usd), tokens: Math.round(t.by[k].tokens), tasks: t.by[k].tasks };
+        return { usd: r6(t.usd), tokens: Math.round(t.tokens), tasks: t.tasks, by };
+    };
+    return {
+        today: tidy(out.today), period: tidy(out.period),
+        models: [...out.models.values()].sort((a, b) => b.tokens - a.tokens || b.usd - a.usd).slice(0, 12)
+            .map((m) => ({ ...m, usd: r6(m.usd), tokens: Math.round(m.tokens) })),
+    };
+}
+
+/** The person's usage today and over `days` (at most what Actor keeps): sumUsage over their tasks, dollars by day. */
+async function usageOf(s, requester, days = RETENTION_DAYS) {
+    const span = Math.max(1, Math.min(RETENTION_DAYS, Math.floor(Number(days)) || RETENTION_DAYS));
+    const today = dayOf(s.now());
+    const since = new Date(Date.parse(`${today}T00:00:00Z`) - (span - 1) * 86_400_000).toISOString();
+    const [rows, spend] = await Promise.all([
+        s.db.many('SELECT created_at, receipt FROM tasks WHERE requester = $1 AND created_at >= $2 ORDER BY id DESC LIMIT 5000', [requester, since]),
+        spendDays(s, requester, span),
+    ]);
+    const out = sumUsage(rows, today);
+    // Dollars: spend_daily is what Actor counts against the day's limit (every task, also those before receipts).
+    out.today.usd = Math.max(out.today.usd, Math.round(Number(spend[spend.length - 1].usd) * 1e6) / 1e6);
+    out.period.usd = Math.max(out.period.usd, Math.round(spend.reduce((t, d) => t + Number(d.usd), 0) * 1e6) / 1e6);
+    return { days: span, since: since.slice(0, 10), ...out };
+}
+
 async function spendDays(s, requester, days = 7) {
     const today = Date.parse(`${dayOf(s.now())}T00:00:00Z`);
     const keys = Array.from({ length: days }, (_, i) => dayOf(today - (days - 1 - i) * 86_400_000));
@@ -312,4 +378,4 @@ function toWire(row, { baseUrl }) {
     return t;
 }
 
-module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, eventsDetailed, lastEvent, needsYou, deskFrom, deskPlace, taskDesk, computerFrom, taskComputer, addSpend, spendToday, spendDays, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };
+module.exports = { insertTask, getTask, byIdempotency, listTasks, updateTask, appendEvent, eventsAfter, eventsDetailed, lastEvent, needsYou, deskFrom, deskPlace, taskDesk, computerFrom, taskComputer, addSpend, spendToday, spendDays, usageOf, sumUsage, lockSpendToday, failInterrupted, openTasks, prune, toWire, subjectRef, dayOf, parseJson: parse, OPEN, RETENTION_DAYS, followContext, followUps, forks, recentSucceeded };

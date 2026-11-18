@@ -1,6 +1,16 @@
 # Changelog
 
 
+## Unreleased — a notice wears the agent's face (plan §AB.31)
+
+- **The agent on a notification:** every notice Actor sends to the Network (a step only the person can do, a task that
+  finished or did not) now carries the agent it is about in `rich_content.agent`: `{ id, name, avatar_url?, hue?, glyph? }`.
+  The agent is the one the task belongs to (`tasks.agent_id`, or the `agent:agt_…` it came through); a person's task
+  with no agent of its own is their **Vibe**, the first agent every person has, with its face when it has one.
+- Only what is safe to show travels: a name, a picture that is an https URL, a hue between 0 and 359 and a short glyph
+  name. Anything else is left out, never guessed. Shared 4.251.0 draws the face; older clients show the message, which
+  already reads right.
+
 ## Unreleased — the agent's files, mail and shared nodes (plan §Z.6, job 2)
 
 - **Files (OpenVibe.Download):** `files_list` (a folder's files and folders), `files_read` (a text file of at most

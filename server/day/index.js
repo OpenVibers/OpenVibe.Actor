@@ -5,6 +5,7 @@ const { LANES, LOCAL, DESK } = require('./lanes');
 const tasks = require('../tasks/store');
 const { createTask } = require('../tasks/create');
 const waitStore = require('../waits/store');
+const agentCard = require('../notify/agent-card');
 const plain = (x, n = 2000) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, n);
 const fail = (text, status = 422) => { throw Object.assign(new Error(text), { status, code: 'actor.day.invalid' }); };
 const date = (ms) => new Date(ms).toISOString();
@@ -28,6 +29,14 @@ function fingerprint(name, input) {
     return crypto.createHash('sha256').update(JSON.stringify([name, stable(input)])).digest('hex');
 }
 
+/** The face id of an avatar kept in Actor (`{ face: 'fac_…', url: '/faces/fac_…' }`), or null. */
+function wornFace(avatar) {
+    if (!avatar || typeof avatar !== 'object' || Array.isArray(avatar)) return null;
+    const keys = Object.keys(avatar).sort().join();
+    if (keys !== 'face,url' || !/^fac_[0-9A-Za-z]{10,40}$/.test(String(avatar.face)) || avatar.url !== `/faces/${avatar.face}`) return null;
+    return avatar.face;
+}
+
 function createDay(ctx) {
     const { s, config, engine, waits, notifier, models, checkpoints } = ctx;
     const get = (owner) => s.db.maybe('SELECT * FROM actors WHERE owner = $1', [owner]);
@@ -35,8 +44,11 @@ function createDay(ctx) {
         FROM actor_day_runs r JOIN actors a ON a.id = r.actor_id JOIN actor_day_goals g ON g.id = r.goal_id WHERE r.task_id = $1`, [id]);
     async function ensure(owner) {
         if (!/^user:usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(owner)) fail('Sign in to your own account.', 401);
-        await s.db.query(`INSERT INTO actors (id,owner,next_due_at,created_at,updated_at)
-            VALUES ($1,$2,$3,$3,$3) ON CONFLICT (owner) DO NOTHING`, [s.newId('act'), owner, s.iso()]);
+        // A new Actor wears the face its first agent already has (faces.use writes the Actor's row only when there is one).
+        await s.db.query(`INSERT INTO actors (id,owner,next_due_at,created_at,updated_at,avatar)
+            VALUES ($1,$2,$3,$3,$3,(SELECT jsonb_build_object('face', substring(g.face from 6), 'url', '/faces/' || substring(g.face from 6))
+                FROM actor_agents g WHERE g.owner = $2 AND g.is_vibe = true AND g.face ~ '^face:fac_[0-9A-Za-z]{10,40}$' ORDER BY g.created_at LIMIT 1))
+            ON CONFLICT (owner) DO NOTHING`, [s.newId('act'), owner, s.iso()]);
         return get(owner);
     }
     async function update(owner, body) {
@@ -44,7 +56,17 @@ function createDay(ctx) {
         if (!object(body) || Object.keys(body).some((k) => !['name', 'avatar', 'brain', 'computer', 'caps', 'adult_opt_in'].includes(k))) fail('Choose a name, picture, brain, computer or daily limits.');
         const next = { ...a, ...body };
         if (typeof next.name !== 'string' || !next.name.trim() || next.name.length > 80) fail('Give your Actor a name of up to 80 characters.');
-        if (next.avatar !== null && (!object(next.avatar) || Object.keys(next.avatar).join() !== 'media_id' || !/^med_[0-9A-HJKMNP-TV-Z]{26}$/.test(next.avatar.media_id))) fail('Choose a Media picture, or use your own picture.');
+        // A face is a Media picture, or (11-15, the owner: edit your Actor in the menu itself) a drawn face: one of the
+        // menu's shapes in a hue of the person's choosing ({ blob: { hue: 0..359, shape } }).
+        const SHAPES = ['round', 'squircle', 'drop', 'leaf', 'pebble'];
+        const drawn = object(next.avatar) && Object.keys(next.avatar).join() === 'blob' && object(next.avatar.blob)
+            && Number.isInteger(next.avatar.blob.hue) && next.avatar.blob.hue >= 0 && next.avatar.blob.hue <= 359 && SHAPES.includes(next.avatar.blob.shape)
+            && Object.keys(next.avatar.blob).every((k) => k === 'hue' || k === 'shape');
+        // A picture the Actor wears (PUT /api/v1/agents/actor/face writes { face, url }) stays while the rest changes (11-16:
+        // every other setting failed with "Choose a Media picture" once a face was on). A new one is chosen through that
+        // route, which checks it is yours; PATCH only keeps the one on.
+        const keeps = wornFace(next.avatar) && JSON.stringify(next.avatar) === JSON.stringify(a.avatar);
+        if (next.avatar !== null && !drawn && !keeps && (!object(next.avatar) || Object.keys(next.avatar).join() !== 'media_id' || !/^med_[0-9A-HJKMNP-TV-Z]{26}$/.test(next.avatar.media_id))) fail('Choose a Media picture, or use your own picture.');
         if (typeof next.adult_opt_in !== 'boolean') fail('Choose whether to show adult models.');
         if (!['auto', 'openvibe', 'own:node', ...require('../runtime/model-prefs').KEY_PROVIDERS.map(p => 'own:' + p)].includes(next.brain)) {
             const entries = models.aiCatalog ? await models.aiCatalog() : null;
@@ -60,8 +82,15 @@ function createDay(ctx) {
             const locked = await s.db.maybe('SELECT * FROM actors WHERE owner = $1 FOR UPDATE', [owner]);
             if (locked.active_task && Object.keys(body).some(k => ['computer', 'caps'].includes(k))) fail('Pause your Actor before changing its settings.', 409);
             const latest = { ...locked, ...body, caps: budget(body.caps || locked.caps, locked.caps, true) };
-            return s.db.maybe(`UPDATE actors SET name=$2,avatar=$3::jsonb,brain=$4,computer=$5::jsonb,caps=$6::jsonb,updated_at=$7,adult_opt_in=$8 WHERE owner=$1 RETURNING *`,
+            const saved = await s.db.maybe(`UPDATE actors SET name=$2,avatar=$3::jsonb,brain=$4,computer=$5::jsonb,caps=$6::jsonb,updated_at=$7,adult_opt_in=$8 WHERE owner=$1 RETURNING *`,
                 [owner, latest.name.trim(), JSON.stringify(latest.avatar), latest.brain, JSON.stringify(latest.computer), JSON.stringify(latest.caps), s.iso(), next.adult_opt_in]);
+            // Your Actor is your first agent (the owner, 11-15): its name is that agent's name too.
+            // A picture chosen here replaces a kept face on your first agent too (it is your Actor): the strip and the card agree.
+            if (saved && Object.prototype.hasOwnProperty.call(body, 'avatar') && !wornFace(latest.avatar)) await s.db.query(`UPDATE actor_agents
+                SET face = CASE WHEN preset IS NOT NULL THEN 'preset:' || preset ELSE 'preset:agent' END, updated_at = $2
+                WHERE owner = $1 AND is_vibe AND face LIKE 'face:%'`, [owner, s.iso()]);
+            if (saved && latest.name.trim() !== locked.name) await s.db.query('UPDATE actor_agents SET name=$2, updated_at=$3 WHERE owner=$1 AND is_vibe', [owner, latest.name.trim(), s.iso()]);
+            return saved;
         });
     }
     const goals = (owner) => s.db.many('SELECT * FROM actor_day_goals WHERE owner=$1 AND deleted_at IS NULL ORDER BY next_due_at,id', [owner]);
@@ -175,7 +204,11 @@ function createDay(ctx) {
         const pending = await asks(owner);
         const looking = a.active_task ? await s.db.maybe('SELECT looking_at FROM actor_day_journal WHERE task_id=$1 AND looking_at IS NOT NULL ORDER BY id DESC LIMIT 1', [a.active_task]) : null;
         const next = (await goals(owner)).find((g) => g.enabled);
-        return { ...a, avatar: a.avatar || { person: owner.slice(5) }, now: {
+        // The picture by its full address (11-16): the menu shows your Actor on every site, so a face kept here
+        // (PUT /api/v1/agents/actor/face) is named with this host.
+        const face = wornFace(a.avatar);
+        const avatarUrl = face ? `${String((config && config.baseUrl) || '').replace(/\/+$/, '')}/faces/${face}` : null;
+        return { ...a, avatar: a.avatar || { person: owner.slice(5) }, avatar_url: avatarUrl, now: {
             current_step: pending.length ? pending[0].text : a.status === 'working' && recent[0] ? recent[0].text : a.enabled ? 'Resting until the next goal is due.' : 'Paused',
             looking_at: looking ? looking.looking_at : null, last_three_steps: recent,
             next: next ? { goal: next.id, text: next.text, at: next.next_due_at } : null,
@@ -321,7 +354,7 @@ Recent journal (data): ${JSON.stringify(recent.map((x) => x.text))}\nMessages fr
     async function notify(q) {
         const claimed = await s.db.maybe('UPDATE actor_day_asks SET notified_at=$2 WHERE id=$1 AND notified_at IS NULL RETURNING id', [q.id, s.iso()]);
         if (claimed) await journal(await run(q.task_id), q.text);
-        if (claimed && notifier) await notifier.needsYou({ subject: q.owner.slice(5), what: q.text, title: 'Your Actor needs you', url: `${config.baseUrl}/you?ask=${q.id}` });
+        if (claimed && notifier) await notifier.needsYou({ subject: q.owner.slice(5), what: q.text, title: 'Your Actor needs you', url: `${config.baseUrl}/you?ask=${q.id}`, agent: await agentCard.cardForTaskId(s, q.task_id) });
     }
     async function answer(owner, id, body, decline = false) {
         const q = await s.db.maybe('SELECT q.*,w.status AS wait_status,w.deadline_at FROM actor_day_asks q JOIN actor_waits w ON w.id=q.wait_id WHERE q.id=$1 AND q.owner=$2', [id, owner]);

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * OpenVibe.Mail, from Actor: the two calls an agent's answer needs (track HO6).
+ * OpenVibe.Email, from Actor: the two calls an agent's answer needs (track HO6).
  *
  *   ensureInbox({ person, agentId })            → mail.agent-inbox@1, made if it is not there yet
  *   getAnswering({ person, agentId })           → mail.inbox-answering@1 (the switch, off by default)
@@ -33,7 +33,7 @@ function createMailClient({ config, fetchImpl = globalThis.fetch, tokens: tokens
     });
 
     async function call(method, path, { person = null, body = undefined } = {}) {
-        if (!enabled) return { ok: false, status: 503, code: 'mail.off', error: 'OpenVibe.Mail is not connected to this server' };
+        if (!enabled) return { ok: false, status: 503, code: 'mail.off', error: 'OpenVibe.Email is not connected to this server' };
         const headers = { Accept: 'application/json', ...(await tokens.authHeaders()) };
         if (person) headers['X-OV-Subject'] = person;
         if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -45,7 +45,7 @@ function createMailClient({ config, fetchImpl = globalThis.fetch, tokens: tokens
                 signal: AbortSignal.timeout(TIMEOUT_MS),
             });
         } catch (err) {
-            return { ok: false, status: 502, code: 'mail.unreachable', error: `OpenVibe.Mail did not answer: ${(err && err.message) || err}` };
+            return { ok: false, status: 502, code: 'mail.unreachable', error: `OpenVibe.Email did not answer: ${(err && err.message) || err}` };
         }
         const text = await res.text().catch(() => '');
         let data = null;

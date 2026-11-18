@@ -18,8 +18,10 @@ const KINDS = [
     'computer.input',  // use the mouse or the keyboard on the person's computer
     'computer.browser',// open, fill or click in the person's browser
     'computer.desk',   // start or stop the agent's desk on a machine
+    'setup.key',       // save a provider key the person asked it to set up (plan §AB.44, a one-time grant)
     'robot.move',      // move the person's robot
     'space',           // change the person's own OpenVibe.Space (make one, write its files)
+    'code',            // change the person's own code on OpenVibe.Git (make a repository, commit, open a change)
     'files.save',      // save a file in the person's OpenVibe.Download drive (under Agent)
     'run.check',       // run a repository's checks on a shared node
     'publish',         // publish something for the public to see
@@ -43,8 +45,10 @@ const LABELS = {
     'computer.input': 'using your mouse or keyboard',
     'computer.browser': 'acting in your browser',
     'computer.desk': "starting or stopping your agent's desk",
+    'setup.key': 'saving a provider key you asked it to set up in your OpenVibe Setup',
     'robot.move': 'moving your robot',
     'space': 'changing your own OpenVibe.Space',
+    'code': 'changing your own code on OpenVibe.Git',
     'files.save': 'saving a file in your OpenVibe.Download drive',
     'run.check': 'running the checks of your code on a shared node',
     'publish': 'publishing for others to see',

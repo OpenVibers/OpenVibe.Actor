@@ -32,6 +32,11 @@ const TABLES = [
     // with them in the extra part below. The bytes are not in the row list: a part may carry 20 MB, and one person's
     // charts must not fill it. First, so the rows are erased and counted before their tasks go (and take them with a
     // cascade).
+    // One task worked several ways (migration 0080): the task's words, the ways and their grades.
+    { table: 'actor_comparisons', subject: 'requester', value: (usr) => `user:${usr}`, file: 'comparisons.json', erase: 'delete' },
+    // Pictures made or uploaded for your agents (11-16): what they were, never the bytes in the export (they are at /faces/<id>).
+    { table: 'actor_faces', subject: 'owner', value: (usr) => `user:${usr}`, file: 'faces.json', erase: 'delete',
+        columns: ['id', 'owner', 'mime', 'prompt', 'style', 'created_at'] },
     { table: 'actor_artifacts', subject: 'owner', value: (usr) => `user:${usr}`, file: 'artifacts.json', erase: 'delete',
         columns: ['id', 'task_id', 'owner', 'name', 'mime', 'size', 'created_at'] },
     // The files they attached to their messages in the chat (plan L55 C2): the rows here (with what the run read of
@@ -78,6 +83,10 @@ const TABLES = [
             'cost_usd', 'free_usd', 'explanation', 'cancel_at', 'cancel_by', 'last_seq', 'idem_key', 'idem_hash', 'created_at', 'finished_at', 'timeout_ms', 'via', 'webhooks', 'parent_id',
             // A fork's parent step and the one change it was made with (stage V2-9), and how often it resumed.
             'fork_of_step', 'fork_change', 'resumes', 'agent_id', 'level', 'assignment_id',
+            // The way the person chose (an engine) and the comparison a task is one side of (migration 0080).
+            'engine', 'comparison_id',
+            // An answer's receipt (migration 0082): what a turn took and what paid for it, by rung.
+            'receipt',
             // The catalogue skill a task was started from (migration 0057): its slug, name and the subject's title.
             'skill_slug', 'skill_name', 'skill_subject_title',
             // A product conversation turn (one-engine slice): which conversation it answers, the tools it may call and
@@ -87,7 +96,9 @@ const TABLES = [
             // the adult tier.
             'tier',
             // The first-party service permitted to read a personal agent run on the person's behalf.
-            'delegated_via', 'run_settings'],
+            'delegated_via', 'run_settings',
+            // The name the person gave a conversation (Rename, migration 0079).
+            'title'],
     },
     // The person's own per-UTC-day spend accounting. Deleted: nothing in Actor keeps a person's spend record for a
     // reason that outlives them. The `*` row (everyone's daily ceiling) does not match `user:usr_…` and stays — it is

@@ -26,11 +26,16 @@ const EXPECTED = {
     list_my_computers: false,
     list_my_robots: false,
     locker_fill_login: false,
+    setup_save_key: true,
     market_quote: false,
     place_info: false,
     read_page: false,
+    decide: false,
+    read_pages: false,
+    fetch_data: false,
     recall: false,
     search_openvibe: false,
+    openvibe_updates: false,
     search_web: false,
     sports_scores: false,
     time_in: false,
@@ -41,6 +46,7 @@ const EXPECTED = {
     // OpenVibe.Tools tool may do any of those.
     codes_task: true,
     computer_browser: true,
+    computer_page_check: true,   // plan §AD.25: it opens a page in the agent's browser, as computer_browser open does
     computer_desk: true,
     computer_input: true,
     computer_run: true,
@@ -60,11 +66,16 @@ const EXPECTED = {
     // Space: the agent builds the person's own spaces (plan 2026-10-22 §Z stage Z1). Making one, writing its files
     // and asking to publish it change the world; listing and reading them do not.
     space_create: true,
+    git_repos_list: false,
+    git_repo_create: true,
+    git_files_write: true,
+    git_change_open: true,
     space_files_list: false,
     space_files_read: false,
     space_files_write: true,
     space_preview: false,
     space_publish: true,
+    space_site_from_repo: true,
     // Money (plan HO7): a tip asks the person, and the payment moves their Vibes when they approve it.
     spend_vibes: true,
     // Files (the person's own drive, OpenVibe.Download): listing and reading change nothing; saving a file does.

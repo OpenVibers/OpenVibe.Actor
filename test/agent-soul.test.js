@@ -142,10 +142,10 @@ const GOOD = {
             assert.strictEqual(by.Juniper.state, 'asks');
             assert.strictEqual(by.Juniper.asks, 1);
             assert.strictEqual(by.Sleepy.state, 'paused');
-            assert.strictEqual(by.Vibe.state, 'resting');
-            assert.strictEqual(by.Vibe.glyph, 'spark');
-            assert.strictEqual(by.Vibe.hue, 258);
-            assert.strictEqual(by.Vibe.avatar_url, null);
+            assert.strictEqual(by.Actor.state, 'resting', 'your first agent is Actor (11-15)');
+            assert.strictEqual(by.Actor.glyph, 'spark');
+            assert.strictEqual(by.Actor.hue, 258);
+            assert.strictEqual(by.Actor.avatar_url, null);
             assert.strictEqual(agents[0].name, 'Worker', 'newest activity first');
             const text = JSON.stringify(agents);
             assert.ok(!text.includes('Work carefully.'), 'no instructions');
@@ -167,7 +167,9 @@ const GOOD = {
         await check('the expand migration adds soul jsonb and lets a proposal be kind soul', async () => {
             const col = await t.ctx.s.db.maybe("SELECT data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'actor_agents' AND column_name = 'soul'");
             assert.deepStrictEqual(col, { data_type: 'jsonb' });
-            const def = await t.ctx.s.db.value("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'actor_agent_proposals_kind_check'");
+            // This test's own schema only: on PostgreSQL every test file has one, and another file's (being dropped as it
+            // finished) answered "could not open relation with OID" (pin PRs #541, #542, 11-15/16).
+            const def = await t.ctx.s.db.value("SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace WHERE c.conname = 'actor_agent_proposals_kind_check' AND n.nspname = current_schema()");
             assert.match(def, /'soul'/);
         });
     } finally { await t.close(); }

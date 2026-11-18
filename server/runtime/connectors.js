@@ -68,6 +68,14 @@ const CONNECTORS = [
         default: true,
     },
     {
+        id: 'git',
+        name: 'Your code on OpenVibe.Git',
+        service: 'openvibe.git',
+        what: 'Make repositories on git.openvibe.codes, commit files to them and open changes for you to merge.',
+        risk: 'writes',
+        default: true,
+    },
+    {
         id: 'space',
         name: 'Your spaces',
         service: 'openvibe.space',
@@ -120,7 +128,7 @@ const CONNECTORS = [
         id: 'email',
         name: 'Email',
         service: 'openvibe.mail',
-        what: 'Read the mail at your OpenVibe.Mail address and answer it.',
+        what: 'Read the mail at your OpenVibe.Email address and answer it.',
         risk: 'sends',
         default: false,
     },

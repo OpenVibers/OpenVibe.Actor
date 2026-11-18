@@ -33,7 +33,7 @@ const PRESET_NAMES = ['Researcher', 'Inbox', 'Studio editor', 'Party host'];
             assert.deepStrictEqual(contracts.validate('actor.agent-list@1', { agents: body.agents.map(contact) }).errors, []);
             assert.strictEqual(body.agents.length, 1);
             vibe = body.agents[0];
-            assert.strictEqual(vibe.name, 'Vibe');
+            assert.strictEqual(vibe.name, 'Actor', 'your first agent is called Actor until you name it (the owner, 11-15)');
             assert.match(vibe.id, /^agt_/);
             assert.deepStrictEqual([vibe.owner, vibe.level, vibe.model.engine], [owner, 'ask', 'runtime']);
             assert.strictEqual(Number(await t.ctx.s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1 AND is_vibe', [owner])), 1, 'one Vibe');
@@ -95,6 +95,22 @@ const PRESET_NAMES = ['Researcher', 'Inbox', 'Studio editor', 'Party host'];
             assert.strictEqual(extra.status, 422);
         });
 
+        await check('your Actor and your first agent are one: Actor until named, and a new name for either is both', async () => {
+            const me = await t.get('/api/v1/me/actor', { as: alice });
+            assert.strictEqual(me.status, 200, me.text);
+            assert.strictEqual(me.json().name, 'Actor', 'Actor by default, never "My Actor" (the owner, 11-15)');
+            const renamed = await t.get(`/api/v1/agents/${vibe.id}`, { as: alice, method: 'PATCH', json: { name: 'Juniper' }, headers: SAME });
+            assert.strictEqual(renamed.status, 200, renamed.text);
+            assert.strictEqual((await t.get('/api/v1/me/actor', { as: alice })).json().name, 'Juniper', 'naming the first agent names your Actor');
+            const back = await t.get('/api/v1/me/actor', { as: alice, method: 'PATCH', json: { name: 'Actor' }, headers: SAME });
+            assert.strictEqual(back.status, 200, back.text);
+            assert.strictEqual((await t.get(`/api/v1/agents/${vibe.id}`, { as: alice })).json().name, 'Actor', 'and naming your Actor names the first agent');
+            // The old defaults move to Actor; a name someone chose stays (migrations/0077_actor_default_name.sql).
+            const sql = require('fs').readFileSync(require('path').join(__dirname, '..', 'migrations', '0077_actor_default_name.sql'), 'utf8');
+            assert.match(sql, /UPDATE actors SET name = 'Actor' WHERE name = 'My Actor';/);
+            assert.match(sql, /UPDATE actor_agents SET name = 'Actor' WHERE is_vibe AND name = 'Vibe';/);
+        });
+
         await check('Vibe is not deletable on either route; other contacts are', async () => {
             const old = await t.get(`/api/v1/me/agents/${vibe.id}`, { as: alice, method: 'DELETE', headers: SAME });
             assert.strictEqual(old.status, 409);
@@ -125,7 +141,7 @@ const PRESET_NAMES = ['Researcher', 'Inbox', 'Studio editor', 'Party host'];
             const made = await t.get('/api/v1/agents', { as: carol, json: { name: 'First' }, headers: SAME });
             assert.strictEqual(made.status, 201, made.text);
             const roster = (await t.get('/api/v1/agents', { as: carol })).json().agents;
-            assert.deepStrictEqual(roster.map((a) => a.name), ['Vibe', 'First']);
+            assert.deepStrictEqual(roster.map((a) => a.name), ['Actor', 'First']);
             assert.strictEqual(Number(await t.ctx.s.db.value('SELECT count(*) FROM actor_agents WHERE owner = $1 AND is_vibe', [`user:${carol.subject}`])), 1);
         });
 

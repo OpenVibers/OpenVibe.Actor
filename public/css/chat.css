@@ -332,3 +332,19 @@ body:has(.page-app) > footer, body:has(.page-app) #ov-footer, body:has(.page-app
 html.ac-has-messenger, html.ac-has-messenger body { overflow: hidden; }
 /* Design rule 201: the intro is one line on a computer, at most two on a phone. */
 @media (max-width: 640px) { .cm-lede, .ct-settings-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
+
+/* A spent free allowance: the ways to keep going (chat-pages.js waysBlock), one row each, 44 px targets. */
+.ct-ways-list { display: grid; gap: 6px; margin: 10px 0 2px; padding: 0; list-style: none; }
+.ct-way { display: grid; grid-template-columns: 36px minmax(0, 1fr) 18px; align-items: center; gap: 10px; min-height: 52px; padding: 6px 10px 6px 8px;
+  border: 1px solid var(--border, rgba(255,255,255,.09)); border-radius: 14px; background: var(--bg-card, rgba(255,255,255,.035)); color: inherit; text-decoration: none;
+  transition: border-color .18s, transform .12s; }
+.ct-way:hover { border-color: color-mix(in srgb, var(--ovt-accent, var(--accent, #3b82f6)) 45%, var(--border, rgba(255,255,255,.09))); }
+.ct-way:active { transform: scale(.99); }
+.ct-way-g { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; color: var(--ovt-accent, var(--accent, #3b82f6));
+  background: color-mix(in srgb, var(--ovt-accent, var(--accent, #3b82f6)) 14%, transparent); }
+.ct-way-g svg { width: 20px; height: 20px; }
+.ct-way-t { display: grid; min-width: 0; }
+.ct-way-t b { font-weight: 650; }
+.ct-way-t small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted, #93a0b4); font-size: 12.5px; }
+.ct-way-go { color: var(--text-muted, #93a0b4); }
+.ct-way-go svg { width: 16px; height: 16px; }

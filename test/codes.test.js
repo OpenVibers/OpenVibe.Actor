@@ -99,6 +99,29 @@ const run = (codes, extra = {}) => {
         const codes = createCodes({ config, fetchImpl: fakeCodes().fetchImpl, tokens, sleep: async () => {}, pollMs: 0 });
         await assert.rejects(codes.adapter({ task: 'https://github.com/a/b fix', requester: 'ip:1.2.3.4', emit: async () => {} }), /signed in/);
         await assert.rejects(codes.adapter({ task: 'fix my code', requester: `user:${ME}`, emit: async () => {} }), (e) => e.code === 'actor.task.no_repo');
+        // 11-18: with OpenVibe Git connected, work that names no repository gets a private one, and Codes runs in it.
+        {
+            const f = fakeCodes();
+            const made = [];
+            const fetchImpl = async (url, init = {}) => {
+                const u = new URL(url);
+                if (u.hostname === 'git.test') { made.push({ path: u.pathname, body: init.body ? JSON.parse(init.body) : null }); return new Response(JSON.stringify({ full_name: 'ada/unittest-example-r9r9r9', html_url: 'https://git.openvibe.codes/ada/unittest-example-r9r9r9', visibility: 'private' }), { status: 201, headers: { 'content-type': 'application/json' } }); }
+                if (u.pathname.startsWith('/api/v1/identity') || u.pathname.startsWith('/api/v1/subjects') || /resolve/.test(u.pathname)) return new Response(JSON.stringify({ subject: ME, username: 'ada', user: { username: 'ada' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+                return f.fetchImpl(url, init);
+            };
+            const withGit = { ...config, services: { ...config.services, gitUrl: 'http://git.test' } };
+            const codes2 = createCodes({ config: withGit, fetchImpl, tokens, sleep: async () => {} });
+            const said = [];
+            const out = await codes2.adapter({ task: 'Write a small unittest example in Python', requester: `user:${ME}`, taskId: TASK, emit: async (e) => { said.push(e); } });
+            assert.ok(out && out.text, 'Codes ran');
+            const repoMade = made.find((x) => x.path.endsWith('/repos'));
+            assert.ok(repoMade, JSON.stringify(made));
+            assert.deepStrictEqual([repoMade.body.visibility, repoMade.body.starter, repoMade.body.owner_username], ['private', 'empty', 'ada']);
+            assert.match(repoMade.body.name, /^unittest-example-python-[a-z0-9]{6}$/);
+            const started = f.calls.find((x) => x.path === '/api/v1/tasks' && x.method === 'POST');
+            assert.strictEqual(started.body.repo, 'https://git.openvibe.codes/ada/unittest-example-r9r9r9');
+            assert.ok(said.some((e) => /Made a private repository for this work: https:\/\/git\.openvibe\.codes\/ada\//.test(e.text || '')), JSON.stringify(said));
+        }
         const none = fakeCodes({ start: 409, startBody: { code: 'codes.no_project', detail: 'no /run task yet' } });
         await assert.rejects(run(createCodes({ config, fetchImpl: none.fetchImpl, tokens, sleep: async () => {}, pollMs: 0 })), /openvibe\.link\/machines.*openvibe\.codes\/run/);
     });

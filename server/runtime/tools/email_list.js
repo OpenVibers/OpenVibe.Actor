@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * The newest messages of the person's own mailbox (OpenVibe.Mail), read with the person's own token.
+ * The newest messages of the person's own mailbox (OpenVibe.Email), read with the person's own token.
  * A list is a read: it changes nothing, so a resume may run it again.
  */
 
@@ -12,7 +12,7 @@ const MAX_LIST = 25;
 
 module.exports = {
     name: 'email_list',
-    description: 'List the newest messages in your OpenVibe.Mail inbox. Answers each message\'s sender, subject, date, id and whether it is unread. At most 25 messages; leave limit out for 10.',
+    description: 'List the newest messages in your OpenVibe.Email inbox. Answers each message\'s sender, subject, date, id and whether it is unread. At most 25 messages; leave limit out for 10.',
     input: {
         type: 'object',
         properties: {

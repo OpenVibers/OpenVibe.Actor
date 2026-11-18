@@ -228,6 +228,16 @@ const runArgs = (m, extra = {}) => ({
         await m.loop.close(out.state);
     });
 
+    await ok('a draft the review keeps word for word is stored once (2026-11-17: the same answer showed twice)', async () => {
+        const same = 'The agent is up and answering; ov-node-01 is offline.';
+        const m = make({ smart: [{ text: same }, { text: same }, { text: same }], config: { ACTOR_LOOP_SELF_REFLECTIONS: '2' } });
+        const out = await m.loop.run(runArgs(m));
+        assert.strictEqual(out.text, same);
+        const texts = m.events.filter((e) => e.step === 'text' && e.text === same);
+        assert.strictEqual(texts.length, 1, `the draft is in the steps once (${texts.length})`);
+        await m.loop.close(out.state);
+    });
+
     await ok('a reflection written out before a "Final answer" heading is the check, not the answer (2026-11-01)', async () => {
         const leaked = 'None of the claims in the existing draft are live facts, so no evidence is required, no tools need to be called.\n\n'
             + '**Claim-by-claim reflection**\n\nYour rule applies to:\n\n- Prices\n- Scores or standings\n\nThe draft I gave earlier only contains:\n\n- Descriptions of my capabilities\n\n'

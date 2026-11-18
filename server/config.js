@@ -32,6 +32,8 @@ function load(env = process.env) {
         codesSessionBridge: env.ACTOR_CODES_SESSION_BRIDGE == null ? !selfHosted : bool(env.ACTOR_CODES_SESSION_BRIDGE),
         // Hosted direct coding tasks use the shared runtime; the self-hosted build has no Codes service.
         unifiedCodeRuns: env.ACTOR_UNIFIED_CODE_RUNS == null ? !selfHosted : bool(env.ACTOR_UNIFIED_CODE_RUNS),
+        // What an agent turn on the free AI takes, about (11-17: 11,134 and 10,986 tokens): less left and it never starts there.
+        freeTurnTokens: Math.max(1000, Number(env.ACTOR_FREE_TURN_TOKENS) || 12000),
         a4ModelSwitch: env.ACTOR_A4_MODEL_SWITCH == null ? !selfHosted : bool(env.ACTOR_A4_MODEL_SWITCH),
         fabric: { enabled: bool(env.ACTOR_WORK_FABRIC) },
         port,
@@ -180,6 +182,10 @@ function load(env = process.env) {
             // OpenVibe.Bot: the person's own robots (list_my_robots, robot_steps). Empty turns the robot tools off.
             botUrl: trim(env.ACTOR_BOT_URL != null ? env.ACTOR_BOT_URL : (selfHosted ? '' : 'http://127.0.0.1:4630')),
             botPublicUrl: trim(env.ACTOR_BOT_PUBLIC_URL || 'https://openvibe.bot'),
+            // OpenVibe.Vision's review panel judges a page Link drew for the Design bot (plan §AD.25). Empty turns it off
+            // (a picture is then read by the vision model alone); the panel's models are comma separated (none: AI picks).
+            visionUrl: trim(env.ACTOR_VISION_URL != null ? env.ACTOR_VISION_URL : (selfHosted ? '' : 'http://127.0.0.1:5130')),
+            visionReviewModels: String(env.ACTOR_VISION_REVIEW_MODELS || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 3),
             // OpenVibe.Codes: the `codes` agent runs a person's coding task on their own machine. Empty turns it off.
             codesUrl: trim(env.ACTOR_CODES_URL != null ? env.ACTOR_CODES_URL : (selfHosted ? '' : 'http://127.0.0.1:4900')),
             codesPublicUrl: trim(env.ACTOR_CODES_PUBLIC_URL || 'https://openvibe.codes'),
@@ -200,6 +206,9 @@ function load(env = process.env) {
             // OpenVibe.Space: the person's own spaces, which their agent builds (plan 2026-10-22 §Z stage Z1).
             // Empty turns the space tools off.
             spaceUrl: trim(env.ACTOR_SPACE_URL != null ? env.ACTOR_SPACE_URL : (selfHosted ? '' : 'http://127.0.0.1:4940')),
+            // OpenVibe.Git (git.openvibe.codes): the person's own repositories, which their agent makes, writes and opens
+            // changes on (plan §AD.10 step 1). Empty turns the git tools off.
+            gitUrl: trim(env.ACTOR_GIT_URL != null ? env.ACTOR_GIT_URL : (selfHosted ? '' : 'http://127.0.0.1:5270')),
             // OpenVibe.Watch: where a trigger's subscription lives (plan §12 A-4). The person's own token is
             // always the authority; empty turns triggers off.
             watchUrl: trim(env.ACTOR_WATCH_URL != null ? env.ACTOR_WATCH_URL : (selfHosted ? '' : 'http://127.0.0.1:4730')),
@@ -207,7 +216,7 @@ function load(env = process.env) {
             // page is looked up to resolve the person who receives it (plan HO7). The person's own token pays, at
             // their own approval; empty turns the spending tool off.
             tipsUrl: trim(env.ACTOR_TIPS_URL != null ? env.ACTOR_TIPS_URL : (selfHosted ? '' : 'http://127.0.0.1:4610')),
-            // OpenVibe.Mail (track HO6): an agent answers the mail sent to its own address. Actor reads one letter in
+            // OpenVibe.Email (track HO6): an agent answers the mail sent to its own address. Actor reads one letter in
             // full text and sends the reply from the agent's inbox, over loopback under its own service token. Empty
             // turns the mail consumer off.
             mailUrl: trim(env.ACTOR_MAIL_URL != null ? env.ACTOR_MAIL_URL : (selfHosted ? '' : 'http://127.0.0.1:5250')),
@@ -284,6 +293,10 @@ function load(env = process.env) {
             selfReflections: Math.max(0, int(env.ACTOR_LOOP_SELF_REFLECTIONS, 2)),
             checkReflections: Math.min(2, Math.max(0, int(env.ACTOR_LOOP_CHECK_REFLECTIONS, 2))),
             toolResultChars: Math.max(500, int(env.ACTOR_LOOP_TOOL_RESULT_CHARS, 6000)),
+            // Context editing (server/runtime/context-edit.js): past this many characters of conversation, tool results
+            // older than the most recent ACTOR_LOOP_CONTEXT_KEEP are sent cut to an excerpt (0 turns it off).
+            contextTriggerChars: Math.max(0, int(env.ACTOR_LOOP_CONTEXT_TRIGGER_CHARS, 60000)),
+            contextKeepTools: Math.max(1, int(env.ACTOR_LOOP_CONTEXT_KEEP, 8)),
             // Sub-agents (stage V2-7), "best" mode only: a self-contained sub-goal runs as a child loop with a share
             // of what is left of the budget and a cap on its model calls. At most 4 at once, depth 1.
             subAgents: env.ACTOR_LOOP_SUB_AGENTS !== '0',

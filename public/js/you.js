@@ -26,6 +26,8 @@
             const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
             for (const id of ['ay-header','ay-now','ay-asks','ay-today','ay-goals','ay-replies','ay-brain']) {
                 const current = document.getElementById(id), next = doc.getElementById(id);
+                // The bar keeps its place: tucked away stays tucked away while you read (2026-11-15).
+                if (current && next && current.classList.contains('is-tucked')) next.classList.add('is-tucked');
                 if (current && next) current.replaceWith(next);
             }
             window.OpenVibeKitWeb?.enhance(document);
@@ -128,3 +130,21 @@
 })();
 // More (the status bar): it closes when one of its items is chosen, or on a press anywhere else.
 document.addEventListener('click', (e) => { const m = document.querySelector('.ay-more[open]'); if (m && (!m.contains(e.target) || (e.target.closest && e.target.closest('.ay-more-item')))) m.open = false; });
+// The status bar tucks away while you scroll down and comes back as you scroll up (2026-11-15, the owner's shot of /you:
+// the sticky bar sat over the card under it and cut "Add earnings"). It stays while its More menu is open, near the top
+// and while the keyboard is in it. The page's refresh replaces the bar, so it is found again on every scroll.
+(function () {
+    if (!document.querySelector('.ay-bar')) return;
+    let last = window.scrollY, ticking = false;
+    const decide = () => {
+        ticking = false;
+        const bar = document.querySelector('.ay-bar');
+        const y = window.scrollY, dy = y - last;
+        if (!bar || Math.abs(dy) < 6) return;
+        const keep = y < 120 || !!bar.querySelector(':focus-visible') || !!bar.querySelector('.ay-more[open]');
+        bar.classList.toggle('is-tucked', !keep && dy > 0);
+        last = y;
+    };
+    window.addEventListener('scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(decide); } }, { passive: true });
+    document.addEventListener('focusin', (e) => { const bar = document.querySelector('.ay-bar'); if (bar && bar.contains(e.target) && bar.querySelector(':focus-visible')) bar.classList.remove('is-tucked'); });
+})();

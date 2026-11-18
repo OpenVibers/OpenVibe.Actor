@@ -77,11 +77,11 @@ const searchFound = (query, sources, citations) => {
     return `${head} The answer cites ${found.length} source${found.length === 1 ? '' : 's'}:\n${lines.join('\n')}`.slice(0, 1200);
 };
 
-function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = console, tools: toolsOverride, codes: codesOverride }) {
+function createAdapters({ config, rates, fetchImpl = globalThis.fetch, log = console, tools: toolsOverride, codes: codesOverride, agentCard = null }) {
     const p = config.providers;
     // The runtime reads a computer's screen through a vision model (agents/tools.js computer_screen): OpenAI's.
     const vision = p.openai.apiKey ? chatClient({ baseUrl: p.openai.baseUrl, apiKey: p.openai.apiKey, model: p.openai.visionModel || p.openai.model, rates: rates.openai, fetchImpl, timeoutMs: 60_000 }) : null;
-    const ovTools = toolsOverride || createOpenVibeTools({ config, fetchImpl, log, vision });
+    const ovTools = toolsOverride || createOpenVibeTools({ config, fetchImpl, log, vision, agentCard });
 
     const deepseek = p.deepseek.apiKey ? chatClient({ baseUrl: p.deepseek.baseUrl, apiKey: p.deepseek.apiKey, model: p.deepseek.model, rates: rates.deepseek, fetchImpl }) : null;
     // Classifying and checking are short, structured answers: DeepSeek's reasoning is off for them.

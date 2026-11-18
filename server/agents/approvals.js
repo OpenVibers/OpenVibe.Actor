@@ -91,7 +91,7 @@ function floorOf(row) {
  * and only from the person's own session. A service that decides for them (the Action Center) never pays: there is
  * no person behind the service token, and the approval stays pending until the person approves it themselves.
  */
-async function decide(ctx, owner, id, decision, { idempotent = false, personToken = null } = {}) {
+async function decide(ctx, owner, id, decision, { idempotent = false, personToken = null, parentId = null } = {}) {
     const { s, config, engine, webhooks } = ctx;
     const row = await get(s, owner, id);
     if (!row) return { error: 'No such request of yours.', status: 404 };
@@ -163,15 +163,32 @@ async function decide(ctx, owner, id, decision, { idempotent = false, personToke
         return { row: done, note: 'Approved. The run that asked had already stopped; run it again to let the agent go on.', allow: allow.row ? allow.row.id : null };
     }
     const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
+    // The work to start, whichever way the request wrote it: the engine's ask keeps the person's words ({ task }), the
+    // codes_task tool keeps { repo, instruction } (11-18: approving that one failed "must have required property 'task'",
+    // on the approvals page and in the conversation alike).
+    const work = codesWork(payload, row.summary);
+    if (!work) return { error: 'This request does not say what to start.', status: 422 };
     // The person just approved this exact work, so the thread starts at full access: the engine's approval gate must not
     // ask again. The always-ask floor still applies (the text may still be a deletion or a payment).
-    const out = await createTask({ s, config, engine, webhooks, principal: { requester: owner, via: null, project: null }, body: { task: payload.task, agent: 'codes', mode: 'balanced', level: 'full' } });
+    // Approved in a conversation (runs-api's approval step): the coding task is that conversation's next turn, so its work
+    // shows where the person said yes.
+    const out = await createTask({ s, config, engine, webhooks, ...(parentId ? { parentId } : {}), principal: { requester: owner, via: null, project: null }, body: { task: work, agent: 'codes', mode: 'balanced', level: 'full' }, ownMachine: true });
     if (!out.task) return { error: out.detail || 'The task could not start.', status: out.status || 422 };
     const allow = always ? await allows.grant(s, owner, row.agent_id, row.kind, row.target) : { row: null };
     if (always && !allow.row) return { error: allow.error || 'This step could not be allowed.', status: 422 };
     const done = await s.db.one("UPDATE actor_approvals SET state = 'approved', decided_at = $2, decided_by = $3, decision_scope = $4, allow_id = $5, result_task_id = $6 WHERE id = $1 RETURNING *",
     [id, s.iso(), owner, always ? 'always' : 'once', allow.row ? allow.row.id : null, out.task.id]);
     return { row: done, task: out.task, allow: allow.row ? allow.row.id : null };
+}
+
+/** A coding request's work as a task's words: { task } as it is, { repo, instruction } with its repository named. */
+function codesWork(payload, summary) {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    if (typeof p.task === 'string' && p.task.trim()) return p.task.trim().slice(0, 16000);
+    const instruction = typeof p.instruction === 'string' ? p.instruction.trim() : '';
+    const repo = typeof p.repo === 'string' ? p.repo.trim() : '';
+    if (instruction) return `${instruction}${repo && !instruction.includes(repo) ? `\n\nIn ${repo}.` : ''}`.slice(0, 16000);
+    return null;
 }
 
 /** One fresh answer to the exact request. The model treats the result as untrusted data. */
@@ -281,8 +298,10 @@ async function pay(ctx, row, { personToken = null } = {}) {
 
 /** Mark the approval approved, once; a concurrent click that already did answers the same row. */
 async function approvePaid(s, owner, row) {
-    return await s.db.one("UPDATE actor_approvals SET state = 'approved', decided_at = $2, decided_by = $3, decision_scope = 'once' WHERE id = $1 AND state = 'pending' RETURNING *", [row.id, s.iso(), owner])
+    // maybe, not one: a concurrent click that already approved it leaves no pending row, and `one` threw where the
+    // fallback below was meant to answer (PostgreSQL CI, 11-17, "two clicks at once pay once").
+    return await s.db.maybe("UPDATE actor_approvals SET state = 'approved', decided_at = $2, decided_by = $3, decision_scope = 'once' WHERE id = $1 AND state = 'pending' RETURNING *", [row.id, s.iso(), owner])
         || await get(s, owner, row.id) || row;
 }
 
-module.exports = { request, list, get, pendingCount, decide, answer, pay, floorOf, KINDS, EXPIRES_DAYS };
+module.exports = { request, list, get, pendingCount, decide, answer, pay, floorOf, codesWork, KINDS, EXPIRES_DAYS };

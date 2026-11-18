@@ -176,7 +176,8 @@ async function threadForTask(s, taskId) {
     return row ? row.id : null;
 }
 
-/** The newest turn of a conversation (the parent of a message typed into it today). One recursive query. */
+/** The newest turn of a conversation (the parent of a message typed into it today), its whole row (its state, mode and
+ * requester: a canvas button and the run API's next message both read them). One recursive query. */
 async function latestForThread(s, thread) {
     if (!thread) return null;
     return s.db.maybe(`WITH RECURSIVE down AS (
@@ -189,7 +190,7 @@ async function latestForThread(s, thread) {
                    WHERE t.parent_id = down.id AND t.fork_of_step IS NULL
                    ORDER BY t.id DESC LIMIT 1) n
              WHERE down.depth < 200)
-        SELECT * FROM down ORDER BY depth DESC LIMIT 1`, [String(thread)]);
+        SELECT t.* FROM down JOIN tasks t ON t.id = down.id ORDER BY down.depth DESC LIMIT 1`, [String(thread)]);
 }
 
 /**

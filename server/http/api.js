@@ -52,6 +52,7 @@ const stills = require('../tasks/stills');
 const replay = require('../tasks/replay');
 const canvases = require('../canvases');
 const skills = require('../skills');
+const bpKit = require('openvibe-sdk/agents/blueprint');
 
 const TASK_ID = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_ID = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -312,6 +313,31 @@ function createApi(ctx) {
     };
     const bpRoute = (fn) => async (req, res) => { try { await fn(req, res); } catch (e) { bpFail(req, res, e); } };
     const bpVersion = (req) => (req.query.version != null && /^[1-9][0-9]{0,5}$/.test(String(req.query.version)) ? Number(req.query.version) : null);
+    // ── The gallery, signed out (openvibe.expert, plan §D item 6; 2026-11-18) ──
+    // The public, published blueprints: OpenVibe's own Experts (experts/, server/agents/stock.js) and what people chose
+    // to share. Anyone may read them; the list is kept a minute, so a busy gallery costs one query a minute. One Expert
+    // is its latest published version (or ?version=) with the asks its install screen shows; a link-only one answers
+    // to its address too, and a private one is 404.
+    let galleryKept = null;
+    r.get('/gallery', limits.reads('actor.gallery.read'), async (req, res) => {
+        try {
+            if (!galleryKept || Date.now() - galleryKept.at > 60_000) galleryKept = { at: Date.now(), cards: (await blueprints.gallery(s)).map((x) => blueprints.card(x.row, x.doc)) };
+        } catch (err) {
+            if (!galleryKept) return problem(req, res, 503, 'actor.gallery.unavailable', 'The gallery could not be read just now.');
+        }
+        res.set('Cache-Control', 'public, max-age=60');
+        res.json({ experts: galleryKept.cards });
+    });
+    r.get('/gallery/:id', limits.reads('actor.gallery.read'), async (req, res) => {
+        let got = null;
+        try { got = await blueprints.get(s, null, req.params.id, { version: bpVersion(req) }); } catch (err) {
+            return problem(req, res, 503, 'actor.gallery.unavailable', 'The gallery could not be read just now.');
+        }
+        if (!got || got.doc.state === 'draft') return problem(req, res, 404, 'actor.blueprint.not_found', 'No such published Expert.');
+        res.set('Cache-Control', 'public, max-age=60');
+        res.json({ ...blueprints.card(got.row, got.doc), blueprint: got.doc, asks: bpKit.asks(got.doc) });
+    });
+
     r.get('/blueprints', principal.requireCapability('actor.agent.manage'), personOnly, limits.reads('actor.agent.manage'), bpRoute(async (req, res) => {
         const scope = req.query.scope === 'public' ? 'public' : 'mine';
         const rows = await blueprints.list(s, req.principal.requester, { scope, limit: req.query.limit });
@@ -572,7 +598,7 @@ function createApi(ctx) {
     });
     r.delete('/me/agents/:id', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
         const row = await loadAgent(req, res); if (!row) return;
-        if (row.is_vibe) return problem(req, res, 409, 'actor.agent.vibe', 'Vibe is your first agent and cannot be deleted.');
+        if (row.is_vibe) return problem(req, res, 409, 'actor.agent.vibe', 'Your Actor is your first agent and cannot be deleted.');
         await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [row.id, row.owner]);
         res.status(204).end();
     });
@@ -779,6 +805,7 @@ function createApi(ctx) {
     });
 
     r.post('/tasks', principal.requireCapability('actor.task.create'), limits.budget('actor.task.create'), async (req, res) => {
+        if (req.body && req.body.setup) return startSetupTask(req, res);
         const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body: req.body || {}, personToken: watchToken(req), timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null });
         if (out.code) {
             if (out.retryAfter) res.set('Retry-After', String(out.retryAfter));
@@ -792,6 +819,38 @@ function createApi(ctx) {
         // The signing secret, to its creator only, in this answer (and an idempotent repeat of it) and never again.
         return res.status(out.status).json({ ...(await wireTask(out.task)), ...(out.task.webhook_secret ? { webhook_secret: out.task.webhook_secret } : {}) });
     });
+
+    /**
+     * Setup done by your agent (plan §AB.44): a task that sets up one provider key for the person's OpenVibe, with the
+     * one-time grant they made on Network's guided setup. The person's own token only (never an app). The grant id stays
+     * in memory beside the task (server/setup/grants.js); the task's text never carries it.
+     *   POST /api/v1/tasks { setup: { grant: 'sgr_…', keys: ['deepseek.api_key'], provider: 'deepseek', label?: 'DeepSeek', get_it_at: 'https://…' } }
+     */
+    async function startSetupTask(req, res) {
+        const p = req.principal;
+        if (!p || p.kind !== 'user' || p.via) return problem(req, res, 403, 'actor.setup.person_only', 'Only the person sets up their own keys.');
+        const b = req.body && req.body.setup && typeof req.body.setup === 'object' ? req.body.setup : {};
+        const setupGrants = require('../setup/grants');
+        const provider = String(b.provider || '').toLowerCase();
+        const keys = Array.isArray(b.keys) ? b.keys.map(String) : [];
+        if (!setupGrants.GRANT_ID.test(String(b.grant || '')) || !keys.length || keys.length > 4) return problem(req, res, 422, 'actor.setup.grant', 'A setup grant and its key are needed.');
+        if (!setupGrants.KEY_SHAPES[provider]) return problem(req, res, 422, 'actor.setup.provider', 'Your agent cannot read this provider\'s keys from its page yet: paste it in Setup.');
+        let url;
+        try { url = new URL(String(b.get_it_at || '')); } catch { url = null; }
+        if (!url || url.protocol !== 'https:') return problem(req, res, 422, 'actor.setup.page', 'The page where the key is made is needed (https).');
+        const label = String(b.label || provider).replace(/[^\p{L}\p{N} ._()-]+/gu, '').slice(0, 60) || provider;
+        const task = `Set up your person's ${label} key for OpenVibe.\n\n`
+            + `1. Open ${url.href} in your own browser on a private desk (computer_browser with desk "private").\n`
+            + '2. Whenever the page asks to sign in, to verify (a code, 2FA), to solve a CAPTCHA, to pay or to accept terms, hand the desk to your person (hand_to_person) with one plain sentence of what to do, and wait for them to give it back. Never type a password or payment details yourself.\n'
+            + '3. Create a new API key named "OpenVibe" with the rights the page offers by default.\n'
+            + '4. As soon as the page shows the new key, call setup_save_key with the same machine and desk. Never read the page, take a screenshot, copy or type the key yourself: the tool reads it and saves it.\n'
+            + `5. Tell your person the ${label} key is saved (with the four characters the tool gives), or what stopped you.`;
+        const out = await createTask({ s, config, engine, webhooks, principal: p, body: { task, mode: 'balanced' }, personToken: watchToken(req), timezone: req.cookies && req.cookies.ov_tz ? String(req.cookies.ov_tz).slice(0, 64) : null });
+        if (out.code) return problem(req, res, out.status, out.code, out.detail);
+        setupGrants.remember(out.task.id, { grantId: b.grant, keys, provider, label });
+        res.set('Location', `/api/v1/tasks/${out.task.id}`);
+        return res.status(out.status).json({ ...(await wireTask(out.task)), setup: { provider, label, keys } });
+    }
 
     r.get('/tasks', principal.requireCapability('actor.task.list'), limits.reads('actor.task.list'), async (req, res) => {
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
@@ -1074,6 +1133,11 @@ function createApi(ctx) {
         if (!task) return;
         if (wantsAgentsRun(req)) {
             if (!req.principal || req.principal.kind !== 'user') return problem(req, res, 404, 'agents.run.not_found', 'No such run.');
+            // A whole conversation (Network's frame asks for it): the first turn's id, the newest turn's state.
+            if (req.query.conversation === '1') {
+                const view = await runsApi.conversationView(s, task.id, req.principal.requester, s.now(), config.baseUrl, config);
+                return view ? res.json(view) : problem(req, res, 404, 'agents.run.not_found', 'No such run.');
+            }
             const run = await runsApi.loadRunRow(s, task.id, req.principal.requester);
             if (!run) return problem(req, res, 404, 'agents.run.not_found', 'No such run.');
             return res.json(await runsApi.viewOf(s, run, s.now()));
@@ -1148,6 +1212,17 @@ function createApi(ctx) {
     // action in their thread, so it takes actor.task.create. Another person's canvas is the same 404 as one that does
     // not exist. A page may post a plain form (same-origin); JSON callers get JSON.
     const canvasWantsJson = (req) => String(req.get('accept') || '').includes('application/json') || String(req.get('content-type') || '').includes('application/json');
+    // What your answers used (2026-11-17, the owner: "usage stats and tokens … cost"): today and the last ?days= (at most
+    // 30, what Actor keeps), by how each was paid (OpenVibe's free AI, your key, your plan, your computer, credits) and by
+    // model, with the free tier's daily limit. The Vibe session's usage sheet reads it.
+    r.get('/me/usage', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
+        const days = req.query.days == null ? store.RETENTION_DAYS : Number.parseInt(String(req.query.days), 10);
+        if (!Number.isInteger(days) || days < 1 || days > store.RETENTION_DAYS) return problem(req, res, 400, 'actor.usage.invalid', `days must be 1 to ${store.RETENTION_DAYS}.`);
+        const out = await store.usageOf(s, req.principal.requester, days);
+        const tier = config.allowance || {};
+        res.set('Cache-Control', 'private, no-store');
+        res.json({ ...out, limit: { per_day_usd: Number(tier.perDayUsd) || null, tasks_per_day: Number(tier.tasksPerDay) || null } });
+    });
     r.get('/me/canvases', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), personOnly, async (req, res) => {
         const requester = req.principal.requester;
         if (req.query.thread != null) {

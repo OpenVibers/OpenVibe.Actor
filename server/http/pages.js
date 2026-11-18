@@ -104,7 +104,7 @@ const usd = (n) => (n == null ? '—' : n === 0 ? '$0' : n < 0.01 ? `$${Number(n
 // ── The task page v2 (Actor v2, stage V2-5): the plan, the evidence behind each claim, the files, the check, honestly ──
 // What a tool is called on the page; an unknown one reads as its own name with spaces.
 const TOOL_LABEL = {
-    search_web: 'Web search', read_page: 'Read a page', search_openvibe: 'OpenVibe search', wikipedia: 'Wikipedia',
+    search_web: 'Web search', read_page: 'Read a page', search_openvibe: 'OpenVibe search', openvibe_updates: 'OpenVibe updates', wikipedia: 'Wikipedia',
     weather_now: 'Weather', market_quote: 'Market price', currency_convert: 'Currency', time_in: 'Local time',
     convert_time: 'Time zones', geocode: 'Place lookup', place_info: 'Place', sports_scores: 'Sports scores',
     calculate: 'Calculator', make_file: 'File', make_chart: 'Chart', run_tool: 'OpenVibe tool', find_tools: 'Find a tool',
@@ -267,15 +267,15 @@ function spanLabel(span) {
 /** The saved steps of a finished task, each with a "Fork from here" of its own. */
 function savedStepsBlock(row, saved, spans) {
     if (!saved || !saved.length) return '';
-    return html`<section class="saved" id="steps" aria-labelledby="h-steps">
-<h2 id="h-steps">Steps saved</h2>
+    // 11-18 (the owner's phone: a Fork button on every saved step, the page full of them): folded to one line until opened.
+    return html`<details class="saved saved-fold" id="steps"><summary><h2 id="h-steps">Steps saved</h2><span class="muted small">${saved.length} · fork one to run on from it</span></summary>
 <p class="muted small">Every step is checkpointed. Fork any step to run on from it with one change: another tier, one tool off the allowed list, or an edited instruction.</p>
 <ol class="saved-list">${saved.map((cp) => {
         const here = (spans || []).filter((sp) => Number(sp.step) === Number(cp.step));
         const last = here[here.length - 1];
         return html`<li class="saved-step"><span class="saved-n">Step ${cp.step}</span><span class="saved-what">${last ? spanLabel(last) : 'saved'}</span><span class="muted small saved-at">${time(cp.created_at)}</span><a class="sc-btn saved-fork" href="/tasks/${row.id}/fork?step=${cp.step}">Fork from here</a></li>`;
     })}</ol>
-</section>`;
+</details>`;
 }
 
 /** The fork dialog: one change, the estimate first, and the task's own allowance in plain words. */
@@ -314,19 +314,19 @@ function relatedRunsBlock(row, { forks = [], others = [] } = {}) {
     for (const f of forks) {
         if (seen.has(f.id)) continue;
         seen.add(f.id);
-        links.push(html`<li><a href="/tasks/${f.id}">Fork from step ${f.fork_of_step}</a> <span class="muted small">${shortText(f.task, 70)}</span> ${compareLink(row, f)}</li>`);
+        links.push(html`<li class="rel-row"><a class="rel-what" href="/tasks/${f.id}"><b>Fork from step ${f.fork_of_step}</b><span class="muted small">${shortText(f.task, 70)}</span></a><a class="sc-btn rel-cmp" href="/tasks/${row.id}/compare/${f.id}">Compare</a></li>`);
     }
     for (const o of others) {
         if (seen.has(o.id)) continue;
         seen.add(o.id);
-        links.push(html`<li>${compareLink(row, o)} <span class="muted small">${shortText(o.task, 70)}</span></li>`);
+        links.push(html`<li class="rel-row"><a class="rel-what" href="/tasks/${o.id}"><b>${shortText(o.task, 70)}</b></a><a class="sc-btn rel-cmp" href="/tasks/${row.id}/compare/${o.id}">Compare</a></li>`);
     }
     if (!links.length) return '';
-    return html`<section class="related-runs" id="related" aria-labelledby="h-related">
-<h2 id="h-related">${forks.length ? 'Forks and other runs' : 'Compare this run'}</h2>
+    // 11-18: folded to one line ("Compare with another run · 4"), each run's words once and a small Compare.
+    return html`<details class="related-runs rel-fold" id="related"><summary><h2 id="h-related">${forks.length ? 'Forks and other runs' : 'Compare with another run'}</h2><span class="muted small">${links.length}</span></summary>
 <p class="muted small">The two answers side by side, with their cost, time, steps and the claims that differ.</p>
 <ul class="related-list">${links}</ul>
-</section>`;
+</details>`;
 }
 
 /**
@@ -468,8 +468,10 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
         const faq = faqItems(agents);
         // Actor v3 (the owner, 2026-11-09): your own AI that works for you, on your behalf, while you watch.
         const hero = showcase.hero({
-            eyebrow: 'OpenVibe.Actor · alpha',
-            title: 'Your own AI.', accent: 'It works for you while you watch.',
+            // Plan §AB.15 (the owner, 11-14: "openvibe.actor is our agent's … website … a more cohesive product"): Actor is
+            // where your agents live: make one, share it, install others, each doing only what you allow.
+            eyebrow: 'OpenVibe.Actor · your agents',
+            title: 'Your agents.', accent: 'They work for you while you watch.',
             lede: 'Tell it what you want: find you work, earn from a gig, grow your channel, brief you every morning, build something. It works on a screen you can watch from any OpenVibe page, uses your own accounts, asks before it spends, posts or applies, and runs on the model you pick.',
             actions: signed ? [{ label: 'Give it a job', href: '#task', primary: true }, { label: 'Your Actor', href: '/chat' }] : [{ label: 'Start your Actor', href: '/auth/login?next=%2F', primary: true }, { label: 'What it can do', href: '#templates' }],
             note: `Open source (AGPL-3.0). Free: ${tier.tasksPerDay} tasks a day and ${usd(tier.perDayUsd)} of model use, no card.`,
@@ -524,6 +526,12 @@ ${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p
 <section class="sc-sec hm-task" id="task" aria-labelledby="h-task"><h2 id="h-task">Give it a job</h2>
 ${box}
 ${raw(starts)}</section>
+${raw(showcase.features({ id: 'yours', title: 'One agent system', lede: 'Your agents: make one, share it, install others. Each does only what you allow. Actor, in the menu on every OpenVibe site, is your first agent: call it what you like.', items: [
+                { icon: 'ov:wand', title: 'Make one', text: 'Say what it is for in plain words. It gets instructions, a memory you can read and edit, a schedule and a budget.', href: '/me/agents' },
+                { icon: 'ov:share', title: 'Share it', text: 'Publish an agent you made so other people can install it as it is, or remix it into their own.', href: '/me/agents' },
+                { icon: 'ov:download', title: 'Install others', text: 'Add an agent or a skill someone shared. It starts with nothing and asks for each thing it needs.', href: '/skills' },
+                { icon: 'ov:shield', title: 'What each may do', text: 'Every agent has its own list: the tools, accounts, computers and money it may use. Anything else waits for your yes.', href: '/me/agents' },
+            ] }))}
 ${raw(showcase.features({ id: 'watch', title: 'Watch it work, from anywhere', lede: 'It is your AI, doing things on your behalf, so you can always see what it is doing.', items: [
                 { icon: 'ov:eye', title: 'Its screen, live', text: 'When it works on a computer, watch its screen from the Dock on any OpenVibe page, or on your phone.' },
                 { icon: 'ov:steps', title: 'What it is doing, in plain words', text: 'Away from a screen: the step it is on, what it read, what it did last and what it will do next.' },
@@ -1409,6 +1417,7 @@ ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates |
             // your model, your keys, your machine.
             body: html`<h1>Who does the work</h1>
 <p class="ag-lede">For each task Actor picks one of these, the one that can do it at the lowest price for your mode, and a second model checks its answer before you see it. Leave it on <b>Balanced</b>, or pick another mode in the chat.</p>
+<p class="ag-lede"><a href="/compare">Compare the ways</a>: run one task through several of these, or any model, the Decisions API or a coding harness, side by side, each answer graded, with a leaderboard.</p>
 <ul class="ag-cards">${agents.map((a) => {
                 const can = a.can.filter((c) => c.startsWith('task:')).map((c) => c.slice(5));
                 const where = a.id === 'codes' ? 'On your own machine' : a.trust === 'first-party' ? 'On OpenVibe\'s own hardware' : a.id === 'openvibe-runtime' ? 'OpenVibe\'s code; its model runs at DeepSeek' : a.id === 'openai-agent' ? 'At OpenAI' : 'At the provider';

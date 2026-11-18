@@ -5,9 +5,16 @@ const { boot, check, done } = require('./helpers/boot');
 (async () => {
     const calls = [];
     let ranCodes = false;
+    let asksInLoop = false;
     const loop = {
         async run(args) {
             calls.push(args);
+            // The codes_task tool's own gate: it made a request for the person and did not run (approval pending).
+            if (asksInLoop) {
+                const approvals = require('../server/agents/approvals');
+                await approvals.request(tRef.ctx.s, { owner: args.requester, taskId: args.taskId, kind: 'codes.task', summary: 'Start a coding task on your machine', payload: { instruction: 'Write a small unittest example' } });
+                return { text: 'Asked first.', evidence: [], sources: [], family: 'deepseek', brain: { steps: [{ tool: 'codes_task', ok: false }] } };
+            }
             return {
                 text: ranCodes ? 'Codes started the requested change. [E1]' : 'I changed the code.',
                 evidence: ranCodes ? [{ id: 'E1', tool: 'codes_task', input: { instruction: 'Edit the README' }, text: 'Codes started the task.', sources: [], artifacts: [], refs: [] }] : [],
@@ -16,7 +23,9 @@ const { boot, check, done } = require('./helpers/boot');
         },
         async close() {},
     };
+    const tRef = {};
     const t = await boot({ loop });
+    tRef.ctx = t.ctx;
     try {
         const person = t.network.addUser('code-owner');
         t.providers.state.cls = 'code';
@@ -50,6 +59,17 @@ const { boot, check, done } = require('./helpers/boot');
             assert.deepStrictEqual(calls[1].allowedTools, ['codes_task']);
             assert.match(calls[1].requester, /^user:usr_[0-9A-HJKMNP-TV-Z]{26}$/);
             assert.strictEqual(row.explanation[0].selected, 'openvibe-runtime');
+        });
+        await check('a coding turn whose codes_task asked first waits for that yes, it did not fail', async () => {
+            // 11-18 (the owner's phone): "did not run … Connect your machine" sat above the card asking to start it.
+            asksInLoop = true;
+            const r = await t.get('/api/v1/tasks', { as: person, headers: { 'sec-fetch-site': 'same-origin' }, json: { task: 'Write a small unittest example', agent: 'codes', level: 'full' } });
+            assert.strictEqual(r.status, 201, r.text);
+            const row = await t.waitFor(r.json().id);
+            asksInLoop = false;
+            assert.strictEqual(row.state, 'succeeded', `${row.error_code}: ${row.error_detail}`);
+            assert.match(row.result.answer, /needs your yes/);
+            assert.match(row.result.approval.url, /\/me\/approvals\/apr_/);
         });
         await check('the same runtime accepts a successful Codes handoff', async () => {
             ranCodes = true;

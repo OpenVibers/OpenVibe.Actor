@@ -76,3 +76,23 @@
 @media (max-width:420px){.ay-bar{gap:8px;padding:7px 7px 7px 9px}.ay-bar .ay-avatar{width:36px;height:36px}.ay-bar-spend small{display:none}}
 /* Design rule 201: the intro is one line on a computer, at most two on a phone. */
 @media (max-width: 640px) { .ay-starters-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
+
+/* Where your Actor works (2026-11-15): three cards; your computers only for "Your computer". */
+.ay-places{display:grid;gap:8px;border:0;margin:0 0 12px;padding:0}
+.ay-places legend{padding:0 0 8px;font-weight:650}
+.ay-place{position:relative;display:flex;align-items:center;gap:12px;min-height:60px;padding:10px 14px;border:1px solid var(--border,rgba(148,163,184,.25));border-radius:14px;cursor:pointer;transition:border-color .18s,background-color .18s}
+.ay-place input{position:absolute;opacity:0;pointer-events:none}
+.ay-place-i{display:grid;place-items:center;flex:none;width:36px;height:36px;border-radius:11px;background:color-mix(in srgb,var(--text-primary,#fff) 7%,transparent);color:var(--text-secondary,#b6c2d4)}
+.ay-place b{display:block}.ay-place small{display:block;color:var(--text-muted,#93a0b4);font-size:.85rem}
+.ay-place:has(input:checked){border-color:var(--accent,#3b82f6);background:color-mix(in srgb,var(--accent,#3b82f6) 10%,transparent)}
+.ay-place:has(input:checked) .ay-place-i{background:var(--accent,#3b82f6);color:#fff}
+.ay-place:has(input:focus-visible){outline:2px solid var(--accent,#3b82f6);outline-offset:2px}
+#ay-computer-form:not(:has(input[name="kind"][value="link"]:checked)) .ay-machines{display:none}
+.ay-machines{margin:0 0 12px}
+
+/* The status bar tucks away while scrolling down (2026-11-15): it slides up under the site bar and comes back on the way
+   up; every jump target keeps clear of it. Calm moves less; Off does not move. */
+.ay-bar{transition:transform .28s cubic-bezier(.2,.8,.2,1),opacity .2s ease}
+.ay-bar.is-tucked{transform:translateY(calc(-100% - 12px - 40px * var(--ov-move,1)));opacity:0;pointer-events:none}
+html[data-ov-motion=off] .ay-bar{transition:none}
+.ay-page [id]{scroll-margin-top:calc(var(--ovnav-h,56px) + 84px)}

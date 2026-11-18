@@ -40,7 +40,7 @@ const ctxFor = (fetchImpl, requester = `user:${ME}`) => ({ config, fetch: fetchI
     await check('the space tools are offered to a signed-in person and to nobody else', async () => {
         const registry = createRegistry({ strict: true, log: { warn() {}, log() {} } });
         const names = registry.definitions({ requester: `user:${ME}`, config }).map((d) => d.function.name);
-        for (const tool of ['space_create', 'space_files_list', 'space_files_read', 'space_files_write', 'space_preview', 'space_publish']) {
+        for (const tool of ['space_create', 'space_files_list', 'space_files_read', 'space_files_write', 'space_preview', 'space_publish', 'space_site_from_repo']) {
             assert.ok(names.includes(tool), `${tool} is offered to a signed-in person`);
         }
         const anonymous = registry.definitions({ requester: null, config }).map((d) => d.function.name);
@@ -101,6 +101,23 @@ const ctxFor = (fetchImpl, requester = `user:${ME}`) => ({ config, fetch: fetchI
         assert.ok(preview.text.includes('openvibe.space/spaces/podcast/edit'), preview.text);
         const list = await registry.run('space_files_list', {}, ctxFor(space.fetchImpl));
         assert.ok(list.text.includes(SPACE), list.text);
+    });
+
+    await check('a repository becomes a website: Space makes the site and Git sends each push as a preview (plan §AD.10)', async () => {
+        const space = fakeSpace(({ path, body }, reply) => (path === '/api/v1/builder/sites/from-repo'
+            ? reply(201, { site: { id: 'sit_01JD0000000000000000000000', name: 'band', url: 'https://band.openvibe.website/', dashboard: 'https://openvibe.space/sites/sit_01JD0000000000000000000000' }, publish: { site_id: 'sit_01JD0000000000000000000000', branch: body.branch || 'main', folder: body.folder || '' } })
+            : reply(404, { detail: 'no' })));
+        const registry = createRegistry({ strict: true, log: { warn() {}, log() {} } });
+        assert.strictEqual(registry.get('space_site_from_repo').acts, true, 'it changes the world: an acting call');
+        const out = await registry.run('space_site_from_repo', { repo: 'https://git.openvibe.codes/ada/band.git', folder: 'dist' }, ctxFor(space.fetchImpl));
+        assert.ok(!out.isError, out.text);
+        const said = JSON.parse(out.text);
+        assert.deepStrictEqual([said.url, said.folder], ['https://band.openvibe.website/', 'dist']);
+        assert.match(said.message, /preview/);
+        assert.deepStrictEqual([space.calls[0].method, space.calls[0].path, space.calls[0].body], ['POST', '/api/v1/builder/sites/from-repo', { repo: 'ada/band', folder: 'dist' }]);
+        assert.strictEqual(space.calls[0].subject, ME, 'as the person the task is for');
+        const bad = await registry.run('space_site_from_repo', { repo: 'not a repo' }, ctxFor(space.fetchImpl));
+        assert.ok(bad.isError && /owner\/name/.test(bad.text), bad.text);
     });
 
     done();

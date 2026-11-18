@@ -207,6 +207,7 @@ function fakeModels(script) {
             assert.strictEqual(okCall.subject, u.subject);
             assert.strictEqual(okCall.url, `https://openvibe.actor/tasks/${okRow.id}`);
             assert.match(okCall.title, /^Your task|Say hello/);
+            assert.ok(okCall.agent && okCall.agent.id && okCall.agent.name, 'the notice wears the face of the agent it is about (plan §AB.31)');
 
             // The same task and state is claimed once; no second notification can go out.
             assert.strictEqual(await taskNotices.once(t.ctx.s, okRow.id, 'succeeded'), false);

@@ -93,21 +93,31 @@ function createAgentPages(ctx) {
           instructions: 'Build <what you want: a small web page, a script, a tool> in <the repository, for example your-name/your-project> with OpenVibe Code on my own computer, run its tests, and open a pull request for me to review. Never push to the main branch.' },
     ];
     const UNFILLED = /<[^<>]{3,80}>/;
+    // 11-18 redesign: choices are chips (no native selects), the time and day appear only for daily and weekly (CSS :has,
+    // no script), Active and Send to Vibe are switches, and the rarely changed limits fold under More settings.
+    const chips = (name, options, value) => html`<div class="pa-chips" role="radiogroup">${options.map(([v, label]) => html`<label class="pa-chip"><input type="radio" name="${name}" value="${v}"${String(value) === String(v) ? raw(' checked') : ''}><span>${label}</span></label>`)}</div>`;
+    const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     function form(a = {}) {
-        return html`<div class="pa-form">
+        const schedule = a.schedule || 'off';
+        const mode = a.mode || 'balanced';
+        return html`<div class="pa-form pa-form2">
 <label class="pa-wide">Name <input name="name" maxlength="60" required value="${a.name || ''}" placeholder="Morning briefing"></label>
-<label class="pa-wide">Instructions <span class="pa-hint">What it should do every run, in plain words. Up to 4000 characters.</span>
-<textarea name="instructions" maxlength="4000" required rows="6" placeholder="Read the OpenVibe changelog and summarise what shipped yesterday in five bullets.">${a.instructions || ''}</textarea></label>
-<label>Mode <select name="mode">${['balanced', 'cheapest', 'best', 'fastest', 'private'].map((x) => html`<option value="${x}"${a.mode === x ? raw(' selected') : ''}>${MODE_LABELS[x]}</option>`)}</select></label>
-<label>Budget per run (USD) <input name="budget_per_run_usd" type="number" min="0.001" max="${config.allowance.perTaskUsd}" step="0.001" value="${a.budget_per_run_usd || config.allowance.perTaskUsd}"><span class="pa-hint">At most $${config.allowance.perTaskUsd} on the free tier.</span></label>
-<label>Runs a day, at most <input name="daily_runs_max" type="number" min="1" max="24" value="${a.daily_runs_max || 1}"></label>
-<label>Schedule <select name="schedule">${personal.SCHEDULES.map((x) => html`<option value="${x}"${(a.schedule || 'off') === x ? raw(' selected') : ''}>${SCHEDULE_LABELS[x]}</option>`)}</select></label>
-<label>At (UTC) <input name="schedule_at" type="time" value="${a.schedule_at || ''}"><span class="pa-hint">For daily and weekly.</span></label>
-<label>On <select name="schedule_dow"><option value=""${a.schedule_dow == null ? raw(' selected') : ''}>Any day</option>${DAYS.map((d, i) => html`<option value="${String(i)}"${a.schedule_dow === i ? raw(' selected') : ''}>${d}</option>`)}</select><span class="pa-hint">For weekly.</span></label>
+<label class="pa-wide">What it does <span class="pa-hint">In plain words, every run. Up to 4000 characters.</span>
+<textarea name="instructions" maxlength="4000" required rows="5" placeholder="Read the OpenVibe changelog and summarise what shipped yesterday in five bullets.">${a.instructions || ''}</textarea></label>
+<fieldset class="pa-wide pa-set"><legend>How it works</legend>${chips('mode', ['balanced', 'cheapest', 'best', 'fastest', 'private'].map((x) => [x, MODE_LABELS[x].replace(' (default)', '')]), mode)}</fieldset>
+<fieldset class="pa-wide pa-set pa-when"><legend>When it runs</legend>${chips('schedule', personal.SCHEDULES.map((x) => [x, SCHEDULE_LABELS[x]]), schedule)}
+<div class="pa-when-at"><label>At (UTC) <input name="schedule_at" type="time" value="${a.schedule_at || '07:00'}"></label></div>
+<div class="pa-when-day"><span class="pa-sub">On</span>${chips('schedule_dow', [['', 'Any day'], ...SHORT_DAYS.map((d, i) => [String(i), d])], a.schedule_dow == null ? '' : a.schedule_dow)}</div></fieldset>
+<div class="pa-wide pa-switches">
+<label class="pa-switch-row"><span><b>Active</b><small>Paused agents keep their notes and never run on their own.</small></span><input type="hidden" name="status" value="paused"><input class="ovk-switch" type="checkbox" role="switch" name="status" value="active"${a.status === 'paused' ? '' : raw(' checked')}></label>
+<label class="pa-switch-row"><span><b>Send each run to Vibe</b><small>Each result also lands in a chat named after this agent, where you can ask Vibe about it.</small></span><input type="hidden" name="send_to_vibe" value="0"><input class="ovk-switch" type="checkbox" role="switch" name="send_to_vibe" value="1"${a.send_to_vibe === false ? '' : raw(' checked')}></label>
+</div>
+<details class="pa-wide pa-more"><summary>More settings</summary><div class="pa-form">
+<label>Budget per run (USD) <input name="budget_per_run_usd" type="number" min="0.001" max="${config.allowance.perTaskUsd}" step="0.001" value="${a.budget_per_run_usd || config.allowance.perTaskUsd}" inputmode="decimal"><span class="pa-hint">At most $${config.allowance.perTaskUsd} on the free tier.</span></label>
+<label>Runs a day, at most <input name="daily_runs_max" type="number" min="1" max="24" value="${a.daily_runs_max || 1}" inputmode="numeric"></label>
 <label>Quiet from (UTC) <input name="quiet_from" type="time" value="${a.quiet_from || ''}"><span class="pa-hint">No scheduled run starts in quiet hours; Run now still works.</span></label>
 <label>Quiet until (UTC) <input name="quiet_to" type="time" value="${a.quiet_to || ''}"><span class="pa-hint">It may cross midnight, like 22:00 to 07:00.</span></label>
-<label>Status <select name="status"><option value="active"${a.status !== 'paused' ? raw(' selected') : ''}>Active</option><option value="paused"${a.status === 'paused' ? raw(' selected') : ''}>Paused</option></select></label>
-<label class="pa-wide pa-check"><input type="hidden" name="send_to_vibe" value="0"><input type="checkbox" name="send_to_vibe" value="1"${a.send_to_vibe === false ? '' : raw(' checked')}> Send each run to Vibe <span class="pa-hint">Each result also lands in a chat named after this agent on openvibe.chat/vibe, where you can ask Vibe about it.</span></label>
+</div></details>
 </div>`;
     }
     const when = (a) => a.schedule === 'off' ? 'Runs when you run it' : (a.schedule === 'hourly' ? 'Every hour'
@@ -116,8 +126,11 @@ function createAgentPages(ctx) {
     function fields(body) {
         return { name: body.name, instructions: body.instructions, mode: body.mode,
             budget_per_run_usd: Number(body.budget_per_run_usd), daily_runs_max: Number(body.daily_runs_max), schedule: body.schedule,
-            schedule_at: body.schedule_at || null, schedule_dow: body.schedule_dow === '' ? null : Number(body.schedule_dow),
-            quiet_from: body.quiet_from || null, quiet_to: body.quiet_to || null, status: body.status,
+            schedule_at: ['daily', 'weekly'].includes(body.schedule) ? body.schedule_at || null : null,
+            schedule_dow: body.schedule !== 'weekly' || body.schedule_dow === '' || body.schedule_dow == null ? null : Number(body.schedule_dow),
+            quiet_from: body.quiet_from || null, quiet_to: body.quiet_to || null,
+            // The switch: a hidden "paused" always comes; a ticked switch adds "active". An older form sends one value.
+            status: [].concat(body.status || []).includes('active') ? 'active' : ([].concat(body.status || [])[0] || 'active'),
             // The hidden 0 always comes; a ticked box adds a 1.
             ...(body.send_to_vibe !== undefined ? { send_to_vibe: [].concat(body.send_to_vibe).includes('1') } : {}) };
     }
@@ -135,7 +148,7 @@ ${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when })}
 <section class="pa-panel" aria-labelledby="ac-add-h"><h2 id="ac-add-h">Add an agent</h2><p class="pa-hint">Each comes ready with its instructions; change anything after.</p>${ui.presetCards(contacts.presets().presets)}</section>
 <section class="pa-panel" aria-labelledby="pa-templates-h"><h2 id="pa-templates-h">Or set up a standing job</h2><p class="pa-hint">An agent with a schedule: it runs on its own and keeps notes between runs.</p>
 <ul class="pa-templates">${TEMPLATES.map((x) => html`<li><a class="pa-template${chosen && chosen.id === x.id ? ' is-chosen' : ''}" href="/me/agents?template=${x.id}#create"><strong>${x.name}</strong><span>${x.line}</span><small>${when({ schedule: x.schedule, schedule_at: x.schedule_at, schedule_dow: x.schedule_dow })}</small></a></li>`)}</ul></section>
-${importPanel()}<section class="pa-panel" id="create"><h2>${chosen ? `Create: ${chosen.name}` : 'Create an agent'}</h2>${chosen ? html`<p class="pa-hint">Fill in the parts in &lt;angle brackets&gt;, then create it. You can change anything later.</p>` : ''}<form method="post" action="/me/agents">${form(chosen ? { ...chosen, id: undefined } : {})}<button type="submit" class="pa-btn pa-primary">Create agent</button></form></section>`);
+<details class="pa-panel pa-fold" id="create"${chosen ? raw(' open') : ''}><summary><h2>${chosen ? `Create: ${chosen.name}` : 'Create your own'}</h2><span class="pa-hint">Name it, say what it does and when it runs.</span></summary>${chosen ? html`<p class="pa-hint">Fill in the parts in &lt;angle brackets&gt;, then create it. You can change anything later.</p>` : ''}<form method="post" action="/me/agents">${form(chosen ? { ...chosen, id: undefined } : {})}<button type="submit" class="pa-btn pa-primary">Create agent</button></form></details>${importPanel()}`);
     });
     r.post('/me/agents', async (req, res) => {
         if (!write(req, res)) return;
@@ -299,17 +312,16 @@ ${provenance(a)}${suggestedApps(a)}</section>`;
         const bound = Boolean(inbox && inbox.boundTo);
         return html`<section class="pa-panel" id="mail" aria-labelledby="ac-mail-h"><h2 id="ac-mail-h">Its mail address</h2>
 ${address ? html`<p class="pa-mail-address"><code>${address}</code> <button type="button" class="pa-btn pa-copy" data-copy="${address}" aria-label="Copy the address">Copy</button></p>`
-        : html`<p class="muted">OpenVibe.Mail is not answering right now, so its address cannot be shown or turned on.</p>`}
+        : html`<p class="muted">OpenVibe.Email is not answering right now, so its address cannot be shown or turned on.</p>`}
 <p class="pa-hint">Mail sent to this address lands in your own mailbox. The agent named under Where it listens may answer it. Answering is <strong>${on ? 'on' : 'off'}</strong>: ${on ? (bound ? 'the bound agent reads the letters and replies.' : 'no agent is bound to answer these letters.') : 'no agent reads or answers them until you turn this on.'}</p>
 ${address ? html`<form method="post" action="/me/agents/${a.id}/mail"><label class="pa-check"><input type="checkbox" name="enabled" value="on" ${on ? 'checked' : ''}> Answer mail sent to this address</label><button type="submit" class="pa-btn pa-primary">${on ? 'Save' : 'Turn answering on'}</button></form>` : ''}
 <p class="pa-hint">A reply to one of your own addresses (your mailbox, a mask, a burner) is sent as it is. A reply to anyone else waits for your yes, in your approvals. OpenVibe Mail cannot send outside OpenVibe yet, so such a reply stays pending there until sending is turned on.</p>
 ${answered.length ? html`<h3 class="pa-sub">The last letters it answered</h3><ul class="pa-notes">${answered.map((m) => html`<li><p class="pa-note-text">${m.subject || '(no subject)'}${m.peer ? html` <span class="muted">from ${m.peer}</span>` : ''}</p><p class="pa-note-meta">${m.reply_state === 'sent' ? 'Answered' : m.reply_state === 'awaiting_person' ? 'Waiting for your yes' : m.reply_state === 'refused' ? 'Not answered' : m.reply_state === 'failed' ? 'Could not answer' : 'Answering'} · ${time(m.created_at)}${m.task_id ? html` · <a href="/tasks/${m.task_id}">the thread</a>` : ''}${m.approval_id ? html` · <a href="/me/approvals/${m.approval_id}">your decision</a>` : ''}${m.reason ? html` · ${m.reason}` : ''}</p></li>`)}</ul>` : raw(kit.empty({ icon: 'mail', title: 'No letter answered yet', text: 'Letters this agent answers appear here.' }))}</section>`;
     };
 
-    const importPanel = () => html`<section class="pa-panel" id="import" aria-labelledby="ac-import-h"><h2 id="ac-import-h">Import an agent's voice</h2>
-<p class="pa-hint">A voice file is a small JSON document: an agent's name, a short bio, the house voice it speaks in, its rules, its level, and the model and apps it prefers. It never carries memory, a connector's token or a file. Paste one and it becomes one of your agents, at level ask — you raise it yourself.</p>
-<p class="pa-hint">A file may name an author. Nothing checks that, so the agent will say so rather than claim it is that person's.</p>
-<form method="post" action="/me/agents/import"><label class="pa-wide">Voice file (JSON) <textarea name="voice" rows="6" required placeholder='{"voice":"actor.voice@1","name":"A house voice"}'></textarea></label><button type="submit" class="pa-btn pa-primary">Import this voice</button></form></section>`;
+    const importPanel = () => html`<details class="pa-panel pa-fold" id="import"><summary><h2>Import an agent's voice</h2><span class="pa-hint">Paste a voice file someone shared: it becomes one of your agents, at level ask.</span></summary>
+<p class="pa-hint">A voice file carries a name, a short bio, the voice, rules, a level and the model and apps it prefers: never memory, a token or a file. An author it names is not checked, so the agent says so.</p>
+<form method="post" action="/me/agents/import"><label class="pa-wide">Voice file <textarea name="voice" rows="5" required placeholder='{"voice":"actor.voice@1","name":"A house voice"}'></textarea></label><button type="submit" class="pa-btn pa-primary">Import this voice</button></form></details>`;
 
     // The switch that says whether this agent answers mail at its own address (track HO6). OFF by default; only the
     // person turns it on, and Actor keeps its own copy so it stops the moment they turn it off.
@@ -576,7 +588,7 @@ ${c.undoable ? html`<form method="post" action="/me/agents/${a.id}/changes/${c.i
         }
         res.redirect(303, `/me/agents/${req.params.id}${decision === 'keep' ? '#skills' : ''}`);
     });
-    r.post('/me/agents/:id/delete', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; if (a.is_vibe) return res.status(409).type('text/plain').send('Vibe is your first agent and cannot be deleted.'); await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [a.id, a.owner]); res.redirect(303, '/me/agents'); });
+    r.post('/me/agents/:id/delete', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; if (a.is_vibe) return res.status(409).type('text/plain').send('Your Actor is your first agent and cannot be deleted.'); await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [a.id, a.owner]); res.redirect(303, '/me/agents'); });
     r.post('/me/agents/:id/run', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; const out = await personal.run(ctx, a, req.body.input || ''); if (out.code) return page(req, res, 'Run refused', html`<h1>Run refused</h1><p>${out.detail}</p><p><a href="/me/agents/${a.id}">Back to agent</a></p>`, out.status); res.redirect(303, `/tasks/${out.task.id}`); });
     r.post('/me/agents/:id/memory', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; const out = await personal.addMemory(s, a.owner, a.id, req.body.text); if (!out.row) return page(req, res, 'Memory refused', html`<h1>Memory refused</h1><p>${out.error || 'Memory is full.'}</p>`, out.limit ? 429 : 422); res.redirect(303, `/me/agents/${a.id}`); });
     r.post('/me/agents/:id/memory/:mem/edit', async (req, res) => {

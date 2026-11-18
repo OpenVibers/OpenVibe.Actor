@@ -27,8 +27,11 @@ const COIN_IDS = {
     TON: 'the-open-network', LTC: 'litecoin', BCH: 'bitcoin-cash', ATOM: 'cosmos', UNI: 'uniswap',
 };
 
-/** The currencies Frankfurter knows (the ECB's set). */
-const isCurrencyCode = (code) => typeof code === 'string' && /^[A-Za-z]{3}$/.test(code);
+/** The currencies Frankfurter knows (the ECB's set). Any three letters are not a currency: "solana" read as SOL/ANA went to
+ * Frankfurter and came back 404 (11-18), so a pair is two of these, never a coin's name cut in half. */
+const CURRENCIES = new Set(['AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'HUF', 'IDR', 'ILS', 'INR',
+    'ISK', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'RON', 'SEK', 'SGD', 'THB', 'TRY', 'USD', 'ZAR']);
+const isCurrencyCode = (code) => typeof code === 'string' && CURRENCIES.has(code.toUpperCase());
 
 /** "btc", "BTC", "bitcoin" or "avalanche-2" all name a coin; a pair like "EURUSD" names a rate. */
 function parseAsset(raw) {
