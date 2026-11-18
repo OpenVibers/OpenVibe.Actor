@@ -969,7 +969,10 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     }
 
     return {
-        warm, chat, decide, image, resolve, tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, allowanceFor, ownKeyFor, aiCatalog, latencyClass,
+        warm, chat, decide, image, resolve,
+        // Whether the Decisions API can be asked here at all (OpenVibe.AI configured with Actor's client secret): the
+        // router asks it only then, and otherwise sorts a task as before without an extra step.
+        decideReady: () => Boolean(routerOn()), tierList, modelList, resolveAll, withChoice, currentChoice, allowedKeys, allowanceFor, ownKeyFor, aiCatalog, latencyClass,
         withMetering, currentMetering,
         tierConfig: cfg, PREFERRED, PREFERRED_CHECKED, TIERS,
         get warmed() { return warmed; },
