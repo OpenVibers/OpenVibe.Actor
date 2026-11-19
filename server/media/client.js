@@ -6,7 +6,9 @@
  * hashes the exact bytes it scans and uploads those bytes with that hash; the listing then pins `{ media_id, sha256 }`,
  * so a Run job names the object and the digest and the Link refuses anything that changed.
  *
- * There is no public URL here: a skill's code is not served to anybody. `put()` answers `{ id, sha256 }` or
+ * There is no public URL here: a skill's code is not served to anybody. The one exception is script_run's packages
+ * bundle (putBytes with visibility 'unlisted', 11-19): public npm code, read by any Link at Media's public address with
+ * no key and checked against its pinned digest (Link v0.83). `put()` answers `{ id, sha256 }` or
  * `{ error }`; `enabled` is false without Media's URL or Actor's client secret, and publishing a sandbox skill then
  * says so plainly instead of listing code it cannot store.
  *
@@ -69,13 +71,18 @@ function createMedia({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         }
     }
 
-    /** Store bytes as they are (script_run's packages bundle, plan §AD.26), private: { id, sha256 } or { error }. */
-    async function putBytes(bytes, { name = 'file.bin', mimeType = 'application/octet-stream' } = {}) {
+    /**
+     * Store bytes as they are (script_run's packages bundle, plan §AD.26): { id, sha256 } or { error }. Private unless
+     * `visibility` is 'unlisted': readable by its id with no key, listed nowhere; only for bytes with nothing private
+     * in them (public npm code).
+     */
+    async function putBytes(bytes, { name = 'file.bin', mimeType = 'application/octet-stream', visibility = 'private' } = {}) {
         if (!enabled) return { error: 'OpenVibe.Media is not connected on this server, so nothing could be stored.' };
         if (!Buffer.isBuffer(bytes) || !bytes.length) return { error: 'There is nothing to store.' };
+        if (visibility !== 'private' && visibility !== 'unlisted') return { error: 'Stored bytes are private or unlisted.' };
         const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
         try {
-            const object = await objects.upload(bytes, { kind: 'file', visibility: 'private', mimeType, contentHash: sha256, filename: String(name).split('/').pop() });
+            const object = await objects.upload(bytes, { kind: 'file', visibility, mimeType, contentHash: sha256, filename: String(name).split('/').pop() });
             const id = object && object.id;
             if (!MEDIA_ID.test(String(id || ''))) return { error: 'OpenVibe.Media answered without an object id.' };
             return { id, sha256 };

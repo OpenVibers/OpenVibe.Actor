@@ -92,7 +92,7 @@ function fakeRun(job) {
         } finally { fs.rmSync(dir, { recursive: true, force: true }); }
     });
 
-    await check('bundle(): installed once per list, stored private in Media, kept, and shared by calls at once', async () => {
+    await check('bundle(): installed once per list, stored unlisted in Media (any Link reads it with no key), kept, and shared by calls at once', async () => {
         let installs = 0;
         const stored = [];
         const media = { enabled: true, putBytes: async (bytes, o) => { stored.push(o); return { id: MED, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }; } };
@@ -109,6 +109,7 @@ function fakeRun(job) {
         await b.bundle(['tiny@1.0.0']);
         assert.strictEqual(installs, 1, 'once per list');
         assert.strictEqual(stored[0].mimeType, 'application/gzip');
+        assert.strictEqual(stored[0].visibility, 'unlisted', 'public npm code: a Link reads it at Media\'s public address (Link v0.83)');
         const failing = createScriptPackages({ media, install: async () => ({ ok: false, error: 'npm could not install them: 404 Not Found' }), log: {} });
         assert.match((await failing.bundle(['nope@9.9.9'])).error, /404/);
         assert.match((await createScriptPackages({ media: null }).bundle(['tiny@1.0.0'])).error, /Media is not connected/);

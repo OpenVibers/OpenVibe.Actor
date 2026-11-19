@@ -9,7 +9,8 @@
  *
  * bundle() installs the list once with npm (--ignore-scripts: no package's install script ever runs here; the public
  * registry only; no lockfile, no audit), packs node_modules as a gzipped ustar of files and folders only (links such as
- * .bin are left out), stores it in Media, private, under Actor's tenant, and keeps { media_id, sha256 } for that exact
+ * .bin are left out), stores it in Media, unlisted, under Actor's tenant (11-19: it is public npm code, so any Link reads
+ * it at Media's public address with no key, Link v0.83; as a private object no Link could), and keeps { media_id, sha256 } for that exact
  * list for a week, so the next script with the same packages starts at once. Link's skill runner 1.2.0 unpacks it
  * beside the code (it refuses links, climbing paths and other entries itself). Native addons will not load there.
  */
@@ -154,7 +155,7 @@ function createScriptPackages({ media, npm = 'npm', now = () => Date.now(), inst
             if (!fs.existsSync(modules)) return { error: 'npm installed nothing' };
             let gz;
             try { gz = pack(modules); } catch (e) { return { error: e.message }; }
-            const stored = await media.putBytes(gz, { name: `packages-${key.slice(0, 12)}.tgz`, mimeType: 'application/gzip' });
+            const stored = await media.putBytes(gz, { name: `packages-${key.slice(0, 12)}.tgz`, mimeType: 'application/gzip', visibility: 'unlisted' });
             if (!stored || stored.error) return { error: (stored && stored.error) || 'OpenVibe.Media did not store the packages' };
             const out = { media_id: stored.id, sha256: stored.sha256, at: now() };
             kept.set(key, out);
