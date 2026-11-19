@@ -1057,12 +1057,13 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             // "Runs on: my computer" (plan L55 C3): a coding task goes to the codes agent, OpenVibe.Codes on the person's
             // own paired machine, unless the task already names its agent.
             const pinnedAgent = row.agent || (runsOn === 'computer' && cls === 'code' ? 'codes' : null);
+            let noneLeft = null;   // the router's answer when nothing else could take the task after a failure
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
                 const placement = route({ cls, mode: row.mode, agent: pinnedAgent, budgetUsd: Math.max(0, budgetLeft()), config, tried, now: now(), floor: row.mode === 'private' ? null : floor });
                 explanation.push(placement);
                 await store.updateTask(s, id, { explanation });
                 if (!placement.selected) {
-                    if (attempt > 1) break;
+                    if (attempt > 1) { noneLeft = placement; break; }
                     const why = pinnedAgent === 'codes' && !row.agent
                         ? { code: 'actor.no_agent', detail: 'Your coding tasks run on your own machine (Runs on: my computer) through OpenVibe.Codes, and it is not connected here. Add your machine on https://openvibe.link/machines, or switch Runs on back to OpenVibe at https://openvibe.actor/chat/model.' }
                         : whyNone(placement, { cls, mode: row.mode, budgetUsd: budgetLeft() });
@@ -1124,7 +1125,16 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 await setState(id, 'running');
             }
             const last = [...tried.entries()].pop();
-            return await setState(id, 'failed', { error_code: 'actor.agents.exhausted', error_detail: `No agent finished this task with an answer that passed its check${last ? ` (last: ${last[0]}, ${last[1]})` : ''}.`.slice(0, 2000), finished_at: iso() });
+            // What happened, in the person's words (2026-11-19, the owner's screenshot: "No agent gave an answer that
+            // passed its check" over a task whose one agent never answered: OpenVibe.Codes could not clone its repository).
+            // An agent that stopped is named with its reason, and so is why no other agent took the task.
+            const checkFailed = !!last && /^its answer failed the check/.test(String(last[1]));
+            const overBudget = !!noneLeft && (noneLeft.candidates || []).some((c) => /over \$/.test(c.excluded_because || ''));
+            const lastName = last ? ((catalog.byId(last[0]) || {}).name || last[0]) : '';
+            const detail = !last || checkFailed
+                ? `No agent finished this task with an answer that passed its check${last ? ` (last: ${last[0]}, ${last[1]})` : ''}.`
+                : `${lastName} stopped before it answered: ${String(last[1]).replace(/\s+/g, ' ').trim()}${overBudget ? ` No other agent could take it within this task's $${budget.toFixed(2)} budget.` : ''}`;
+            return await setState(id, 'failed', { error_code: 'actor.agents.exhausted', error_detail: detail.slice(0, 2000), finished_at: iso() });
         } catch (err) {
             if (signal.aborted) {
                 if (signal.reason === 'shutdown') return undefined;    // stop() records it as interrupted

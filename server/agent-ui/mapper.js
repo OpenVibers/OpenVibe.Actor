@@ -173,6 +173,11 @@ function createMapper(state, { clean = (x) => x, fallback = async () => null } =
                 step.status = l.ok === false ? 'failed' : 'done';
                 emit('STEP_FINISHED', { stepName: step.id }, { title: step.title, kind: step.kind });
             }
+            // The plan item the run was on ends with it (it stayed "running" on a failed task's card, 2026-11-19).
+            if (state.plan.some((p) => p.status === 'running')) {
+                state.plan = state.plan.map((p) => (p.status === 'running' ? { ...p, status: l.ok === false ? 'failed' : 'done' } : p));
+                emit('STATE_SNAPSHOT', { snapshot: { plan: state.plan } }, { title: 'Updated the plan', kind: 'plan' });
+            }
             state.status = l.ok === false ? 'failed' : 'done';
             state.endedAt = at;
             state.terminal = true;
