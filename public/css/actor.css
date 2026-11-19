@@ -66,17 +66,75 @@ button.sc-btn.sc-primary { border: 0; }
 .task-box { display: flex; flex-direction: column; gap: 12px; padding: 18px; border-radius: 16px; border: 1px solid var(--border-light, #2c3d5c); background: var(--bg-secondary, #101828); max-width: 860px; }
 .task-box-lead { margin: 0; font-size: 1.05rem; }
 .task-label { font-weight: 700; }
-.task-box textarea { width: 100%; min-height: 110px; resize: vertical; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-light, #2c3d5c); background: var(--bg-primary, #0a0f1c); color: var(--text-primary, #e6edf7); font: inherit; line-height: 1.5; }
+.task-box textarea { width: 100%; box-sizing: border-box; min-height: 84px; max-height: 50vh; resize: vertical; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-light, #2c3d5c); background: var(--bg-primary, #0a0f1c); color: var(--text-primary, #e6edf7); font: inherit; line-height: 1.5; }
 .task-box textarea:focus { border-color: var(--accent, #3b82f6); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #3b82f6) 25%, transparent); }
-.modes { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-.modes legend { font-weight: 700; margin-bottom: 6px; padding: 0; }
-.mode { position: relative; display: block; cursor: pointer; }
-.mode input { position: absolute; opacity: 0; inset: 0; }
-.mode span { display: flex; flex-direction: column; gap: 2px; height: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); transition: border-color .15s, background .15s; }
-.mode b { font-size: 14px; }
-.mode small { font-size: 12.5px; line-height: 1.4; color: var(--text-muted, #7386a3); }
-.mode input:checked + span { border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); }
+/* The mode as one row of pills with Run beside it (2026-11-19: five cards filled a phone); the chosen mode's meaning
+   is the one line under them. Plain radios underneath. */
+.task-bar { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.modes { flex: 1 1 auto; min-width: 0; border: 0; padding: 2px; margin: 0; display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.modes::-webkit-scrollbar { display: none; }
+.mode { position: relative; flex: none; cursor: pointer; }
+.mode input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.mode span { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); color: var(--text-secondary, #96a7c2); font-size: 14px; font-weight: 600; white-space: nowrap; transition: border-color .15s, background .15s, color .15s, transform .12s; }
+.mode input:checked + span { border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 16%, transparent); color: var(--text-primary, #e6edf7); }
 .mode input:focus-visible + span { outline: 3px solid var(--accent, #3b82f6); outline-offset: 2px; }
+.mode:active span { transform: scale(.96); }
+.task-run { flex: none; min-height: 44px; padding: 0 22px; border-radius: 999px; }
+.mode-say { margin: -4px 0 0; min-height: 1.3em; font-size: 13px; line-height: 1.4; color: var(--text-muted, #7386a3); }
+.mode-say span { display: none; }
+.task-box:has(input[value="cheapest"]:checked) .mode-say [data-mode="cheapest"],
+.task-box:has(input[value="balanced"]:checked) .mode-say [data-mode="balanced"],
+.task-box:has(input[value="fastest"]:checked) .mode-say [data-mode="fastest"],
+.task-box:has(input[value="private"]:checked) .mode-say [data-mode="private"],
+.task-box:has(input[value="best"]:checked) .mode-say [data-mode="best"] { display: inline; }
+.task-allowance { margin: 0; }
+@media (max-width: 520px) {
+    .task-box { padding: 14px; }
+    .task-bar { flex-wrap: wrap; }
+    /* On a phone the pills and the filters wrap: a row that scrolled sideways cut a word in half. */
+    .modes, .tk-filters { flex-wrap: wrap; overflow: visible; }
+    .modes { flex: 1 1 100%; }
+    .task-run { flex: 1 1 100%; }
+}
+
+/* ── Your tasks (/tasks, 2026-11-19 redesign): the allowance as one meter, filter chips, a row per task ── */
+.tk-page { display: grid; gap: 16px; max-width: 860px; }
+.tk-page > * { min-width: 0; }
+.tk-head h1 { margin: 0 0 10px; }
+.tk-today { display: grid; gap: 6px; }
+.tk-today p { margin: 0; font-size: 14px; color: var(--text-secondary, #96a7c2); }
+.tk-today b { color: var(--text-primary, #e6edf7); font-variant-numeric: tabular-nums; }
+.tk-meter { height: 6px; border-radius: 999px; background: color-mix(in srgb, var(--text-muted, #7386a3) 22%, transparent); overflow: hidden; }
+.tk-meter span { display: block; height: 100%; border-radius: inherit; background: var(--accent, #3b82f6); transform-origin: left; animation: tk-grow .6s cubic-bezier(.2, .8, .2, 1) both; }
+.tk-links { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.tk-links a { display: inline-flex; align-items: center; min-height: 32px; }
+.tk-filters { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding: 2px; }
+.tk-filters::-webkit-scrollbar { display: none; }
+.tk-chip { flex: none; display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border, #1f2d47); color: var(--text-secondary, #96a7c2); text-decoration: none; font-size: 14px; font-weight: 600; white-space: nowrap; transition: background .15s, border-color .15s, color .15s; }
+.tk-chip:hover { border-color: var(--border-light, #2c3d5c); color: var(--text-primary, #e6edf7); }
+.tk-chip[aria-current="page"] { background: color-mix(in srgb, var(--accent, #3b82f6) 16%, transparent); border-color: var(--accent, #3b82f6); color: var(--text-primary, #e6edf7); }
+.tk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.tk-row a { display: grid; gap: 4px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border, #1f2d47); background: var(--bg-secondary, #101828); color: inherit; text-decoration: none; transition: border-color .15s, transform .12s, background .15s; animation: tk-in .32s cubic-bezier(.2, .8, .2, 1) both; }
+.tk-row a:hover { border-color: var(--border-light, #2c3d5c); background: color-mix(in srgb, var(--accent, #3b82f6) 5%, var(--bg-secondary, #101828)); }
+.tk-row a:active { transform: scale(.99); }
+.tk-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--text-muted, #7386a3); }
+.tk-state i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.tk-ok { color: var(--success, #22c55e); }
+.tk-bad { color: var(--danger, #ef4444); }
+.tk-live, .tk-you { color: var(--accent, #3b82f6); }
+.tk-live i { animation: tk-pulse 1.4s ease-in-out infinite; }
+.tk-you { color: var(--warning, #f59e0b); }
+.tk-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 15px; line-height: 1.4; color: var(--text-primary, #e6edf7); }
+.tk-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12.5px; color: var(--text-muted, #7386a3); }
+.tk-empty { padding: 22px 16px; border-radius: 14px; border: 1px dashed var(--border, #1f2d47); text-align: center; color: var(--text-secondary, #96a7c2); }
+.tk-empty p { margin: 0; }
+.tk-empty p + p { margin-top: 8px; }
+.tk-more { margin: 0; text-align: center; }
+.tk-more a { display: inline-flex; align-items: center; min-height: 44px; }
+@keyframes tk-in { from { opacity: 0; transform: translateY(calc(6px * var(--ov-move, 1))); } }
+@keyframes tk-grow { from { transform: scaleX(0); } }
+@keyframes tk-pulse { 50% { opacity: .35; } }
+html[data-ov-motion="off"] .tk-row a, html[data-ov-motion="off"] .tk-meter span, html[data-ov-motion="off"] .tk-live i { animation: none; }
 .task-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .examples { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .examples li { padding: 8px 12px; border-radius: 10px; background: var(--bg-primary, #0a0f1c); border: 1px solid var(--border, #1f2d47); color: var(--text-secondary, #96a7c2); font-size: .94rem; }
