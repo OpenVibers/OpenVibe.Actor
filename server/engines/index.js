@@ -14,11 +14,18 @@
  *                opencode, gemini, muse …; absent, Codes chooses)
  *   openai-agent OpenAI's agent with its hosted web search
  *   open-model   the small open model on OpenVibe's own server: nothing leaves OpenVibe
+ *   a2a          an outside agent that speaks A2A, at its address (`url`, https): the task's words go to it and its answer
+ *                comes back, with the person's own key for that agent when they connected it on /connections, else
+ *                none (plan §AD.19, 11-19: outside agents in group conversations). Its turns keep the agent's own
+ *                conversation (A2A contextId). Not offered on the engine chooser, which has no address field: a group
+ *                member, or a caller that names the address, sets it
  *
  * Each engine is one module with one shape, so a new way to work a task is one more entry.
  */
 
-const KINDS = ['agent', 'model', 'decisions', 'harness', 'openai-agent', 'open-model'];
+const KINDS = ['agent', 'model', 'decisions', 'harness', 'openai-agent', 'open-model', 'a2a'];
+// An outside agent's address: https, no password in it, a sane length (the egress guard checks the host when called).
+const A2A_URL_MAX = 2048;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
 const HARNESS_ID = /^[a-z][a-z0-9-]{0,39}$/;
 
@@ -66,7 +73,17 @@ function parseEngine(value) {
         if (typeof v.code !== 'boolean') return { error: 'engine.code: true or false' };
         out.code = v.code;
     }
-    for (const k of Object.keys(v)) if (!['kind', 'model', 'harness', 'specialist', 'code'].includes(k)) return { error: `engine.${k} is not an engine option` };
+    if (v.url != null && v.url !== '' && v.kind !== 'a2a') return { error: 'engine.url: only the a2a engine takes an address' };
+    if (v.kind === 'a2a') {
+        let u = null;
+        try { u = new URL(String(v.url || '')); } catch { u = null; }
+        if (!u || u.protocol !== 'https:' || u.username || u.password || String(v.url).length > A2A_URL_MAX) {
+            return { error: 'engine.url: the outside agent\'s https address (its base, or its /.well-known/agent-card.json)' };
+        }
+        u.hash = '';
+        out.url = u.toString();
+    }
+    for (const k of Object.keys(v)) if (!['kind', 'model', 'harness', 'specialist', 'code', 'url'].includes(k)) return { error: `engine.${k} is not an engine option` };
     return { engine: out };
 }
 
@@ -82,10 +99,13 @@ function label(e) {
     if (!e) return 'Actor chooses';
     const base = (ENGINES.find((x) => x.kind === e.kind) || { name: e.kind }).name;
     if (e.specialist) return `${e.specialist.charAt(0).toUpperCase()}${e.specialist.slice(1)}${e.model ? ` · ${e.model}` : ''}`;
+    if (e.kind === 'a2a') return `An outside agent${hostOf(e.url) ? ` · ${hostOf(e.url)}` : ''}`;
     return e.model ? `${base} · ${e.model}` : e.harness ? `${base} · ${e.harness}` : base;
 }
-/** A stable key for the leaderboard: kind, then its model or harness. */
-const keyOf = (e) => (e ? [e.kind, e.model || e.harness || ''].filter(Boolean).join(':') : 'auto');
+/** An address's host, for a label ("An outside agent · agents.example.com"). */
+function hostOf(url) { try { return new URL(String(url)).host; } catch { return ''; } }
+/** A stable key for the leaderboard: kind, then its model, harness or (an outside agent) host. */
+const keyOf = (e) => (e ? [e.kind, e.model || e.harness || (e.kind === 'a2a' ? hostOf(e.url) : '') || ''].filter(Boolean).join(':') : 'auto');
 
 const ONE_MODEL_SYSTEM = () => `You are a helpful assistant answering one task in one reply. Today is ${new Date().toISOString().slice(0, 10)}.
 Lead with the answer in one or two sentences, the key fact in **bold**; then what helps the person act on it. Use Markdown lists where they help. If you are not sure or cannot know (anything after your training, live prices, the person's own data), say so plainly instead of guessing.`;
@@ -98,12 +118,16 @@ const SHAPE_SYSTEM = `Turn a task into ONE closed question for a decisions model
 - none: anything that needs writing, research, steps or open-ended answers.
 Never invent options the task does not name, except the levels of a score.`;
 
+// How long one outside agent's turn may take (its card, message/send, and tasks/get while it works).
+const A2A_ENGINE_TIMEOUT_MS = 180_000;
+
 /**
- * The engines that run without the agent loop: one model, and the Decisions API.
- *   createEngines({ models, log }) → { model(args), decisions(args) }
+ * The engines that run without the agent loop: one model, the Decisions API, and an outside agent over A2A.
+ *   createEngines({ models, log, connectors }) → { model(args), decisions(args), a2a(args) }
  *   args: { task, subject, model, signal, meter, budgetLeft, emit } → { text, sources, model, decision? }
+ *   a2a's args add { url, contextId } and its answer adds { a2a: { agent, contextId, taskId, state, protocol } }
  */
-function createEngines({ models, log = console } = {}) {
+function createEngines({ models, log = console, connectors = null, a2aClient = null } = {}) {
     const fail = (message, code) => Object.assign(new Error(message), { code });
     const withPerson = (choice, fn) => (models && typeof models.withChoice === 'function' && choice ? models.withChoice(choice, fn) : fn());
 
@@ -160,7 +184,43 @@ function createEngines({ models, log = console } = {}) {
         return { text, sources: [], model: r.model ? `${r.provider ? `${r.provider}/` : ''}${r.model}` : 'decisions', decision: { type: a.type, answer: a, calibrated: Boolean(d.calibrated), question } };
     }
 
-    return { model, decisions };
+    /**
+     * An outside agent (A2A): the task's words to it, its answer back. The person's own key for that agent (their A2A
+     * connection with the same address) goes with it; without one the agent is asked with none, as a public agent
+     * expects. Outside agents cost OpenVibe nothing, so nothing is metered; the egress guard (connectors' options)
+     * decides which addresses may be reached.
+     */
+    async function a2a({ task, subject = null, url, contextId = null, emit }) {
+        const client = a2aClient || require('../connections/a2a');
+        if (!url) throw fail('An outside agent needs its address.', 'actor.engine.invalid');
+        const host = hostOf(url);
+        const key = connectors && typeof connectors.a2aKeyFor === 'function' && subject
+            ? await connectors.a2aKeyFor(`user:${subject}`, url).catch((err) => { log.warn && log.warn('[Actor] an A2A key could not be read:', (err && err.message) || err); return null; })
+            : null;
+        await emit({ step: 'plan', text: `Asking the outside agent at ${host}${key && key.token ? ' with your key for it' : ''}.` });
+        let out;
+        try {
+            out = await client.sendTask(url, {
+                text: task, contextId, token: key ? key.token : null, headerName: key ? key.headerName : null,
+                timeoutMs: A2A_ENGINE_TIMEOUT_MS, ...(connectors && typeof connectors.guardOpts === 'function' ? connectors.guardOpts() : {}),
+            });
+        } catch (err) {
+            throw fail(`The outside agent at ${host} did not answer: ${String((err && err.message) || err).slice(0, 300)}`, 'actor.a2a.failed');
+        }
+        const name = (out.card && typeof out.card.name === 'string' && out.card.name.trim().slice(0, 80)) || host;
+        const text = String(out.text || '').trim();
+        if (['failed', 'rejected', 'canceled'].includes(out.state)) {
+            throw fail(`${name} ${out.state === 'rejected' ? 'turned the task down' : out.state === 'canceled' ? 'stopped the task' : 'could not do it'}${text ? `: ${text.slice(0, 600)}` : '.'}`, 'actor.a2a.failed');
+        }
+        if (!text) throw fail(`${name} gave no answer${out.state && out.state !== 'completed' ? ` (still ${out.state} when the time ran out)` : ''}.`, 'actor.agent.no_answer');
+        const t = out.task && typeof out.task === 'object' ? out.task : {};
+        return {
+            text, sources: [{ url, title: name }], model: null,
+            a2a: { agent: name, contextId: typeof t.contextId === 'string' ? t.contextId.slice(0, 200) : contextId, taskId: typeof t.id === 'string' ? t.id.slice(0, 200) : null, state: out.state || null, protocol: out.protocol || null },
+        };
+    }
+
+    return { model, decisions, a2a };
 }
 
 module.exports = { createEngines, parseEngine, engineOf, label, keyOf, ENGINES, HARNESSES, KINDS };

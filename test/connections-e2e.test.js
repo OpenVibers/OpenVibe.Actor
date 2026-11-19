@@ -172,6 +172,37 @@ function appToken(t, extra = {}) {
         } finally { await t.close(); }
     });
 
+    await check("A2A 0.3: JSON-RPC message/send starts the person's task, tasks/get answers with it", async () => {
+        const t = await boot();
+        try {
+            const dev = t.network.addUser("dev");
+            const svc = token(t, { extra: { on_behalf_of: dev.subject } });
+            const rpc = (method, params) => t.get("/a2a/v1/tasks", { method: "POST", bearer: svc, headers: { "x-ov-subject": dev.subject },
+                json: { jsonrpc: "2.0", id: 7, method, params } });
+            const sent = await rpc("message/send", { message: { role: "user", kind: "message", messageId: "m1", contextId: "ctx-a", parts: [{ kind: "text", text: "What is in the notes?" }] } });
+            assert.strictEqual(sent.status, 200, sent.text.slice(0, 300));
+            const task = sent.json().result;
+            assert.strictEqual(sent.json().id, 7);
+            assert.strictEqual(task.kind, "task");
+            assert.match(task.id, /^a2a_/);
+            assert.strictEqual(task.contextId, "ctx-a", "the caller's conversation is kept");
+            assert.strictEqual(task.status.state, "submitted");
+            const row = await t.waitFor(task.id.slice(4));
+            assert.strictEqual(row.state, "succeeded", row.error_detail || "");
+            assert.strictEqual(row.requester, "user:" + dev.subject);
+            const got = (await rpc("tasks/get", { id: task.id })).json().result;
+            assert.strictEqual(got.status.state, "completed");
+            assert.ok(got.artifacts[0].parts[0].text.length > 0, "the answer is an artifact's text");
+            assert.strictEqual((await rpc("tasks/get", { id: "a2a_nope" })).json().error.code, -32001);
+            assert.strictEqual((await rpc("tasks/cancel", { id: task.id })).json().error.code, -32601);
+            assert.strictEqual((await rpc("message/send", { message: { parts: [] } })).json().error.code, -32602);
+            const card = await t.get("/.well-known/agent-card.json");
+            assert.strictEqual(card.status, 200);
+            assert.strictEqual(card.json().preferredTransport, "JSONRPC");
+            assert.strictEqual(card.json().protocolVersion, "0.3.0");
+        } finally { await t.close(); }
+    });
+
     await check("A2A: a token that names another person, or may not act for one, is refused", async () => {
         const t = await boot();
         try {

@@ -68,6 +68,20 @@ function createConnectors({ store: s, config = {}, log = console, guard = {} } =
     /** The connections of one person (the owner's rows only). */
     const connections = (owner) => store.list(s, owner);
 
+    /**
+     * The person's own key for an outside agent: their switched-on A2A connection with the same address (the a2a engine,
+     * server/engines, so an agent in a group answers with the key of the person whose message started the round).
+     * → { token, headerName } or null when they have none.
+     */
+    async function a2aKeyFor(owner, url) {
+        const want = a2a.baseOf(url);
+        if (!want || !String(owner || "").startsWith("user:")) return null;
+        const row = (await connections(owner)).find((c) => c.kind === "a2a" && c.enabled && a2a.baseOf(c.url) === want);
+        if (!row) return null;
+        const token = await tokenFor(owner, row.id);
+        return token ? { token, headerName: row.headerName || null } : null;
+    }
+
     /** Check one connection: an MCP server is initialized and asked for its tools; an A2A agent is asked for its card. */
     async function check(owner, id) {
         const conn = await store.get(s, owner, id);
@@ -185,7 +199,7 @@ function createConnectors({ store: s, config = {}, log = console, guard = {} } =
                 try {
                     const out = await a2a.sendTask(pick.url, { text: String((input && input.message) || ""), token, headerName: pick.headerName, timeoutMs: A2A_TIMEOUT_MS, ...guardOpts() });
                     return {
-                        text: clip(taskText(out.task), MAX_RESULT_BYTES),
+                        text: clip(out.text || taskText(out.task), MAX_RESULT_BYTES),
                         data: null,
                         sources: [{ url: pick.url, title: pick.name }],
                     };
@@ -226,7 +240,7 @@ function createConnectors({ store: s, config = {}, log = console, guard = {} } =
     /** The servers OpenVibe offers ready to turn on (the config file; Know's ov-know is one of them). */
     const builtins = () => (Array.isArray(config.connectors && config.connectors.builtins) ? config.connectors.builtins : []);
 
-    return { check, add, toolsFor, connections, builtins, tokenFor, sealer, actsFor, aliasOf, MAX_RESULT_BYTES, MAX_FAILURES };
+    return { check, add, toolsFor, connections, builtins, tokenFor, a2aKeyFor, guardOpts, sealer, actsFor, aliasOf, MAX_RESULT_BYTES, MAX_FAILURES };
 }
 
 module.exports = { createConnectors, actsFor, aliasOf, taskText, MAX_RESULT_BYTES, MAX_FAILURES };
