@@ -20,6 +20,30 @@ const { personFor } = require('./subject');
 
 const DONE = ['succeeded', 'failed', 'cancelled'];
 
+/** A task's answer in words: the result's answer (a jsonb object) or the text it is. */
+function answerOf(result) {
+    if (result == null) return '';
+    let r = result;
+    if (typeof r === 'string') { try { r = JSON.parse(r); } catch { return r; } }
+    if (r && typeof r === 'object' && typeof r.answer === 'string') return r.answer;
+    return typeof r === 'string' ? r : '';
+}
+
+/**
+ * A task as A2A 0.3 tells it (JSON-RPC's Task): its state, and its answer as an artifact once it succeeded. The
+ * contextId is the one the caller sent with the message, else the task's own id.
+ */
+function rpcTask(row, contextId = null) {
+    const done = DONE.includes(row.state);
+    const state = !done ? (row.state === 'queued' ? 'submitted' : 'working') : row.state === 'succeeded' ? 'completed' : row.state === 'cancelled' ? 'canceled' : 'failed';
+    const words = (text) => ({ kind: 'message', role: 'agent', messageId: `${row.id}-status`, parts: [{ kind: 'text', text }] });
+    return {
+        kind: 'task', id: 'a2a_' + row.id, contextId: contextId || 'a2a_' + row.id,
+        status: { state, ...(state === 'failed' && row.error_detail ? { message: words(String(row.error_detail).slice(0, 400)) } : {}) },
+        ...(state === 'completed' ? { artifacts: [{ artifactId: 'answer', name: 'answer', parts: [{ kind: 'text', text: answerOf(row.result) }] }] } : {}),
+    };
+}
+
 function createA2APages(ctx) {
     const { config, s, engine, principal } = ctx;
     const r = express.Router();
@@ -32,6 +56,9 @@ function createA2APages(ctx) {
         const who = personFor(p, req.get('x-ov-subject'));
         if (who.error) return contracts.http.sendProblem(res, who.error[0], who.error[1], { detail: who.error[2], ctx: req.ov });
         const subject = who.subject;
+        // A2A 0.3 (JSON-RPC 2.0 on the card's url, 11-19): message/send starts a task, tasks/get tells how it is going.
+        // The answer is always HTTP 200 with a JSON-RPC result or error; the auth above is the same for both shapes.
+        if (req.body && req.body.jsonrpc === '2.0') return jsonRpc(req, res, p, subject);
         const v = contracts.validate('actor.a2a-task-request@1', req.body || {});
         if (!v.valid) {
             const detail = (v.errors || []).map((e) => ((e.path || e.instancePath || '') + ' ' + e.message).trim()).join('; ').slice(0, 400);
@@ -46,6 +73,31 @@ function createA2APages(ctx) {
         }
         return res.status(201).json({ id: 'a2a_' + out.task.id, state: 'submitted', taskId: out.task.id });
     });
+
+    async function jsonRpc(req, res, p, subject) {
+        const b = req.body;
+        const id = typeof b.id === 'string' || typeof b.id === 'number' ? b.id : null;
+        const reply = (result) => res.json({ jsonrpc: '2.0', id, result });
+        const error = (code, message) => res.json({ jsonrpc: '2.0', id, error: { code, message } });
+        const params = b.params && typeof b.params === 'object' && !Array.isArray(b.params) ? b.params : {};
+        if (b.method === 'message/send') {
+            const message = params.message && typeof params.message === 'object' ? params.message : null;
+            const text = messageText(message).slice(0, 8000);
+            if (!text) return error(-32602, 'the message has no text');
+            const contextId = message && typeof message.contextId === 'string' ? message.contextId.slice(0, 200) : null;
+            const out = await createTask({ s, config, engine, principal: { ...p, requester: 'user:' + subject }, body: { task: text, mode: 'balanced' }, assignmentOrigin: 'outside' });
+            if (!out || !out.task) return error(-32603, (out && out.detail) || 'the task could not be started');
+            return reply(rpcTask({ id: out.task.id, state: 'queued' }, contextId));
+        }
+        if (b.method === 'tasks/get') {
+            const tid = String(params.id || '').replace(/^a2a_/, '');
+            const row = tid ? await s.db.maybe('SELECT id, requester, state, result, error_detail FROM tasks WHERE id = $1', [tid]) : null;
+            // Another person's task answers like a missing one (A2A's TaskNotFoundError).
+            if (!row || row.requester !== 'user:' + subject) return error(-32001, 'Task not found');
+            return reply(rpcTask(row));
+        }
+        return error(-32601, 'Method not found');
+    }
 
     r.get('/a2a/v1/tasks/:id', principal.requireCapability('actor.a2a.task'), async (req, res) => {
         const p = req.principal;
@@ -68,4 +120,4 @@ function createA2APages(ctx) {
     return r;
 }
 
-module.exports = { createA2APages };
+module.exports = { createA2APages, rpcTask, answerOf };

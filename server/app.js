@@ -144,7 +144,7 @@ async function createApp(opts = {}) {
     // Network notifications ("tell me when it's done"): off without a client secret, never able to fail a task.
     const notifier = opts.notifier || createNotifier({ config, fetchImpl, log });
     // The person's computers (made below) reach the engine through a getter: its route to their own computer (plan §AD.17).
-    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier, registry, checkpoints, computersOf: () => computers });
+    const engine = createEngine({ config, s, adapters, stream, webhooks, now: s.now, log, models, loop, notifier, registry, checkpoints, computersOf: () => computers, connectors });
     // Triggers (plan §12 A-4): a Watch subscription the person owns, its card in the thread, and the run back as an
     // assignment root at the trigger's level. The engine reports every task state so the card's streak stays true.
     const triggers = opts.triggers || createTriggers({ s, config, engine, webhooks, stream, now: s.now, log, fetchImpl: providerFetch });
@@ -380,7 +380,8 @@ async function createApp(opts = {}) {
     // A task page is behind a person's token: renderPublicPage deliberately returns null for it.
     // The agent card (stage V2-11): the shared OpenVibe manifest plus the A2A half - the skills another agent may
     // ask for and the auth a caller needs (a Network service token with actor.a2a.task, acting for a person).
-    app.get('/.well-known/agent.json', (req, res) => {
+    // A2A 0.3 reads /.well-known/agent-card.json; agents built before it read agent.json: the same card at both.
+    app.get(['/.well-known/agent.json', '/.well-known/agent-card.json'], (req, res) => {
         const layer = require('openvibe-shared/agent-layer');
         const card = require('./connections/a2a').actorCard({ baseUrl: config.baseUrl, version: VERSION });
         const manifest = layer.agentManifest(require('./agent-descriptor'));

@@ -92,9 +92,9 @@ function receiptOf(calls) {
     return { cost: { usd: r6(usd), tokens, seconds: r1(ms / 1000), by }, model };
 }
 
-function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null, computersOf = null }) {
-    // The engines that answer without the loop (server/engines): one model, the Decisions API.
-    const standalone = createEngines({ models, log });
+function createEngine({ config, s, adapters, stream, webhooks = null, now = () => Date.now(), log = console, models = null, loop = null, notifier = null, registry = null, checkpoints = null, waits: waitsArg = null, triggers: triggersArg = null, computersOf = null, connectors: connectorsService = null }) {
+    // The engines that answer without the loop (server/engines): one model, the Decisions API, an outside agent (A2A).
+    const standalone = createEngines({ models, log, connectors: connectorsService });
     // The router asks the Decisions API only where it is configured (models.decideReady); a stand-in models object
     // (a test's) without it never does.
     const decisionsHere = () => Boolean(models && typeof models.decide === 'function' && typeof models.decideReady === 'function' && models.decideReady());
@@ -691,15 +691,23 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             }
             // One model, or the Decisions API: the engine answers on its own, without the loop or the router. Its answer
             // is that engine's own (a comparison grades it), so the loop's check does not rewrite or refuse it.
-            if (chosenEngine && (chosenEngine.kind === 'model' || chosenEngine.kind === 'decisions') && !resume && !fork) {
-                const engineId = chosenEngine.kind === 'model' ? 'one-model' : 'decisions';
+            if (chosenEngine && (chosenEngine.kind === 'model' || chosenEngine.kind === 'decisions' || chosenEngine.kind === 'a2a') && !resume && !fork) {
+                const engineId = chosenEngine.kind === 'model' ? 'one-model' : chosenEngine.kind === 'a2a' ? 'a2a' : 'decisions';
+                // An outside agent's next turn continues its own conversation: the contextId its last answer gave.
+                let contextId = null;
+                if (chosenEngine.kind === 'a2a' && row.parent_id) {
+                    const prev = await store.getTask(s, row.parent_id).catch(() => null);
+                    let pr = null;
+                    try { pr = prev ? store.parseJson(prev.result) : null; } catch { pr = null; }
+                    if (pr && pr.a2a && typeof pr.a2a.contextId === 'string' && pr.engine && pr.engine.url === chosenEngine.url) contextId = pr.a2a.contextId;
+                }
                 explanation.push({ selected: engineId, objective: 'chosen', reasons: [`${engineLabel(chosenEngine)}, chosen for this task`], candidates: [], decided_at: iso() });
                 await store.updateTask(s, id, { explanation });
                 await emit(id, { kind: 'output', step: 'plan', agent: engineId, text: `${engineLabel(chosenEngine)} takes it, as you chose.` });
                 const subject = String(row.requester || '').startsWith('user:') ? row.requester.slice(5) : null;
                 let out;
                 // Its model calls note their receipt like the loop's (models.js noteReceipt).
-                const runOne = () => standalone[chosenEngine.kind]({ task: row.task, subject, model: chosenEngine.model || null, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: engineId, ...e }) });
+                const runOne = () => standalone[chosenEngine.kind]({ task: row.task, subject, model: chosenEngine.model || null, url: chosenEngine.url || null, contextId, signal, meter, budgetLeft, emit: (e) => emit(id, { kind: 'output', agent: engineId, ...e }) });
                 try {
                     out = await (models && typeof models.withMetering === 'function'
                         ? models.withMetering({ taskId: id, task: 'actor.task', startedAt: now(), seq: 0, receipt: receiptCalls }, runOne) : runOne());
@@ -715,7 +723,7 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                     await emit(id, { kind: 'output', step: 'text', agent: engineId, text: why, is_error: true });
                     return await setState(id, 'failed', { error_code: (err && /^actor\./.test(String(err.code)) ? err.code : 'actor.engine.failed'), error_detail: why, finished_at: iso() });
                 }
-                const result = { answer: out.text, sources: out.sources || [], agent: engineId, model: out.model || null, class: cls, engine: chosenEngine, ...(out.decision ? { decision: out.decision } : {}) };
+                const result = { answer: out.text, sources: out.sources || [], agent: engineId, model: out.model || null, class: cls, engine: chosenEngine, ...(out.a2a ? { a2a: out.a2a } : {}), ...(out.decision ? { decision: out.decision } : {}) };
                 return await setState(id, 'succeeded', { result, finished_at: iso() });
             }
             // A chosen agent system other than the loop (OpenAI's agent, the open model, a Codes harness) runs as chosen:
