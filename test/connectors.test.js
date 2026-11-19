@@ -207,6 +207,11 @@ const SAME_SITE = { 'sec-fetch-site': 'same-origin' };
         assert.match(settings.text, /OpenVibe search/);
         assert.match(settings.text, /c_openvibe/, 'the switches of the connectors');
         assert.match(settings.text, /Off for everyone/, 'a connector the owner turned off');
+        // Its sidebar works: the page loads the scripts that open and collapse it, as the chat page does (2026-11-19, the
+        // owner's screenshot: the sidebar button was "broken when on settings").
+        assert.match(settings.text, /data-ovk-sidebar-open/, 'the sidebar button is there');
+        assert.match(settings.text, /\/shared\/kit-web\.js/, 'and the script that opens it');
+        assert.match(settings.text, /\/shared\/ov-thread\.js/, 'and the one that collapses it');
 
         // The person's own form saves the switch.
         const saved = await t.get('/chat/connectors', { as: kim, method: 'POST', form: { c_openvibe: '0' }, headers: { 'sec-fetch-site': 'same-origin' } });

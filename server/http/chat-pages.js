@@ -963,7 +963,9 @@ ${raw(await runPolicyHtml(requester, req.query.saved === 'run-policy'))}
 </div>`;
         return send(res, 200, {
             viewer: req.viewer, config, path: req.originalUrl, title: 'Settings', app: true, noReferrer: true,
-            css: ['css/chat.css', 'css/connectors.css'], scripts: [], styles: ['kit.css', 'thread.css'],
+            // The sidebar's own scripts, as the chat page has them (kit-web.js opens the drawer, ov-thread.js collapses it):
+            // without them its button did nothing on Settings (the owner's screenshot, 2026-11-19: "broken when on settings").
+            css: ['css/chat.css', 'css/connectors.css'], scripts: [], styles: ['kit.css', 'thread.css'], sharedScripts: ['kit-web.js', 'ov-thread.js'],
             body: raw(thread.page({
                 sidebar: String(sidebar(chats, null, { settings: true })),
                 head: thread.head({ title: 'Settings', newHref: '/chat' }),
