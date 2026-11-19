@@ -486,7 +486,8 @@ ${acting ? '' : html`<form method="post" action="/tasks/${row.id}/answer" class=
     function failedBlock(row, t, readOnly = false) {
         const err = t.error || {};
         if (SPENT_RE.test(String(err.detail || '')) || err.code === 'ai.allowance_spent') return waysBlock(row, readOnly);
-        const why = {
+        const stopped = err.code === 'actor.agents.exhausted' && err.detail && !/^No agent finished this task/.test(String(err.detail));
+        const why = stopped ? String(err.detail).slice(0, 400) : {
             'actor.agents.exhausted': 'No answer passed its check, so nothing unchecked was shown.',
             'actor.check.unavailable': 'The answer could not be checked, so it was not shown.',
             'actor.task.timeout': 'It ran too long and was stopped.',

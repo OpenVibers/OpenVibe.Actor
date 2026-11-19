@@ -188,7 +188,9 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
                 if (r.ok && r.data) t = r.data;
                 if (t.state !== shown) {
                     shown = t.state;
-                    await emit({ step: 'text', text: `${LABEL[t.state] || t.state}.` });
+                    // A terminal state is said by what follows: the answer, or why it stopped. "Finished." came before
+                    // "The agents on your machine did not finish" (the owner's screenshot, 2026-11-19).
+                    if (!TERMINAL.has(t.state)) await emit({ step: 'text', text: `${LABEL[t.state] || t.state}.` });
                 }
             }
         } finally {

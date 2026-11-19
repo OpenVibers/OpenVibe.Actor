@@ -1253,6 +1253,8 @@ ${problem ? html`<p class="notice warn" role="alert">${problem}</p>` : ''}
         if (!err) return 'It stopped without saying why.';
         // The resume cap has its own words (stage V2-9): a generic "Actor restarted" would hide why it stopped.
         if (err.code === 'actor.task.interrupted' && /interrupted twice/.test(String(err.detail || ''))) return err.detail;
+        // An agent that stopped before answering is named with its reason (engine.js): the check sentence would be untrue.
+        if (err.code === 'actor.agents.exhausted' && err.detail && !/^No agent finished this task/.test(String(err.detail))) return String(err.detail).slice(0, 600);
         const plain = {
             'actor.agents.exhausted': 'No agent gave an answer that passed its check, so nothing unchecked was shown to you. Trying again in Best mode starts with the strongest agent.',
             'actor.check.unavailable': 'The answer could not be checked, so it was not delivered. Try again in a minute.',
