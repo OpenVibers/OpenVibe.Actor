@@ -68,10 +68,12 @@ const recentSucceeded = (s, requester, exceptId, limit = 5) => s.db.many(
 const byIdempotency = (s, requester, key) => s.db.maybe('SELECT * FROM tasks WHERE requester = $1 AND idem_key = $2', [requester, key]);
 
 /** A requester's tasks, newest first; `via` narrows to the ones that service started for them. */
-async function listTasks(s, requester, { limit = 20, before = null, via = null } = {}) {
+async function listTasks(s, requester, { limit = 20, before = null, via = null, states = null } = {}) {
     const where = ['requester = $1'];
     const args = [requester];
     if (via) { args.push(via); where.push(`via = $${args.length}`); }
+    // Your tasks' filters (2026-11-19): only these states.
+    if (Array.isArray(states) && states.length) { args.push(states); where.push(`state = ANY($${args.length})`); }
     if (before) { args.push(before); where.push(`id < $${args.length}`); }
     args.push(limit + 1);
     const rows = await s.db.many(`SELECT * FROM tasks WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT $${args.length}`, args);

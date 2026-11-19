@@ -52,6 +52,16 @@ const MODE_TEXT = {
 const MODE_LABEL = { cheapest: 'Cheapest', balanced: 'Balanced', best: 'Best', fastest: 'Fastest', private: 'Private' };
 const CLASS_WORD = { answer: 'Answers', lookup: 'Lookups', research: 'Reading pages', web: 'Web search', code: 'Code', robot: 'Your robot', computer: 'Your computer' };
 const STATE_KIND = { queued: '', running: 'info', verifying: 'info', succeeded: 'ok', failed: 'bad', cancelled: '' };
+// Your tasks (2026-11-19): what a row says and how it is tinted, and the filters as [key, label, states].
+const TASK_STATE_WORD = { queued: 'Waiting to start', running: 'Working', verifying: 'Checking', needs_you: 'Needs you', succeeded: 'Done', failed: 'Didn\'t finish', cancelled: 'Cancelled' };
+const ROW_KIND = { queued: 'wait', running: 'live', verifying: 'live', needs_you: 'you', succeeded: 'ok', failed: 'bad', cancelled: 'off' };
+const TASK_FILTERS = [
+    ['all', 'All', null],
+    ['working', 'Working', ['queued', 'running', 'verifying']],
+    ['needs_you', 'Needs you', ['needs_you']],
+    ['done', 'Done', ['succeeded']],
+    ['stopped', 'Didn\'t finish', ['failed', 'cancelled']],
+];
 // What it does for you (the owner, 2026-11-09: the old examples, a flight, a desk, Lisbon, "suck"; lead with work,
 // money, a channel, a brief and building things; Actor v3 plan). Every one runs on today's engine: web and OpenVibe
 // search, reading pages, writing, files, Watch and coding. Grouped by the lane the Actor v3 plan names.
@@ -427,15 +437,21 @@ ${text ? html`<p class="task-box-lead">Your task, ready to run once you sign in:
         : html`<p class="task-box-lead">Sign in with your OpenVibe account and ask in plain words. Not sure what to ask? Start from one of the tasks below.</p>`}
 <div class="task-actions"><a class="sc-btn sc-primary" href="/auth/login?next=${encodeURIComponent(next)}">${text ? 'Sign in to run it' : 'Sign in to start'}</a><span class="muted small">Free: ${tier.tasksPerDay} tasks a day, no card.</span></div></div>`;
         }
-        return html`<form class="task-box" method="post" action="/tasks">
+        // One box (the owner, 2026-11-19, "Improve, Redesign" over five mode cards that filled a phone): the task, the
+        // mode as one row of pills with the chosen one's meaning under it, and Run beside them. Plain radios underneath,
+        // so it works without a script; js/tasks.js only grows the box as you type.
+        return html`<form class="task-box" method="post" action="/tasks" data-task-box>
 ${problem ? notice(problem, 'warn') : ''}
-<label class="task-label" for="task">What should Actor do?</label>
-<textarea id="task" name="task" rows="4" maxlength="20000" required placeholder="${EXAMPLES[0]}">${text}</textarea>${needs}
-<fieldset class="modes"><legend>Mode</legend>
-${MODES.map((m) => html`<label class="mode"><input type="radio" name="mode" value="${m}"${m === mode ? raw(' checked') : ''}><span><b>${MODE_LABEL[m]}</b><small>${MODE_TEXT[m]}</small></span></label>`)}
+<label class="task-label" for="task">New task</label>
+<textarea id="task" name="task" rows="3" maxlength="20000" required placeholder="Tell Actor what to do, in plain words: find, compare, write, watch, code…">${text}</textarea>${needs}
+<div class="task-bar">
+<fieldset class="modes"><legend class="sr-only">Mode</legend>
+${MODES.map((m) => html`<label class="mode" title="${MODE_TEXT[m]}"><input type="radio" name="mode" value="${m}"${m === mode ? raw(' checked') : ''}><span>${MODE_LABEL[m]}</span></label>`)}
 </fieldset>
-<div class="task-actions"><button class="sc-btn sc-primary" type="submit">Run it</button><span class="muted small">Up to ${usd(tier.perTaskUsd)} a task on the free tier; you see the real cost to a fraction of a cent.</span></div>
-${today ? html`<p class="task-allowance muted small">${leftLine(tier, today)}</p>` : ''}
+<button class="sc-btn sc-primary task-run" type="submit">Run</button>
+</div>
+<p class="mode-say">${MODES.map((m) => html`<span data-mode="${m}">${MODE_TEXT[m]}</span>`)}</p>
+<p class="task-allowance muted small">Up to ${usd(tier.perTaskUsd)} a task on the free tier, the real cost shown to a fraction of a cent.</p>
 </form>`;
     }
 
@@ -923,25 +939,40 @@ ${enough ? html`<form method="post" action="/tasks/${row.id}/challenge">
             return page(req, res, { title: 'Your tasks', crumbs: [{ label: 'Your tasks' }], body: html`<h1>Your tasks</h1><p>Sign in to see the tasks you gave Actor.</p><p><a class="sc-btn sc-primary" href="/auth/login?next=%2Ftasks">Sign in</a></p>` });
         }
         const before = typeof req.query.before === 'string' && TASK_ID.test(req.query.before) ? req.query.before : null;
-        const pageRows = await store.listTasks(s, requesterOf(req), { limit: 30, before });
+        const show = TASK_FILTERS.some((f) => f[0] === req.query.show) ? req.query.show : 'all';
+        const filter = TASK_FILTERS.find((f) => f[0] === show);
+        const pageRows = await store.listTasks(s, requesterOf(req), { limit: 30, before, states: filter[2] });
         const today = await store.spendToday(s, requesterOf(req));
         const offers = await benchOffers.list(s, requesterOf(req));
+        const used = tier.perDayUsd > 0 ? Math.min(100, Math.round((Number(today.usd) / tier.perDayUsd) * 100)) : 0;
+        const left = Math.max(0, tier.perDayUsd - Number(today.usd));
+        const showHref = (key, extra = '') => `/tasks${key === 'all' ? '' : `?show=${key}`}${extra}`;
+        const rows = pageRows.rows.map((t) => {
+            const result = t.result ? (typeof t.result === 'string' ? JSON.parse(t.result) : t.result) : null;
+            const agent = result && result.agent ? ((catalog.byId(result.agent) || {}).name || result.agent) : null;
+            const cost = t.cost_usd == null ? null : usd(Number(t.cost_usd));
+            return html`<li class="tk-row"><a href="/tasks/${t.id}"><span class="tk-state tk-${ROW_KIND[t.state] || 'plain'}"><i aria-hidden="true"></i>${TASK_STATE_WORD[t.state] || t.state}</span><span class="tk-text">${t.task}</span><span class="tk-meta">${agent ? html`<span>${agent}</span>` : ''}${cost && cost !== '$0' ? html`<span>${cost}</span>` : ''}<span>${time(t.created_at)}</span></span></a></li>`;
+        });
         page(req, res, {
-            title: 'Your tasks', crumbs: [{ label: 'Your tasks' }], styles: [showcase.STYLESHEET],
-            body: html`<h1>Your tasks</h1>
-<p class="muted">Today: ${today.tasks} of ${tier.tasksPerDay} free tasks, ${usd(today.usd)} of ${usd(tier.perDayUsd)}. ${leftLine(tier, today)} Tasks are kept ${store.RETENTION_DAYS} days. · <a href="/memory">Memory</a></p>
+            title: 'Your tasks', styles: [showcase.STYLESHEET], scripts: ['js/tasks.js'],
+            body: html`<div class="tk-page">
+<header class="tk-head"><h1>Your tasks</h1>
+<div class="tk-today"><div class="tk-meter" role="img" aria-label="${`${used}% of today's free allowance used`}"><span style="width:${used}%"></span></div>
+<p><b>${today.tasks}</b> of ${tier.tasksPerDay} free tasks today · <b>${usd(left)}</b> of ${usd(tier.perDayUsd)} left · kept ${store.RETENTION_DAYS} days</p>
+<p class="tk-links"><a href="/memory">Memory</a><a href="/me/spend">What you have spent</a><a href="/chat">Chat</a></p></div>
+</header>
 ${taskForm(req.viewer, { today })}
-${table(['Task', 'State', 'Agent', 'Cost', 'Started'], pageRows.rows.map((t) => {
-                const result = t.result ? (typeof t.result === 'string' ? JSON.parse(t.result) : t.result) : null;
-                return [html`<a href="/tasks/${t.id}">${t.task.length > 90 ? `${t.task.slice(0, 89)}…` : t.task}</a>`, badge(t.state, STATE_KIND[t.state]), result ? (catalog.byId(result.agent) || {}).name || result.agent : '—', usd(t.cost_usd == null ? null : Number(t.cost_usd)), time(t.created_at)];
-            }), { empty: 'No tasks yet.' })}
+<nav class="tk-filters" aria-label="Show tasks">${TASK_FILTERS.map(([key, label]) => html`<a class="tk-chip" href="${showHref(key)}"${key === show ? raw(' aria-current="page"') : ''}>${label}</a>`)}</nav>
+${rows.length ? html`<ul class="tk-list" data-tk-list>${rows}</ul>`
+        : html`<div class="tk-empty"><p>${show === 'all' ? 'No tasks yet. Write one above, or ask in Chat.' : `Nothing here: no tasks are ${filter[1].toLowerCase()}.`}</p>${show === 'all' ? '' : html`<p><a href="/tasks">Show all your tasks</a></p>`}</div>`}
+${pageRows.next ? html`<p class="tk-more"><a href="${showHref(show, `${show === 'all' ? '?' : '&'}before=${pageRows.next}`)}" data-tk-more>Older tasks</a></p>` : ''}
 ${offers.length ? html`<h2>Offered as Bench cases</h2>
 ${table(['Case', 'Offered', ''], offers.map((o) => [
                 html`<a href="/tasks/${o.task_id}">${o.text.length > 90 ? `${o.text.slice(0, 89)}…` : o.text}</a>`,
                 time(o.offered_at),
                 html`<form method="post" action="/tasks/${o.task_id}/bench-offer/withdraw"><button class="sc-btn" type="submit">Withdraw</button></form>`,
             ]))}` : ''}
-${pageRows.next ? html`<p><a href="/tasks?before=${pageRows.next}">Older tasks</a></p>` : ''}`,
+</div>`,
         });
     });
 
