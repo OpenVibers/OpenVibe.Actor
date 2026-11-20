@@ -20,7 +20,7 @@ const BASE = { name: 'Empty panels', instructions: 'Help me.', mode: 'balanced',
                 assert.ok(page.text.includes(text), `expected ${text}`);
             }
             assert.ok(page.text.includes('class="ovk-empty"'), 'the kit empty state is drawn');
-            assert.ok(page.text.includes('Browse the skills registry'), 'the one next action is a kit button');
+            assert.ok(page.text.includes('Teach it a task'), 'the one next action is a kit button: teach it (Teach, plan §AD.33)');
             assert.match(page.text, /kit\.css/, 'the page loads kit.css');
         });
         await check('the connections page loads the kit it draws its tool empty state with', async () => {
