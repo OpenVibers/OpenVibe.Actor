@@ -26,13 +26,13 @@ const LESSON_STATE = {
 };
 
 /** The Teach panel: one sentence, an optional start page, the kind of desk, and the button. */
-function panel(agent, lessons = []) {
+function panel(agent, lessons = [], { ready = false } = {}) {
     const recent = lessons.slice(0, 3);
     return html`<section class="pa-panel tc-panel" id="teach" aria-labelledby="tc-h">
 <div class="tc-head"><span class="tc-mark" aria-hidden="true"><span></span></span><h2 id="tc-h">Teach it a task</h2></div>
 <p class="pa-hint tc-lede">Show ${agent.name} once on its own desk. It turns what you did into a skill, and rewrites that skill itself whenever it needs your help with it.</p>
 <form method="post" action="/me/agents/${agent.id}/teach" class="tc-form">
-<label class="tc-what">What will you show it? <input name="what" maxlength="300" required placeholder="Post a clip to my X account" autocomplete="off"></label>
+<label class="tc-what">What will you show it? <input name="what" maxlength="300" required placeholder="Post a clip to my X account" autocomplete="off"${ready ? raw(' autofocus') : ''}></label>
 <label class="tc-url"><span class="tc-label">Start at <span class="tc-opt">optional</span></span><input name="url" type="url" inputmode="url" maxlength="2048" placeholder="https://x.com" autocomplete="off"></label>
 <fieldset class="tc-kind"><legend>Its desk</legend>
 <label><input type="radio" name="kind" value="browser" checked><span>A browser</span></label>

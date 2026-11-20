@@ -146,7 +146,7 @@ function createAgentPages(ctx) {
         page(req, res, 'Your agents', html`<header class="pa-head"><h1>Your agents</h1>
 <p class="pa-lede">Each agent is a contact: a face, a model, a computer to work on, the apps it may use, its memory, and how much it may do without asking. Every run is an ordinary Actor task, with the same checks, costs and limits.</p>
 <p class="ac-links"><a href="/me/approvals">Approvals${waiting ? html` <span class="pill pill-running">${String(waiting)} waiting</span>` : ''}</a> <a href="/memory">Memory</a> <a href="/skills">Skills</a></p></header>
-${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when })}
+${ui.roster(rows.map((row) => ({ row, agent: contacts.wire(row) })), { when, teach: true })}
 <section class="pa-panel" aria-labelledby="ac-add-h"><h2 id="ac-add-h">Add an agent</h2><p class="pa-hint">Each comes ready with its instructions; change anything after.</p>${ui.presetCards(contacts.presets().presets)}</section>
 <section class="pa-panel" aria-labelledby="pa-templates-h"><h2 id="pa-templates-h">Or set up a standing job</h2><p class="pa-hint">An agent with a schedule: it runs on its own and keeps notes between runs.</p>
 <ul class="pa-templates">${TEMPLATES.map((x) => html`<li><a class="pa-template${chosen && chosen.id === x.id ? ' is-chosen' : ''}" href="/me/agents?template=${x.id}#create"><strong>${x.name}</strong><span>${x.line}</span><small>${when({ schedule: x.schedule, schedule_at: x.schedule_at, schedule_dow: x.schedule_dow })}</small></a></li>`)}</ul></section>
@@ -496,7 +496,7 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
 <p class="pa-lede">${ui.levelChip(contact.level)} <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></div></header>
 ${a.last_skip_reason ? html`<p class="notice" role="status">The last scheduled run was skipped: ${a.last_skip_reason}</p>` : ''}
 <form method="post" action="/me/agents/${a.id}/run" class="pa-runbar"><label class="pa-runbar-in"><span class="sr-only">Anything this run should also consider (optional)</span><textarea name="input" maxlength="8000" rows="1" placeholder="Anything to add? (optional)"></textarea></label><button type="submit" class="pa-btn pa-primary">Run now</button></form>
-${teachUi.panel(a, lessons)}
+${teachUi.panel(a, lessons, { ready: req.query.teach === '1' })}
 <ul class="pa-glance" aria-label="At a glance">
 <li><a href="#runs"><b>${runs.length}${runs.length === 20 ? '+' : ''}</b><span>${runs.length === 1 ? 'run' : 'runs'}</span></a></li>
 <li><a href="#always"><b>${allowRules.length}</b><span>always allowed</span></a></li>
