@@ -188,6 +188,13 @@ async function prepareDesk(tool, a, person, core, ctx) {
     if (!DESK_TOOLS.has(tool)) return a;
     if (a.desk != null && a.desk !== 'private' && a.desk !== 'main') return { error: 'desk is "private" (your own desk) or left out (the person\'s own screen)' };
     const desks = ctx.state && ctx.state.desks;
+    // Machine "any" is the desk this run placed (computer_desk start with machine "any" says to use it so): a tool
+    // other than computer_desk sent "any" straight to the machine check and was refused (11-20, production).
+    if (a.machine === 'any' && tool !== 'computer_desk') {
+        if (!desks || !desks.placed) return { error: 'no desk of yours runs yet: start one with computer_desk start and machine "any"' };
+        a = { ...a, machine: desks.placed };
+        if (core.pcs.isSession && core.pcs.isSession(a.machine)) return a;   // a desk host's session names its own desk
+    }
     if (tool === 'computer_desk' || a.desk === 'private') return { ...a, desk: await deskFor(desks, person, a.machine, { core, signal: ctx.signal }) };
     return a;
 }
