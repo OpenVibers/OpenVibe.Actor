@@ -12,7 +12,7 @@ const { serviceFor, personOf } = require('./_openvibe');
 
 module.exports = {
     name: 'watch_web',
-    description: 'Watch the web for something new, for your person: once a day OpenVibe.Search searches the web for these words and notifies them when results appear that it has not shown before (the first day only records what is there). Use it for "tell me when …" about news, a release, a price or a page. At most 10 watches per person; they see and remove them on OpenVibe.Search. Not for OpenVibe content (search_openvibe) or for work to do on a schedule (schedule_trigger).',
+    description: 'Watch the web for something new, for your person: once a day OpenVibe.Search searches the web for these words and notifies them when results appear that it has not shown before (the first day only records what is there). Use it for "tell me when …" about news, a release, a price or a page. At most 10 watches per person; they see and remove them at https://search.openvibe.network/saved. Not for OpenVibe content (search_openvibe) or for work to do on a schedule (schedule_trigger).',
     input: {
         type: 'object',
         properties: {
@@ -32,7 +32,7 @@ module.exports = {
         if (out.error) return { text: out.error, isError: true, data: out };
         return {
             text: out.created
-                ? `Watching the web for “${out.q}”: once a day, your person is told of results not shown before.`
+                ? `Watching the web for “${out.q}”: once a day, your person is told of results not shown before. They can see and remove it at https://search.openvibe.network/saved.`
                 : `Already watching the web for “${out.q}”.`,
             data: out,
         };
