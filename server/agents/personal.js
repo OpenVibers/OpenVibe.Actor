@@ -209,7 +209,7 @@ async function keepSkillProposal(s, owner, id, pid, input, { readFindings = fals
     const slug = `learned-${pid.slice(-20).toLowerCase()}`;
     const doc = { skill: 'actor.skill@2', slug, ...fields, version: '1.0.0', runs: 'prompt' };
     // A skill the person taught declares the hosts and kinds of step they showed it (Teach, plan §AD.33).
-    if (proposal.source === 'teach') {
+    if (proposal.source === 'teach' || proposal.source === 'helped') {
         const requires = require('../teach/draft').deriveRequires(fields);
         if (requires) doc.requires = requires;
     }

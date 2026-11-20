@@ -122,11 +122,12 @@ async function demonstration(steps, picture) {
  * Write a skill from a demonstration.
  * → { draft: { name, description, instructions }, cost_usd, model } or { error }
  */
-async function write({ models, subject = null, what, startUrl = null, steps, picture, signal = null }) {
+async function write({ models, subject = null, what, startUrl = null, steps, picture, signal = null, context = null }) {
     if (!models || typeof models.chat !== 'function') return { error: 'No model is set up to read what you showed.' };
     if (!steps || !steps.length) return { error: 'Nothing was done on the desk, so there is nothing to learn.' };
     const demo = await demonstration(steps, picture);
-    const intro = `The task the person showed: ${oneLine(what, 300)}${startUrl ? `\nThe desk started at: ${startUrl}` : ''}\n\nWhat they did, in order:\n${demo.lines}`;
+    const before = Array.isArray(context) && context.length ? `\n\nWhat the agent did itself on this run, before and after the person stepped in (keep the steps that worked):\n${context.slice(-60).join('\n')}` : '';
+    const intro = `The task the person showed: ${oneLine(what, 300)}${startUrl ? `\nThe desk started at: ${startUrl}` : ''}${before}\n\nWhat the person did, in order:\n${demo.lines}`;
     const r = await models.chat({
         tier: 'vision', maxTokens: 3000, signal, subject,
         messages: [{ role: 'system', content: WRITE_SYSTEM }, { role: 'user', content: [{ type: 'text', text: intro }, ...demo.parts] }],
