@@ -134,7 +134,21 @@ function serviceFor(ctx) {
         return results.length ? { results, found_by: steps.join(', ') || null } : { results: [], note: 'Nothing found on the web for that; try other words.' };
     }
 
-    const core = { searchUrl, toolsUrl, webTokens, notify, bot, pcs, getJson, tools, inputSchema, findTools, runTool, searchOpenVibe, searchWeb };
+    /** A web watch for the person (OpenVibe.Search saved search, scope web), asked as Actor acting for them. */
+    async function watchWeb(query, name, person, { signal } = {}) {
+        if (!webTokens) return { error: 'web search is not connected on this server' };
+        if (!person) return { error: 'a web watch is for a signed-in person' };
+        const q = String(query || '').trim().slice(0, 300);
+        if (!q) return { error: 'a web watch needs words to search for' };
+        const headers = { ...(await webTokens.authHeaders()), 'x-ov-subject': person };
+        const r = await getJson(`${searchUrl}/api/v1/saved-searches`, { method: 'POST', body: { q, scope: 'web', ...(name ? { name: String(name).trim().slice(0, 100) } : {}) }, headers, signal, timeoutMs: 15_000 });
+        if (r.status === 409) return { error: 'Your person already has the most web watches allowed (10): they can remove one on OpenVibe.Search.' };
+        if (!r.ok || !r.data || !r.data.saved_search) return { error: (r.data && (r.data.detail || r.data.title)) || `Search answered ${r.status}` };
+        const s = r.data.saved_search;
+        return { created: r.status === 201, id: s.id, name: s.name, q: s.q, scope: s.scope };
+    }
+
+    const core = { searchUrl, toolsUrl, webTokens, notify, bot, pcs, getJson, tools, inputSchema, findTools, runTool, searchOpenVibe, searchWeb, watchWeb };
     CACHE.set(key, core);
     return core;
 }

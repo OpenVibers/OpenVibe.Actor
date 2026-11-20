@@ -365,6 +365,18 @@ function stepFor(name, input) {
             };
         }
 
+        // ── A web watch: one search a day, the person told of what is new; it keeps running, so it is a routine ──
+        case 'watch_web': {
+            const q = text(a.query, 160);
+            return {
+                act: 'act',
+                kind: 'routine',
+                summary: `Watch the web every day for ${quoted(q, 160) || 'the words you gave'} and tell you about new results`,
+                target: `watch:${q.toLowerCase()}`,
+                payload: safeInput({ query: a.query, name: a.name }),
+            };
+        }
+
         // ── Money: a tip to a creator, with the person's own Vibes (plan HO7) ──
         case 'spend_vibes': {
             const to = text(a.to, 120);

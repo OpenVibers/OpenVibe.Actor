@@ -20,8 +20,14 @@ function fakeSearch({ fabric = true } = {}) {
     const fetchImpl = async (url, init = {}) => {
         const u = new URL(url);
         const headers = init.headers || {};
-        calls.push({ method: init.method || 'GET', path: u.pathname, query: Object.fromEntries(u.searchParams), auth: headers.Authorization || null, subject: headers['x-ov-subject'] || null, body: init.body ? JSON.parse(init.body) : null });
+        let body = null;
+        try { body = init.body ? JSON.parse(init.body) : null; } catch { body = String(init.body); }
+        calls.push({ method: init.method || 'GET', path: u.pathname, query: Object.fromEntries(u.searchParams), auth: headers.Authorization || headers.authorization || null, subject: headers['x-ov-subject'] || null, body });
         if (u.host === 'tools.test') return reply(200, { tools: [] });
+        if (u.pathname === '/oauth/token') return reply(200, { access_token: 'svc-token', token_type: 'Bearer', expires_in: 300 });
+        if (u.pathname === '/api/v1/saved-searches' && init.method === 'POST') {
+            return reply(201, { saved_search: { id: 'svs_01jabcdefghjkmnpqrstvwxyz0', name: body.name || body.q, q: body.q, scope: body.scope, filters: {} } });
+        }
         if (u.pathname === '/api/v1/query' && !fabric) return reply(404, { code: 'not_found' });
         if (u.pathname === '/api/v1/query' && (init.method || 'GET') === 'GET') {
             return reply(200, { results: [{ scope: 'network', kind: 'document', title: 'Night owls recap', snippet: 'what happened', url: 'https://openvibe.live/@goosely', type: 'stream', owner: 'live', published_at: '2026-10-27T10:00:00Z' }], route: { explain: [] } });
@@ -79,6 +85,27 @@ function fakeSearch({ fabric = true } = {}) {
         const tool = require('../server/runtime/tools/search_web');
         assert.deepStrictEqual(tool.input.properties.depth.enum, ['standard', 'deep'], 'the runtime tool offers the same');
         assert.ok(tool.timeoutMs >= 55_000, 'and waits for a deep search');
+    });
+
+    await check('watch_web: a web watch saved on Search for the person, as Actor acting for them', async () => {
+        const s = fakeSearch();
+        const config2 = config;
+        const { serviceFor } = require('../server/runtime/tools/_openvibe');
+        const tool = require('../server/runtime/tools/watch_web');
+        const ctx = { config: config2, fetch: s.fetchImpl, requester: `user:${ME}`, log: { warn() {} } };
+        const core = serviceFor(ctx);
+        const out = await core.watchWeb('new node.js LTS release', 'Node LTS', ME);
+        const call = s.calls.find((c) => c.path === '/api/v1/saved-searches' && c.method === 'POST');
+        assert.ok(call, 'POSTed to saved searches');
+        assert.deepStrictEqual([call.subject, call.body.q, call.body.scope, call.body.name], [ME, 'new node.js LTS release', 'web', 'Node LTS']);
+        assert.ok(call.auth && /^Bearer /.test(call.auth), "Actor's service token");
+        assert.deepStrictEqual([out.created, out.scope], [true, 'web']);
+        assert.match((await core.watchWeb('', null, ME)).error, /needs words/);
+        assert.match((await core.watchWeb('x', null, null)).error, /signed-in person/);
+        assert.strictEqual(tool.available({ ...ctx, requester: 'app:app_1' }), false, 'not offered without a person');
+        const { stepFor } = require('../server/agents/actions');
+        const step = stepFor('watch_web', { query: 'New Node.js LTS release' });
+        assert.deepStrictEqual([step.kind, step.target], ['routine', 'watch:new node.js lts release']);
     });
 
     await check('search_web for a task with no signed-in person: no subject header', async () => {
