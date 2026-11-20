@@ -308,6 +308,30 @@ function fakeModels(answer) {
             assert.strictEqual(models.asked.length, 0, 'no model was asked');
         });
 
+        await check('a run it finished with the person\'s help offers a new skill from what they showed it; a sign-in does not', async () => {
+            const helpedRun = async (clicks, state = 'succeeded') => {
+                const id = await task();
+                await event(id, { step: 'tool_call', tool: 'computer_browser', call_id: 'b1', args: { action: 'open', url: 'https://x.com/compose/post' }, input: 'open https://x.com/compose/post' });
+                await event(id, { step: 'tool_call', tool: 'hand_to_person', call_id: 'h1', args: { machine: 'any', what: 'Show me where to post' }, input: 'Show me where to post' });
+                for (let i = 0; i < clicks; i++) await recorder.record(s, id, { action: 'click', x: 100 + i, y: 100, width: 640, height: 400 });
+                await store.updateTask(s, id, { state });
+                return store.getTask(s, id);
+            };
+            const models = fakeModels(JSON.stringify({ ...SKILL, name: 'Post from compose' }));
+            const p = await improve.afterRun({ s, models, row: await helpedRun(3) });
+            assert.ok(p, 'a draft');
+            assert.strictEqual(p.source, 'helped');
+            assert.strictEqual(p.state, 'pending');
+            assert.match(models.asked[0].messages[1].content[0].text, /What the agent did itself on this run[\s\S]*open https:\/\/x\.com\/compose\/post/);
+            assert.match(models.asked[0].messages[1].content[0].text, /What the person did, in order:/);
+            const page = await t.get(`/me/agents/${agent.id}`, { as: kim });
+            assert.match(page.text, /You stepped in on this run and showed it part of the job/);
+            assert.strictEqual(await improve.afterRun({ s, models, row: await helpedRun(2) }), null, 'two clicks is a sign-in, not a lesson');
+            assert.strictEqual(await improve.afterRun({ s, models, row: await helpedRun(5, 'failed') }), null, 'only a run that worked');
+            assert.strictEqual(models.asked.length, 1);
+            await personal.decide(s, owner, agent.id, p.id, 'dismiss');
+        });
+
         await check('the improve switch and Try it are the person\'s own', async () => {
             const sw = await t.get(`/me/agents/${agent.id}/skills-improve`, { as: kim, method: 'POST', form: { mode: 'ask' }, headers: SAME, redirect: 'manual' });
             assert.strictEqual(sw.status, 303);

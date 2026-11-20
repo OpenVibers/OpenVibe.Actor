@@ -12,13 +12,16 @@ function card(agentId, proposal, { findings = [] } = {}) {
     // Where the draft came from (plan §AD.33): what the person showed it, its own improvement of a skill, or a run.
     const improving = Boolean(proposal.updates_listing);
     const taught = proposal.source === 'teach';
-    const title = improving ? `Update “${draft.name || 'its skill'}”?` : taught ? 'Keep what you showed it?' : 'Keep this as a skill?';
+    const helped = proposal.source === 'helped';
+    const title = improving ? `Update “${draft.name || 'its skill'}”?` : taught || helped ? 'Keep what you showed it?' : 'Keep this as a skill?';
     const hint = improving
         ? 'It rewrote this skill after a run that needed you. Read and edit it before you keep it; the version before stays one tap away.'
         : taught
             ? 'It watched you do this once and wrote it up as steps it can follow. Read and edit every part, then keep it: it stays private to you and asks for no new permission.'
+            : helped
+                ? 'You stepped in on this run and showed it part of the job. It wrote what you did, with its own steps, as a skill for next time. Read and edit every part, then keep it.'
             : 'Your agent learned a reusable method after a checked run. Read and edit every part before keeping it. It stays private to you and asks for no new permission.';
-    return html`<section class="pa-panel sk-draft${taught ? ' sk-taught' : ''}" aria-label="Skill draft">
+    return html`<section class="pa-panel sk-draft${taught || helped ? ' sk-taught' : ''}" aria-label="Skill draft">
 <h2>${title}</h2>
 ${improving && proposal.text ? html`<p class="sk-change">${proposal.text}</p>` : ''}
 <p class="pa-hint">${hint}</p>

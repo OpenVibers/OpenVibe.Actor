@@ -72,3 +72,6 @@ of that agent whose only tools open its desk (`computer_desk`, `computer_browser
   for you. A skill grants nothing either way: the agent's level and your approvals still decide every step.
 - **Try it now** on one of your skills runs the agent with that skill on its own desk; where it gets stuck, it hands
   you the desk, and what you do then improves the skill.
+- **It learns when you help.** On any run that used none of your skills, if you take its desk over and show it part of
+  the job (three clicks or more, so not just a sign-in) and the run then succeeds, it drafts a new skill from its own
+  steps and yours: "Keep what you showed it?" on its page, like a lesson.

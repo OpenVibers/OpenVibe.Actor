@@ -72,7 +72,7 @@ async function afterRun({ s, models, row, log = console }) {
     if (await s.db.maybe('SELECT 1 AS one FROM actor_teach_sessions WHERE task_id = $1', [row.id])) return null;
     const events = await store.eventsDetailed(s, row.id, 0);
     const slugs = [...new Set(events.filter((e) => e && e.step === 'tool_call' && e.tool === 'load_skill' && e.args && typeof e.args.slug === 'string').map((e) => e.args.slug))];
-    if (!slugs.length) return null;
+    if (!slugs.length) return learnFromHelp({ s, models, row, events, agentId });
     const tookOver = events.some((e) => e && e.step === 'person');
     if (!tookOver && row.state !== 'failed') return null;
     const subject = row.requester.slice(5);
@@ -107,6 +107,31 @@ async function afterRun({ s, models, row, log = console }) {
         return insertProposal(s, { row, agentId, listing, text, next, previous: doc, state: 'pending' });
     }
     return null;
+}
+
+// The person showed something, not only signed in: at least this many clicks of theirs on the desk.
+const HELP_CLICKS = 3;
+
+/**
+ * Learning from help: a run that used none of the person's skills, where the person took the desk over and showed it
+ * part of the job (three clicks or more: more than a sign-in) and the run then succeeded, offers a new skill drafted
+ * from what the agent did and what the person did. It waits for them like any draft (source 'helped'); the cap on
+ * waiting suggestions holds, so a busy agent drops it rather than piling them up.
+ */
+async function learnFromHelp({ s, models, row, events, agentId }) {
+    if (row.state !== 'succeeded') return null;
+    const clicks = events.filter((e) => e && e.step === 'person' && e.args && /click/.test(String(e.args.action || ''))).length;
+    if (clicks < HELP_CLICKS) return null;
+    if (await s.db.maybe("SELECT id FROM actor_agent_proposals WHERE from_task = $1 AND kind = 'skill'", [row.id])) return null;
+    const steps = await recorder.steps(s, row.id);
+    const what = String(row.title || '').trim() || 'the job this run did, with the person\'s help';
+    const out = await draft.write({
+        models, subject: row.requester.slice(5), what, steps, picture: (seq) => stills.get(s, row.id, seq),
+        context: callLines(events).filter((l) => !/^\s*\(the person took over/.test(l)),
+    });
+    if (out.cost_usd) await store.addSpend(s, row.requester, out.cost_usd).catch(() => {});
+    if (out.error || !out.draft) return null;
+    return require('../agents/personal').addSkillProposal(s, row.requester, agentId, out.draft, row.id, { source: 'helped' });
 }
 
 /**
@@ -148,4 +173,4 @@ async function undo(s, { owner, agentId, proposal }) {
     return row ? { row } : { error: 'This improvement was already undone.', status: 409 };
 }
 
-module.exports = { afterRun, keep, undo, bump, callLines, nextVersion };
+module.exports = { afterRun, learnFromHelp, keep, undo, bump, callLines, nextVersion, HELP_CLICKS };
