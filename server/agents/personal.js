@@ -170,21 +170,25 @@ const draftFields = (input) => {
         ? { name, description, instructions } : null;
 };
 
-/** One draft from one checked multi-step run; no instructions enter the agent until its person keeps it. */
-async function addSkillProposal(s, owner, id, input, fromTask) {
+/**
+ * One draft from one checked multi-step run, or from what the person showed it (Teach, plan §AD.33: source 'teach',
+ * force: the person asked for it, so the cap on waiting suggestions does not drop it); no instructions enter the agent
+ * until its person keeps it.
+ */
+async function addSkillProposal(s, owner, id, input, fromTask, { source = 'run', force = false } = {}) {
     const draft = draftFields(input);
     if (!draft || !fromTask) return null;
     return s.tx(async () => {
         const agent = await s.db.maybe('SELECT id FROM actor_agents WHERE id = $1 AND owner = $2 FOR UPDATE', [id, owner]);
         if (!agent) return null;
         const pending = Number(await s.db.value("SELECT count(*) FROM actor_agent_proposals WHERE agent_id = $1 AND state = 'pending'", [id]));
-        if (pending >= MAX_PENDING) return null;
+        if (pending >= MAX_PENDING && !force) return null;
         const pid = s.newId('prp');
         const doc = { skill: 'actor.skill@2', slug: `learned-${pid.slice(-20).toLowerCase()}`, ...draft, version: '1.0.0', runs: 'prompt' };
         doc.integrity = { alg: 'sha256', hash: skillsStore.document.hashOf(doc) };
-        return s.db.maybe(`INSERT INTO actor_agent_proposals (id, agent_id, owner, text, kind, draft, state, from_task, created_at)
-            VALUES ($1,$2,$3,$4,'skill',$5::jsonb,'pending',$6,$7)
-            ON CONFLICT DO NOTHING RETURNING *`, [pid, id, owner, draft.name, JSON.stringify(doc), fromTask, s.iso()]);
+        return s.db.maybe(`INSERT INTO actor_agent_proposals (id, agent_id, owner, text, kind, draft, state, from_task, created_at, source)
+            VALUES ($1,$2,$3,$4,'skill',$5::jsonb,'pending',$6,$7,$8)
+            ON CONFLICT DO NOTHING RETURNING *`, [pid, id, owner, draft.name, JSON.stringify(doc), fromTask, s.iso(), source]);
     });
 }
 
@@ -195,10 +199,20 @@ async function keepSkillProposal(s, owner, id, pid, input, { readFindings = fals
     if (proposal.state !== 'pending') return { error: 'This skill draft was already decided.', status: 409 };
     const fields = draftFields(input);
     if (!fields) return { error: 'Give the skill a name, a short description and instructions (up to 4000 characters).', status: 422 };
+    // An improvement of one of the person's own skills (teach/improve.js) becomes that skill's next version.
+    if (proposal.updates_listing) {
+        const kept = await require('../teach/improve').keep(s, { owner, agentId: id, proposal, fields, readFindings });
+        return kept.error ? kept : { row: kept.row, agent, listing: kept.listing };
+    }
     // The proposal id makes a collision with a public or another person's slug vanishingly unlikely, while the
     // person can still edit every word the agent wrote. A prompt-only @2 document uses listing @2's visibility.
     const slug = `learned-${pid.slice(-20).toLowerCase()}`;
     const doc = { skill: 'actor.skill@2', slug, ...fields, version: '1.0.0', runs: 'prompt' };
+    // A skill the person taught declares the hosts and kinds of step they showed it (Teach, plan §AD.33).
+    if (proposal.source === 'teach') {
+        const requires = require('../teach/draft').deriveRequires(fields);
+        if (requires) doc.requires = requires;
+    }
     doc.integrity = { alg: 'sha256', hash: skillsStore.document.hashOf(doc) };
     const kept = await skillsStore.keepDraft(s, { doc, owner, agentId: id, readFindings });
     if (kept.error) return kept;
@@ -319,6 +333,14 @@ const proposals = (s, owner, id) => s.db.many('SELECT * FROM actor_agent_proposa
 /** apply | dismiss | undo one suggestion → { row, agent } or { error, status }. */
 async function decide(s, owner, id, pid, action, { person = true } = {}) {
     if (!PRP_ID.test(String(pid || '')) || !['apply', 'dismiss', 'undo'].includes(action)) return { status: 404, error: 'No such suggestion.' };
+    // An improvement the agent applied to one of the person's skills (teach/improve.js) is undone to the version before.
+    if (action === 'undo') {
+        const p = await s.db.maybe("SELECT * FROM actor_agent_proposals WHERE id = $1 AND agent_id = $2 AND owner = $3 AND kind = 'skill' AND updates_listing IS NOT NULL", [pid, id, owner]);
+        if (p) {
+            const out = await require('../teach/improve').undo(s, { owner, agentId: id, proposal: p });
+            return out.error ? { status: out.status, error: out.error } : out;
+        }
+    }
     return s.tx(async () => {
         const agent = await s.db.maybe('SELECT * FROM actor_agents WHERE id = $1 AND owner = $2 FOR UPDATE', [id, owner]);
         const p = agent ? await s.db.maybe('SELECT * FROM actor_agent_proposals WHERE id = $1 AND agent_id = $2', [pid, id]) : null;

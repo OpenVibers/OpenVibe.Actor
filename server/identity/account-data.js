@@ -124,6 +124,8 @@ const TABLES = [
         columns: ['owner', 'enabled', 'next_due_at', 'last_run_at', 'last_error', 'created_at', 'updated_at'] },
     // What their agents suggested adding to their instructions, and what they decided (agents/personal.js).
     { table: 'actor_agent_proposals', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-suggestions.json' },
+    // What they taught their agents, lesson by lesson (Teach, plan §AD.33); the steps themselves are task events.
+    { table: 'actor_teach_sessions', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-lessons.json', erase: 'delete' },
     // Which of their agents' runs went to their Vibe chats (agents/vibe-deliver.js).
     { table: 'actor_vibe_deliveries', subject: 'owner', value: (usr) => `user:${usr}`, file: 'agent-runs-sent-to-vibe.json' },
     { table: 'actor_work_fabric', subject: 'owner', value: (usr) => `user:${usr}`, file: 'work-fabric.json', erase: 'delete' },

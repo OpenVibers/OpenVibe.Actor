@@ -50,6 +50,8 @@ const modelPrefs = require('../runtime/model-prefs');
 const driving = require('../agents/driving');
 const stills = require('../tasks/stills');
 const replay = require('../tasks/replay');
+const teach = require('../teach');
+const recorder = require('../teach/recorder');
 const canvases = require('../canvases');
 const skills = require('../skills');
 const bpKit = require('openvibe-sdk/agents/blueprint');
@@ -942,6 +944,8 @@ function createApi(ctx) {
             live,
             still: target.where === 'run' ? `${config.baseUrl}/api/v1/tasks/${row.id}/still` : `${config.baseUrl}/api/v1/tasks/${row.id}/desk-still?desk=${encodeURIComponent(target.desk || 'private')}`,
             driving: driving.is(row.id, s.now()),
+            // A teach session (plan §AD.33): the viewer says "Show it" and "Done", and offers private typing.
+            teaching: await teach.session(s, row.id).then((t) => Boolean(t && ['started', 'watching'].includes(t.state))).catch(() => false),
         };
     }
     r.get('/tasks/:id/desks', principal.requireCapability('actor.task.read'), limits.reads('actor.task.read'), async (req, res) => {
@@ -985,7 +989,25 @@ function createApi(ctx) {
         const target = await deskTarget(row);
         if (!target || target.id !== String(req.params.desk || '')) return problem(req, res, 404, 'actor.task.no_computer', 'This task has no such desk.');
         const subject = row.requester.slice(5);
-        const body = req.body && typeof req.body === 'object' ? req.body : {};
+        const { private: typedPrivate, ...body } = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+        // Teach (plan §AD.33): every input the person sends is a step of the task the agent can learn from. In a teach
+        // session what they type is kept for the skill (unless private) and a click keeps the picture they clicked on;
+        // on any other desk only the shape of the step is kept, and a picture only when one was already at hand.
+        const lesson = await teach.session(s, row.id).catch(() => null);
+        const teaching = Boolean(lesson && ['started', 'watching'].includes(lesson.state));
+        const grab = async () => {
+            const kept = stillFrame.get(`${row.id}:${target.desk}`);
+            if (kept && Date.now() - kept.at < 2500) return { data: kept.bytes, format: kept.type === 'image/png' ? 'png' : 'jpeg' };
+            if (!teaching) return null;
+            if (target.where === 'run') {
+                const shot = await ctx.computers.still(subject, target.session_id).catch(() => null);
+                return shot && !shot.error && shot.bytes ? { data: shot.bytes, format: shot.type === 'image/png' ? 'png' : 'jpeg' } : null;
+            }
+            const shot = await ctx.computers.screen(subject, target.machine, { desk: target.desk, maxWidth: 1280 }).catch(() => null);
+            return shot && !shot.error && shot.content_b64 ? { data: shot.content_b64, format: shot.format === 'png' ? 'png' : 'jpeg', width: shot.width, height: shot.height } : null;
+        };
+        const log = ctx.log || console;
+        await recorder.record(s, row.id, body, { keep: teaching, private: typedPrivate === true, grab, log }).catch((err) => log.warn && log.warn('[Actor] teach: a step was not recorded:', row.id, err && err.message));
         let out;
         if (target.where === 'run') out = await ctx.computers.personSession(subject, target.session_id, 'input', { kind: 'input', value: body }).catch((err) => ({ error: (err && err.message) || 'the session refused it' }));
         else {

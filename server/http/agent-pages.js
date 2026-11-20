@@ -19,6 +19,8 @@ const kinds = require('../agents/kinds');
 const spend = require('../agents/spend');
 const skills = require('../skills');
 const skillDraftCard = require('./skill-draft-card');
+const teachUi = require('./teach-ui');
+const teach = require('../teach');
 const kit = require('openvibe-shared/kit');
 
 /** "22 minutes ago", "in 6 days": a person reads this, the exact UTC instant stays in the <time> element's title. */
@@ -479,6 +481,9 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
         // The skills this agent has installed (plan HO2): the name and the line, never the instructions (the agent
         // loads a skill itself, when one of them fits the job).
         const installed = await skills.forAgent(s, a.owner, a.id);
+        // Teach (plan §AD.33): the last lessons, and what the agent changed in the person's own skills after its runs.
+        const lessons = await teach.sessionsOf(s, a.owner, a.id, 3);
+        const skillChanges = suggestions.filter((p) => p.kind === 'skill' && p.updates_listing);
         // Its mail address (track HO6): what Mail gave it, whether it answers there, and the last ten letters it
         // answered with the thread each one stayed in.
         const mail = ctx.agentMail ? await ctx.agentMail.statusFor(a.owner, a).catch(() => ({ address: null, enabled: false, inboxId: null, available: false })) : { address: null, enabled: false, inboxId: null, available: false };
@@ -491,6 +496,7 @@ ${signed(req) ? html`<form method="post" action="/voices/${row.id}/borrow"><butt
 <p class="pa-lede">${ui.levelChip(contact.level)} <span class="pill ${a.status === 'paused' ? 'pill-failed' : 'pill-succeeded'}">${a.status === 'paused' ? 'Paused' : 'Active'}</span> ${when(a)}${a.next_run_at && a.status !== 'paused' && a.schedule !== 'off' ? html` · next ${time(a.next_run_at)}` : ''}</p></div></header>
 ${a.last_skip_reason ? html`<p class="notice" role="status">The last scheduled run was skipped: ${a.last_skip_reason}</p>` : ''}
 <form method="post" action="/me/agents/${a.id}/run" class="pa-runbar"><label class="pa-runbar-in"><span class="sr-only">Anything this run should also consider (optional)</span><textarea name="input" maxlength="8000" rows="1" placeholder="Anything to add? (optional)"></textarea></label><button type="submit" class="pa-btn pa-primary">Run now</button></form>
+${teachUi.panel(a, lessons)}
 <ul class="pa-glance" aria-label="At a glance">
 <li><a href="#runs"><b>${runs.length}${runs.length === 20 ? '+' : ''}</b><span>${runs.length === 1 ? 'run' : 'runs'}</span></a></li>
 <li><a href="#always"><b>${allowRules.length}</b><span>always allowed</span></a></li>
@@ -499,7 +505,7 @@ ${a.last_skip_reason ? html`<p class="notice" role="status">The last scheduled r
 <li><a href="#skills"><b>${installed.length}</b><span>${installed.length === 1 ? 'skill' : 'skills'}</span></a></li>
 <li><a href="#memory"><b>${notes.length}</b><span>${notes.length === 1 ? 'note' : 'notes'}</span></a></li>
 </ul>
-<nav class="pa-jump" aria-label="On this page"><a href="#level">Trust</a><a href="#wake">Wake</a><a href="#runs">Runs</a><a href="#always">Allowed</a><a href="#spend">Money</a><a href="#channels">Where it listens</a><a href="#mail">Mail</a><a href="#voice">Voice</a><a href="#skills">Skills</a><a href="#memory">Memory</a><a href="#settings">Settings</a></nav>
+<nav class="pa-jump" aria-label="On this page"><a href="#teach">Teach</a><a href="#level">Trust</a><a href="#wake">Wake</a><a href="#runs">Runs</a><a href="#always">Allowed</a><a href="#spend">Money</a><a href="#channels">Where it listens</a><a href="#mail">Mail</a><a href="#voice">Voice</a><a href="#skills">Skills</a><a href="#memory">Memory</a><a href="#settings">Settings</a></nav>
 <section class="pa-panel" id="level" aria-labelledby="ac-level-h"><h2 id="ac-level-h">How much it may do on its own</h2>${ui.levelPicker(contact)}</section>
 <div class="pa-grid">
 <section class="pa-panel" id="wake" aria-labelledby="pa-wake-h"><h2 id="pa-wake-h">Wake it when something happens</h2><p class="pa-hint">Beside its schedule, it can run the moment a channel goes live, a post appears, a page or a price changes, or a webhook arrives. <a href="https://openvibe.watch">OpenVibe.Watch</a> does the watching.</p>
@@ -532,10 +538,9 @@ ${pendingSuggestions.length ? html`<ul class="pa-notes">${pendingSuggestions.map
 ${applied.length ? html`<details><summary>Added lately</summary><ul class="pa-notes">${applied.map((p) => html`<li><p class="pa-note-text">${p.text}</p><p class="pa-note-meta">Added ${time(p.decided_at)}</p>
 <form method="post" action="/me/agents/${a.id}/suggestions/${p.id}"><button type="submit" name="decision" value="undo" class="pa-danger-link">Undo</button></form></li>`)}</ul></details>` : ''}</section>` : ''}
 ${channelSection.panel(a, channels.accounts, channels.agents, req.query.channel === 'moved')}${mailPanel(a, mailInbox, mailAnswered)}${voicePanel(a, doc, shared)}<section class="pa-panel" id="skills" aria-labelledby="pa-skills-h"><h2 id="pa-skills-h">Its skills</h2>
-<p class="pa-hint">Small how-to documents it reads for one kind of job. It grants nothing: every step still goes through its level and your approvals.</p>
-${installed.length ? html`<ul class="pa-notes">${installed.map((k) => html`<li><p class="pa-note-text">${k.name}</p><p class="pa-note-meta">${k.description}</p>
-${k.withdrawn ? html`<p class="pa-note-meta">${k.withdrawn}</p>` : ''}
-<form method="post" action="/me/agents/${a.id}/skills/${k.listing_id}/remove" class="pa-actions"><button type="submit" class="pa-danger-link">Remove</button></form></li>`)}</ul>` : raw(kit.empty({ icon: 'grid', title: 'No skills yet', text: 'Add a how-to from the skills registry.', action: { href: '/skills', label: 'Browse the skills registry', icon: 'grid' } }))}
+<p class="pa-hint">Small how-to documents it reads for one kind of job: ones you taught it, ones it learned, and ones from the registry. It grants nothing: every step still goes through its level and your approvals.</p>
+${installed.some((k) => k.own) ? teachUi.improveSwitch(a) : ''}
+${installed.length ? html`<ul class="pa-notes">${installed.map((k) => teachUi.skillItem(a, k, skillChanges))}</ul>` : raw(kit.empty({ icon: 'grid', title: 'No skills yet', text: 'Teach it a task above, or add a how-to from the skills registry.', action: { href: '#teach', label: 'Teach it a task', icon: 'grid' } }))}
 <p class="pa-hint"><a href="/skills">The skills registry</a></p></section><section class="pa-panel" id="memory" aria-labelledby="pa-mem-h"><h2 id="pa-mem-h">Memory</h2><p class="pa-hint">Newest first; only active notes go into a run. It adds at most one note per good run, as a suggestion you accept on <a href="/memory">Memory</a>. Your own notes are never dropped (50 notes at most).</p>
 ${notes.length ? html`<ul class="pa-notes">${notes.map((n) => html`<li><p class="pa-note-text">${n.text}</p><p class="pa-note-meta"><span class="pill ${n.status === 'suggested' ? 'pill-running' : n.status === 'archived' ? 'pill-failed' : 'pill-succeeded'}">${n.status === 'suggested' ? 'Suggested' : n.status === 'archived' ? 'Archived' : 'Active'}</span> ${n.source === 'agent' ? 'Written by the agent' : 'Written by you'} · ${n.kind} · ${time(n.created_at)}${n.last_used_at ? html` · last used ${time(n.last_used_at)}` : ''}${n.pinned ? ' · pinned' : ''}${n.merged_into ? ' · merged away' : ''}${n.retired_at ? ' · retired' : ''}</p>${n.status === 'suggested' ? html`<form method="post" action="/memory/${n.id}/accept" class="pa-actions"><button type="submit" class="pa-btn pa-primary">Accept</button> <button type="submit" class="pa-btn" formaction="/memory/${n.id}/decline">Decline</button></form>` : ''}
 <form method="post" action="/me/agents/${a.id}/memory/${n.id}/${n.pinned ? 'unpin' : 'pin'}" class="pa-actions"><button type="submit" class="pa-btn">${n.pinned ? 'Unpin' : 'Pin'}</button></form>
@@ -572,6 +577,31 @@ ${c.undoable ? html`<form method="post" action="/me/agents/${a.id}/changes/${c.i
         if (out.error) return page(req, res, 'Not found', html`<h1>Not found</h1><p>${out.error}</p><p><a href="/me/agents/${a.id}">Back to the agent</a></p>`, 404);
         res.redirect(303, `/me/agents/${a.id}#skills`);
     });
+    // Teach a task (plan §AD.33): a teach session opens the agent's desk; the task page is where the person shows it.
+    r.post('/me/agents/:id/teach', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const body = req.body || {};
+        const out = await teach.start(ctx, a, { what: body.what, url: body.url, kind: body.kind });
+        if (out.code) return page(req, res, 'Not started', html`<h1>The lesson did not start</h1><p role="alert">${out.detail}</p><p><a href="/me/agents/${a.id}#teach">Back to ${a.name}</a></p>`, out.status || 422);
+        res.redirect(303, `/tasks/${out.task.id}`);
+    });
+    r.post('/me/agents/:id/skills-improve', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const mode = (req.body || {}).mode === 'ask' ? 'ask' : 'auto';
+        await s.db.query('UPDATE actor_agents SET skills_improve = $1, updated_at = $2 WHERE id = $3 AND owner = $4', [mode, s.iso(), a.id, a.owner]);
+        res.redirect(303, `/me/agents/${a.id}#skills`);
+    });
+    r.post('/me/agents/:id/skills/:listingId/try', async (req, res) => {
+        if (!write(req, res)) return;
+        const a = await find(req, res); if (!a) return;
+        const k = (await skills.forAgent(s, a.owner, a.id)).find((x) => x.listing_id === req.params.listingId && x.own && !x.withdrawn);
+        if (!k) return page(req, res, 'No such skill', html`<h1>No such skill</h1><p><a href="/me/agents/${a.id}#skills">Back to ${a.name}</a></p>`, 404);
+        const out = await personal.run(ctx, a, teachUi.tryInput(k));
+        if (out.code) return page(req, res, 'Run refused', html`<h1>Run refused</h1><p>${out.detail}</p><p><a href="/me/agents/${a.id}">Back to agent</a></p>`, out.status);
+        res.redirect(303, `/tasks/${out.task.id}`);
+    });
     r.post('/me/agents/:id/suggestions/:pid', async (req, res) => {
         if (!write(req, res)) return;
         const body = req.body || {};
@@ -586,7 +616,7 @@ ${c.undoable ? html`<form method="post" action="/me/agents/${a.id}/changes/${c.i
             }
             return page(req, res, 'Not done', html`<h1>Not done</h1><p>${out.error}</p><p><a href="/me/agents/${req.params.id}">Back to the agent</a></p>`, out.status);
         }
-        res.redirect(303, `/me/agents/${req.params.id}${decision === 'keep' ? '#skills' : ''}`);
+        res.redirect(303, `/me/agents/${req.params.id}${decision === 'keep' || (out.row && out.row.updates_listing) ? '#skills' : ''}`);
     });
     r.post('/me/agents/:id/delete', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; if (a.is_vibe) return res.status(409).type('text/plain').send('Your Actor is your first agent and cannot be deleted.'); await s.db.query('DELETE FROM actor_agents WHERE id = $1 AND owner = $2', [a.id, a.owner]); res.redirect(303, '/me/agents'); });
     r.post('/me/agents/:id/run', async (req, res) => { if (!write(req, res)) return; const a = await find(req, res); if (!a) return; const out = await personal.run(ctx, a, req.body.input || ''); if (out.code) return page(req, res, 'Run refused', html`<h1>Run refused</h1><p>${out.detail}</p><p><a href="/me/agents/${a.id}">Back to agent</a></p>`, out.status); res.redirect(303, `/tasks/${out.task.id}`); });

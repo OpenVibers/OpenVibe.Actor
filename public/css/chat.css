@@ -348,3 +348,11 @@ html.ac-has-messenger, html.ac-has-messenger body { overflow: hidden; }
 .ct-way-t small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted, #93a0b4); font-size: 12.5px; }
 .ct-way-go { color: var(--text-muted, #93a0b4); }
 .ct-way-go svg { width: 16px; height: 16px; }
+/* Teach a task (plan §AD.33): the lesson's ask on the desk, and the viewer's Private typing switch. */
+.ct-desk-teach { border-color: color-mix(in srgb, var(--accent, #f97316) 70%, var(--line)); }
+.ct-desk-teach .ct-desk-teach-how { flex-basis: 100%; order: 3; font-size: 12.5px; color: var(--text-secondary, #96a7c2); }
+.ct-desk-teach button { animation: ct-teach-ready 2.4s ease-in-out infinite; }
+@keyframes ct-teach-ready { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #f97316) 0%, transparent); } 50% { box-shadow: 0 0 0 calc(6px * var(--ov-move, 1)) color-mix(in srgb, var(--accent, #f97316) 28%, transparent); } }
+html[data-ov-motion="off"] .ct-desk-teach button { animation: none; }
+.ct-viewer-bar .ct-viewer-private[aria-pressed="true"] { border-color: var(--accent, #f97316); background: color-mix(in srgb, var(--accent, #f97316) 22%, #0f1729); }
+.ct-viewer-bar .ct-viewer-private[aria-pressed="true"]::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--accent, #f97316); vertical-align: middle; }

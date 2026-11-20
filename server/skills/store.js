@@ -112,7 +112,7 @@ async function retire(s, id, at = null) {
 const installsOf = (s, owner, agentId) => s.db.many(`SELECT i.*, l.slug AS listing_slug, l.skill AS listing_skill, l.skill_text AS listing_skill_text, l.code AS listing_code,
         l.skill->>'name' AS listing_name, l.skill->>'description' AS listing_description,
         l.scan_state AS listing_scan_state, l.scan AS listing_scan, l.retired_at AS listing_retired_at,
-        l.curator_state AS listing_curator_state, l.publisher_kind AS listing_publisher_kind
+        l.curator_state AS listing_curator_state, l.publisher_kind AS listing_publisher_kind, l.visibility AS listing_visibility
     FROM actor_skill_installs i JOIN actor_skill_listings l ON l.id = i.listing_id
     WHERE i.owner = $1 AND i.agent_id = $2 AND i.removed_at IS NULL ORDER BY i.installed_at DESC`, [owner, agentId]);
 

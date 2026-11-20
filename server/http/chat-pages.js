@@ -324,8 +324,10 @@ ${from ? html`<input type="hidden" name="from" value="${from}">` : ''}<label for
         let open = null;
         for (const e of events) {
             if (!e || e.kind !== 'output') continue;
-            if (e.step === 'tool_call' && e.tool === 'hand_to_person') open = String((e.args && e.args.what) || 'Actor needs you on its desk').slice(0, 300);
-            if (e.step === 'tool_result' && e.tool === 'hand_to_person') open = null;
+            if (e.step === 'tool_call' && e.tool === 'hand_to_person') open = { what: String((e.args && e.args.what) || 'Actor needs you on its desk').slice(0, 300), teach: false };
+            // A lesson (Teach, plan §AD.33): the person shows the agent the task on its desk, then presses Done.
+            if (e.step === 'tool_call' && e.tool === 'learn_from_person') open = { what: String((e.args && e.args.what) || 'the task').slice(0, 300), teach: true };
+            if (e.step === 'tool_result' && (e.tool === 'hand_to_person' || e.tool === 'learn_from_person')) open = null;
         }
         return open;
     }
@@ -350,7 +352,8 @@ ${from ? html`<input type="hidden" name="from" value="${from}">` : ''}<label for
 ${raw(ring)}
 </div>
 <figcaption><span data-ct-desk-caption>${deskCaption(events)}</span><span class="ct-desk-place">${d.label}</span>${page ? html`<a data-ct-desk-url href="${page}" target="_blank" rel="noopener nofollow" hidden>${String(page).replace(/^https?:\/\//, '').slice(0, 80)}</a>` : ''}</figcaption>
-${ask ? html`<div class="ct-desk-ask" data-ct-desk-ask><p><b>Actor needs you:</b> ${ask}</p><button type="button" class="ct-desk-take" data-ct-takeover>Take over</button></div>` : ''}
+${ask && ask.teach ? html`<div class="ct-desk-ask ct-desk-teach" data-ct-desk-ask><p><b>Show it how:</b> ${ask.what}</p><p class="ct-desk-teach-how">Use its desk as your own, do the task once, then press Done. It learns from every click and key.</p><button type="button" class="ct-desk-take" data-ct-takeover data-ct-teach>Show it</button></div>` : ''}
+${ask && !ask.teach ? html`<div class="ct-desk-ask" data-ct-desk-ask><p><b>Actor needs you:</b> ${ask.what}</p><button type="button" class="ct-desk-take" data-ct-takeover>Take over</button></div>` : ''}
 </figure>`;
     }
 

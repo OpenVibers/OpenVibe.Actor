@@ -49,3 +49,26 @@ Additional page APIs: `GET /page`, `POST /do-now` (`{goal?}`), `POST /earnings` 
 For an OpenVibe computer, `hand_to_person` creates a `sign_in` Ask and keeps the Run session while the task is parked. “Done” saves the profile and hands control back before recording the answer. A new session restores the same Actor's encrypted cookies and local storage. Sign-out clears the exact listed site's stored and live browser data. Run requires its existing durable signing key; it refuses saved profiles with an ephemeral key. Profiles are encrypted with authenticated owner/Actor binding and removed on account deletion. The bounded snapshot is at most 47 KB; an oversized save fails visibly rather than silently dropping sign-ins.
 
 Companion reviews: Contracts #365, Network #703, Run #217, Bot #347, Node #144. Run migration is `0017_actor_browser_profiles.sql` after Link address support's 0016; Network adds scopes in 0060 after reserved 0059. Deploy the profile protocol together across Actor, Run, Bot and Link.
+
+## Teach it a task
+
+On an agent's page (`/me/agents/:id`), **Teach it a task** opens a lesson: say in a sentence what you will show it,
+optionally where to start (a web address), and whether it needs a browser or a whole desktop. The lesson is one task
+of that agent whose only tools open its desk (`computer_desk`, `computer_browser`) and watch you (`learn_from_person`).
+
+- On the task page, press **Show it** on the desk, do the task once, and press **Done**. Every click, key and run of
+  typing you send through the viewer is a step of the task; a click keeps the picture you clicked on. **Private
+  typing** (in the viewer's bar) keeps what you type out of the record; a run of typing shaped like a password is kept
+  out on its own. A lesson lasts up to 14 minutes.
+- A vision model reads the steps and the pictures (a red ring where you clicked) and writes a skill: what it needs
+  (`{placeholders}`), numbered steps naming each element by what it shows, and how to check it worked. The draft waits
+  on the agent's page (**Keep what you showed it?**): read it, edit it, keep it. A taught skill declares the hosts and
+  the kinds of step its words use, so the scan passes what you showed it. What you typed is wiped from the task once the
+  draft is written.
+- **It improves its own skills.** After any later run that loaded one of your own skills and either failed or needed
+  you (you took over its desk), the agent writes that skill's next version from what went wrong and what you did. By
+  default it applies it at once (the skill shows `v1.1.0` and what changed, with **Undo**); with **It asks me first** the
+  new version waits as a card you edit and keep. A version that reaches a new host or a new kind of step always waits
+  for you. A skill grants nothing either way: the agent's level and your approvals still decide every step.
+- **Try it now** on one of your skills runs the agent with that skill on its own desk; where it gets stuck, it hands
+  you the desk, and what you do then improves the skill.
