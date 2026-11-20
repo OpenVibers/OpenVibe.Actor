@@ -170,3 +170,41 @@ img.ac-face { background: var(--bg-card, #131c2e); }
 .pa-more > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; color: var(--accent, #3b82f6); }
 .pa-more[open] > summary { margin-bottom: .4rem; }
 html[data-ov-motion="off"] .pa-chip span, html[data-ov-motion="off"] .pa-fold > summary h2::after { transition: none; }
+/* Teach a task (plan §AD.33): the lesson panel, the improve switch, a skill's version and what the agent changed. */
+.tc-panel { position: relative; overflow: hidden; border-color: color-mix(in srgb, var(--accent, #3b82f6) 40%, var(--border-color, rgba(255,255,255,.12))); background: linear-gradient(135deg, color-mix(in srgb, var(--accent, #3b82f6) 10%, var(--bg-card, #131c2e)), var(--bg-card, #131c2e) 60%); }
+.tc-head { display: flex; gap: .75rem; align-items: center; }
+.tc-head h2 { margin: 0; }
+.tc-lede { margin: .55rem 0 0; max-width: 60ch; }
+.tc-label { display: flex; align-items: baseline; gap: .45rem; }
+.tc-opt { font-size: 12px; font-weight: 500; color: var(--text-secondary, #96a7c2); }
+.tc-mark { flex: none; position: relative; width: 40px; height: 40px; border-radius: 12px; background: color-mix(in srgb, var(--accent, #3b82f6) 18%, transparent); border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent); }
+.tc-mark::before { content: ""; position: absolute; left: 11px; top: 9px; width: 14px; height: 18px; background: var(--accent-light, #60a5fa); clip-path: polygon(0 0, 100% 62%, 52% 66%, 76% 100%, 60% 100%, 38% 70%, 0 92%); }
+.tc-mark span { position: absolute; left: 6px; top: 4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent-light, #60a5fa); opacity: 0; animation: tc-click 2.6s ease-out infinite; }
+@keyframes tc-click { 0%, 40% { transform: scale(.4); opacity: 0; } 50% { opacity: .9; } 100% { transform: scale(calc(1 + 1.4 * var(--ov-move, 1))); opacity: 0; } }
+html[data-ov-motion="off"] .tc-mark span { animation: none; }
+.pa-panel form.tc-form { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: .75rem; align-items: end; margin-top: .9rem; }
+.tc-form .tc-what { grid-column: 1 / -1; }
+.tc-kind { display: flex; gap: .4rem; margin: 0; padding: 0; border: 0; min-width: 0; }
+.tc-kind legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.pa-panel .tc-kind label { flex: 1; width: auto; flex-direction: row; font-weight: 600; }
+.pa-panel .tc-kind input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.tc-kind span { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 42px; padding: 0 .7rem; border-radius: 10px; border: 1px solid var(--border-color, rgba(255,255,255,.18)); background: var(--bg-primary, #0a0f1c); cursor: pointer; white-space: nowrap; transition: border-color .15s, background .15s; }
+.tc-kind input:checked + span { border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 16%, var(--bg-primary, #0a0f1c)); }
+.tc-kind input:focus-visible + span { outline: 2px solid var(--accent-light, #60a5fa); outline-offset: 2px; }
+.tc-form .tc-go { grid-column: 1 / -1; justify-self: start; min-height: 44px; padding: .55rem 1.3rem; }
+.tc-lessons { list-style: none; margin: .9rem 0 0; padding: .7rem 0 0; border-top: 1px solid var(--border-color, rgba(255,255,255,.1)); display: grid; gap: .4rem; }
+.tc-lessons li { display: flex; flex-wrap: wrap; gap: .15rem .6rem; align-items: baseline; min-width: 0; }
+.tc-lessons a { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.pa-panel form.tc-improve { flex-direction: row; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin: 0 0 .8rem; }
+.tc-improve-label { font-size: 13px; color: var(--text-secondary, #96a7c2); }
+.tc-seg { display: inline-flex; padding: 3px; border-radius: 11px; border: 1px solid var(--border-color, rgba(255,255,255,.16)); background: var(--bg-primary, #0a0f1c); }
+.tc-seg button { font: inherit; font-size: 13px; font-weight: 600; min-height: 36px; padding: 0 .8rem; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary, #96a7c2); cursor: pointer; }
+.tc-seg button[aria-pressed="true"] { background: var(--accent-strong, #2563eb); color: var(--on-accent-strong, #fff); }
+.tc-ver { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; vertical-align: 2px; background: color-mix(in srgb, var(--accent, #3b82f6) 16%, transparent); color: var(--accent-light, #60a5fa); }
+.tc-changes { list-style: none; margin: .4rem 0; padding: 0 0 0 .7rem; border-left: 2px solid color-mix(in srgb, var(--accent, #3b82f6) 40%, transparent); display: grid; gap: .35rem; }
+.tc-changes li { display: grid; gap: .1rem; font-size: 13.5px; }
+.pa-panel .tc-changes form.tc-undo { display: inline; margin: 0; }
+.tc-undo button { font: inherit; font-size: inherit; padding: 0; border: 0; background: none; color: var(--accent-light, #60a5fa); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pa-panel .tc-skill-actions { flex-direction: row; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.pa-panel .tc-skill-actions form { margin: 0; }
+@media (max-width: 30rem) { .pa-panel form.tc-form { grid-template-columns: minmax(0, 1fr); } .tc-form .tc-go { justify-self: stretch; } }

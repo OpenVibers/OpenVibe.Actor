@@ -156,6 +156,7 @@ const CORE_TOOLS = [
     'remember',
     'ask_person',
     'hand_to_person',
+    'learn_from_person',
     'load_skill',
     'find_tools',
 ];

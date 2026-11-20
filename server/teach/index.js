@@ -1,0 +1,108 @@
+'use strict';
+
+/**
+ * Teach a task (plan §AD.33). The owner, 2026-11-20: "click on one of your actors and train it to do a task … it
+ * brings up the desktop view, you do the task, and it trains based off what you do, and it's able to do that task and
+ * learn from it … self-improvement, recursive".
+ *
+ *   start(ctx, agent, { what, url, kind })   a teach session: one task of that agent whose only tools open a desk and
+ *                                            watch the person (learn_from_person). The task page opens on its desk.
+ *   session(s, taskId)                       the teach session of a task, or null
+ *   afterRun({ s, models, row })             after any run of a person's agent: when the run used one of the person's
+ *                                            own skills and the person had to take over or the run failed, the agent
+ *                                            writes that skill's next version (improve.js)
+ *
+ * The loop is the recursion: a skill taught once is used, the person steps in where it goes wrong, and those steps
+ * become the skill's next version, applied at once (with an undo) unless the person said to ask first.
+ */
+const { createTask } = require('../tasks/create');
+
+const TEACH_TOOLS = ['list_my_computers', 'computer_desk', 'computer_browser', 'learn_from_person'];
+const KINDS = ['browser', 'desktop'];
+const WHAT_MAX = 300;
+
+/** A start address: http(s) with no password in it, or null. → { url } or { error } */
+function startUrl(value) {
+    const v = String(value == null ? '' : value).trim();
+    if (!v) return { url: null };
+    let u = null;
+    try { u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(v) ? v : `https://${v}`); } catch { u = null; }
+    if (!u || !/^https?:$/.test(u.protocol) || u.username || u.password || u.href.length > 2048) return { error: 'The start page must be a web address (https://…).' };
+    return { url: u.href };
+}
+
+/** What the agent is told to do in a teach session: open the desk, open the page, watch, then say what it learned. */
+function brief({ what, url, kind }) {
+    const open = url && kind === 'browser'
+        ? `2. computer_browser: action "open", machine "any", desk "private", url "${url}".`
+        : '2. Open nothing: the person starts from the desk as it is.';
+    return [
+        'Teach session: your person will show you how to do a task on your own desk, once, so that you can do it yourself next time.',
+        `The task they will show you: ${what}`,
+        'Do exactly this, and nothing else on the desk (the person drives it):',
+        `1. computer_desk: action "start", machine "any", kind "${kind}".`,
+        open,
+        `3. learn_from_person: machine "any", what "${what.replace(/"/g, '\'')}". It waits while they show you, then writes the skill from what they did.`,
+        'Then answer in two short sentences: what you learned, and that the new skill waits on your page for them to read and keep.',
+    ].join('\n');
+}
+
+async function session(s, taskId) {
+    if (!taskId) return null;
+    return s.db.maybe('SELECT * FROM actor_teach_sessions WHERE task_id = $1', [taskId]);
+}
+
+/** The latest teach sessions of an agent, for its page. */
+async function sessionsOf(s, owner, agentId, limit = 5) {
+    return s.db.many('SELECT * FROM actor_teach_sessions WHERE owner = $1 AND agent_id = $2 ORDER BY created_at DESC LIMIT $3', [owner, agentId, limit]);
+}
+
+/**
+ * Start a teach session on one of the person's agents.
+ * → { task, session } or { status, code, detail }
+ */
+async function start(ctx, agent, input = {}) {
+    const { s, config, engine, webhooks } = ctx;
+    const what = String(input.what == null ? '' : input.what).replace(/\s+/g, ' ').trim();
+    if (!what || what.length > WHAT_MAX) return { status: 422, code: 'actor.teach.invalid', detail: `Say in a sentence what you will show it (at most ${WHAT_MAX} characters).` };
+    const kind = KINDS.includes(input.kind) ? input.kind : 'browser';
+    const at = startUrl(input.url);
+    if (at.error) return { status: 422, code: 'actor.teach.invalid', detail: at.error };
+    if (!String(agent.owner || '').startsWith('user:')) return { status: 403, code: 'actor.teach.no_person', detail: 'Only a person can teach their agent.' };
+    let made = null;
+    const out = await createTask({
+        s, config, engine, webhooks,
+        principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null },
+        body: { task: brief({ what, url: at.url, kind }), mode: 'balanced', level: 'full', tools: TEACH_TOOLS },
+        assignmentOrigin: 'person',
+        afterInsert: async (task) => {
+            made = await s.db.maybe(`INSERT INTO actor_teach_sessions (task_id, owner, agent_id, what, start_url, desk_kind, state, created_at)
+                VALUES ($1,$2,$3,$4,$5,$6,'started',$7) RETURNING *`, [task.id, agent.owner, agent.id, what, at.url, kind, s.iso()]);
+        },
+    });
+    if (out.code) return out;
+    return { task: out.task, session: made };
+}
+
+/** The teach session's end: what happened and the draft it left. */
+async function finish(s, taskId, { state, steps = 0, proposalId = null }) {
+    return s.db.maybe(`UPDATE actor_teach_sessions SET state = $2, steps = $3, proposal_id = COALESCE($4, proposal_id), ended_at = $5
+        WHERE task_id = $1 RETURNING *`, [taskId, state, steps, proposalId, s.iso()]);
+}
+
+async function watching(s, taskId) {
+    return s.db.maybe("UPDATE actor_teach_sessions SET state = 'watching' WHERE task_id = $1 AND state = 'started' RETURNING *", [taskId]);
+}
+
+/** After a run ends: the improvement pass (improve.js), and what the person typed wiped from the record either way. */
+async function afterRun({ s, models, row, log = console }) {
+    try {
+        await require('./improve').afterRun({ s, models, row, log });
+    } catch (err) {
+        log.warn && log.warn('[Actor] teach: improving a skill failed:', row && row.id, err && err.message);
+    } finally {
+        if (row && row.id) await require('./recorder').forget(s, row.id).catch(() => {});
+    }
+}
+
+module.exports = { start, session, sessionsOf, finish, watching, afterRun, brief, startUrl, TEACH_TOOLS, KINDS, WHAT_MAX };

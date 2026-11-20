@@ -3,6 +3,8 @@
 // The most a task's clock waits for its person, in all (Desks plan D4: hand_to_person).
 const inputs = require('./inputs');
 const PERSON_WAIT_MAX_MS = 15 * 60_000;
+// A teach session's whole wait (plan §AD.33): the person shows the agent a task, which can take a while.
+const TEACH_WAIT_MAX_MS = 20 * 60_000;
 
 /**
  * The task engine: a queued task runs here, in the process that accepted it (no claims, no leases).
@@ -277,6 +279,11 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         if (ended && fabric) await fabric(saved).catch((err) => log.warn && log.warn('[Actor] fabric task report:', id, (err && err.message) || err));
         if (ended) runTokens.drop(id);
         if (ended) stream.end(id);
+        // The agent improves its own skills (Teach, plan §AD.33): a run that used one of the person's skills and failed
+        // or needed them writes that skill's next version. In the background: it never holds the task's end up.
+        if (ended && saved && /^agent:/.test(String(saved.via || '')) && !config.drill) {
+            setImmediate(() => { require('../teach').afterRun({ s, models, row: saved, log }).catch(() => {}); });
+        }
         // Webhooks that asked for this state hear it; a delivery never holds the task up or fails it.
         if (webhooks && saved && saved.webhooks) {
             try {
@@ -409,8 +416,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
         // Desks plan D4: a task that handed its person a step on its desk (a sign-in, a CAPTCHA, a payment) waits for
         // them; its clock waits too, up to PERSON_WAIT_MAX_MS in all. Answers how long it may wait (0: no more).
         let waited = 0;
-        const waitForPerson = (ms) => {
-            const add = Math.max(0, Math.min(Number(ms) || 0, PERSON_WAIT_MAX_MS - waited));
+        // A teach session (learn_from_person) waits up to TEACH_WAIT_MAX_MS: the person is showing a whole task.
+        const waitForPerson = (ms, { teach = false } = {}) => {
+            const add = Math.max(0, Math.min(Number(ms) || 0, (teach ? TEACH_WAIT_MAX_MS : PERSON_WAIT_MAX_MS) - waited));
             if (!add) return 0;
             waited += add;
             ends += add;

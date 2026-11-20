@@ -128,6 +128,7 @@
                     st.width = found.width || 1280; st.height = found.height || 800;
                     tile.setAttribute('data-width', String(st.width)); tile.setAttribute('data-height', String(st.height));
                     if (found.label) tile.setAttribute('data-label', found.label);
+                    if (found.teaching) tile.setAttribute('data-teach', '1');
                     if (found.browser_url) {
                         var a = tile.querySelector('[data-ct-desk-url]');
                         if (a) { a.href = found.browser_url; a.textContent = found.browser_url.replace(/^https?:\/\//, ''); a.hidden = false; }
@@ -154,7 +155,7 @@
         else startStill(tile, st);
     }
 
-    function openTile(tile, control) {
+    function openTile(tile, control, teach) {
         var task = taskOf(tile);
         var desk = deskIdOf(tile);
         if (!task || !desk) return;
@@ -162,6 +163,9 @@
         v.hidden = false;
         v.dataset.task = task; v.dataset.desk = desk;
         v.dataset.control = '0'; v.dataset.state = 'watch';
+        // A lesson (Teach, plan §AD.33): the person shows the agent a task; Hand back is Done, typing may be private.
+        v.dataset.teach = teach || tile.getAttribute('data-teach') === '1' ? '1' : '0';
+        v.dataset.private = '0';
         v._size = { width: Number(tile.getAttribute('data-width')) || 1280, height: Number(tile.getAttribute('data-height')) || 800 };
         v.querySelector('[data-ct-viewer-badge]').textContent = 'Watching';
         var badge = v.querySelector('[data-ct-viewer-badge]');
@@ -209,7 +213,11 @@
         var list = turn && turn.querySelector('[data-ovt-work]');
         if (list) side.appendChild(list.cloneNode(true));
         var hint = v.querySelector('[data-ct-viewer-hint]');
-        hint.textContent = 'Watch Actor work, or take over to use the mouse and keyboard yourself.';
+        hint.textContent = v.dataset.teach === '1' ? 'Press Show it, then do the task on this desk as you would on your own computer.' : 'Watch Actor work, or take over to use the mouse and keyboard yourself.';
+        v.querySelector('[data-ct-viewer-take]').textContent = v.dataset.teach === '1' ? 'Show it' : 'Take over';
+        v.querySelector('[data-ct-viewer-hand]').textContent = v.dataset.teach === '1' ? 'Done' : 'Hand back';
+        v.querySelector('[data-ct-viewer-private]').hidden = true;
+        v.querySelector('[data-ct-viewer-private]').setAttribute('aria-pressed', 'false');
         v.querySelector('[data-ct-viewer-take]').hidden = false;
         v.querySelector('[data-ct-viewer-hand]').hidden = true;
         v.querySelector('[data-ct-viewer-note]').hidden = true;
@@ -230,13 +238,21 @@
         viewer.hidden = true;
         viewer.innerHTML = '<div class="ct-viewer-stage" data-ct-viewer-stage><span class="ct-viewer-badge" data-ct-viewer-badge>Watching</span><div class="ct-viewer-input" data-ct-viewer-input tabindex="0" aria-label="Use the desk"></div><div class="ct-viewer-caption"><span data-ct-viewer-caption-text></span><a data-ct-viewer-page hidden></a></div></div>'
             + '<aside class="ct-viewer-side"><h2>What Actor is doing</h2><div data-ct-viewer-steps></div></aside>'
-            + '<div class="ct-viewer-bar"><p class="ct-viewer-hint" data-ct-viewer-hint></p><button type="button" class="is-primary" data-ct-viewer-take>Take over</button><button type="button" data-ct-viewer-pause>Pause</button><button type="button" data-ct-viewer-hand hidden>Hand back</button><button type="button" data-ct-viewer-stop>Stop</button><button type="button" data-ct-viewer-close>Close</button><div class="ct-viewer-note" data-ct-viewer-note hidden><input type="text" maxlength="1000" placeholder="A note for Actor, optional" data-ct-viewer-note-input aria-label="A note for Actor"><button type="button" data-ct-viewer-note-send>Hand back with note</button></div></div>';
+            + '<div class="ct-viewer-bar"><p class="ct-viewer-hint" data-ct-viewer-hint></p><button type="button" class="is-primary" data-ct-viewer-take>Take over</button><button type="button" data-ct-viewer-pause>Pause</button><button type="button" data-ct-viewer-hand hidden>Hand back</button><button type="button" class="ct-viewer-private" data-ct-viewer-private aria-pressed="false" hidden title="What you type now is not kept: for a password or a code">Private typing</button><button type="button" data-ct-viewer-stop>Stop</button><button type="button" data-ct-viewer-close>Close</button><div class="ct-viewer-note" data-ct-viewer-note hidden><input type="text" maxlength="1000" placeholder="A note for Actor, optional" data-ct-viewer-note-input aria-label="A note for Actor"><button type="button" data-ct-viewer-note-send>Hand back with note</button></div></div>';
         document.body.appendChild(viewer);
         viewer.querySelector('[data-ct-viewer-close]').addEventListener('click', closeViewer);
         viewer.querySelector('[data-ct-viewer-take]').addEventListener('click', function () { takeOver(viewer); });
         viewer.querySelector('[data-ct-viewer-pause]').addEventListener('click', function () { pauseViewer(viewer); });
         viewer.querySelector('[data-ct-viewer-stop]').addEventListener('click', function () { stopViewer(viewer); });
         viewer.querySelector('[data-ct-viewer-hand]').addEventListener('click', function () { handBack(viewer); });
+        viewer.querySelector('[data-ct-viewer-private]').addEventListener('click', function () {
+            var on = viewer.dataset.private !== '1';
+            viewer.dataset.private = on ? '1' : '0';
+            this.setAttribute('aria-pressed', on ? 'true' : 'false');
+            var hint = viewer.querySelector('[data-ct-viewer-hint]');
+            if (hint) hint.textContent = on ? 'Private typing: what you type now is not kept. Turn it off after the password.' : 'Your typing is kept again, so it can learn what to type.';
+            viewer.querySelector('[data-ct-viewer-input]').focus();
+        });
         viewer.querySelector('[data-ct-viewer-note-send]').addEventListener('click', function () { handBack(viewer); });
         viewer.querySelector('[data-ct-viewer-input]').addEventListener('pointerdown', onPointer);
         viewer.querySelector('[data-ct-viewer-input]').addEventListener('wheel', onWheel, { passive: false });
@@ -296,7 +312,12 @@
         if (!viewer || viewer.dataset.control !== '1') return;
         var keys = { Enter: 'Return', Backspace: 'BackSpace', Tab: 'Tab', Escape: 'Escape', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Delete: 'Delete', ' ': 'space' };
         if (keys[e.key]) { e.preventDefault(); sendInput(viewer, { action: 'key', keys: keys[e.key] }); return; }
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); sendInput(viewer, { action: 'type', text: e.key }); }
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            var typed = { action: 'type', text: e.key };
+            if (viewer.dataset.private === '1') typed.private = true;
+            sendInput(viewer, typed);
+        }
     }
 
     async function takeOver(v) {
@@ -308,8 +329,13 @@
             v.querySelector('[data-ct-viewer-badge]').textContent = 'You are driving';
             v.querySelector('[data-ct-viewer-take]').hidden = true;
             v.querySelector('[data-ct-viewer-hand]').hidden = false;
-            v.querySelector('[data-ct-viewer-note]').hidden = false;
-            hint.textContent = 'You are driving. Actor waits; click and type on the picture.';
+            var teaching = v.dataset.teach === '1';
+            v.querySelector('[data-ct-viewer-note]').hidden = teaching;
+            v.querySelector('[data-ct-viewer-private]').hidden = !teaching;
+            if (teaching) v.querySelector('[data-ct-viewer-badge]').textContent = 'Showing it';
+            hint.textContent = teaching
+                ? 'It is watching. Do the task once, step by step, then press Done. Use Private typing for a password.'
+                : 'You are driving. Actor waits; click and type on the picture.';
             v.querySelector('[data-ct-viewer-input]').focus();
         } catch (err) {
             hint.textContent = err.message || 'Actor could not hand over the desk.';
@@ -326,7 +352,11 @@
             v.querySelector('[data-ct-viewer-hand]').hidden = true;
             v.querySelector('[data-ct-viewer-note]').hidden = true;
             v.querySelector('[data-ct-viewer-note-input]').value = '';
-            v.querySelector('[data-ct-viewer-hint]').textContent = note.trim() ? 'Handed back with your note. Actor goes on.' : 'Handed back. Actor goes on.';
+            v.querySelector('[data-ct-viewer-private]').hidden = true;
+            v.dataset.private = '0';
+            v.querySelector('[data-ct-viewer-hint]').textContent = v.dataset.teach === '1'
+                ? 'Done. It is writing what you showed it as a skill: keep it on its page in a moment.'
+                : note.trim() ? 'Handed back with your note. Actor goes on.' : 'Handed back. Actor goes on.';
         } catch (err) {
             v.querySelector('[data-ct-viewer-hint]').textContent = err.message || 'Actor could not take the desk back.';
         }
@@ -419,7 +449,7 @@
 
     document.addEventListener('click', function (e) {
         var take = e.target.closest && e.target.closest('[data-ct-takeover]');
-        if (take) { var t = take.closest('[data-ct-desk]'); if (t) openTile(t, true); return; }
+        if (take) { var t = take.closest('[data-ct-desk]'); if (t) openTile(t, true, take.hasAttribute('data-ct-teach')); return; }
         var open = e.target.closest && e.target.closest('[data-ct-desk-open]');
         if (open) { var tile = open.closest('[data-ct-desk]'); if (tile) openTile(tile, false); }
     });
