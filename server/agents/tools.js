@@ -254,10 +254,12 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
     }
 
     /** The web, cited: each result keeps its URL, site and date, and the answer says which step found them. */
-    async function searchWeb(query, person, { signal } = {}) {
+    async function searchWeb(query, person, { signal, depth = 'standard' } = {}) {
         if (!webTokens) return { error: 'web search is not connected on this server' };
         const headers = { ...(await webTokens.authHeaders()), ...(person ? { 'x-ov-subject': person } : {}) };
-        const r = await getJson(`${searchUrl}/api/v1/query`, { method: 'POST', body: { q: String(query || '').slice(0, 300), scopes: ['web'], limit: 6 }, headers, signal, timeoutMs: 30_000 });
+        // deep: Search's deep depth (Exchange search v2's standard: three engines, rewrites, the best pages read).
+        const deep = depth === 'deep';
+        const r = await getJson(`${searchUrl}/api/v1/query`, { method: 'POST', body: { q: String(query || '').slice(0, 300), scopes: ['web'], limit: 6, ...(deep ? { depth: 'deep' } : {}) }, headers, signal, timeoutMs: deep ? 55_000 : 30_000 });
         if (!r.ok || !r.data) return { error: (r.data && (r.data.detail || r.data.title)) || `Search answered ${r.status}` };
         const results = (Array.isArray(r.data.results) ? r.data.results : []).slice(0, 6)
             .map((x) => ({ title: x.title, summary: x.snippet, url: x.url, site: x.site, published_at: x.published_at || null }));
@@ -273,7 +275,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
         const defs = [
             ...(searchUrl ? [{ type: 'function', function: { name: 'search_openvibe', description: 'Search everything published on the OpenVibe network (streams, clips, pastes, community posts, wiki pages, blog posts, threads). Returns titles, summaries and links.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } }] : []),
             ...(webTokens ? [{ type: 'function', function: { name: 'search_sites', description: 'Ask the same question of several named sites at once (for example ["github.com", "stackoverflow.com", "reddit.com"]): each site is searched in parallel, and its results come back under its name. Use it to compare what different sites say, or to search the ones you trust.', parameters: { type: 'object', properties: { query: { type: 'string' }, sites: { type: 'array', items: { type: 'string' }, maxItems: 6 } }, required: ['query', 'sites'] } } }] : []),
-            ...(webTokens ? [{ type: 'function', function: { name: 'search_web', description: 'Search the web for anything outside OpenVibe (news, facts, documentation, products). Returns up to 6 results, each with its title, summary, URL, site and date: cite the URLs you use. Prefer search_openvibe for OpenVibe content.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } }] : []),
+            ...(webTokens ? [{ type: 'function', function: { name: 'search_web', description: 'Search the web for anything outside OpenVibe (news, facts, documentation, products). Returns up to 6 results, each with its title, summary, URL, site and date: cite the URLs you use. depth deep (slower, about 10 s) searches three engines with rewritten queries and reads the best pages, so a summary is the passage that answers: use it for a specific fact, a number or a date. Prefer search_openvibe for OpenVibe content.', parameters: { type: 'object', properties: { query: { type: 'string' }, depth: { type: 'string', enum: ['standard', 'deep'], description: 'standard (the default, about 1 s) or deep (about 10 s, reads the best pages)' } }, required: ['query'] } } }] : []),
             ...(toolsUrl ? [{ type: 'function', function: { name: 'find_tools', description: 'Find OpenVibe.Tools tools for a need (for example "mx records", "ssl certificate", "whois", "http headers", "base64", "hash"), including the tools people made (the person\'s own first; an mtl_ id runs as them). Returns each tool id with its input schema and an example.', parameters: { type: 'object', properties: { need: { type: 'string' } }, required: ['need'] } } }, { type: 'function', function: { name: 'run_tool', description: 'Run one OpenVibe.Tools tool by id with its input object (use find_tools first to see the input).', parameters: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool', 'input'] } } }] : []),
             ...(toolsUrl ? [{ type: 'function', function: { name: 'run_tools', description: 'Run several OpenVibe.Tools tools at once (at most 8): the same tools and inputs run_tool takes, in parallel. Use it when several lookups or conversions are independent (for example the DNS, the certificate and the headers of one site, or one lookup for several domains). Each answer comes back under its call.', parameters: { type: 'object', properties: { calls: { type: 'array', maxItems: 8, items: { type: 'object', properties: { tool: { type: 'string' }, input: { type: 'object' } }, required: ['tool'] } } }, required: ['calls'] } } }] : []),
         ];
@@ -505,7 +507,7 @@ function createOpenVibeTools({ config, fetchImpl = globalThis.fetch, now = () =>
                 if (!r.ok || !r.data) return json({ error: `Network history answered ${r.status}` });
                 return json(r.data);
             }
-            if (name === 'search_web') return json(await searchWeb(a.query, personOf(requester), { signal }));
+            if (name === 'search_web') return json(await searchWeb(a.query, personOf(requester), { signal, depth: a.depth === 'deep' ? 'deep' : 'standard' }));
             if (name === 'find_tools') return json(await findTools(a.need, { signal, person: personOf(requester) }));
             if (name === 'run_tool') return json(await runTool(String(a.tool || ''), a.input, { signal, person: personOf(requester) }));
             if (name === 'run_tools') return json(await runTools(a.calls, { signal, person: personOf(requester) }));

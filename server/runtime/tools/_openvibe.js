@@ -121,10 +121,12 @@ function serviceFor(ctx) {
     }
 
     /** The web, cited: each result keeps its URL, site and date, and the answer says which step found them. */
-    async function searchWeb(query, person, { signal } = {}) {
+    async function searchWeb(query, person, { signal, depth = 'standard' } = {}) {
         if (!webTokens) return { error: 'web search is not connected on this server' };
         const headers = { ...(await webTokens.authHeaders()), ...(person ? { 'x-ov-subject': person } : {}) };
-        const r = await getJson(`${searchUrl}/api/v1/query`, { method: 'POST', body: { q: String(query || '').slice(0, 300), scopes: ['web'], limit: 6 }, headers, signal, timeoutMs: 30_000 });
+        // deep: Search's deep depth (Exchange search v2's standard: three engines, rewrites, the best pages read).
+        const deep = depth === 'deep';
+        const r = await getJson(`${searchUrl}/api/v1/query`, { method: 'POST', body: { q: String(query || '').slice(0, 300), scopes: ['web'], limit: 6, ...(deep ? { depth: 'deep' } : {}) }, headers, signal, timeoutMs: deep ? 55_000 : 30_000 });
         if (!r.ok || !r.data) return { error: (r.data && (r.data.detail || r.data.title)) || `Search answered ${r.status}` };
         const results = (Array.isArray(r.data.results) ? r.data.results : []).slice(0, 6)
             .map((x) => ({ title: x.title, summary: x.snippet, url: x.url, site: x.site, published_at: x.published_at || null }));

@@ -4,17 +4,17 @@ const { serviceFor, json, personOf } = require('./_openvibe');
 
 module.exports = {
     name: 'search_web',
-    description: 'Search the web for anything outside OpenVibe (news, facts, documentation, products). Returns up to 6 results, each with its title, summary, URL, site and date: cite the URLs you use. Prefer search_openvibe for OpenVibe content.',
-    input: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    description: 'Search the web for anything outside OpenVibe (news, facts, documentation, products). Returns up to 6 results, each with its title, summary, URL, site and date: cite the URLs you use. depth deep (slower, about 10 s) searches three engines with rewritten queries and reads the best pages, so a summary is the passage that answers: use it for a specific fact, a number or a date. Prefer search_openvibe for OpenVibe content.',
+    input: { type: 'object', properties: { query: { type: 'string' }, depth: { type: 'string', enum: ['standard', 'deep'], description: 'standard (the default, about 1 s) or deep (about 10 s, reads the best pages)' } }, required: ['query'] },
     scope: 'public',
     needs: { files: 'none', network: true },   // plan 11c: the run's files and network settings gate it
     connector: 'openvibe',
     costUsd: 0,
-    timeoutMs: 35_000,
+    timeoutMs: 60_000,
     available: (ctx) => Boolean(ctx.config && ctx.config.services && ctx.config.services.searchUrl && ctx.config.oauth && ctx.config.oauth.clientSecret),
     async run(input, ctx) {
         const core = serviceFor(ctx);
-        const out = await core.searchWeb(input.query, personOf(ctx.requester), { signal: ctx.signal });
+        const out = await core.searchWeb(input.query, personOf(ctx.requester), { signal: ctx.signal, depth: input.depth === 'deep' ? 'deep' : 'standard' });
         const data = out && out.error ? out : out;
         return { text: json(data), data, sources: out && Array.isArray(out.results) ? out.results.map((x) => ({ url: x.url, title: x.title || x.site })) : [] };
     },

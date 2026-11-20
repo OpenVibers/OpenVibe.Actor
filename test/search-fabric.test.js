@@ -66,6 +66,21 @@ function fakeSearch({ fabric = true } = {}) {
         assert.deepStrictEqual([q.auth, q.subject, q.body.scopes, q.body.limit], ['Bearer svc-token', ME, ['web'], 6]);
     });
 
+    await check('search_web depth deep: Search\'s deep depth (three engines, the best pages read); the default asks none', async () => {
+        const s = fakeSearch();
+        const t = createOpenVibeTools({ config, fetchImpl: s.fetchImpl, searchTokens: tokens });
+        const def = (await t.definitions({ requester: `user:${ME}` })).find((d) => d.function.name === 'search_web');
+        assert.deepStrictEqual(def.function.parameters.properties.depth.enum, ['standard', 'deep'], 'the model may ask for a deep search');
+        await t.call('search_web', { query: 'when did the louvre open', depth: 'deep' }, { requester: `user:${ME}` });
+        await t.call('search_web', { query: 'x' }, { requester: `user:${ME}` });
+        await t.call('search_web', { query: 'x', depth: 'bottomless' }, { requester: `user:${ME}` });
+        const bodies = s.calls.filter((c) => c.path === '/api/v1/query' && c.method === 'POST').map((c) => c.body.depth);
+        assert.deepStrictEqual(bodies, ['deep', undefined, undefined], 'deep only when asked; anything else is the default');
+        const tool = require('../server/runtime/tools/search_web');
+        assert.deepStrictEqual(tool.input.properties.depth.enum, ['standard', 'deep'], 'the runtime tool offers the same');
+        assert.ok(tool.timeoutMs >= 55_000, 'and waits for a deep search');
+    });
+
     await check('search_web for a task with no signed-in person: no subject header', async () => {
         const s = fakeSearch();
         const t = createOpenVibeTools({ config, fetchImpl: s.fetchImpl, searchTokens: tokens });
