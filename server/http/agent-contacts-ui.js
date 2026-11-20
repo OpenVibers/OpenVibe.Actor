@@ -79,15 +79,16 @@ function usesLine(agent) {
 
 const levelChip = (level) => html`<span class="ac-level" data-level="${LEVEL_WORDS[level] ? level : 'ask'}">${(LEVEL_WORDS[level] || LEVEL_WORDS.ask)[0]}</span>`;
 
-/** One contact row per agent: the face, the name and its level, what it uses, and its schedule when it has one. */
-function roster(rows, { when = () => '' } = {}) {
-    return html`<ul class="ac-roster">${rows.map(({ agent, row }) => {
+/** One contact row per agent: the face, the name and its level, what it uses, and its schedule when it has one. With
+ * `teach`, each row also has Teach (plan §AD.33): one tap to the agent's lesson panel, its first field ready. */
+function roster(rows, { when = () => '' , teach = false } = {}) {
+    return html`<ul class="ac-roster${teach ? ' ac-roster-teach' : ''}">${rows.map(({ agent, row }) => {
         const sched = row && row.schedule && row.schedule !== 'off' ? when(row) : '';
         const paused = row && row.status === 'paused';
         return html`<li><a class="ac-row" href="/me/agents/${agent.id}">${face(agent)}
 <span class="ac-row-main"><span class="ac-row-top"><strong>${agent.name}</strong>${row && row.is_vibe ? html`<span class="ac-first">Your first agent</span>` : ''}${levelChip(agent.level)}${paused ? html`<span class="ac-paused">Paused</span>` : ''}</span>
 <span class="ac-row-uses">${usesLine(agent)}</span>${sched ? html`<span class="ac-row-when">${sched}</span>` : ''}</span>
-<svg class="ac-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a></li>`;
+<svg class="ac-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>${teach ? html`<a class="ac-teach" href="/me/agents/${agent.id}?teach=1#teach" aria-label="Teach ${agent.name} a task">Teach</a>` : ''}</li>`;
     })}</ul>`;
 }
 

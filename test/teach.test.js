@@ -117,8 +117,13 @@ function fakeModels(answer) {
             assert.ok(teach.startUrl('javascript:alert(1)').error);
             assert.ok(teach.startUrl('https://u:p@x.com').error);
             assert.strictEqual(teach.startUrl('x.com/compose').url, 'https://x.com/compose');
+            const roster = await t.get('/me/agents', { as: kim });
+            assert.match(roster.text, new RegExp(`<a class="ac-teach" href="/me/agents/${agent.id}\\?teach=1#teach" aria-label="Teach Poster a task">Teach</a>`), 'one tap from the list of agents');
+            const ready = await t.get(`/me/agents/${agent.id}?teach=1`, { as: kim });
+            assert.match(ready.text, /name="what"[^>]*autofocus/, 'and its first field is ready');
             const page = await t.get(`/me/agents/${agent.id}`, { as: kim });
             assert.strictEqual(page.status, 200);
+            assert.ok(!/name="what"[^>]*autofocus/.test(page.text), 'no focus jump on a plain visit');
             assert.match(page.text, /Teach it a task/);
             assert.match(page.text, new RegExp(`action="/me/agents/${agent.id}/teach"`));
             const r = await t.get(`/me/agents/${agent.id}/teach`, { as: kim, method: 'POST', form: { what: 'Post a clip to X', url: 'https://x.com/compose/post', kind: 'browser' }, headers: SAME, redirect: 'manual' });

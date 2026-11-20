@@ -208,3 +208,10 @@ html[data-ov-motion="off"] .tc-mark span { animation: none; }
 .pa-panel .tc-skill-actions { flex-direction: row; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
 .pa-panel .tc-skill-actions form { margin: 0; }
 @media (max-width: 30rem) { .pa-panel form.tc-form { grid-template-columns: minmax(0, 1fr); } .tc-form .tc-go { justify-self: stretch; } }
+/* Teach from the roster (plan §AD.33): the row stays one link; Teach sits beside it. */
+.ac-roster-teach > li { display: flex; align-items: center; }
+.ac-roster-teach > li > .ac-row { flex: 1; min-width: 0; }
+.ac-teach { flex: none; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; margin-right: .75rem; padding: 0 .9rem; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 45%, var(--border-color, rgba(255,255,255,.16))); color: var(--accent-light, #60a5fa); font-size: 13.5px; font-weight: 700; text-decoration: none; transition: background .15s, transform .15s; }
+@media (hover: hover) { .ac-teach:hover { background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent); } }
+.ac-teach:active { transform: scale(calc(1 - .04 * var(--ov-move, 1))); }
+.ac-teach:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
