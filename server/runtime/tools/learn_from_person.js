@@ -49,7 +49,8 @@ module.exports = {
         const personal = require('../../agents/personal');
         // A desk must be open: the person needs something to show it on.
         const row = await tasks.getTask(s, ctx.taskId);
-        if (!row || !(await tasks.taskDesk(s, row)) && !(await tasks.taskComputer(s, row))) {
+        const placed = Boolean(ctx.state && ctx.state.desks && ctx.state.desks.placed);
+        if (!row || (!placed && !(await tasks.taskDesk(s, row)) && !(await tasks.taskComputer(s, row)))) {
             return { text: json({ error: 'Start your desk first (computer_desk action "start"), then open the first page, then call this again.' }), isError: true };
         }
         // The steps after this point are the lesson.

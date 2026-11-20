@@ -113,9 +113,12 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             if (s && s.state !== 'ended') await runCall('POST', `/sessions/${s.id}/end`, subject, { signal }).catch(() => null);
             return { error: s && s.end ? `no desk host could take a browser desk now (${s.end.reason})` : 'no desk host took a browser desk in time' };
         }
-        if (actorId) {
-            try { await personSession(subject, s.id, 'back'); }
-            catch (err) { await runCall('POST', `/sessions/${s.id}/end`, subject, { signal }).catch(() => null); return { error: err.message }; }
+        // Run gives a new session's control to its person for the first minute, then to nobody; the agent that opened it
+        // is the one about to drive it, so it takes control now (11-20: every first command was refused as
+        // run.session.control_held). The person takes it back with Take over, as before.
+        try { await personSession(subject, s.id, 'back'); }
+        catch (err) {
+            if (actorId) { await runCall('POST', `/sessions/${s.id}/end`, subject, { signal }).catch(() => null); return { error: err.message }; }
         }
         return { machine: `run:${s.id}`, session: s };
     }
@@ -210,7 +213,16 @@ function createComputers({ config, fetchImpl = globalThis.fetch, tokens: tokensO
             // A desk on a desk host: only its page (screen, input, browser), through Run, which names the desk itself.
             if (!SESSION_KINDS.has(kind)) return { error: 'your desk is on a desk host, which runs a browser only: no programs or files there' };
             const { desk: _desk, ...rest } = value || {};
-            const r = await runCall('POST', `/sessions/${ses[1]}/commands`, subject, { body: { kind, value: rest }, signal, timeoutMs: windowMs + 10_000 });
+            const send = () => runCall('POST', `/sessions/${ses[1]}/commands`, subject, { body: { kind, value: rest }, signal, timeoutMs: windowMs + 10_000 });
+            let r = await send();
+            if (!r.ok && r.data && r.data.code === 'run.session.control_held') {
+                // The lease lapses after a quiet spell (nobody holds it then): ask for it once and send again. While the
+                // person drives (Take over) the request changes nothing and the refusal stands.
+                const asked = await runCall('POST', `/sessions/${ses[1]}/control/request`, subject, { body: {}, signal }).catch(() => null);
+                const holder = asked && asked.ok && asked.data && asked.data.lease && asked.data.lease.holder;
+                if (holder && holder.kind === 'ai') r = await send();
+                else if (holder && holder.kind === 'person') return { error: 'the person is using your desk right now (they took it over): wait until they give it back' };
+            }
             if (!r.ok) return runProblem(r, `the ${kind} command`);
             if (r.data.result === 'ack') return { data: r.data.data || {} };
             if (r.data.state === 'ended') return { error: 'your desk on the desk host has ended (its time ran out or its host went away): start a new one with computer_desk start and machine "any"' };

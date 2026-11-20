@@ -319,7 +319,13 @@ function normalize(out) {
     // model running, until the event or the deadline comes. Only a wait may set it.
     const park = out.park && typeof out.park === 'object' && typeof out.park.wait_id === 'string'
         ? { wait_id: out.park.wait_id.slice(0, 64) } : null;
-    return { text, data, sources, artifacts, refs, isError: out.isError === true, secret: out.secret === true, park };
+    // The Computer a desk tool opened or closed (computer_desk: plan 2026-11-07, one id): the loop puts it on the
+    // tool_result event, and the task page, Take over and a lesson find the desk by it. Kept to its own fields; null
+    // says the desk stopped. (11-20: this was dropped here, so a desk on a desk host never showed on its task.)
+    const computer = out.computer === null ? null : out.computer && typeof out.computer === 'object' && !Array.isArray(out.computer)
+        ? Object.fromEntries(['session_id', 'machine', 'where', 'cost_hint'].filter((k) => out.computer[k] != null).map((k) => [k, String(out.computer[k]).slice(0, 200)]))
+        : undefined;
+    return { text, data, sources, artifacts, refs, isError: out.isError === true, secret: out.secret === true, park, ...(computer !== undefined ? { computer } : {}) };
 }
 
 module.exports = { createRegistry, validateTool, allowedBy, normalize, SCOPES, MAX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS };
