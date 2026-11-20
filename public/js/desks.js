@@ -409,6 +409,7 @@
             }
             function captionOf(st) {
                 if (!st) return '';
+                if (st.tool === 'person') return st.text || 'You used the desk';
                 if (st.tool === 'computer_input') {
                     if (st.action === 'click' || st.action === 'double_click' || st.action === 'right_click') return 'Clicked at ' + Math.round(st.x || 0) + ', ' + Math.round(st.y || 0);
                     if (st.action === 'scroll') return 'Scrolled';

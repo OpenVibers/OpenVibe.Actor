@@ -167,6 +167,14 @@ function fakeModels(answer) {
             assert.strictEqual(got[0].picture, true, 'the picture they clicked on');
             assert.strictEqual(got[1].args.text, 'hi there');
             assert.ok((await stills.list(s, id)).some((p) => p.tool === 'person'));
+            // The lesson's replay is the person's own steps, each click with the picture they clicked on, never the words.
+            const replay = (await t.get(`/api/v1/tasks/${id}/replay`, { as: kim, bearer: token, headers: SAME })).json().steps;
+            const mine = replay.filter((x) => x.tool === 'person');
+            assert.deepStrictEqual(mine.map((x) => x.text), ['You clicked', 'You typed 8 characters', 'You pressed Enter']);
+            assert.ok(mine[0].still && /\/replay\/\d+\/still$/.test(mine[0].still.url), 'the click keeps its picture');
+            assert.strictEqual(mine[1].secret, true);
+            assert.ok(!JSON.stringify(replay).includes('hi there'), 'what they typed is never in the replay');
+            assert.strictEqual(require('../server/tasks/replay').caption(mine[2]), 'You pressed Enter');
         });
 
         await check('the lesson tool waits while the person shows it and presses Done, then leaves the skill draft on the agent', async () => {

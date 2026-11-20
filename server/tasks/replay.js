@@ -20,6 +20,19 @@ async function steps(s, row, { baseUrl = '' } = {}) {
     for (const e of events) if (e && e.kind === 'output' && e.step === 'tool_result' && e.call_id) results.set(e.call_id, e);
     const out = [];
     for (const e of events) {
+        // The person's own steps on the desk (Take over, a lesson: plan §AD.33), with the picture they clicked on.
+        if (e && e.kind === 'output' && e.step === 'person') {
+            const a = e.args && typeof e.args === 'object' ? e.args : {};
+            const num = (v) => (Number.isFinite(Number(v)) && v !== null ? Number(v) : null);
+            const picture = bySeq.get(e.seq);
+            out.push({
+                seq: e.seq, at: e.at || null, tool: 'person', action: a.action === 'type' ? 'secret' : String(a.action || 'input'),
+                x: num(a.x), y: num(a.y), width: num(a.width), height: num(a.height), url: null, secret: a.action === 'type',
+                text: String(e.text || '').slice(0, 120), error: false,
+                still: picture ? { seq: picture.seq, url: `${baseUrl}/api/v1/tasks/${row.id}/replay/${picture.seq}/still`, width: picture.width, height: picture.height, mime: picture.mime } : null,
+            });
+            continue;
+        }
         if (!e || e.kind !== 'output' || e.step !== 'tool_call' || !COMPUTER.test(String(e.tool || ''))) continue;
         const result = results.get(e.call_id) || null;
         const args = e.args && typeof e.args === 'object' ? e.args : {};
@@ -56,6 +69,8 @@ async function steps(s, row, { baseUrl = '' } = {}) {
 /** One line for the replay's caption, in plain words. */
 function caption(step) {
     if (!step) return '';
+    // The person's step already says itself in plain words ("You clicked", "You typed 12 characters").
+    if (step.tool === 'person') return step.text || 'You used the desk';
     if (step.tool === 'computer_input') {
         if (step.action === 'click' || step.action === 'double_click' || step.action === 'right_click') return `Clicked at ${Math.round(step.x || 0)}, ${Math.round(step.y || 0)}`;
         if (step.action === 'move') return `Moved to ${Math.round(step.x || 0)}, ${Math.round(step.y || 0)}`;
