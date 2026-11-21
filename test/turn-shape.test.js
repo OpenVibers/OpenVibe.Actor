@@ -21,7 +21,11 @@ assert.strictEqual(asksPerson(`${'A long report paragraph. '.repeat(60)}\n\nWhat
 
 const said = { kind: 'answer', risk: 'low', known: true, facts: { given: [], lookup: [], derive: [] } };
 assert.strictEqual(quick(said, 'Test', []), true, '"Test" is a quick ask');
-assert.strictEqual(quick(said, 'Search Google', []), true);
+assert.strictEqual(quick(said, 'What can you do?', []), true);
+assert.strictEqual(quick(said, 'Search Google', []), false, 'a search is work: it is planned');
+assert.strictEqual(quick(said, 'Compare the RTX 4090 and 5090 prices in three shops', []), false, 'production 11-21: nothing listed to look up, still research');
+assert.strictEqual(quick(said, 'What is the weather in Lisbon', []), false);
+assert.strictEqual(quick(said, 'please write me a short poem about the sea and the boats that sail on it at night', []), false, 'more than a line is work');
 assert.strictEqual(quick({ ...said, known: false }, 'Test', []), false, 'a guessed understanding is never quick');
 assert.strictEqual(quick({ ...said, facts: { lookup: ['price', 'stock'] } }, 'Compare two GPUs', []), false, 'two things to look up is work');
 assert.strictEqual(quick({ ...said, risk: 'high' }, 'Pay the bill', []), false);
