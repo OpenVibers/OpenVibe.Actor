@@ -12,12 +12,17 @@
  *                                            else not when it only asks the person something
  */
 const SHORT = 700;
+// Words that mean finding things out (11-21, production: the understand model listed nothing to look up for "Compare the
+// RTX 4090 and 5090 prices in three shops"): such an ask is work, planned and checked, whatever the small model said.
+const RESEARCH = /\b(compare|comparison|vs\.?|versus|prices?|costs?|cheapest|best|latest|newest|news|today|tonight|weather|forecast|score|stock|find|search|look ?up|research|review|reviews|list|top \d+|how much|how many|where|when is|schedule|deals?)\b/i;
 
 function quick(u, task, attachments) {
     if (!u || !u.known || u.kind !== 'answer' || u.risk !== 'low') return false;
     const f = u.facts || {};
     const work = (Array.isArray(f.lookup) ? f.lookup.length : 0) + (Array.isArray(f.derive) ? f.derive.length : 0);
-    return work <= 1 && String(task || '').trim().length <= 240 && !(attachments && attachments.length);
+    const t = String(task || '').trim();
+    // Short in words as well as characters: a quick ask is a line ("Test", "hi", "what can you do?"), not a brief.
+    return work <= 1 && t.length <= 160 && t.split(/\s+/).length <= 12 && !RESEARCH.test(t) && !(attachments && attachments.length);
 }
 
 function asksPerson(text) {
