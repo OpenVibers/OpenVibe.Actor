@@ -50,7 +50,8 @@ const { boot, check, done } = require('./helpers/boot');
         const listed = (await t.get('/api/v1/agents')).json().agents;
         for (const a of listed) assert.ok(agents.includes(`<a href="/agents#${a.id}">`), `${a.id} is a row that opens its place on /agents`);
         const page = await t.get('/agents');
-        assert.match(page.text, /<p class="agent-blurb">/, 'what each agent is now lives on /agents');
+        assert.match(page.text, /class="aw-way/, 'what each way is now lives on /agents (2026-11-21: the ways as rows)');
+        for (const a of listed) assert.ok(page.text.includes(`id="${a.id}"`), `${a.id}'s anchor is on /agents`);
         const launcher = (/<section class="sc-sec sc-apps-sec" id="network"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
         // The launcher is the shared neighbourhood for Actor, whatever the library currently lists there.
         const related = showcase.RELATED.actor || [];

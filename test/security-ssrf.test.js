@@ -103,6 +103,7 @@ const SAME = { 'sec-fetch-site': 'same-origin' };
 
     await check('ratchet: every file that makes an outbound request itself is reviewed', () => {
         const REVIEWED = {
+            'server/http/exchange-models.js': 'only the configured OpenVibe.Exchange public model list (ACTOR_EXCHANGE_MODELS_URL, default https://openvibe.exchange/api/v1/models; empty in tests and drills): one GET, no credentials, a 4 s timeout, kept ten minutes; no caller input',
             'server/faces/index.js': 'only the https image link an OpenVibe.AI ai.image run returned for this picture (never a caller\'s URL): https only, a 30 s timeout, 8 MB at most, then checked as PNG/JPEG/WebP by its bytes and re-encoded',
             'server/task-view/frames.js': 'only the configured Network base plus the fixed /api/frame?host=openvibe.actor path; no caller input, no credentials, redirects rejected and a two-second timeout; cached first-party frame origins with a checked-in fallback (test/task-view.test.js)',
             'server/auth/keys.js': 'no request itself; openvibe-sdk/auth fetches the JWKS from the configured Network',

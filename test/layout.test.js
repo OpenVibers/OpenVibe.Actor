@@ -56,16 +56,16 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
         assert.ok(!/"loginUrl":"\/auth\/login\?next=%2F/.test(r.text), 'loginUrl still has the current path baked in');
     });
 
-    await check('the agents page lists every catalog agent server-side, with no local path', async () => {
+    // 2026-11-21: the page lists the ways a task can be worked (server/engines, the chat's own list), not the old agent
+    // systems; the machine-readable catalog stays at /api/v1/agent-systems.
+    await check('the agents page lists every way to work server-side, with no local path', async () => {
         const r = await t.get('/agents');
         assert.strictEqual(r.status, 200, r.text.slice(0, 300));
         assert.match(r.headers.get('content-type'), /^text\/html/);
-        const agents = (await t.get('/api/v1/agents')).json().agents;
-        assert.ok(agents.length > 0, 'the catalog has agents');
-        for (const a of agents) {
-            assert.ok(r.text.includes(`<code>${a.id}</code>`), `${a.id} listed`);
-            assert.ok(r.text.includes(`id="${a.id}"`), `${a.id} has its anchor`);
-        }
+        const ways = require('../server/engines').ENGINES.map((e) => e.kind);
+        assert.ok(ways.length >= 5, 'the engines list the ways');
+        ways.forEach((k) => assert.ok(r.text.includes(`id="way-${k}"`), `${k} listed with its anchor`));
+        assert.ok(r.text.includes('href="/api/v1/agent-systems"'), 'the catalog for apps');
         assert.ok(!r.text.includes('/home/') && !r.text.includes('/mnt/'), 'no local filesystem path on the page');
     });
 

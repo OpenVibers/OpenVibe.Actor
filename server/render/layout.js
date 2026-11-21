@@ -29,6 +29,12 @@ const NAV = [
     { label: 'Your tasks', href: '/tasks', icon: 'steps' },
     { label: 'Agents', href: '/agents', icon: 'robot' },
     { label: 'Settings', href: '/chat/settings', icon: 'gear' },
+    { label: 'Your agents', href: '/me/agents', icon: 'robot', more: true },
+    { label: 'Memory', href: '/memory', icon: 'book', more: true },
+    { label: 'Connections', href: '/connections', icon: 'link', more: true },
+    { label: 'Skills', href: '/skills', icon: 'spark', more: true },
+    { label: 'Compare', href: '/compare', icon: 'scale', more: true },
+    { label: 'What you spent', href: '/me/spend', icon: 'coin', more: true },
     { label: 'API', href: '/docs', icon: 'code', more: true },
 ];
 

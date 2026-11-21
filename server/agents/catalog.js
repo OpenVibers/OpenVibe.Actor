@@ -93,6 +93,15 @@ function runtimeOverride(config) {
  * endpoint is the rate card's source) and is user-owned; every other agent is as listed.
  */
 function effective(agent, config) {
+    // On OpenVibe.AI's router (11-21, model-agnostic): the runtime works on whichever model the person or the mode picks,
+    // so it names no maker; its card is the estimate, the real price is the model's own on OpenVibe.Exchange.
+    if (agent.id === 'openvibe-runtime' && routerOn(config) && !runtimeOverride(config)) {
+        return {
+            ...agent, name: 'Actor\'s agent', providerKey: 'openvibe-ai',
+            rate_card: { ...agent.rate_card, source: 'https://openvibe.exchange/models' },
+            blurb: 'Actor\'s own agent: it plans and acts through OpenVibe\'s services (search across the network and the web, OpenVibe.Tools, a page reader, your robots and computers when you let it) on the model you pick: any model on OpenVibe.Exchange, or Auto.',
+        };
+    }
     const r = agent.id === 'openvibe-runtime' ? runtimeOverride(config) : null;
     if (!r) return agent;
     return {
