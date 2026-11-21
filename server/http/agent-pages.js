@@ -59,6 +59,8 @@ const tidy = require('../memory/tidy');
 const CHANGE_LABEL = { merge: 'Merged notes', retire: 'Retired a note', promote: 'Pinned a note' };
 
 function createAgentPages(ctx) {
+    // Practice (teach/practice.js) starts the next try from the engine's after-run hook, which has no context of its own.
+    require('../teach/practice').bind(ctx);
     const { config, s, limits } = ctx;
     const r = asyncRouter();
     r.use(express.urlencoded({ extended: false, limit: '64kb' }));
@@ -582,7 +584,7 @@ ${c.undoable ? html`<form method="post" action="/me/agents/${a.id}/changes/${c.i
         if (!write(req, res)) return;
         const a = await find(req, res); if (!a) return;
         const body = req.body || {};
-        const out = await teach.start(ctx, a, { what: body.what, url: body.url, kind: body.kind });
+        const out = await teach.start(ctx, a, { what: body.what, url: body.url, kind: body.kind, how: body.how, words: body.words, practice: body.practice });
         if (out.code) return page(req, res, 'Not started', html`<h1>The lesson did not start</h1><p role="alert">${out.detail}</p><p><a href="/me/agents/${a.id}#teach">Back to ${a.name}</a></p>`, out.status || 422);
         res.redirect(303, `/tasks/${out.task.id}`);
     });
@@ -609,6 +611,12 @@ ${c.undoable ? html`<form method="post" action="/me/agents/${a.id}/changes/${c.i
         const out = decision === 'keep'
             ? await personal.keepSkillProposal(s, owner(req), req.params.id, req.params.pid, body, { readFindings: body.read_findings === '1' })
             : await personal.decide(s, owner(req), req.params.id, req.params.pid, decision);
+        // A skill kept from a lesson: the agent practises it on its desk now (when the lesson asked), and the person
+        // watches the first try.
+        if (decision === 'keep' && !out.error && out.row && out.row.source === 'teach' && !out.row.updates_listing) {
+            const tried = await teach.kept(ctx, out.agent, out.row, out.listing).catch(() => null);
+            if (tried && tried.task) return res.redirect(303, `/tasks/${tried.task.id}`);
+        }
         if (out.error) {
             if (decision === 'keep') {
                 const proposal = await s.db.maybe("SELECT * FROM actor_agent_proposals WHERE id = $1 AND agent_id = $2 AND owner = $3 AND kind = 'skill' AND state = 'pending'", [req.params.pid, req.params.id, owner(req)]);

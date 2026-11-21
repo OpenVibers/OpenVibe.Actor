@@ -78,7 +78,11 @@ module.exports = {
             return { text: json({ done: false, note: took ? 'The person gave the desk back without doing anything on it: tell them nothing was recorded, and that they can teach you again from your page.' : `The person did not show you anything in ${Math.round(granted / 60000)} minutes: tell them they can teach you any time from your page.` }) };
         }
         // Their last words on hand-back, if any, came to the run as a steer; the steps are what count.
-        const out = await draft.write({ models: ctx.models, subject: person, what, steps, picture: (seq) => stills.get(s, ctx.taskId, seq), signal: ctx.signal });
+        // Cleaned (segment.js) and the details that change named (variables.js) before the model reads them.
+        const { actions } = require('../../teach/segment').segment(steps);
+        const inputs = require('../../teach/variables').inputsOf(actions);
+        if (inputs.length) await s.db.query('UPDATE actor_teach_sessions SET examples = $2::jsonb WHERE task_id = $1', [ctx.taskId, JSON.stringify(inputs.map(({ name, kind, example }) => ({ name, kind, example })))]).catch(() => {});
+        const out = await draft.write({ models: ctx.models, subject: person, what, steps: actions, inputs, picture: (seq) => stills.get(s, ctx.taskId, seq), signal: ctx.signal });
         if (out.cost_usd && ctx.meter) await ctx.meter(out.cost_usd);
         if (out.error) {
             await teach.finish(s, ctx.taskId, { state: 'failed', steps: steps.length }).catch(() => null);

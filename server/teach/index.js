@@ -18,8 +18,14 @@
 const { createTask } = require('../tasks/create');
 
 const TEACH_TOOLS = ['list_my_computers', 'computer_desk', 'computer_browser', 'learn_from_person'];
+// Told in words: no desk, one tool that writes the skill from the lesson's own words.
+const WORDS_TOOLS = ['learn_from_words'];
 const KINDS = ['browser', 'desktop'];
+const HOWS = ['desk', 'words'];
 const WHAT_MAX = 300;
+const WORDS_MAX = 6000;
+// How many practice tries after the skill is kept: 0 (off), 1, or until it works (up to practice.MAX_ROUNDS).
+const PRACTICE = { off: 0, once: 1, until: 3 };
 
 /** A start address: http(s) with no password in it, or null. → { url } or { error } */
 function startUrl(value) {
@@ -29,6 +35,16 @@ function startUrl(value) {
     try { u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(v) ? v : `https://${v}`); } catch { u = null; }
     if (!u || !/^https?:$/.test(u.protocol) || u.username || u.password || u.href.length > 2048) return { error: 'The start page must be a web address (https://…).' };
     return { url: u.href };
+}
+
+/** What the agent is told in a lesson told in words: write the skill from them, nothing else. */
+function wordsBrief({ what }) {
+    return [
+        'Teach session: your person told you in words how to do a task, so that you can do it yourself next time.',
+        `The task: ${what}`,
+        'Do exactly this: call learn_from_words once (it reads their words from this lesson and writes the skill).',
+        'Then answer in two short sentences: what you learned, and that the new skill waits on your page for them to read and keep (and that you will practise it once they keep it, if they asked).',
+    ].join('\n');
 }
 
 /** What the agent is told to do in a teach session: open the desk, open the page, watch, then say what it learned. */
@@ -69,15 +85,22 @@ async function start(ctx, agent, input = {}) {
     const at = startUrl(input.url);
     if (at.error) return { status: 422, code: 'actor.teach.invalid', detail: at.error };
     if (!String(agent.owner || '').startsWith('user:')) return { status: 403, code: 'actor.teach.no_person', detail: 'Only a person can teach their agent.' };
+    // The modules of a lesson: how it is shown (on the desk, or told in words) and how much it practises afterwards.
+    const words = String(input.words == null ? '' : input.words).trim();
+    const how = HOWS.includes(input.how) ? input.how : (words ? 'words' : 'desk');
+    if (how === 'words' && (words.length < 10 || words.length > WORDS_MAX)) return { status: 422, code: 'actor.teach.invalid', detail: `Write the steps in a few lines (at most ${WORDS_MAX} characters), the way you would tell a person.` };
+    const practice = Object.prototype.hasOwnProperty.call(PRACTICE, input.practice) ? PRACTICE[input.practice] : PRACTICE.until;
     let made = null;
     const out = await createTask({
         s, config, engine, webhooks,
         principal: { requester: agent.owner, via: `agent:${agent.id}`, project: null },
-        body: { task: brief({ what, url: at.url, kind }), mode: 'balanced', level: 'full', tools: TEACH_TOOLS },
+        body: how === 'words'
+            ? { task: wordsBrief({ what }), mode: 'balanced', level: 'full', tools: WORDS_TOOLS }
+            : { task: brief({ what, url: at.url, kind }), mode: 'balanced', level: 'full', tools: TEACH_TOOLS },
         assignmentOrigin: 'person',
         afterInsert: async (task) => {
-            made = await s.db.maybe(`INSERT INTO actor_teach_sessions (task_id, owner, agent_id, what, start_url, desk_kind, state, created_at)
-                VALUES ($1,$2,$3,$4,$5,$6,'started',$7) RETURNING *`, [task.id, agent.owner, agent.id, what, at.url, kind, s.iso()]);
+            made = await s.db.maybe(`INSERT INTO actor_teach_sessions (task_id, owner, agent_id, what, start_url, desk_kind, state, created_at, source, words, practice_rounds)
+                VALUES ($1,$2,$3,$4,$5,$6,'started',$7,$8,$9,$10) RETURNING *`, [task.id, agent.owner, agent.id, what, at.url, kind, s.iso(), how, how === 'words' ? words : null, practice]);
         },
     });
     if (out.code) return out;
@@ -94,15 +117,35 @@ async function watching(s, taskId) {
     return s.db.maybe("UPDATE actor_teach_sessions SET state = 'watching' WHERE task_id = $1 AND state = 'started' RETURNING *", [taskId]);
 }
 
-/** After a run ends: the improvement pass (improve.js), and what the person typed wiped from the record either way. */
+/**
+ * After a run ends: the improvement pass (improve.js), then practice (practice.js: a failed try was just improved, so
+ * the next try starts), and what the person typed wiped from the record either way.
+ */
 async function afterRun({ s, models, row, log = console }) {
     try {
         await require('./improve').afterRun({ s, models, row, log });
     } catch (err) {
         log.warn && log.warn('[Actor] teach: improving a skill failed:', row && row.id, err && err.message);
+    }
+    try {
+        await require('./practice').afterRun({ s, row, log });
+    } catch (err) {
+        log.warn && log.warn('[Actor] teach: practice did not go on:', row && row.id, err && err.message);
     } finally {
         if (row && row.id) await require('./recorder').forget(s, row.id).catch(() => {});
     }
 }
 
-module.exports = { start, session, sessionsOf, finish, watching, afterRun, brief, startUrl, TEACH_TOOLS, KINDS, WHAT_MAX };
+/**
+ * The person kept a skill drafted in a lesson: the agent practises it (when the lesson asked). Called by the route that
+ * keeps a draft. → { task } | { error } | null (not a lesson's draft, or no practice)
+ */
+async function kept(ctx, agent, proposal, listing) {
+    if (!proposal || proposal.source !== 'teach' || !proposal.from_task || !listing) return null;
+    const lesson = await session(ctx.s, proposal.from_task);
+    if (!lesson || !(Number(lesson.practice_rounds) > 0)) return null;
+    const doc = require('../skills').document.parse(listing.skill_text || listing.skill) || {};
+    return require('./practice').start(ctx, lesson, agent, { id: listing.id, slug: listing.slug || doc.slug, name: doc.name || lesson.what });
+}
+
+module.exports = { start, session, sessionsOf, finish, watching, afterRun, kept, brief, wordsBrief, startUrl, TEACH_TOOLS, WORDS_TOOLS, KINDS, HOWS, PRACTICE, WHAT_MAX, WORDS_MAX };
