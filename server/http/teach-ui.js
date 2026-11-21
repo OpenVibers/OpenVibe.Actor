@@ -18,29 +18,55 @@ function when(iso, now = Date.now()) {
 }
 
 const LESSON_STATE = {
-    started: 'Opening its desk',
+    started: 'Starting',
     watching: 'Waiting for you to show it',
     drafted: 'Skill written: keep it below',
     empty: 'Nothing was shown',
     failed: 'Could not write the skill',
 };
+// After the skill is kept: how its practice went.
+const PRACTICE_STATE = {
+    running: 'practising',
+    passed: 'did it on its own',
+    failed: 'still needs you: try it with it',
+    not_started: 'practice could not start',
+};
+
+/** A lesson's line: its state, its steps, its practice. */
+function lessonMeta(l) {
+    const bits = [LESSON_STATE[l.state] || l.state];
+    if (l.source === 'words') bits.push('told in words');
+    else if (l.steps) bits.push(`${l.steps} step${l.steps === 1 ? '' : 's'}`);
+    if (l.practice_state) bits.push(`${PRACTICE_STATE[l.practice_state] || l.practice_state}${l.practice_done ? ` (try ${l.practice_done} of ${l.practice_rounds})` : ''}`);
+    return bits.join(' · ');
+}
 
 /** The Teach panel: one sentence, an optional start page, the kind of desk, and the button. */
 function panel(agent, lessons = [], { ready = false } = {}) {
     const recent = lessons.slice(0, 3);
     return html`<section class="pa-panel tc-panel" id="teach" aria-labelledby="tc-h">
 <div class="tc-head"><span class="tc-mark" aria-hidden="true"><span></span></span><h2 id="tc-h">Teach it a task</h2></div>
-<p class="pa-hint tc-lede">Show ${agent.name} once on its own desk. It turns what you did into a skill, and rewrites that skill itself whenever it needs your help with it.</p>
+<p class="pa-hint tc-lede">Show ${agent.name} once on its own desk, or tell it in words. It turns that into a skill, practises it until it can do it alone, and rewrites the skill itself whenever it needs your help with it.</p>
 <form method="post" action="/me/agents/${agent.id}/teach" class="tc-form">
-<label class="tc-what">What will you show it? <input name="what" maxlength="300" required placeholder="Post a clip to my X account" autocomplete="off"${ready ? raw(' autofocus') : ''}></label>
+<label class="tc-what">What will you teach it? <input name="what" maxlength="300" required placeholder="Post a clip to my X account" autocomplete="off"${ready ? raw(' autofocus') : ''}></label>
 <label class="tc-url"><span class="tc-label">Start at <span class="tc-opt">optional</span></span><input name="url" type="url" inputmode="url" maxlength="2048" placeholder="https://x.com" autocomplete="off"></label>
 <fieldset class="tc-kind"><legend>Its desk</legend>
 <label><input type="radio" name="kind" value="browser" checked><span>A browser</span></label>
 <label><input type="radio" name="kind" value="desktop"><span>A whole desktop</span></label>
 </fieldset>
-<button type="submit" class="pa-btn pa-primary tc-go">Open its desk</button>
+<details class="tc-words"><summary>Tell it in words instead</summary>
+<label class="tc-words-l"><span class="tc-label">How you do it <span class="tc-opt">a few lines, the way you would tell a person</span></span><textarea name="words" rows="5" maxlength="6000" placeholder="Open x.com and press Post. Attach the clip from Downloads, write the title, then press Post again."></textarea></label>
+<p class="pa-hint">With words, there is no desk to show it on: it writes the skill from what you wrote, then practises it.</p>
+</details>
+<div class="tc-practice-row"><span class="tc-label" aria-hidden="true">Afterwards it practises</span>
+<fieldset class="tc-kind tc-practice"><legend>Afterwards it practises</legend>
+<label><input type="radio" name="practice" value="until" checked><span>Until it works</span></label>
+<label><input type="radio" name="practice" value="once"><span>Once</span></label>
+<label><input type="radio" name="practice" value="off"><span>Not at all</span></label>
+</fieldset></div>
+<button type="submit" class="pa-btn pa-primary tc-go">Start the lesson</button>
 </form>
-${recent.length ? html`<ul class="tc-lessons" aria-label="Recent lessons">${recent.map((l) => html`<li><a href="/tasks/${l.task_id}">${l.what}</a><span class="pa-note-meta">${LESSON_STATE[l.state] || l.state}${l.steps ? ` · ${l.steps} step${l.steps === 1 ? '' : 's'}` : ''} · ${when(l.created_at)}</span></li>`)}</ul>` : ''}
+${recent.length ? html`<ul class="tc-lessons" aria-label="Recent lessons">${recent.map((l) => html`<li><a href="/tasks/${l.task_id}">${l.what}</a><span class="pa-note-meta">${lessonMeta(l)} · ${when(l.created_at)}</span>${l.practice_task ? html` <a class="pa-note-meta" href="/tasks/${l.practice_task}">Its last try</a>` : ''}</li>`)}</ul>` : ''}
 </section>`;
 }
 
@@ -70,4 +96,4 @@ function tryInput(skill) {
     return `Use your skill "${skill.name}" now: load it (load_skill ${skill.slug}) and follow it on your own desk (computer_desk, machine "any"). Where it needs a detail you do not have, ask me. If a step does not work, take the desk to me (hand_to_person) rather than guessing: what I do then will improve the skill.`;
 }
 
-module.exports = { panel, improveSwitch, skillItem, tryInput, when, LESSON_STATE, raw };
+module.exports = { panel, improveSwitch, skillItem, tryInput, when, lessonMeta, LESSON_STATE, PRACTICE_STATE, raw };

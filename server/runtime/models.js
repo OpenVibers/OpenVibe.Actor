@@ -77,6 +77,24 @@ const LATENCY_CLASSES = ['interactive', 'background', 'batch'];
 // still reached when a person chooses their own key (sealed in AI's vault).
 const AI_PROVIDER = 'openvibe-ai';
 
+/**
+ * A model call's connection, tried again when it failed before any answer came (11-21: one dropped connection to
+ * Exchange, five calls into a Teach lesson, ended the lesson with "OpenVibe.Exchange could not be reached"). Up to two
+ * more tries, 0.3 s and 0.6 s apart; never after a timeout or a cancel, and never once an answer has started (the
+ * request body is a string, so a try sends exactly the same request).
+ */
+async function connect(fetchImpl, url, init) {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return await fetchImpl(url, init);
+        } catch (err) {
+            const stopped = (init.signal && init.signal.aborted) || (err && (err.name === 'TimeoutError' || err.name === 'AbortError'));
+            if (stopped || attempt >= 2) throw err;
+            await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        }
+    }
+}
+
 /** Parse a pinned tier value: "openai:gpt-5.1", or a bare model on the first configured provider. */
 function parsePin(value) {
     const text = String(value || '').trim();
@@ -561,7 +579,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         const sig = signal ? AbortSignal.any([signal, timeout]) : timeout;
         let res;
         try {
-            res = await fetchImpl(base + '/v1/chat/completions', {
+            res = await connect(fetchImpl, base + '/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
@@ -773,7 +791,7 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
         const sig = signal ? AbortSignal.any([signal, AbortSignal.timeout(ai.timeoutMs || 180_000)]) : AbortSignal.timeout(ai.timeoutMs || 180_000);
         let res;
         try {
-            res = await fetchImpl(`${trimSlash(ai.exchangeUrl || 'https://api.openvibe.exchange')}/v1/chat/completions`, {
+            res = await connect(fetchImpl, `${trimSlash(ai.exchangeUrl || 'https://api.openvibe.exchange')}/v1/chat/completions`, {
                 method: 'POST',
                 headers: { authorization: `Bearer ${await c.tokens.getToken()}`, 'content-type': 'application/json', accept: onDelta ? 'text/event-stream' : 'application/json' },
                 body: JSON.stringify(body), signal: sig,
@@ -980,4 +998,4 @@ function createModels({ config, rates = {}, fetchImpl = globalThis.fetch, log = 
     };
 }
 
-module.exports = { createModels, ModelError, parsePin, PREFERRED, PREFERRED_CHECKED, TIERS, PROVIDERS, AI_PROVIDER, LATENCY_CLASSES };
+module.exports = { connect, createModels, ModelError, parsePin, PREFERRED, PREFERRED_CHECKED, TIERS, PROVIDERS, AI_PROVIDER, LATENCY_CLASSES };

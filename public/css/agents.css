@@ -192,6 +192,17 @@ html[data-ov-motion="off"] .tc-mark span { animation: none; }
 .tc-kind input:checked + span { border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 16%, var(--bg-primary, #0a0f1c)); }
 .tc-kind input:focus-visible + span { outline: 2px solid var(--accent-light, #60a5fa); outline-offset: 2px; }
 .tc-form .tc-go { grid-column: 1 / -1; justify-self: start; min-height: 44px; padding: .55rem 1.3rem; }
+/* Tell it in words (folded), and how much it practises afterwards (plan §AD.33, 11-21). */
+.tc-words { grid-column: 1 / -1; min-width: 0; }
+.tc-words > summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; font-weight: 600; color: var(--accent-light, #60a5fa); list-style: none; }
+.tc-words > summary::-webkit-details-marker { display: none; }
+.tc-words > summary::before { content: ""; width: 7px; height: 7px; margin-right: .55rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .18s; }
+.tc-words[open] > summary::before { transform: rotate(45deg); }
+.tc-words textarea { width: 100%; min-height: 7.5rem; resize: vertical; font: inherit; box-sizing: border-box; }
+.tc-words .tc-words-l { display: grid; gap: .35rem; }
+.tc-practice-row { grid-column: 1 / -1; display: grid; gap: .35rem; min-width: 0; }
+.tc-practice-row > .tc-label { font-weight: 600; }
+.tc-practice span { white-space: normal; text-align: center; line-height: 1.2; }
 .tc-lessons { list-style: none; margin: .9rem 0 0; padding: .7rem 0 0; border-top: 1px solid var(--border-color, rgba(255,255,255,.1)); display: grid; gap: .4rem; }
 .tc-lessons li { display: flex; flex-wrap: wrap; gap: .15rem .6rem; align-items: baseline; min-width: 0; }
 .tc-lessons a { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }

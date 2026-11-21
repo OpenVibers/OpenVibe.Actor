@@ -403,6 +403,7 @@ function stepFor(name, input) {
         case 'remember':
         case 'hand_to_person':
         case 'learn_from_person':   // a lesson the person started (Teach, plan §AD.33): it only watches them
+        case 'learn_from_words':    // a lesson told in words: it writes a draft the person keeps or not
         case 'wait_for':
             return null;
 
