@@ -56,7 +56,8 @@ const EXPECTED = {
     computer_write: true,
     hand_to_person: true,
     learn_from_person: true,   // a lesson: it waits for the person and writes a skill draft (Teach, plan §AD.33)
-    learn_from_words: false,   // a lesson told in words: it only writes a skill draft the person keeps or not
+    learn_from_words: false,
+    spare_usage: true,   // changes the person's spare-usage list on Codes (what it holds starts tasks)   // a lesson told in words: it only writes a skill draft the person keeps or not
     // A wait changes nothing in the world: it parks the run until the event or the deadline.
     wait_for: false,
     make_chart: true,

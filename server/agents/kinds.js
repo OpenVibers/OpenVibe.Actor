@@ -12,6 +12,7 @@
 
 const KINDS = [
     'codes.task',      // a coding task on the person's own machine
+    'codes.spare',     // the person's spare-usage list on Codes (what it holds starts tasks before a plan resets)
     'actor.action',    // a connected tool (an MCP server or another agent) that acts
     'computer.run',    // run a program on the person's computer
     'computer.write',  // write a file on the person's computer
@@ -39,6 +40,7 @@ const KINDS = [
 // The plain words a person reads for each kind. Never an id, never a code: this is the sentence on the card.
 const LABELS = {
     'codes.task': 'a coding task on your machine',
+    'codes.spare': 'your spare-usage list of coding tasks',
     'actor.action': 'an action by a connected tool',
     'computer.run': 'running a program on your computer',
     'computer.write': 'writing a file on your computer',

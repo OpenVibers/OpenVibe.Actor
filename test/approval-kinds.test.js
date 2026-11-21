@@ -28,6 +28,7 @@ const EXPECTED = {
     ask_location: null,
     ask_photo: null,
     codes_task: 'codes.task',
+    spare_usage: 'codes.spare',
     my_apps_run: 'actor.action',   // only a script that touches the floor asks in Actor; Connect's grants decide the rest
     computer_browser: 'computer.browser',
     computer_page_check: 'computer.browser',
@@ -63,6 +64,7 @@ const SAMPLE = {
     ask_location: { why: 'Find a nearby shelter' },
     ask_photo: { why: 'Read the sign' },
     codes_task: { repo: 'ada/site', instruction: 'fix the bug' },
+    spare_usage: { action: 'add', prompt: 'Add tests', repo: 'ada/site' },
     computer_browser: { machine: 'dev_x', action: 'click', text: 'Send' },
     computer_page_check: { machine: 'dev_x', url: 'https://openvibe.live/' },
     computer_desk: { machine: 'dev_x', action: 'start' },
