@@ -294,6 +294,20 @@ function stepFor(name, input) {
                 payload: safeInput({ instruction: a.instruction, repo, ...(a.agent ? { agent: a.agent } : {}) }),
             };
         }
+        // Spare usage (plan §AD.37): reading what the agents have left never asks; changing the list (what it holds starts
+        // tasks on the person's machines when a plan is about to reset) is an edit, asked at the agent's level.
+        case 'spare_usage': {
+            const action = text(a.action, 20) || 'show';
+            if (action === 'show') return null;
+            const repo = text(a.repo, 300);
+            return {
+                act: 'edit',
+                kind: 'codes.spare',
+                summary: action === 'add' ? `Put a coding task on your spare-usage list${repo ? ` (${repo})` : ''}` : action === 'turn_on' ? 'Turn your spare-usage list on' : 'Turn your spare-usage list off',
+                target: repo ? repoTarget(a.repo) : 'codes:spare',
+                payload: safeInput({ action, ...(a.prompt ? { prompt: a.prompt } : {}), ...(repo ? { repo } : {}), ...(a.agent ? { agent: a.agent } : {}) }),
+            };
+        }
         case 'muse_run': {
             // One agentic step through Muse Code on the person's computer: the approval names the instruction
             // exactly (like a routine's task), so allowing it always covers that instruction on that machine only.

@@ -223,7 +223,8 @@ function createCodes({ config, fetchImpl = globalThis.fetch, tokens: tokensOverr
         return { text, sources, model: (t.result.agents || [])[0] || 'openvibe-codes' };
     }
 
-    return { enabled, adapter };
+    // call: the same service token for the person, for the other /api/v1 routes a tool reaches (spare_usage).
+    return { enabled, adapter, call };
 }
 
 module.exports = { createCodes, repoIn, answerOf, personOf, sessionEventsOf, harnessSetup };
