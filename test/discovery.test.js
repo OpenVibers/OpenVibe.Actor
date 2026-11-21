@@ -22,8 +22,9 @@ const PRIVATE = ['/tasks', '/auth/', '/api/', '/limits.json'];
             assert.strictEqual(r.status, 200);
             assert.match(r.headers.get('content-type'), /^text\/plain/);
             assert.match(r.headers.get('cache-control') || '', /public, max-age=\d+/);
-            for (const d of ['/auth/', '/api/', '/tasks']) assert.ok(r.text.includes(`Disallow: ${d}`), `missing Disallow: ${d}`);
-            for (const d of ['/agents', '/docs', '/updates']) assert.ok(!r.text.includes(`Disallow: ${d}`), `${d} must stay crawlable`);
+            // openvibe-shared 4.333.0 (the owner, 11-21: "Everything should be just crawlable"): only the sign-in plumbing is out.
+            assert.ok(r.text.includes('Disallow: /auth/'), 'missing Disallow: /auth/');
+            for (const d of ['/api/', '/tasks', '/agents', '/docs', '/updates']) assert.ok(!r.text.includes(`Disallow: ${d}\n`), `${d} must stay crawlable`);
             assert.ok(r.text.includes('Sitemap: https://openvibe.actor/sitemap.xml'), 'sitemap not named');
             assert.ok(/^User-agent: \*$/m.test(r.text), 'no User-agent: * group');
         });
