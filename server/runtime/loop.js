@@ -27,6 +27,7 @@
  * createLoop({ config, models, registry, log, store, now }) → { run(args), revise(state, claims) }
  */
 
+const turnShape = require('./turn-shape');
 const { block: inputBlock } = require('../tasks/inputs');
 const { createLedger } = require('./evidence');
 const { createTracer, codeOf } = require('./trace');
@@ -144,6 +145,8 @@ const FINAL_HEAD = /^[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?(?:my |the )?final (?:an
 const CHECK_TALK = [
     /\bclaim[- ]by[- ]claim\b/i, /\b(?:existing|earlier|previous|first|my|the|this) draft\b/i, /\breflect(?:ion|ing)?\b/i,
     /\bno (?:tool[- ]backed )?evidence (?:is )?(?:required|needed)\b/i, /\[E#\]/, /\bunverif(?:ied|iable)\b/i, /\blive facts?\b/i,
+    // 11-21: "Checked by openvibe-ai (same family): every claim is supported by E1."
+    /^\s*checked by\b/im, /\bsupported by (?:the )?(?:recall )?(?:evidence|E\d+)\b/i,
 ];
 function splitCheck(text) {
     const s = String(text || '');
@@ -359,7 +362,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     const resultChars = loopCfg.toolResultChars || 6000;
     const contextOpts = { triggerChars: loopCfg.contextTriggerChars == null ? 60000 : loopCfg.contextTriggerChars, keepRecent: loopCfg.contextKeepTools || 8 };
     const maxCalls = loopCfg.maxToolCallsPerTurn || 8;
-    const selfReflections = loopCfg.selfReflections == null ? 2 : loopCfg.selfReflections;
+    const selfReflections = loopCfg.selfReflections == null ? 1 : loopCfg.selfReflections;
 
     /** The plan: a fast-tier call when one is available, else one honest step from the task itself. */
     // A follow-up is planned with what it follows: "and for 8 GB?" means nothing on its own.
@@ -369,12 +372,22 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         return `Earlier in this conversation:\n${state.context.map((c) => `Asked: ${clip(c.task, 600)}\nAnswered: ${clip(c.answer, 1200)}`).join('\n\n')}\n\nNow, a follow-up: ${state.task}`;
     }
 
+    // The turn's shape (runtime/turn-shape.js): a quick ask gets no planner and its short answer no review.
+    const isQuick = (state) => turnShape.quick(state.brain && state.brain.understanding, state.task, state.attachments);
+    const worthReviewing = (state, draft) => turnShape.worthChecking({ understanding: state.brain && state.brain.understanding, task: state.task, attachments: state.attachments, text: draft, evidence: state.ledger && typeof state.ledger.forResult === 'function' ? state.ledger.forResult() : [] });
+
     const chatForDay = async (ctx, args) => ctx.day && models.withChoice ? models.withChoice(await ctx.day.modelChoice(ctx.taskId), () => models.chat(args)) : models.chat(args);
     async function makePlan(state, ctx) {
         const fallback = () => ({ assumptions: [], steps: [{ goal: clip(state.task.replace(/\s+/g, ' ').trim(), 200) || 'Do the task', state: 'pending' }] });
         let plan = fallback();
         let startedAt = null;
         const u = state.brain && state.brain.understanding;
+        // A quick ask (runtime/turn-shape.js) has no planner call; what it assumed is said only when the ask was unclear.
+        if (isQuick(state)) {
+            plan.quick = true;
+            if (u && Array.isArray(u.assumptions) && u.assumptions.length && Number(u.ambiguity) >= 0.6) plan.assumptions = u.assumptions.map((a) => clip(a, 200)).filter(Boolean).slice(0, 2);
+            return plan;
+        }
         try {
             if (ctx.budgetLeft && ctx.budgetLeft() <= 0) return plan;
             startedAt = now();
@@ -415,6 +428,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         state.plan.steps.forEach((s, i) => {
             if (s.state !== 'done' && s.state !== 'active') s.state = i === 0 || state.plan.steps.slice(0, i).every((x) => x.state === 'done') ? 'active' : 'pending';
         });
+        // A quick ask's one step is not a plan worth a card (11-21: "Plan · 0 of 1" over a one-line reply).
+        if (state.plan.quick && state.plan.steps.length <= 1 && !(state.plan.assumptions || []).length && !(state.brain && state.brain.progressLedger && state.brain.progressLedger.state.replans)) return Promise.resolve();
         // An unchanged plan is not said again (11-18: the same "Assumptions: …" eight times in one run, each a Thought block).
         const text = planText(state.plan, state.brain);
         if (text === state.lastPlanText) return Promise.resolve();
@@ -438,7 +453,9 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         // start a fresh draft when a call that ended in tool calls is followed by the next one.
         const n = (state.deltaCalls = (state.deltaCalls || 0) + 1);
         // Only while someone reads the answer as it is written: a task nobody watches calls the model as before.
-        const onDelta = ctx.delta && (typeof ctx.delta.wanted !== 'function' || ctx.delta.wanted()) ? (text) => ctx.delta({ text, n }) : null;
+        // A review call is not streamed (11-21): its "checked by …" talk is not the answer; the draft stays on the page
+        // until the reviewed answer replaces it.
+        const onDelta = !state.reviewing && ctx.delta && (typeof ctx.delta.wanted !== 'function' || ctx.delta.wanted()) ? (text) => ctx.delta({ text, n }) : null;
         // What the model is sent: older tool results cut to an excerpt once the conversation is long (context editing);
         // the run's own messages and evidence stay whole.
         const view = contextView(state.messages, contextOpts);
@@ -756,11 +773,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             if (r.text && r.text.trim()) { state.lastText = r.text.trim(); if (state.brain) state.brain.lastLine = clip(r.text.trim(), 160); }
             if (!r.toolCalls || !r.toolCalls.length) {
                 // A draft answer: the writer's own reflection before it is delivered.
-                if (state.selfReflections < reflections && (!ctx.budgetLeft || ctx.budgetLeft() > 0)) {
+                if (state.selfReflections < reflections && worthReviewing(state, state.lastText) && (!ctx.budgetLeft || ctx.budgetLeft() > 0)) {
                     state.selfReflections += 1;
-                    // The draft is shown once: a review that keeps it word for word writes no second copy (11-17: the
-                    // owner saw the same answer twice in a session, tasks' events 15 and 16 identical).
-                    if (state.lastText && state.lastText !== state.shownText) { state.shownText = state.lastText; await ctx.emit({ step: 'text', text: clip(state.lastText, 2000) }); }
+                    state.reviewing = true;
+                    // The draft is not shown: the reviewed answer is the one delivered, once (11-21: the owner saw a
+                    // draft and two rewrites of one reply; 11-17: the same answer twice).
                     state.messages.push({ role: 'user', content: `Reflect before this is delivered. Check the draft claim by claim: which claims have no evidence? A live fact (a price, score, weather reading, count, current status, release, date) must cite an [E#] from this run. If one has no evidence and a tool can fetch it, call that tool now. If it cannot be verified, remove it or say plainly that it is unverified. Do this check in your head: your next reply goes to the person exactly as written, so it is only the final answer, keeping the citations, with no notes about the check or the draft and no heading such as "Final answer".` });
                     await saveCheckpoint(state, ctx);
                     continue;
@@ -769,8 +786,10 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                     state.brain.progress = state.brain.progressLedger.update({ answered: true, nextGoal: state.brain.progressLedger.state.nextGoal });
                     if (state.depth === 0) await emitPlan(state, ctx);
                 }
+                // The model's own review notes ("Checked by …: the claims are supported by E1") stay on the run for the
+                // receipt and the trace, not in the chat as a Thought (11-21).
                 const split = splitCheck(state.lastText);
-                if (split.check) await ctx.emit({ step: 'text', text: clip(split.check, 2000) });
+                if (split.check && state.brain) state.brain.selfCheck = clip(split.check, 600);
                 state.answered = true;
                 await saveCheckpoint(state, ctx);
                 break;

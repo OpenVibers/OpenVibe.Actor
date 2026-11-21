@@ -292,7 +292,7 @@ function load(env = process.env) {
         // `checkReflections` caps the verifier's second-family passes (the DeepSeek research: two at most).
         loop: {
             maxToolCallsPerTurn: Math.max(1, int(env.ACTOR_LOOP_MAX_TOOL_CALLS, 12)),
-            selfReflections: Math.max(0, int(env.ACTOR_LOOP_SELF_REFLECTIONS, 2)),
+            selfReflections: Math.max(0, int(env.ACTOR_LOOP_SELF_REFLECTIONS, 1)),
             checkReflections: Math.min(2, Math.max(0, int(env.ACTOR_LOOP_CHECK_REFLECTIONS, 2))),
             toolResultChars: Math.max(500, int(env.ACTOR_LOOP_TOOL_RESULT_CHARS, 6000)),
             // Context editing (server/runtime/context-edit.js): past this many characters of conversation, tool results

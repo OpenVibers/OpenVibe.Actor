@@ -17,7 +17,7 @@ const reply = ({ text = '', tools = [] } = {}) => ({
     text, toolCalls: tools, cost_usd: 0.0001, model: 'fake-1', family: 'fake', provider: 'fake',
 });
 
-function fakeModels(smart) {
+function fakeModels(smart, fast = null) {
     const chats = [];
     let n = 0;
     return {
@@ -26,7 +26,9 @@ function fakeModels(smart) {
         async chat(req) {
             // A snapshot: the loop keeps pushing on its own array, so the request is kept as it was sent.
             chats.push({ ...req, messages: req.messages.map((m) => ({ ...m })) });
-            if (req.tier === 'fast') return reply({ text: JSON.stringify({ assumptions: ['a stand-in assumption'], steps: [{ goal: 'Find the facts' }, { goal: 'Answer the person' }] }) });
+            // One fast reply serves both the understand pass and the planner: a task with two things to look up (work, so
+            // it is planned and its answer reviewed; 11-21 a quick ask is neither).
+            if (req.tier === 'fast') return reply({ text: JSON.stringify(fast || { kind: 'answer', risk: 'low', facts: { given: [], lookup: ['the facts', 'their sources'], derive: [] }, assumptions: ['a stand-in assumption'], steps: [{ goal: 'Find the facts' }, { goal: 'Answer the person' }] }) });
             const r = typeof smart === 'function' ? smart(req, n++) : smart[Math.min(n++, smart.length - 1)];
             return reply(r);
         },
@@ -45,8 +47,8 @@ function fakeRegistry(runImpl) {
     };
 }
 
-function make({ smart, run, config = {}, budgetLeft } = {}) {
-    const models = fakeModels(smart);
+function make({ smart, fast = null, run, config = {}, budgetLeft } = {}) {
+    const models = fakeModels(smart, fast);
     const registry = fakeRegistry(run);
     const cfg = configLib.load({ NODE_ENV: 'test', ...config });
     const loop = createLoop({ config: cfg, models, registry, log: { warn() {}, log() {} } });
@@ -228,13 +230,33 @@ const runArgs = (m, extra = {}) => ({
         await m.loop.close(out.state);
     });
 
-    await ok('a draft the review keeps word for word is stored once (2026-11-17: the same answer showed twice)', async () => {
-        const same = 'The agent is up and answering; ov-node-01 is offline.';
-        const m = make({ smart: [{ text: same }, { text: same }, { text: same }], config: { ACTOR_LOOP_SELF_REFLECTIONS: '2' } });
+    await ok('a reviewed answer is delivered once: the draft and the review talk are never steps (11-17, 11-21)', async () => {
+        const draft = 'The agent is up and answering; ov-node-01 is offline, last seen at 14:02 with 3 desks free and the build queue empty, so a run there would start now. '.repeat(6).trim();
+        const reviewed = 'Checked by openvibe-ai (same family): every claim is supported by E1.\n\n**Final answer**\n\nThe agent is up; ov-node-01 is offline [E1].';
+        const m = make({ smart: [{ text: draft }, { text: reviewed }], config: { ACTOR_LOOP_SELF_REFLECTIONS: '2' } });
         const out = await m.loop.run(runArgs(m));
-        assert.strictEqual(out.text, same);
-        const texts = m.events.filter((e) => e.step === 'text' && e.text === same);
-        assert.strictEqual(texts.length, 1, `the draft is in the steps once (${texts.length})`);
+        assert.strictEqual(out.text, 'The agent is up; ov-node-01 is offline [E1].');
+        const texts = m.events.filter((e) => e.step === 'text');
+        assert.strictEqual(texts.length, 0, `no draft and no "Checked by" note in the chat (${texts.map((e) => e.text.slice(0, 40)).join(' | ')})`);
+        assert.match((out.state && out.state.brain && out.state.brain.selfCheck) || '', /^Checked by/, 'the review notes stay on the run');
+        await m.loop.close(out.state);
+    });
+
+    await ok('a quick ask ("Test", "Search Google") gets no planner call, no plan card and no review: understand + one call (11-21)', async () => {
+        const m = make({ fast: { kind: 'answer', risk: 'low', facts: { given: [], lookup: [], derive: [] }, assumptions: [] }, smart: [{ text: 'Working. What should I do?' }, { text: 'must not run' }] });
+        const out = await m.loop.run(runArgs(m, { task: 'Test' }));
+        assert.strictEqual(out.text, 'Working. What should I do?');
+        assert.deepStrictEqual(m.models.chats.map((c) => c.tier), ['fast', 'smart'], 'understand, then the answer: no planner, no review');
+        assert.strictEqual(m.events.filter((e) => e.step === 'plan').length, 0, 'no "Plan · 0 of 1" card');
+        await m.loop.close(out.state);
+    });
+
+    await ok('a reply that asks the person something is not reviewed: one call, the turn is theirs (11-21)', async () => {
+        const ask = 'What should I search for? Give me the words and I will run them.';
+        const m = make({ smart: [{ text: ask }, { text: 'a review that must not run' }], config: { ACTOR_LOOP_SELF_REFLECTIONS: '2' } });
+        const out = await m.loop.run(runArgs(m));
+        assert.strictEqual(out.text, ask);
+        assert.strictEqual(m.events.filter((e) => e.step === 'text').length, 0, 'the question is said once, as the answer');
         await m.loop.close(out.state);
     });
 

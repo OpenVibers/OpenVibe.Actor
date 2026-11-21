@@ -91,6 +91,8 @@ function normalize(parsed, { task, mode = 'balanced', context = [] } = {}) {
     const asked = shouldAsk({ ambiguity, risk }) ? normQuestion(p.question) : null;
     return {
         kind,
+        // The model named the kind and the facts (11-21): only then may a turn be judged quick (runtime/turn-shape.js).
+        known: ['answer', 'file', 'action', 'other'].includes(p.kind) && !!(p.facts && typeof p.facts === 'object'),
         deliverable: clip(real(p.deliverable), 300) || clip(task, 300),
         constraints: list((Array.isArray(p.constraints) ? p.constraints : []).filter(real)),
         risk,
