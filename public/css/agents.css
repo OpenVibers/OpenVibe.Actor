@@ -198,8 +198,11 @@ html[data-ov-motion="off"] .tc-mark span { animation: none; }
 .tc-words > summary::-webkit-details-marker { display: none; }
 .tc-words > summary::before { content: ""; width: 7px; height: 7px; margin-right: .55rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .18s; }
 .tc-words[open] > summary::before { transform: rotate(45deg); }
-.tc-words textarea { width: 100%; min-height: 7.5rem; resize: vertical; font: inherit; box-sizing: border-box; }
+.tc-words textarea { width: 100%; min-height: 7.5rem; resize: vertical; font: inherit; font-weight: 400; line-height: 1.45; box-sizing: border-box; }
 .tc-words .tc-words-l { display: grid; gap: .35rem; }
+/* The hint under its label, not squeezed beside it (390 px, 11-21). */
+.tc-words .tc-label { flex-wrap: wrap; row-gap: .1rem; }
+.tc-words .tc-opt { flex-basis: 100%; }
 .tc-practice-row { grid-column: 1 / -1; display: grid; gap: .35rem; min-width: 0; }
 .tc-practice-row > .tc-label { font-weight: 600; }
 .tc-practice span { white-space: normal; text-align: center; line-height: 1.2; }
