@@ -303,9 +303,9 @@ function stepFor(name, input) {
             return {
                 act: 'edit',
                 kind: 'codes.spare',
-                summary: action === 'add' ? `Put a coding task on your spare-usage list${repo ? ` (${repo})` : ''}` : action === 'turn_on' ? 'Turn your spare-usage list on' : 'Turn your spare-usage list off',
+                summary: action === 'add' ? (a.loop ? `Add the ${text(a.loop, 20)} loop to your spare-usage list${repo ? ` for ${repo}` : ''}` : `Put a coding task on your spare-usage list${repo ? ` (${repo})` : ''}`) : action === 'turn_on' ? 'Turn your spare-usage list on' : 'Turn your spare-usage list off',
                 target: repo ? repoTarget(a.repo) : 'codes:spare',
-                payload: safeInput({ action, ...(a.prompt ? { prompt: a.prompt } : {}), ...(repo ? { repo } : {}), ...(a.agent ? { agent: a.agent } : {}) }),
+                payload: safeInput({ action, ...(a.prompt ? { prompt: a.prompt } : {}), ...(a.loop ? { loop: a.loop } : {}), ...(repo ? { repo } : {}), ...(a.agent ? { agent: a.agent } : {}) }),
             };
         }
         case 'muse_run': {

@@ -14,7 +14,7 @@ const tool = require('../server/runtime/tools/spare_usage');
         calls.push({ method: init.method || 'GET', path: u.pathname, subject: init.headers['X-OV-Subject'], auth: init.headers.Authorization || init.headers.authorization, body: init.body ? JSON.parse(init.body) : null });
         if (u.pathname === '/api/v1/me/spare' && (init.method || 'GET') === 'GET') return json(200, state);
         if (u.pathname === '/api/v1/me/spare' && init.method === 'PUT') { state.settings.enabled = JSON.parse(init.body).enabled; return json(200, { settings: state.settings }); }
-        if (u.pathname === '/api/v1/me/spare/tasks' && init.method === 'POST') { const b = JSON.parse(init.body); state.tasks.push({ id: 'spt_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', title: b.title || b.prompt, state: 'queued', agent: b.agent || 'any', priority: b.priority || 3, repeat: !!b.repeat, runs: 0 }); return json(201, { task: state.tasks[0] }); }
+        if (u.pathname === '/api/v1/me/spare/tasks' && init.method === 'POST') { const b = JSON.parse(init.body); state.tasks.push({ id: 'spt_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', title: b.title || b.prompt || `${b.loop} loop`, state: 'queued', agent: b.agent || 'any', priority: b.priority || 3, repeat: !!b.repeat, runs: 0 }); return json(201, { task: state.tasks[0] }); }
         return json(404, { detail: 'no' });
     };
     const ctx = {
@@ -31,6 +31,8 @@ const tool = require('../server/runtime/tools/spare_usage');
     assert.strictEqual(added.list[0].title, 'Add tests for fleet.js');
     assert.deepStrictEqual(calls.find((c) => c.method === 'POST').body, { prompt: 'Add tests for fleet.js', repo: 'OpenVibers/OpenVibe.Codes', priority: 2 });
     assert.strictEqual(JSON.parse((await tool.run({ action: 'turn_on' }, ctx)).text).on, true);
+    await tool.run({ action: 'add', loop: 'security', repo: 'OpenVibers/OpenVibe.Live', site: 'https://openvibe.live' }, ctx);
+    assert.deepStrictEqual(calls.filter((c) => c.method === 'POST').pop().body, { loop: 'security', repo: 'OpenVibers/OpenVibe.Live', site: 'https://openvibe.live' }, 'a loop goes as a loop');
     const bad = await tool.run({ action: 'add', prompt: 'x' }, ctx);
     assert.ok(bad.isError && /repo/.test(bad.text));
     assert.ok(!tool.available({ ...ctx, requester: 'service:x' }), 'only for a person');
