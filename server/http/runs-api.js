@@ -122,6 +122,13 @@ function runOf(row, names, now) {
     const agent = { id: String(agentId), product: 'actor' };
     const name = (row.agent_id && names.get(row.agent_id)) || (listed && listed.name);
     if (name) agent.name = String(name);
+    // How it is worked (agents.run@1 agent.harness, "the loop that runs it"; the owner, 11-21: "did it run on the DeepSeek
+    // harness, or … just API? … what mode are we in?"): Actor's own agent loop, one model, Decisions, a coding harness
+    // (by name) or an outside agent. Where: a coding harness works on the person's machine, the rest on OpenVibe.
+    const way = engineStored(row);
+    const kind = way && way.kind;
+    agent.harness = kind === 'harness' ? (/^[a-z][a-z0-9-]{0,59}$/.test(String(way.harness || '')) ? String(way.harness) : 'codes')
+        : kind === 'model' ? 'one-model' : kind && /^[a-z][a-z0-9-]{0,59}$/.test(kind) && kind !== 'agent' ? kind : 'openvibe';
     const budget = { usd: num(row.budget_task) };
     if (row.timeout_ms != null) budget.seconds = Number(row.timeout_ms) / 1000;
     const cost = {};
@@ -141,6 +148,7 @@ function runOf(row, names, now) {
         updated_at: iso(row.last_at || row.finished_at || row.created_at),
         result_summary: summaryOf(row),
         cost: Object.keys(cost).length ? cost : null,
+        where: { kind: kind === 'harness' || row.agent === 'codes' ? 'machine' : 'openvibe' },
     };
     return out;
 }
