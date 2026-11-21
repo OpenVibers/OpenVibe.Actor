@@ -6,7 +6,8 @@
  *
  *   show      each agent's windows (used %, when it resets) and whether the list would use it now, and the list
  *   add       put a task on the list: what to do and the repository (owner/name or https), optionally which agent,
- *             a priority 1-5 and whether it comes back after each run
+ *             a priority 1-5 and whether it comes back after each run; or a loop (accessibility, security, latency,
+ *             tests, docs, dependencies: a repeating task that measures, fixes, proves and opens a pull request)
  *   turn_on / turn_off   whether the list runs at all
  *
  * The list is Codes' own (/api/v1/me/spare), reached with Actor's service token for the person (codes.task.read to
@@ -23,6 +24,7 @@ function codesFor(ctx) {
 }
 const json = (o) => JSON.stringify(o);
 const ACTIONS = ['show', 'add', 'turn_on', 'turn_off'];
+const LOOPS = ['accessibility', 'security', 'latency', 'tests', 'docs', 'dependencies'];
 
 /** The agents and the list, short enough for a model to read. */
 function summary(v) {
@@ -41,7 +43,7 @@ function summary(v) {
 
 module.exports = {
     name: 'spare_usage',
-    description: 'What the person\'s coding agents (Claude Code, Codex, Command Code …) have left before their plans reset, and their spare-usage list on OpenVibe Codes: a list of coding tasks their agents work through when a plan is about to reset with usage left and the agent is idle, so nothing they paid for is lost. action "show" reads it; "add" puts a task on the list (prompt and repo required; agent, priority 1-5 and repeat optional); "turn_on"/"turn_off" switch the list.',
+    description: 'What the person\'s coding agents (Claude Code, Codex, Command Code …) have left before their plans reset, and their spare-usage list on OpenVibe Codes: a list of coding tasks their agents work through when a plan is about to reset with usage left and the agent is idle, so nothing they paid for is lost. action "show" reads it; "add" puts a task on the list (prompt and repo required; agent, priority 1-5 and repeat optional), or a loop instead of a prompt (accessibility, security, latency, tests, docs or dependencies: a repeating check that fixes what it finds and opens a pull request, optionally on a live site); "turn_on"/"turn_off" switch the list.',
     input: {
         type: 'object',
         properties: {
@@ -52,6 +54,8 @@ module.exports = {
             agent: { type: 'string', description: 'for add: which coding agent (optional; any with time left by default)' },
             priority: { type: 'integer', minimum: 1, maximum: 5, description: 'for add: 1 runs first, 5 last (default 3)' },
             repeat: { type: 'boolean', description: 'for add: back on the list after each run (chores worth repeating)' },
+            loop: { type: 'string', enum: LOOPS, description: 'for add, instead of prompt: a loop that checks, fixes and opens a pull request each window' },
+            site: { type: 'string', description: 'for a loop: the live site to check (https://…), optional' },
         },
     },
     scope: 'person',
@@ -74,8 +78,9 @@ module.exports = {
         } else if (action === 'add') {
             const prompt = String((input && input.prompt) || '').trim();
             const repo = String((input && input.repo) || '').trim();
-            if (!prompt || !repo) return { text: json({ error: 'add needs prompt (what to do) and repo (owner/name or https)' }), isError: true };
-            const body = { prompt: prompt.slice(0, 8000), repo: repo.slice(0, 300) };
+            const loop = LOOPS.includes(input && input.loop) ? input.loop : null;
+            if ((!prompt && !loop) || !repo) return { text: json({ error: 'add needs prompt (what to do) or loop, and repo (owner/name or https)' }), isError: true };
+            const body = loop ? { loop, repo: repo.slice(0, 300), ...(typeof input.site === 'string' && input.site.trim() ? { site: input.site.trim().slice(0, 300) } : {}) } : { prompt: prompt.slice(0, 8000), repo: repo.slice(0, 300) };
             for (const k of ['title', 'agent']) if (typeof input[k] === 'string' && input[k].trim()) body[k] = input[k].trim().slice(0, k === 'title' ? 120 : 40);
             if (Number.isInteger(input.priority)) body.priority = input.priority;
             if (typeof input.repeat === 'boolean') body.repeat = input.repeat;
