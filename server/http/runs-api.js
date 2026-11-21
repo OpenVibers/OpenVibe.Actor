@@ -452,6 +452,13 @@ function createRunsRoutes(ctx) {
                 ...(IDEMPOTENCY.test(key) ? { idempotency_key: key } : {}) };
             const out = await createTask({ s, config, engine, webhooks, principal: req.principal, body, personToken: bearerOf(req), timezone: tzOf(req) });
             if (out.code) return failed(req, res, out);
+            // A group conversation's turn (Network's groups, 11-21): the group shows the answer, so the done and failed
+            // alerts are claimed now and never sent ("Your task is done — You are Design in a group conversation…").
+            // A step only the person can do still asks them.
+            if (out.status === 201 && b.source && b.source.kind === 'group' && /^[A-Za-z0-9_-]{1,64}$/.test(String(b.source.id || ''))) {
+                const notices = require('../notify/task-notices');
+                try { await notices.once(s, out.task.id, 'succeeded'); await notices.once(s, out.task.id, 'failed'); } catch { /* an alert is the worst case */ }
+            }
             if (out.status === 201) await started(req, out.task, text, out.task.id);
             const view = await conversationView(s, out.task.id, req.principal.requester, s.now(), config.baseUrl);
             res.set('Location', `/api/v1/runs/${out.task.id}`);
