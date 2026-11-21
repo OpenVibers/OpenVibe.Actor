@@ -1456,6 +1456,8 @@ ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates |
         'open-model': { glyph: 'lock', href: '/chat?way=open-model', name: 'Private', line: 'A model on OpenVibe\'s own server. Nothing leaves OpenVibe.', chips: ['Private'] },
     };
     const icon = (name, size = 22) => raw(glyphs.svg(name, { size }));
+    // The agent systems (the home's rows, /api/v1/agent-systems) each open the way they are.
+    const ANCHORS = { agent: ['openvibe-runtime'], 'openai-agent': ['openai-agent'], 'open-model': ['open-model'], harness: ['codes'] };
     async function agentsPage() {
         const byId = new Map(catalog.list(config).map((a) => [a.id, a]));
         const up = (kind) => (kind === 'openai-agent' ? byId.get('openai-agent') : kind === 'open-model' ? byId.get('open-model') : kind === 'harness' ? byId.get('codes') : null);
@@ -1466,7 +1468,8 @@ ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates |
             const off = a && !a.available;
             const chips = e.kind === 'harness' ? engines.HARNESSES.map((h) => HARNESS_NAME[h] || h) : w.chips || [];
             const inner = html`<span class="aw-ic">${icon(w.glyph)}</span><span class="aw-t"><b>${w.name}</b><small>${w.line}</small>${chips.length ? html`<span class="aw-chips">${chips.map((c) => html`<span>${c}</span>`)}</span>` : ''}${off ? html`<em class="aw-off">Not running here now</em>` : ''}</span>${off ? '' : html`<span class="aw-go">${icon('chevron', 18)}</span>`}`;
-            return html`<li class="aw-way${off ? ' is-off' : ''}" id="way-${e.kind}">${off ? html`<div class="aw-row">${inner}</div>` : html`<a class="aw-row" href="${w.href}">${inner}</a>`}</li>`;
+            const anchors = (ANCHORS[e.kind] || []).map((id) => html`<span class="aw-anchor" id="${id}"></span>`);
+            return html`<li class="aw-way${off ? ' is-off' : ''}" id="way-${e.kind}">${anchors}${off ? html`<div class="aw-row">${inner}</div>` : html`<a class="aw-row" href="${w.href}">${inner}</a>`}</li>`;
         });
         const exch = 'https://openvibe.exchange/models';
         return {

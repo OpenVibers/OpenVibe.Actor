@@ -265,7 +265,9 @@ html[data-ov-motion="off"] .tk-row a, html[data-ov-motion="off"] .tk-meter span,
 .aw-sec h2 { margin: 0 0 10px; font-size: 13px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted, #7d8aa0); }
 .aw-ways { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 @media (min-width: 900px) { .aw-ways { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.aw-way { min-width: 0; animation: aw-in .35s cubic-bezier(.2, .8, .2, 1) both; }
+.aw-way { position: relative; min-width: 0; animation: aw-in .35s cubic-bezier(.2, .8, .2, 1) both; scroll-margin-top: 80px; }
+.aw-anchor { position: absolute; top: -80px; }
+.aw-anchor:target ~ .aw-row { border-color: var(--accent, #3b82f6); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #3b82f6) 22%, transparent); }
 .aw-way:nth-child(2) { animation-delay: 40ms; } .aw-way:nth-child(3) { animation-delay: 80ms; } .aw-way:nth-child(4) { animation-delay: 120ms; } .aw-way:nth-child(n+5) { animation-delay: 160ms; }
 .aw-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 20px; align-items: center; gap: 12px; min-height: 76px; height: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 18px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); color: inherit; text-decoration: none; transition: border-color .15s, background-color .15s, transform .12s; }
 a.aw-row:hover { border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border, #1f2d47)); background: color-mix(in srgb, var(--accent, #3b82f6) 5%, var(--bg-card, #131c2e)); }
