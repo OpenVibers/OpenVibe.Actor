@@ -371,6 +371,9 @@ function stepOf(runId, seq, body) {
         if (!text || BOOKKEEPING.some((re) => re.test(text))) return null;
         b.text = text;
     }
+    // A passed check is the receipt's business, not a Thought in the chat (11-21: "Checked by openvibe-ai (same family):
+    // The only factual claims are …" under every answer). A failed one is still said.
+    if (b.step === 'check' && !b.is_error && /^Checked\b/.test(String(b.text || ''))) return null;
     const step = {
         run_id: b.task_id || runId,
         seq: Number(b.seq == null ? seq : b.seq),

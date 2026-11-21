@@ -1,6 +1,7 @@
 'use strict';
 
 // The most a task's clock waits for its person, in all (Desks plan D4: hand_to_person).
+const turnShape = require('../runtime/turn-shape');
 const inputs = require('./inputs');
 const PERSON_WAIT_MAX_MS = 15 * 60_000;
 // A teach session's whole wait (plan §AD.33): the person shows the agent a task, which can take a while.
@@ -932,10 +933,14 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                         writerFamily: current.family || null, signal, now: () => now(),
                         trace: current.state && current.state.ctx && current.state.ctx.trace,
                     })));
-                    let verdict = await verify(out);
+                    // No claim check where there is nothing to check (11-21): a reply that only asks the person something,
+                    // or a quick ask's short answer. It was another model call and a "Checked by …" Thought every turn.
+                    const u = out.state && out.state.brain && out.state.brain.understanding;
+                    const checkIt = turnShape.worthChecking({ understanding: u, task: row.task, attachments: (out.state && out.state.attachments) || [], text: out.text, evidence: out.evidence || [] });
+                    let verdict = checkIt ? await verify(out) : { ok: true, skipped: true, cost_usd: 0 };
                     await meter(verdict.cost_usd);
                     const showCheck = (v) => emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${v.ok ? 'Checked' : 'Check failed'}${v.by ? ` by ${v.by}${v.cross ? '' : ' (same family)'}` : ''}: ${v.reason || ''}`.slice(0, 2000), is_error: !v.ok });
-                    await showCheck(verdict);
+                    if (!verdict.skipped) await showCheck(verdict);
                     // The last progress ledger for a task that will not deliver (stage V2-8 review): done no, no next,
                     // and the reason it stopped. A delivered task keeps the loop's final "done" ledger.
                     const finalPlan = async (stopped) => {
