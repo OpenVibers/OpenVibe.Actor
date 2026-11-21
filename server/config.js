@@ -178,6 +178,8 @@ function load(env = process.env) {
         // The OpenVibe services the runtime acts through.
         services: {
             searchUrl: trim(env.ACTOR_SEARCH_URL || 'https://search.openvibe.network'),
+            // OpenVibe.Exchange's public model list, for the Agents page's "any model" (empty: the page links to Exchange only).
+            exchangeModelsUrl: env.ACTOR_EXCHANGE_MODELS_URL != null ? trim(env.ACTOR_EXCHANGE_MODELS_URL) : (env.NODE_ENV === 'test' ? '' : 'https://openvibe.exchange/api/v1/models'),
             toolsUrl: trim(env.ACTOR_TOOLS_URL || 'https://openvibe.tools'),
             // OpenVibe.Bot: the person's own robots (list_my_robots, robot_steps). Empty turns the robot tools off.
             botUrl: trim(env.ACTOR_BOT_URL != null ? env.ACTOR_BOT_URL : (selfHosted ? '' : 'http://127.0.0.1:4630')),

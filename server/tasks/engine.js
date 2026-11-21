@@ -628,8 +628,10 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
             } else if (row.mode === 'private' || (!adapters.checkers.deepseek && !decisionsHere())) {
                 cls = heuristic(row.task);
             } else {
-                // The Decisions API first (plan §AD.27 item 6), then the cheap model, then the heuristic.
-                const c = await classify(row.task, { chat: adapters.checkers.deepseek || null, decide: decisionsHere() ? models.decide : null, signal });
+                // The Decisions API first (plan §AD.27 item 6), then the cheap model, then the heuristic. With OpenVibe.AI on,
+                // the cheap model is its fast tier (any maker), not a provider key of Actor's own (11-21: model-agnostic).
+                const quick = decisionsHere() && typeof models.chat === 'function' ? (args) => models.chat({ tier: 'fast', ...args }) : (adapters.checkers.deepseek || null);
+                const c = await classify(row.task, { chat: quick, decide: decisionsHere() ? models.decide : null, signal });
                 await meter(c.cost_usd);
                 cls = c.class;
             }
@@ -1117,7 +1119,9 @@ function createEngine({ config, s, adapters, stream, webhooks = null, now = () =
                 // delivered as written, and it says so, rather than failing on a cent the person was never asked for.
                 let verdict = agentId === 'codes' && budgetLeft() <= 1e-9
                     ? { ok: false, unavailable: true, reason: 'nothing was left of today\'s free allowance for a second opinion, and the work ran on your machine', cost_usd: 0 }
-                    : await check({ task: row.task, answer: out.text, sources: out.sources || [], evidence: out.evidence || [], agentId, mode: row.mode, checkers: adapters.checkers, signal, now: () => now() });
+                    : await check({ task: row.task, answer: out.text, sources: out.sources || [], evidence: out.evidence || [], agentId, mode: row.mode, checkers: adapters.checkers, signal, now: () => now(),
+                        // Model-agnostic (11-21): OpenVibe.AI's Decisions API and check tier when this server has it.
+                        ...(decisionsHere() ? { decide: models.decide, routed: models, wroteWith: out.model || null } : {}) });
                 await meter(verdict.cost_usd);
                 if (!verdict.unavailable) await emit(id, { kind: 'output', step: 'check', agent: agentId, text: `${verdict.ok ? 'Checked' : 'Check failed'}${verdict.by ? ` by ${verdict.by}${verdict.cross ? '' : ' (same family)'}` : ''}: ${verdict.reason || ''}`.slice(0, 2000), is_error: !verdict.ok });
                 if (verdict.unavailable) {

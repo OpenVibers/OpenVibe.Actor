@@ -249,3 +249,59 @@ html[data-ov-motion="off"] .tk-row a, html[data-ov-motion="off"] .tk-meter span,
 }
 /* Design rule 201 (the owner, 11-14): a page starts within 12 px of the bar, 8 px on a phone. */
 @media (max-width: 640px) { .page { padding-top: 8px; } }
+
+/* ── Who does the work (/agents, 2026-11-21 redesign): the ways to work as tappable rows, the models from Exchange,
+   the modes, the check. Phone first: one column, 44 px rows; wide screens: ways in two columns. ── */
+.aw-hero { display: grid; gap: 10px; margin: 6px 0 18px; }
+.aw-hero h1 { margin: 0; font-size: clamp(28px, 7vw, 38px); line-height: 1.1; letter-spacing: -.02em; text-wrap: balance; }
+.aw-lede { margin: 0; max-width: 52ch; font-size: clamp(16.5px, 4.3vw, 18px); line-height: 1.45; color: var(--text-secondary, #96a7c2); text-wrap: pretty; }
+.aw-cta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.aw-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); color: var(--text-primary, #e6edf7); font-weight: 650; font-size: 15px; text-decoration: none; transition: background-color .15s, border-color .15s, transform .12s; }
+.aw-btn svg { width: 20px; height: 20px; }
+.aw-btn:hover { border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border, #1f2d47)); }
+.aw-btn:active { transform: scale(.97); }
+.aw-btn.is-primary { border-color: transparent; background: var(--accent, #3b82f6); color: var(--on-accent, #fff); }
+.aw-sec { margin: 26px 0 0; }
+.aw-sec h2 { margin: 0 0 10px; font-size: 13px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted, #7d8aa0); }
+.aw-ways { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+@media (min-width: 900px) { .aw-ways { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.aw-way { min-width: 0; animation: aw-in .35s cubic-bezier(.2, .8, .2, 1) both; }
+.aw-way:nth-child(2) { animation-delay: 40ms; } .aw-way:nth-child(3) { animation-delay: 80ms; } .aw-way:nth-child(4) { animation-delay: 120ms; } .aw-way:nth-child(n+5) { animation-delay: 160ms; }
+.aw-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 20px; align-items: center; gap: 12px; min-height: 76px; height: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 18px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); color: inherit; text-decoration: none; transition: border-color .15s, background-color .15s, transform .12s; }
+a.aw-row:hover { border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border, #1f2d47)); background: color-mix(in srgb, var(--accent, #3b82f6) 5%, var(--bg-card, #131c2e)); }
+a.aw-row:active { transform: scale(.985); }
+a.aw-row:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
+.aw-way.is-off .aw-row { grid-template-columns: 44px minmax(0, 1fr); opacity: .7; }
+.aw-ic { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent); color: var(--accent-light, #60a5fa); }
+.aw-ic svg { width: 24px; height: 24px; }
+.aw-t { display: grid; gap: 3px; min-width: 0; }
+.aw-t b { font-size: 16.5px; line-height: 1.25; }
+.aw-t small { font-size: 14px; line-height: 1.4; color: var(--text-secondary, #96a7c2); }
+.aw-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.aw-chips span { padding: 3px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary, #a8b3c4); background: color-mix(in srgb, var(--text-primary, #e6edf7) 7%, transparent); }
+.aw-off { font-style: normal; font-size: 12.5px; color: var(--text-muted, #7d8aa0); }
+.aw-go { display: grid; place-items: center; color: var(--text-muted, #7d8aa0); transition: transform .2s cubic-bezier(.2, 1.2, .3, 1); }
+.aw-go svg { width: 18px; height: 18px; }
+a.aw-row:hover .aw-go { transform: translateX(calc(3px * var(--ov-move, 1))); color: var(--accent-light, #60a5fa); }
+.aw-note { display: flex; align-items: center; gap: 8px; margin: 10px 2px 0; font-size: 14.5px; color: var(--text-secondary, #96a7c2); }
+.aw-note svg { flex: none; width: 18px; height: 18px; }
+.aw-models { display: grid; gap: 12px; padding: 16px; border-radius: 18px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); }
+.aw-big { margin: 0; font-size: 17px; line-height: 1.45; }
+.aw-big b { font-family: 'OV Brand', Nunito, Inter, sans-serif; font-size: 22px; font-variant-numeric: tabular-nums; }
+.aw-makers { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.aw-makers a { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border, #1f2d47); color: inherit; text-decoration: none; font-size: 14px; font-weight: 600; transition: border-color .15s, background-color .15s; }
+.aw-makers a:hover { border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border, #1f2d47)); background: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent); }
+.aw-makers small { font-size: 12px; color: var(--text-muted, #7d8aa0); font-variant-numeric: tabular-nums; }
+.aw-modes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border-radius: 18px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); overflow: hidden; }
+.aw-modes li { display: grid; grid-template-columns: minmax(90px, auto) minmax(0, 1fr); align-items: baseline; gap: 12px; padding: 12px 16px; font-size: 15px; scroll-margin-top: 80px; }
+.aw-modes li + li { border-top: 1px solid color-mix(in srgb, var(--border, #1f2d47) 80%, transparent); }
+.aw-modes li span { color: var(--text-secondary, #96a7c2); }
+.aw-trust { display: grid; gap: 10px; }
+@media (min-width: 760px) { .aw-trust { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.aw-card { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 16px; border-radius: 18px; border: 1px solid var(--border, #1f2d47); background: var(--bg-card, #131c2e); scroll-margin-top: 80px; }
+.aw-card > svg { width: 22px; height: 22px; color: var(--accent-light, #60a5fa); margin-top: 1px; }
+.aw-card b { font-size: 16px; }
+.aw-card p { margin: 4px 0 0; font-size: 14.5px; line-height: 1.45; color: var(--text-secondary, #96a7c2); }
+.aw-foot { margin: 22px 2px 8px; font-size: 13px; color: var(--text-muted, #7d8aa0); }
+@keyframes aw-in { from { opacity: 0; transform: translateY(calc(8px * var(--ov-move, 1))); } to { opacity: 1; transform: none; } }
+html[data-ov-motion=off] .aw-way, html[data-ov-motion=off] .aw-row, html[data-ov-motion=off] .aw-go, html[data-ov-motion=off] .aw-btn { animation: none; transition: none; }

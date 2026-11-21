@@ -1438,50 +1438,62 @@ ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates |
     });
 
     // ── The agents ───────────────────────────────────────────
-    function agentsPage() {
-        const agents = catalog.list(config);
+    // 2026-11-21 (the owner's phone: "improve this for mobile especially … make it more modular … choose different models
+    // or harnesses … less wordy … more user friendly and intuitive … make agnostic"): the ways a task can be worked
+    // (server/engines, the same list the chat's chooser uses), every model on OpenVibe.Exchange (its live list), the
+    // harnesses, the modes and the check, in that order, each a line or a tap. No model or maker is named as Actor's own.
+    const exchangeModelsUrl = config.services && config.services.exchangeModelsUrl;
+    const exchangeModels = ctx.exchangeModels || (exchangeModelsUrl && !config.drill ? require('./exchange-models').createExchangeModels({ url: exchangeModelsUrl }) : { summary: async () => null });
+    const glyphs = require('openvibe-shared/glyphs');
+    const engines = require('../engines');
+    const HARNESS_NAME = { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', muse: 'Muse', 'codebuddy-code': 'CodeBuddy', qwen: 'Qwen Code', goose: 'Goose', aider: 'Aider' };
+    const WAY = {
+        agent: { glyph: 'robot', href: '/chat?way=agent', name: 'Actor\'s agent', line: 'Plans, searches, uses tools, then checks its answer.', chips: ['Any model', 'Web search', 'OpenVibe tools', 'Your computers'] },
+        model: { glyph: 'chat', href: '/chat?way=model', name: 'One model', line: 'One quick answer from the model you pick. No tools.', chips: ['Any model', 'Fastest', 'Cheapest'] },
+        decisions: { glyph: 'scale', href: '/chat?way=decisions', name: 'Decisions', line: 'Yes or no, pick one, or rate it, with how sure it is.', chips: ['Probabilities', 'One pass'] },
+        harness: { glyph: 'code', href: '/chat?agent=codes', name: 'A coding harness', line: 'Writes and changes code on your own computer, through OpenVibe.Codes.', chips: null },
+        'openai-agent': { glyph: 'globe', href: '/chat?way=openai-agent', name: 'OpenAI\'s agent', line: 'OpenAI\'s own agent with its web search.', chips: ['Web search'] },
+        'open-model': { glyph: 'lock', href: '/chat?way=open-model', name: 'Private', line: 'A model on OpenVibe\'s own server. Nothing leaves OpenVibe.', chips: ['Private'] },
+    };
+    const icon = (name, size = 22) => raw(glyphs.svg(name, { size }));
+    async function agentsPage() {
+        const byId = new Map(catalog.list(config).map((a) => [a.id, a]));
+        const up = (kind) => (kind === 'openai-agent' ? byId.get('openai-agent') : kind === 'open-model' ? byId.get('open-model') : kind === 'harness' ? byId.get('codes') : null);
+        const models = await exchangeModels.summary().catch(() => null);
+        const ways = engines.ENGINES.filter((e) => WAY[e.kind]).map((e) => {
+            const w = WAY[e.kind];
+            const a = up(e.kind);
+            const off = a && !a.available;
+            const chips = e.kind === 'harness' ? engines.HARNESSES.map((h) => HARNESS_NAME[h] || h) : w.chips || [];
+            const inner = html`<span class="aw-ic">${icon(w.glyph)}</span><span class="aw-t"><b>${w.name}</b><small>${w.line}</small>${chips.length ? html`<span class="aw-chips">${chips.map((c) => html`<span>${c}</span>`)}</span>` : ''}${off ? html`<em class="aw-off">Not running here now</em>` : ''}</span>${off ? '' : html`<span class="aw-go">${icon('chevron', 18)}</span>`}`;
+            return html`<li class="aw-way${off ? ' is-off' : ''}" id="way-${e.kind}">${off ? html`<div class="aw-row">${inner}</div>` : html`<a class="aw-row" href="${w.href}">${inner}</a>`}</li>`;
+        });
+        const exch = 'https://openvibe.exchange/models';
         return {
             agent: true, index: true, cache: PUBLIC_CACHE,
             title: 'Who does the work',
-            description: 'The agents OpenVibe.Actor gives a task to: OpenVibe\'s own, OpenAI\'s web agent, an open model on OpenVibe hardware and OpenVibe.Codes, with what each is good at, where it runs, what it costs and how fast it is.',
+            description: 'How OpenVibe.Actor works a task: its own agent, one model, Decisions, a coding harness or a private model, on any model on OpenVibe.Exchange, and how every answer is checked.',
             crumbs: [{ label: 'Agents' }],
-            // Plain cards, not a seven-column table (the owner, 2026-11-01: "how does this system even work? This is
-            // confusing"; the table ran off a phone). The rarer parts are folds. Plan L55 C3 turns this into Settings:
-            // your model, your keys, your machine.
-            body: html`<h1>Who does the work</h1>
-<p class="ag-lede">For each task Actor picks one of these, the one that can do it at the lowest price for your mode, and a second model checks its answer before you see it. Leave it on <b>Balanced</b>, or pick another mode in the chat.</p>
-<p class="ag-lede"><a href="/compare">Compare the ways</a>: run one task through several of these, or any model, the Decisions API or a coding harness, side by side, each answer graded, with a leaderboard.</p>
-<ul class="ag-cards">${agents.map((a) => {
-                const can = a.can.filter((c) => c.startsWith('task:')).map((c) => c.slice(5));
-                const where = a.id === 'codes' ? 'On your own machine' : a.trust === 'first-party' ? 'On OpenVibe\'s own hardware' : a.id === 'openvibe-runtime' ? 'OpenVibe\'s code; its model runs at DeepSeek' : a.id === 'openai-agent' ? 'At OpenAI' : 'At the provider';
-                return html`<li class="ag-card${a.available ? '' : ' is-off'}" id="${a.id}">
-<div class="ag-head"><strong>${a.name}</strong>${a.available ? badge('ready', 'ok') : badge('not available')}</div>
-${(catalog.byId(a.id) || {}).blurb ? html`<p class="agent-blurb">${catalog.byId(a.id).blurb}</p>` : ''}
-<dl class="ag-facts"><div><dt>Good at</dt><dd>${can.length ? can.map((c) => html`<span class="ag-chip">${CLASS_WORD[c] || c}</span>`) : '—'}</dd></div>
-<div><dt>Where it runs</dt><dd>${where}</dd></div>
-<div><dt>Cost</dt><dd>${a.id === 'codes' ? 'Nothing from Actor: your machine\'s own keys pay its model' : priceText(a.rate_card)} <a class="muted small" href="${a.rate_card.source}" rel="noopener">source</a></dd></div>
-<div><dt>Speed</dt><dd>about ${Math.round(a.typical_latency_ms / 1000)} s</dd></div></dl>
-${a.available ? '' : html`<p class="muted small">${a.reason}</p>`}
-<p class="ag-id muted small"><code>${a.id}</code>${a.model ? html` · ${a.model}` : ''} · prices checked ${a.rate_card.verified_at}</p>
-</li>`;
-            })}</ul>
-<p class="ag-soon">Not here yet: your own models and API keys in Actor. Your own computers already can work for the runtime: pair one with <a href="https://openvibe.link">OpenVibe Link</a> and let it.</p>
-<details class="ag-fold" id="modes"><summary>Modes: how Actor picks (${MODES.length})</summary>
-${table(['Mode', 'What it picks'], MODES.map((m) => [html`<strong>${MODE_LABEL[m]}</strong> <code>${m}</code>`, MODE_TEXT[m]]))}</details>
-<details class="ag-fold" id="classes"><summary>What a task needs (5 kinds)</summary>
-<p>Actor sorts each task first, and only agents that can do that kind of task are considered:</p>
-<ul><li><strong>answer</strong>: writing, explaining, planning, anything a capable model knows.</li>
-<li><strong>lookup</strong>: facts about a domain, address or site (DNS, mail records, certificates, headers, WHOIS), from OpenVibe.Tools.</li>
-<li><strong>research</strong>: reading the pages a task names, or OpenVibe's own content.</li>
-<li><strong>web</strong>: a live web search, for anything recent.</li>
-<li><strong>code</strong>: writing or changing code, through OpenVibe.Codes.</li></ul></details>
-<details class="ag-fold" id="check"><summary>The check</summary>
-<p>Before you see an answer, a model of another family reads it: DeepSeek's answers are checked by OpenAI's smallest model and OpenAI's by DeepSeek. In private mode only OpenVibe's own model may read the task, so it checks itself.</p></details>
-<details class="ag-fold" id="trust"><summary>Where your words go</summary>
-<p><strong>On OpenVibe's own hardware</strong> means nothing leaves OpenVibe. Anything else means the task's text goes to that provider (the OpenVibe runtime is OpenVibe's code, but its model runs at DeepSeek). Private mode takes only OpenVibe's own model. Machine-readable: <a href="/api/v1/agent-systems"><code>GET /api/v1/agent-systems</code></a>.</p></details>`,
+            body: html`<header class="aw-hero"><h1>Who does the work</h1>
+<p class="aw-lede">Pick how Actor works on a task, and with which model. Any model on OpenVibe.Exchange, any coding harness.</p>
+<div class="aw-cta"><a class="aw-btn is-primary" href="/chat">${icon('chat', 20)}<span>Open the chat</span></a><a class="aw-btn" href="/compare">${icon('scale', 20)}<span>Compare them</span></a></div></header>
+<section class="aw-sec" aria-labelledby="aw-ways"><h2 id="aw-ways">Ways to work</h2>
+<ul class="aw-ways">${ways}</ul>
+<p class="aw-note">${icon('link', 18)}<span>Outside agents that speak A2A join too: <a href="/connections">connect one</a>.</span></p></section>
+<section class="aw-sec" aria-labelledby="aw-models"><h2 id="aw-models">Models</h2>
+<div class="aw-models">${models ? html`<p class="aw-big"><b>${models.count.toLocaleString('en-US')}</b> models from every major maker, on <b>${models.providers}</b> providers, priced live on <a href="${exch}">OpenVibe.Exchange</a>.</p>
+<ul class="aw-makers">${models.makers.map((m) => html`<li><a href="${exch}?q=${encodeURIComponent(m.q)}"><span>${m.name}</span><small>${m.n}</small></a></li>`)}</ul>` : html`<p class="aw-big">Every model on <a href="${exch}">OpenVibe.Exchange</a>, priced live.</p>`}
+<div class="aw-cta"><a class="aw-btn" href="/chat?way=model">${icon('chat', 20)}<span>Pick one in the chat</span></a><a class="aw-btn" href="/chat/settings">${icon('key', 20)}<span>Use your own key</span></a></div></div></section>
+<section class="aw-sec" aria-labelledby="aw-modes"><h2 id="aw-modes">Modes</h2>
+<ul class="aw-modes">${MODES.map((m) => html`<li id="mode-${m}"><b>${MODE_LABEL[m]}</b><span>${MODE_TEXT[m]}</span></li>`)}</ul></section>
+<section class="aw-sec aw-trust" aria-label="Checks and privacy">
+<div class="aw-card" id="check">${icon('check', 22)}<div><b>Every answer is checked</b><p>Before you see it, another model reads the answer against the task and what the tools found. In Private, OpenVibe's own model checks it.</p></div></div>
+<div class="aw-card" id="trust">${icon('lock', 22)}<div><b>Where your words go</b><p>To the model that works on the task, named on every answer. Private keeps them on OpenVibe's own hardware.</p></div></div>
+</section>
+<p class="aw-foot">For apps: <a href="/docs">the API</a> · <a href="/api/v1/agent-systems"><code>GET /api/v1/agent-systems</code></a></p>`,
         };
     }
-    r.get('/agents', (req, res) => page(req, res, agentsPage()));
+    r.get('/agents', async (req, res) => page(req, res, await agentsPage()));
 
     // ── The API reference ────────────────────────────────────
     function docsPage() {
