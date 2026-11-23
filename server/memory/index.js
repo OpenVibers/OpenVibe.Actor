@@ -135,16 +135,9 @@ async function add(s, { owner, agentId = null, text, kind = 'fact', source = 'pe
         if (agentId) {
             const agent = await s.db.maybe('SELECT id FROM actor_agents WHERE id = $1 AND owner = $2 FOR UPDATE', [agentId, owner]);
             if (!agent) return { error: 'No such agent.' };
-            const count = Number(await s.db.value('SELECT count(*) FROM actor_agent_memory WHERE agent_id = $1', [agentId]));
-            if (count >= MAX_PER_AGENT) {
-                const oldest = await s.db.maybe("SELECT id FROM actor_agent_memory WHERE agent_id = $1 AND origin = 'agent' ORDER BY created_order LIMIT 1", [agentId]);
-                if (!oldest) return { limit: true, error: 'This agent\'s memory is full of notes you wrote; delete one first.' };
-                await s.db.query('DELETE FROM actor_agent_memory WHERE id = $1', [oldest.id]);
-            }
-        } else {
-            const count = Number(await s.db.value('SELECT count(*) FROM actor_agent_memory WHERE owner = $1 AND agent_id IS NULL', [owner]));
-            if (count >= MAX_PER_PERSON) return { limit: true, error: 'Your memory is full: archive or delete a note first.' };
         }
+        // A duplicate needs no room. Resolve it before capacity checks can evict a different note, replace this
+        // note's identity/usage, or refuse the person's confirmation of an existing suggestion.
         const prior = await s.db.maybe('SELECT * FROM actor_agent_memory WHERE owner = $1 AND agent_id IS NOT DISTINCT FROM $2 AND lower(text) = lower($3) LIMIT 1', [owner, agentId, body]);
         if (prior) {
             // The person saying it again makes their own earlier suggestion theirs, rather than adding a duplicate.
@@ -154,6 +147,17 @@ async function add(s, { owner, agentId = null, text, kind = 'fact', source = 'pe
                 return { row: fromRow(row), duplicate: true };
             }
             return { row: fromRow(prior), duplicate: true };
+        }
+        if (agentId) {
+            const count = Number(await s.db.value('SELECT count(*) FROM actor_agent_memory WHERE agent_id = $1', [agentId]));
+            if (count >= MAX_PER_AGENT) {
+                const oldest = await s.db.maybe("SELECT id FROM actor_agent_memory WHERE agent_id = $1 AND origin = 'agent' ORDER BY created_order LIMIT 1", [agentId]);
+                if (!oldest) return { limit: true, error: 'This agent\'s memory is full of notes you wrote; delete one first.' };
+                await s.db.query('DELETE FROM actor_agent_memory WHERE id = $1', [oldest.id]);
+            }
+        } else {
+            const count = Number(await s.db.value('SELECT count(*) FROM actor_agent_memory WHERE owner = $1 AND agent_id IS NULL', [owner]));
+            if (count >= MAX_PER_PERSON) return { limit: true, error: 'Your memory is full: archive or delete a note first.' };
         }
         const row = await s.db.maybe(`INSERT INTO actor_agent_memory (id, agent_id, owner, text, kind, origin, status, source_task, created_at, updated_at, last_used_at, uses)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,NULL,0) RETURNING ${select}`,
