@@ -180,6 +180,15 @@ function planText(plan, brain = null) {
 
 const clip = (s, n) => (String(s == null ? '' : s).length > n ? `${String(s).slice(0, n - 1)}…` : String(s == null ? '' : s));
 
+const TOOL_ARGS_ERROR = 'not run: tool arguments must be a valid JSON object; correct them and try again';
+function toolArgs(raw) {
+    try {
+        const args = JSON.parse(raw == null ? '{}' : raw);
+        if (args && typeof args === 'object' && !Array.isArray(args)) return args;
+    } catch { /* Tell the model to correct the call, never execute with guessed defaults. */ }
+    return null;
+}
+
 /** The args an event may carry: credentials stripped, and what a person or agent typed never stored verbatim. */
 function eventArgs(name, args) {
     const safe = stripSecrets(args);
@@ -490,7 +499,7 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
     }
 
     /**
-     * Run every call of a turn together and record each result as evidence, in call order. A call already made twice
+     * Parallelize reads between acting calls, and record each result as evidence in call order. A call already made twice
      * with the same input is refused (the loop detector) and the turn is marked as looping.
      */
     async function act(state, ctx, toolCalls) {
@@ -504,11 +513,15 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
         let lastTool = null;
         for (const call of calls) {
             const fn = call.function || {};
-            let args = {};
-            try { args = JSON.parse(fn.arguments || '{}'); } catch { args = {}; }
-            const key = `${fn.name}|${JSON.stringify(args)}`;
+            const args = toolArgs(fn.arguments);
+            const key = `${fn.name}|${args ? JSON.stringify(args) : String(fn.arguments)}`;
             const n = (state.counts.get(key) || 0) + 1;
             state.counts.set(key, n);
+            if (!args) {
+                if (n >= 3) looping = true;
+                planned.push({ call, name: fn.name, args: {}, skipped: TOOL_ARGS_ERROR });
+                continue;
+            }
             if (state.allow && !state.allow.has(fn.name)) planned.push({ call, name: fn.name, args, skipped: 'that tool is not offered for this task' });
             else if (state.brain && state.brain.withheld === fn.name) planned.push({ call, name: fn.name, args, skipped: 'that tool is not making progress; use another tool for this step' });
             else if (fn.name === DELEGATE.function.name && ++delegated > MAX_SUB_AGENTS) planned.push({ call, name: fn.name, args, skipped: `at most ${MAX_SUB_AGENTS} sub-agents at once; hand the rest over in the next turn` });
@@ -533,7 +546,8 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             state.acting = acting.map((p) => ({ call_id: p.call.id, tool: p.name, input: p.args, step: state.calls, started_at: new Date(now()).toISOString() }));
             await saveCheckpoint(state, ctx);
         }
-        const results = await Promise.all(runnable.map(async (p) => {
+        const runOne = async (p) => {
+            if (state.signal && state.signal.aborted) throw Object.assign(new Error('cancelled'), { code: 'actor.task.cancelled' });
             if (p.name === DELEGATE.function.name) {
                 // The delegate span is the parent of everything the sub-agent does; it is written when the child ends,
                 // with the id the child's own spans already point at.
@@ -564,7 +578,18 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
                 await spanCall(ctx.trace, { kind: 'tool', name: p.name, startedAt, ms: now() - startedAt, ok: false, errorCode: codeOf(err, 'actor.tool.failed'), step: state.calls });
                 throw err;
             }
-        }));
+        };
+        // Actions are barriers: finish earlier reads, run the action alone, then start later calls. Independent
+        // reads still overlap. This also uses the acts flag of a run's dynamic connector tools (isActing).
+        const results = [];
+        for (let start = 0; start < runnable.length;) {
+            let end = start + 1;
+            if (!isActing(runnable[start].name, ctx)) {
+                while (end < runnable.length && !isActing(runnable[end].name, ctx)) end += 1;
+            }
+            results.push(...await Promise.all(runnable.slice(start, end).map(runOne)));
+            start = end;
+        }
         let i = 0;
         for (const p of planned) {
             if (p.skipped) {
@@ -1001,8 +1026,11 @@ function createLoop({ config, models, registry, log = console, now = () => Date.
             if (!id) continue;
             if (state.messages.some((m) => m.role === 'tool' && String(m.tool_call_id) === id)) continue;
             const name = (call.function && call.function.name) || 'tool';
-            let args = {};
-            try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { args = {}; }
+            const args = toolArgs(call.function && call.function.arguments);
+            if (!args) {
+                await recordError(name, {}, id, TOOL_ARGS_ERROR);
+                continue;
+            }
             await ctx.emit({ step: 'tool_call', tool: name, input: summarize(eventArgs(name, args)) });
             const choice = choices.get(id);
             const redacted = /\[redacted|\[not stored/.test(JSON.stringify(args));

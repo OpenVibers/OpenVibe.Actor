@@ -1,6 +1,6 @@
 'use strict';
 /**
- * The one loop (Actor v2) against a scripted fake model and a fake registry: understand → plan → act (parallel) →
+ * The one loop (Actor v2) against a scripted fake model and a fake registry: understand → plan → act (parallel reads) →
  * observe → reflect → answer with citations. It stops on the budget, the task's clock, a loop detector (the same
  * tool and input three times) or the answer. No 10-turn cap.
  */
@@ -64,6 +64,102 @@ const runArgs = (m, extra = {}) => ({
 });
 
 (async () => {
+    for (const raw of ['{"q":', 'null', '[]', '"text"', '7', 'false', '']) {
+        await ok(`invalid tool arguments ${JSON.stringify(raw)} are returned to the model without executing, then corrected`, async () => {
+            const bad = call('lookup', {}, 'bad');
+            bad.function.arguments = raw;
+            const m = make({
+                smart: [{ tools: [bad] }, { tools: [call('lookup', { q: 'fixed' }, 'fixed')] }, { text: 'Found it [E1].' }],
+                config: { ACTOR_LOOP_SELF_REFLECTIONS: '0' },
+            });
+            const out = await m.loop.run(runArgs(m));
+            assert.deepStrictEqual(m.registry.calls.map((c) => c.input), [{ q: 'fixed' }], 'only corrected arguments execute');
+            const feedback = m.models.chats.flatMap((c) => c.messages).find((msg) => msg.tool_call_id === 'bad');
+            assert.match(JSON.parse(feedback.content).error, /JSON object/);
+            assert.strictEqual(out.evidence.length, 1, 'invalid calls produce no evidence or side effects');
+        });
+    }
+
+    await ok('repeated malformed calls still stop at the loop detector without executing', async () => {
+        const bad = (id) => ({ id, type: 'function', function: { name: 'lookup', arguments: '{"q":' } });
+        const m = make({
+            smart: [{ tools: [bad('bad1'), bad('bad2'), bad('bad3')] }, { text: 'I could not complete the lookup.' }],
+            config: { ACTOR_LOOP_SELF_REFLECTIONS: '0' },
+        });
+        const out = await m.loop.run(runArgs(m));
+        assert.strictEqual(m.registry.calls.length, 0);
+        assert.match(out.stopped, /three times/);
+        assert.strictEqual(m.models.chats[m.models.chats.length - 1].tools, null);
+    });
+
+    await ok('resuming an interrupted batch refuses malformed arguments in its remaining read', async () => {
+        const m = make({ smart: [{ text: 'The action happened; the read needs correcting.' }], config: { ACTOR_LOOP_SELF_REFLECTIONS: '0' } });
+        const action = call('lookup', { q: 'already happened' }, 'action');
+        const bad = call('lookup', {}, 'bad-resume');
+        bad.function.arguments = '{"q":';
+        const saved = require('../server/runtime/checkpoint-state').snapshot({
+            task: 'Continue the task', tier: 'smart', tools: m.registry.definitions(), allow: new Set(['lookup']),
+            messages: [{ role: 'system', content: 'Complete the task.' }, { role: 'user', content: 'Continue the task' }, reply({ tools: [action, bad] }).message],
+            acting: [{ call_id: 'action', tool: 'lookup', input: { q: 'already happened' } }],
+        });
+        await m.loop.run(runArgs(m, { resume: { state: saved }, askPerson: async () => 'It happened, go on' }));
+        assert.strictEqual(m.registry.calls.length, 0, 'neither the confirmed action nor malformed read executes');
+        const feedback = m.models.chats.flatMap((c) => c.messages).find((msg) => msg.tool_call_id === 'bad-resume');
+        assert.match(JSON.parse(feedback.content).error, /JSON object/);
+    });
+
+    await ok('computer actions finish in call order between parallel read groups', async () => {
+        const order = [];
+        let page = 'old', filled = null, readers = 0, peakReaders = 0;
+        const m = make({
+            smart: [{ tools: [
+                call('lookup', { q: 'before-a' }, 'b1'), call('lookup', { q: 'before-b' }, 'b2'),
+                call('computer_browser', { action: 'open', url: 'https://example.org/new' }, 'open'),
+                call('computer_browser', { action: 'fill', text: 'hello' }, 'fill'),
+                call('lookup', { q: 'after-a' }, 'a1'), call('lookup', { q: 'after-b' }, 'a2'),
+            ] }, { text: 'Done [E6].' }],
+            run: async (name, input) => {
+                const label = input.action || input.q;
+                order.push(`start:${label}`);
+                if (input.action === 'fill') filled = page;
+                if (name === 'lookup') peakReaders = Math.max(peakReaders, ++readers);
+                await new Promise((resolve) => setImmediate(resolve));
+                if (input.action === 'open') page = input.url;
+                if (name === 'lookup') readers -= 1;
+                order.push(`end:${label}`);
+                return { text: JSON.stringify({ label, page, filled }), sources: [] };
+            },
+            config: { ACTOR_LOOP_SELF_REFLECTIONS: '0' },
+        });
+        const browser = require('../server/runtime/tools/computer_browser');
+        const defs = m.registry.definitions();
+        m.registry.definitions = () => [...defs, { type: 'function', function: { name: browser.name, description: browser.description, parameters: browser.input } }];
+        m.registry.get = (name) => name === browser.name ? browser : null;
+        const out = await m.loop.run(runArgs(m));
+        assert.ok(order.indexOf('start:open') > order.indexOf('end:before-b'), JSON.stringify(order));
+        assert.ok(order.indexOf('start:fill') > order.indexOf('end:open'), JSON.stringify(order));
+        assert.ok(order.indexOf('start:after-a') > order.indexOf('end:fill'), JSON.stringify(order));
+        assert.strictEqual(peakReaders, 2, 'independent reads still overlap');
+        assert.strictEqual(filled, 'https://example.org/new');
+        assert.deepStrictEqual(out.evidence.map((e) => e.id), ['E1', 'E2', 'E3', 'E4', 'E5', 'E6']);
+    });
+
+    await ok('cancelling an action prevents later queued tools from starting', async () => {
+        const controller = new AbortController();
+        const m = make({
+            smart: [{ tools: [call('lookup', { q: 'first' }), call('lookup', { q: 'second' })] }, { text: 'Done.' }],
+            run: async () => {
+                await new Promise((resolve) => setImmediate(resolve));
+                controller.abort();
+                return { text: 'finished the first action', sources: [] };
+            },
+            config: { ACTOR_LOOP_SELF_REFLECTIONS: '0' },
+        });
+        m.registry.get = () => ({ acts: true });
+        await assert.rejects(() => m.loop.run(runArgs(m, { signal: controller.signal })), (err) => err.code === 'actor.task.cancelled');
+        assert.strictEqual(m.registry.calls.length, 1, 'no queued action starts after cancellation');
+    });
+
     await ok('plan first, then independent tool calls in parallel, then an answer citing each result', async () => {
         const m = make({
             smart: [
