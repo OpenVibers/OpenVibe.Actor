@@ -448,7 +448,7 @@ async function run(ctx, agent, input = '', { origin = 'person', level = null, tr
     // the trigger records: the agent judges, with what the run actually saw.
     const runInput = goal && goal.done_test ? require('../triggers/goal').promptFor(goal, input) : input;
     // The person's own active memory and this agent's active notes; a suggestion is not put in a run.
-    const notes = await memoryStore.forRun(s, agent.owner, agent.id);
+    const notes = await memoryStore.forRun(s, agent.owner, agent.id, { query: runInput });
     // The skills this agent has installed (plan HO2): their name and description go in the prompt, never their
     // instructions. The agent loads a skill itself when one of them fits the job; a withdrawn one is not offered.
     const installed = (await skillsStore.forAgent(s, agent.owner, agent.id)).filter((k) => !k.withdrawn);

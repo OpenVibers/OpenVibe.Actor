@@ -52,6 +52,21 @@ module.exports = {
         const outside = typeof ctx.readOutside === 'function' ? ctx.readOutside() === true : false;
         const personSaidIt = theirs(text, ctx.personText);
         const active = personSaidIt && !outside;
+        // One memory (plan §V.1, 11-23): the person's notes live in OpenVibe.AI's store, the Memory page's. The same
+        // checks first (no secret, no widening instruction); their own words are kept active there, the rest suggested.
+        if (memory.usesPersonStore()) {
+            const refused = memory.whyRefused(text, { kind });
+            if (refused) return { text: JSON.stringify({ error: refused }), isError: true };
+            const kept = await memory.rememberForPerson(ctx.requester, { text, kind, personSaid: active });
+            if (kept.error) return { text: JSON.stringify({ error: kept.error }), isError: true };
+            const row = kept.row;
+            return {
+                text: row.status === 'active'
+                    ? `${kept.duplicate ? 'Already remembered' : 'Saved for this person'} (${row.id}). It is active and will be recalled in later tasks, by every agent of theirs.`
+                    : `Saved as a suggestion (${row.id}) on their Memory page, not active. ${outside ? 'This run read outside content, so the person decides. ' : 'It is not in their own words, so the person decides. '}It does nothing until they keep it.`,
+                data: { memory: row, duplicate: kept.duplicate === true },
+            };
+        }
         const out = await memory.add(ctx.store, {
             owner: ctx.requester,
             // Their own words become the person's memory, usable everywhere; a suggestion belongs to the agent that made it.

@@ -107,6 +107,8 @@ async function createApp(opts = {}) {
     // One AI meter for the process (ai-metrics.md): Actor's own model calls are sent to AI's usage route; it is off
     // in a drill and in tests, and without a Network client secret. It never fails or blocks a model call.
     const aiMeter = opts.aiMeter !== undefined ? opts.aiMeter : require('./runtime/ai-meter').createAiMeter({ config, fetchImpl: providerFetch, log });
+    // One memory (plan §V.1, 11-23): the person's own notes in OpenVibe.AI's store; off in tests, drills and self-hosted.
+    require('./memory').setPersonStore(opts.personStore !== undefined ? opts.personStore : require('./memory/person').createPersonStore({ config, fetchImpl: providerFetch, log }));
     // Actor v2: one model layer (tiers), one tool registry (every module in runtime/tools) and one loop. The tools
     // are validated strictly in tests, leniently in production; the model lists are read once at boot.
     const models = opts.models || createModels({ config, rates: catalog.RATES, fetchImpl: providerFetch, log, meter: aiMeter });
