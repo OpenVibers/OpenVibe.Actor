@@ -165,6 +165,7 @@ ${change.undoable ? html`<form method="post" action="/memory/changes/${change.id
         page(req, res, html`<header class="mem-head-page">
 <h1>Memory</h1>
 <p class="mem-lede">What Actor remembers about you. Only your own words become active; anything else waits here for you.</p>
+${memory.usesPersonStore() ? notice(raw('What you tell any of your agents to remember is on <a href="https://openvibe.my/memory">your Memory page</a> now, in one place with your other assistants. Your agents\' own working notes stay here.')) : ''}
 <details class="mem-how"><summary>How memory works</summary>
 <p>Only your own words make an active memory. Anything an agent works out from a page, a file or a tool result waits here as a suggestion until you accept it. Memory is never shown to anyone else and never leaves Actor except in your export.</p>
 <p>An instruction can narrow what the agent does ("ask before spending"); it never gives it a new permission or a bigger budget.</p>
@@ -203,6 +204,16 @@ ${changes.length ? html`<section class="mem-changes" aria-labelledby="h-changes"
 
     r.post('/memory', async (req, res) => {
         if (!write(req, res)) return;
+        // One memory (11-23): a note the person writes here is theirs, in their own words: kept active on the Memory page.
+        if (memory.usesPersonStore()) {
+            const text = memory.norm((req.body || {}).text);
+            const kind = memory.KINDS.includes((req.body || {}).kind) ? req.body.kind : 'fact';
+            const refused = memory.whyRefused(text, { kind });
+            if (refused) return res.redirect(303, problem('active', refused, 'add'));
+            const kept = await memory.rememberForPerson(owner(req), { text, kind, personSaid: true });
+            if (kept.error) return res.redirect(303, problem('active', kept.error, 'add'));
+            return res.redirect(303, 'https://openvibe.my/memory');
+        }
         const out = await memory.add(s, { owner: owner(req), text: (req.body || {}).text, kind: (req.body || {}).kind, source: 'person' });
         if (out.error) return res.redirect(303, problem('active', out.error, 'add'));
         res.redirect(303, back('active', out.row.id));

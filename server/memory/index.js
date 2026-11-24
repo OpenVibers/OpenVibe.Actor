@@ -166,6 +166,15 @@ async function add(s, { owner, agentId = null, text, kind = 'fact', source = 'pe
     });
 }
 
+/**
+ * The person's own memory lives in OpenVibe.AI's store when Actor can reach it (server/memory/person.js, set at boot by
+ * server/app.js): their notes go there and come back from there. Null (tests, drills, self-hosted, no client secret):
+ * the person's notes stay in actor_agent_memory as before. An agent's own notes are always kept here.
+ */
+let personStore = null;
+const setPersonStore = (store) => { personStore = store || null; };
+const usesPersonStore = () => personStore != null;
+
 const get = async (s, owner, id) => (MEM_ID.test(String(id || '')) ? fromRow(await s.db.maybe(`SELECT ${select} FROM actor_agent_memory WHERE id = $1 AND owner = $2`, [id, owner])) : null);
 
 /** The person's own memory (agent_id NULL), newest first. */
@@ -184,11 +193,20 @@ const forAgent = async (s, owner, agentId) => (await s.db.many(
  * pinned note comes first (HO5): the person pinned it, or the night's tidy promoted it, so the agent reads it before
  * the rest.
  */
-const forRun = async (s, owner, agentId) => (await s.db.many(
-    `SELECT ${select} FROM actor_agent_memory WHERE owner = $1 AND status = 'active' AND (agent_id IS NULL OR agent_id = $2)
-     ORDER BY pinned DESC, created_order DESC LIMIT 200`,
-    [owner, agentId],
-)).map(fromRow);
+const forRun = async (s, owner, agentId, { query = '' } = {}) => {
+    const local = (await s.db.many(
+        `SELECT ${select} FROM actor_agent_memory WHERE owner = $1 AND status = 'active' AND (agent_id IS NULL OR agent_id = $2)
+         ORDER BY pinned DESC, created_order DESC LIMIT 200`,
+        [owner, agentId],
+    )).map(fromRow);
+    if (!personStore) return local;
+    // The person's own notes from the one store, matched to what this run is about (at most 8), after the pinned ones.
+    const theirs = await personStore.recall(owner, query);
+    const seen = new Set(local.map((m) => norm(m.text).toLowerCase()));
+    const fresh = theirs.filter((m) => !seen.has(norm(m.text).toLowerCase()));
+    const pinned = local.filter((m) => m.pinned);
+    return [...pinned, ...fresh, ...local.filter((m) => !m.pinned)];
+};
 
 /** Everything the person can see on /memory: their own and every agent's, newest first. */
 const list = async (s, owner, { status = null } = {}) => (await s.db.many(
@@ -272,6 +290,17 @@ function scoreOf(memory, q, at) {
  */
 async function recall(s, owner, query, { limit = MAX_RECALL, now = Date.now() } = {}) {
     if (!OWNER.test(String(owner || ''))) return [];
+    if (personStore) {
+        // The one store's notes first (the person's own), then this store's (agent notes, and any from before the move).
+        const theirs = await personStore.recall(owner, query);
+        const local = await recallLocal(s, owner, query, { limit, now });
+        const seen = new Set(theirs.map((m) => norm(m.text).toLowerCase()));
+        return [...theirs, ...local.filter((m) => !seen.has(norm(m.text).toLowerCase()))].slice(0, Math.max(1, Math.min(MAX_RECALL, Number(limit) || MAX_RECALL)));
+    }
+    return recallLocal(s, owner, query, { limit, now });
+}
+
+async function recallLocal(s, owner, query, { limit = MAX_RECALL, now = Date.now() } = {}) {
     const rows = (await s.db.many(`SELECT ${select} FROM actor_agent_memory WHERE owner = $1 AND status = 'active' ORDER BY created_order DESC LIMIT 300`, [owner])).map(fromRow);
     if (!rows.length) return [];
     const q = [...new Set(words(query).filter((w) => !STOP.has(w)).map(stem))];
@@ -288,4 +317,5 @@ module.exports = {
     KINDS, STATUSES, SOURCES, MAX_TEXT, MAX_PER_AGENT, MAX_PER_PERSON, MAX_RECALL, MEM_ID,
     norm, looksLikeSecret, instructionWidens, whyRefused, luhn,
     add, get, own, forAgent, forRun, list, edit, decide, remove, recall, pin, unpin, MOVES,
+    setPersonStore, usesPersonStore, rememberForPerson: (...a) => personStore.remember(...a),
 };
