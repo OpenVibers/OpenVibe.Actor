@@ -102,6 +102,14 @@ async function createApp(opts = {}) {
     // A self-hosted Actor signs its one owner in itself (auth/local.js); otherwise OpenVibe.Network does (auth/sso.js).
     if (config.selfHosted.on) checkSelfHosted(config);
     const sso = config.selfHosted.on ? createLocalSignIn({ config, now: s.now }) : createSso({ config, keys, fetchImpl, now: s.now, log });
+    // openvibe.expert (plan §D item 6): its own sign-in client, used only for requests to that host (http/expert-host.js).
+    const { expertHostOf, isExpertRequest, createExpertHost } = require('./http/expert-host');
+    const expertHost = config.selfHosted.on ? null : expertHostOf(config);
+    const expertSso = expertHost ? createSso({
+        config: { ...config, baseUrl: config.expert.baseUrl, oauth: { ...config.oauth, clientId: config.expert.clientId, clientSecret: config.expert.clientSecret, redirectUri: `${config.expert.baseUrl}/auth/callback` } },
+        keys, fetchImpl, now: s.now, log,
+    }) : null;
+    const onExpert = (req) => Boolean(expertSso) && isExpertRequest(req, expertHost);
     const stream = createTaskStream({ log });
     const providerFetch = opts.providerFetch || globalThis.fetch;
     // One AI meter for the process (ai-metrics.md): Actor's own model calls are sent to AI's usage route; it is off
@@ -285,13 +293,20 @@ async function createApp(opts = {}) {
     const readiness = createActorReadiness({ s, config, engine, release: release.release, valkey, sso });
     app.get('/api/ready', readiness.handler);
 
+    // openvibe.expert's paths onto Actor's Experts pages (a no-op without the expert client's secret).
+    if (expertSso) app.use(createExpertHost({ config }));
+
     // ── Who is asking (verified offline; refreshed when expired) ──
-    app.use(sso.middleware());
+    const ssoMiddleware = sso.middleware();
+    const expertMiddleware = expertSso ? expertSso.middleware() : null;
+    app.use((req, res, next) => (onExpert(req) ? expertMiddleware : ssoMiddleware)(req, res, next));
 
     // ── Sign-in (OAuth2 + PKCE client of OpenVibe.Network) ──
     // /auth/me is the navbar's who-is-signed-in read on every page, so it is not counted with sign-ins: 60 page views in 15 minutes made a signed-in visitor look signed out.
     app.use('/auth/', rateLimit({ windowMs: 15 * 60_000, limit: 60, skip: (req) => req.path === '/me' || req.path === '/navbar-token', standardHeaders: true, legacyHeaders: false }));
-    app.use('/auth', sso.routes());
+    const ssoRoutes = sso.routes();
+    const expertRoutes = expertSso ? expertSso.routes() : null;
+    app.use('/auth', (req, res, next) => (onExpert(req) ? expertRoutes : ssoRoutes)(req, res, next));
     { const legal = require('openvibe-shared/legal'); app.get(legal.PATHS, legal.handler({ id: 'actor', service: 'actor', host: 'openvibe.actor', name: 'OpenVibe.Actor', profile: 'ugc' })); }
 
     // ── OpenVibe.Events → this service (loopback only) ──────
