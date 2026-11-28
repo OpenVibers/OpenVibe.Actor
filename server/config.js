@@ -112,7 +112,7 @@ function load(env = process.env) {
         // ai.complete on AI, which picks the offer (price, latency, policy) for each tier and says which model ran.
         // The token is Actor's service token for audience openvibe.ai (the grant: ai.run.create, namespace ai.complete).
         ai: {
-            url: trim(env.OV_AI_URL || 'https://ai.openvibe.services'),
+            url: trim(env.OV_AI_URL || (nodeEnv === 'test' ? 'http://127.0.0.1:9' : 'https://ai.openvibe.services')),   // tests never reach production (11-28)
             audience: 'openvibe.ai',
             scope: 'ai.run.create',
             clientId: env.OV_OAUTH_CLIENT_ID || 'actor',
@@ -126,7 +126,7 @@ function load(env = process.env) {
             // Hosted chat completions use Exchange's compatible API. Slow classes and targeted runs
             // keep the runs API, which carries their extra controls. Set 0 to use the runs API for all.
             exchangeRouter: env.ACTOR_EXCHANGE_ROUTER == null ? isProduction && !selfHosted : bool(env.ACTOR_EXCHANGE_ROUTER),
-            exchangeUrl: trim(env.ACTOR_EXCHANGE_URL || 'https://api.openvibe.exchange'),
+            exchangeUrl: trim(env.ACTOR_EXCHANGE_URL || (nodeEnv === 'test' ? 'http://127.0.0.1:9' : 'https://api.openvibe.exchange')),
             // Each tier's policy on the router: floor and ceiling in one name (economy = cheapest healthy, fast =
             // quickest, balanced = price and latency, auto = the router's own, private = OpenVibe-run/local only).
             // An exact id (<org>/<model>@<revision>) pins a model when AI's catalog is on.
