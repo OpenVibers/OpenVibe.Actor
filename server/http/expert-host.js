@@ -29,11 +29,25 @@ function isExpertRequest(req, host) {
     return h === host;
 }
 
+/** Actor's /experts address → the same page's address on openvibe.expert. */
+function expertPathOf(p) {
+    if (p === '/experts' || p === '/experts/') return '/';
+    const m = /^\/experts\/(.+)$/.exec(p);
+    return m ? `/${m[1]}` : null;
+}
+
 function createExpertHost({ config }) {
     const host = expertHostOf(config);
     const actor = String(config.baseUrl || 'https://openvibe.actor').replace(/\/+$/, '');
+    const base = String(config.expert.baseUrl).replace(/\/+$/, '');
     return function expertHost(req, res, next) {
-        if (!isExpertRequest(req, host)) return next();
+        if (!isExpertRequest(req, host)) {
+            // On openvibe.actor the gallery's home is openvibe.expert: its pages name that address as canonical.
+            const there = req.method === 'GET' ? expertPathOf(req.path) : null;
+            if (there && !/^\/(?:new|mine)$/.test(there) && !/\/(?:edit|install)$/.test(there)) res.locals.canonicalUrl = `${base}${there}`;
+            return next();
+        }
+        res.locals.site = { baseUrl: base, name: 'OpenVibe Expert' };
         const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
         const p = req.path;
         if (PASS.test(p) || p.startsWith('/experts')) return next();
@@ -46,4 +60,4 @@ function createExpertHost({ config }) {
     };
 }
 
-module.exports = { createExpertHost, expertHostOf, isExpertRequest };
+module.exports = { createExpertHost, expertHostOf, isExpertRequest, expertPathOf };

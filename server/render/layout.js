@@ -62,13 +62,15 @@ function renderPage(o) {
     const signedIn = viewer.kind === 'user';
     const pathNow = o.path || '/';
     const loginNext = encodeURIComponent(pathNow);
-    const canonical = `${o.config.baseUrl}${pathNow.split('?')[0]}`;
+    // openvibe.expert (http/expert-host.js) serves some of these pages under its own name and address.
+    const NAME = o.siteName || SITE_NAME;
+    const canonical = o.canonicalUrl || `${o.config.baseUrl}${pathNow.split('?')[0]}`;
     const nav = {
         service: 'actor',
         apiBase: NETWORK_URL,
         links: NAV.map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) })),
         appBar: [{ label: 'Home', href: '/', icon: 'home' }, { label: 'Chat', href: '/chat', icon: 'chat' }, { label: 'Agents', href: '/agents', icon: 'robot' }],   // phones: the bottom tab bar (Shared 4.20): Home, Chat, Agents
-        history: { type: 'page', title: o.title || SITE_NAME },
+        history: { type: 'page', title: o.title || NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
         tokenUrl: '/auth/navbar-token',
@@ -79,7 +81,7 @@ function renderPage(o) {
     // This site's own account links live in the shared navbar's account menu (the page's account
     // bar below is only for visitors without JavaScript).
     if (signedIn) nav.menu = { before: [{ label: 'Chat', href: '/chat', icon: 'chat' }, { label: 'Your tasks', href: '/tasks', icon: 'steps' }, { label: 'Your agents', href: '/me/agents', icon: 'robot' }, { label: 'Memory', href: '/memory', icon: 'brain' }, { label: 'Settings', href: '/chat/settings', icon: 'gear' }] };
-    const footer = { service: 'actor', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' };
+    const footer = { service: 'actor', variant: 'full', mount: '#ov-footer', brandName: NAME, updates: '/updates' };
     const account = signedIn
         ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`
         : html`<a href="/auth/login?next=${loginNext}">Sign in with OpenVibe</a>`;
@@ -88,11 +90,11 @@ function renderPage(o) {
         : '';
     const scripts = (o.sharedScripts || []).map((name) => html`<script src="${ovServe.url(name)}" defer></script>`).concat((o.scripts || []).map((rel) => html`<script src="${asset(rel)}" defer></script>`));
     return shell.page({
-        name: SITE_NAME,
+        name: NAME,
         lang: 'en',
-        title: o.title || `${SITE_NAME}: your agent for everything`,
-        titleSuffix: o.title ? ` · ${SITE_NAME}` : '',
-        siteName: SITE_NAME,
+        title: o.title || `${NAME}: your agent for everything`,
+        titleSuffix: o.title ? ` · ${NAME}` : '',
+        siteName: NAME,
         // At most 160 characters, so search results show it whole.
         description: o.description || 'Give a task in plain words. Actor picks the best agent for it, ours or another platform\'s, checks the answer and shows the cost and why.',
         canonical,
@@ -140,6 +142,11 @@ function render(v) { return require('./html').render(v); }
 
 /** Send a page; a page rendered for a signed-in person is private and never cached. */
 function send(res, status, o) {
+    // A page served for another of Actor's domains (openvibe.expert) carries that site's address and name; a page
+    // whose home is that domain (Actor's /experts) names it as canonical.
+    const site = res.locals && res.locals.site;
+    if (site) o = { ...o, config: { ...o.config, baseUrl: site.baseUrl }, siteName: site.name };
+    if (res.locals && res.locals.canonicalUrl && !o.canonicalUrl) o = { ...o, canonicalUrl: res.locals.canonicalUrl };
     // A page rendered for a signed-in person names them in the account bar: never shared caches.
     const personal = o.viewer && o.viewer.kind === 'user';
     if (!res.get('Cache-Control')) res.set('Cache-Control', !personal && o.cache ? o.cache : cache.htmlHeaders({ private: true }));
