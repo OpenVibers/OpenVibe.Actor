@@ -25,6 +25,9 @@ const bp = require('openvibe-sdk/agents/blueprint');
 const glyphs = require('openvibe-shared/glyphs');
 const kit = require('openvibe-shared/kit');
 const { FLOOR_WORDS } = require('./agent-contacts-ui');
+const seo = require('openvibe-shared/seo');
+const cache = require('openvibe-shared/cache-policy');
+const { isExpertRequest, expertHostOf } = require('./expert-host');
 
 const ID = /^bp_[A-Za-z0-9_-]{3,40}$/;
 const PUBLIC_CACHE = 'public, max-age=60';
@@ -87,6 +90,32 @@ function createExpertPages(ctx) {
     const notFound = (req, res) => page(req, res, { title: 'No such Expert', body: html`<h1>No such Expert</h1><p><a href="/experts">See all the Experts</a></p>` }, 404);
     const load = async (id) => (ID.test(String(id || '')) ? blueprints.get(s, null, id) : null);
 
+    // openvibe.expert's crawler files (expert-host.js sends its /robots.txt, /sitemap.xml and /llms.txt here): the
+    // gallery and every Expert in it, at openvibe.expert's own addresses. On any other host these are not pages.
+    const expertBase = String((config.expert && config.expert.baseUrl) || 'https://openvibe.expert').replace(/\/+$/, '');
+    const onExpert = (req) => isExpertRequest(req, expertHostOf(config));
+    const TEXT = cache.htmlHeaders({ maxAge: 3600 });
+    const listed = async () => ((await blueprints.gallery(s).catch(() => null)) || []).filter((x) => x && x.row && /^bp_[a-z0-9_]{1,80}$/.test(String(x.row.id)) && x.doc && x.doc.name);
+    r.get('/experts/robots.txt', (req, res) => {
+        if (!onExpert(req)) return res.status(404).end();
+        res.type('text/plain').set('Cache-Control', TEXT).send('# openvibe.expert: Experts, agents with a personality and a job, are for search and AI crawlers; sign-in and the API are not.\n'
+            + seo.robotsTxt({ sitemaps: [`${expertBase}/sitemap.xml`], disallow: ['/auth/', '/api/', '/new', '/mine'] }));
+    });
+    r.get('/experts/sitemap.xml', async (req, res) => {
+        if (!onExpert(req)) return res.status(404).end();
+        const urls = [{ loc: `${expertBase}/`, changefreq: 'daily', priority: 1 }]
+            .concat((await listed()).map(({ row }) => ({ loc: `${expertBase}/${row.id}`, ...(row.updated_at ? { lastmod: String(row.updated_at).slice(0, 10) } : {}), changefreq: 'weekly', priority: 0.7 })));
+        res.type('application/xml').set('Cache-Control', TEXT).send(seo.sitemapXml(urls));
+    });
+    r.get('/experts/llms.txt', async (req, res) => {
+        if (!onExpert(req)) return res.status(404).end();
+        const all = await listed();
+        const lines = ['# OpenVibe Expert', '', '> Agents with a personality and a job. Read who each one is and what it may do, try it in a chat with sample details, then install it as your own agent on OpenVibe.Actor, or remix it into your own.', '',
+            '## Start here', '', `- [The gallery](${expertBase}/): every Expert, by what it is for`, `- [OpenVibe.Actor](https://openvibe.actor/): where an installed Expert runs your tasks`, '',
+            '## Experts', '', ...all.slice(0, 200).map(({ row, doc }) => `- [${String(doc.name).replace(/[\[\]\n]/g, ' ').slice(0, 80)}](${expertBase}/${row.id})${doc.summary ? `: ${String(doc.summary).replace(/\s+/g, ' ').slice(0, 200)}` : ''}`), '',
+            '## Optional', '', `- [Sitemap](${expertBase}/sitemap.xml)`, ''];
+        res.type('text/plain').set('Cache-Control', TEXT).send(lines.join('\n'));
+    });
     r.get('/experts', async (req, res) => {
         const list = await blueprints.gallery(s).catch(() => null);
         const tag = /^[a-z][a-z0-9-]{0,40}$/.test(String(req.query.tag || '')) ? String(req.query.tag) : '';
