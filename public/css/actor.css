@@ -175,7 +175,7 @@ html[data-ov-motion="off"] .tk-row a, html[data-ov-motion="off"] .tk-meter span,
 .tl:empty { display: none; }
 .tl-item { display: grid; grid-template-columns: 52px 1fr; gap: 10px; font-size: .9rem; position: relative; animation: step-in .25s ease-out; }
 .tl-item::before { content: ""; position: absolute; left: -18px; top: .55em; width: 10px; height: 10px; border-radius: 50%; background: var(--bg-card, #131c2e); border: 2px solid var(--border-light, #2c3d5c); }
-.tl-k { font-size: 11.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--text-muted, #7386a3); padding-top: 2px; }
+.tl-k { font-size: 12px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--text-muted, #7386a3); padding-top: 2px; }
 .tl-v { overflow-wrap: anywhere; white-space: pre-wrap; }
 .tl-ok::before { border-color: var(--success, #22c55e); background: var(--success, #22c55e); }
 .tl-ok .tl-k { color: var(--success-text, var(--success, #22c55e)); }
@@ -244,7 +244,7 @@ html[data-ov-motion="off"] .tk-row a, html[data-ov-motion="off"] .tk-meter span,
     .table-wrap > table:has(thead th:nth-child(3)):has(td[data-label]) tr { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border, #1f2d47); border-radius: 14px; background: var(--bg-card, var(--bg-secondary, #101828)); }
     .table-wrap > table:has(thead th:nth-child(3)):has(td[data-label]) td { display: block; min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere; }
     .table-wrap > table:has(thead th:nth-child(3)):has(td[data-label]) td:first-child { font-weight: 700; color: var(--text-primary, #e6edf7); }
-    .table-wrap > table:has(thead th:nth-child(3)):has(td[data-label]) td[data-label]:not(:first-child)::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted, #7386a3); }
+    .table-wrap > table:has(thead th:nth-child(3)):has(td[data-label]) td[data-label]:not(:first-child)::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted, #7386a3); }
     .table-wrap > table:has(thead th:nth-child(3)):has(td[data-label]) td:empty { display: none; }
 }
 /* Design rule 201 (the owner, 11-14): a page starts within 12 px of the bar, 8 px on a phone. */

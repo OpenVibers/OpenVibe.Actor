@@ -9,7 +9,7 @@
 .mem-how > summary { display: inline-flex; align-items: center; min-height: 36px; cursor: pointer; color: var(--accent-light); font-weight: 650; font-size: .88rem; }
 .mem-how p { margin: .35rem 0 0; max-width: 42rem; color: var(--text-secondary); font-size: .88rem; line-height: 1.5; }
 .mem-add-wrap { margin: .55rem 0 .75rem; }
-.mem-add-wrap > h2 { margin: 0 0 .3rem; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.mem-add-wrap > h2 { margin: 0 0 .3rem; font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .mem-add { display: flex; align-items: center; gap: .5rem; max-width: 46rem; }
 .mem-add input, .mem-add select, .mem-edit input, .mem-edit textarea, .mem-edit select {
     box-sizing: border-box; padding: .45rem .6rem; border-radius: 8px; font: inherit; font-size: .9rem;
@@ -27,7 +27,7 @@
 .mem-row .ovk-row-top { align-items: baseline; gap: 8px; }
 .mem-text { flex: 1 1 auto; min-width: 0; font-weight: 400; line-height: 1.42; overflow-wrap: anywhere; }
 .mem-meta { color: var(--text-muted); font-size: .78rem; line-height: 1.35; }
-.mem-meta time { font-size: .74rem; }
+.mem-meta time { font-size: .75rem; }
 .mem-row .ovk-row-sub > span:first-child { white-space: normal; overflow: visible; text-overflow: clip; }
 .mem-meta a { color: inherit; text-decoration: underline; }
 .mem-trail { display: flex; align-items: center; gap: .25rem; flex: none; position: relative; }
@@ -67,10 +67,10 @@
 .mem-foot { margin: 1rem 0 0; font-size: .85rem; color: var(--text-muted); overflow-wrap: anywhere; }
 /* The night's tidy (HO5): the switch, the diary the agents wrote and the changes they made, with the undo. */
 .mem-tidy { margin: .7rem 0 .8rem; padding: .55rem .65rem; border: 1px solid var(--border-light); border-radius: 12px; background: var(--bg-card); }
-.mem-tidy > h2 { margin: 0 0 .3rem; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.mem-tidy > h2 { margin: 0 0 .3rem; font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .mem-tidy form { margin: .45rem 0 0; }
 .mem-diaries, .mem-changes { margin: .8rem 0 0; }
-.mem-diaries > h2, .mem-changes > h2 { margin: 0 0 .3rem; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.mem-diaries > h2, .mem-changes > h2 { margin: 0 0 .3rem; font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .mem-diary, .mem-change {
     display: flex; flex-direction: column; gap: .25rem; padding: 8px 10px; border-bottom: 1px solid var(--border);
     overflow-wrap: anywhere;

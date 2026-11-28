@@ -25,7 +25,7 @@
 @keyframes ay-wait{50%{opacity:.35;transform:scale(.8)}}
 .ay-bar-spend{display:grid;justify-items:end;flex:none;line-height:1.15;text-decoration:none;color:var(--text-primary,#e6edf7);font-variant-numeric:tabular-nums}
 .ay-bar-spend strong{font-size:.95rem}
-.ay-bar-spend small{font-size:.68rem;color:var(--text-muted,#7386a3)}
+.ay-bar-spend small{font-size: .75rem;color:var(--text-muted,#7386a3)}
 .ay-bar-btn{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;min-width:44px;height:44px;padding:0 12px;border-radius:14px;cursor:pointer;font-size:.86rem;font-weight:750;color:var(--text-primary,#e6edf7);background:color-mix(in srgb,var(--text-primary,#e6edf7) 8%,transparent);transition:background-color .15s ease,transform .12s ease}
 .ay-bar-btn .ovk-i{width:18px;height:18px}
 .ay-bar-btn:hover{background:color-mix(in srgb,var(--text-primary,#e6edf7) 14%,transparent)}
