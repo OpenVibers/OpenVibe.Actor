@@ -56,7 +56,7 @@
 .cn-bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; height: 100%; }
 .cn-bar i { display: block; width: 100%; max-width: 22px; border-radius: 4px 4px 2px 2px; background: color-mix(in srgb, var(--accent, #3b82f6) 70%, transparent); }
 .cn-bar:last-child i { background: var(--accent, #3b82f6); }
-.cn-bar small { font-size: 11px; color: var(--text-secondary, #96a7c2); }
+.cn-bar small { font-size: 12px; color: var(--text-secondary, #96a7c2); }
 .cn-month .cn-bars { gap: 2px; height: 120px; }
 .cn-month .cn-bar small { display: block; height: 1.3em; line-height: 1.3em; }
 /* The events feed: a coloured dot for how each ended, the text, then who, cost and when. */

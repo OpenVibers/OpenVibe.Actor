@@ -32,7 +32,7 @@
 .cmp-board-wrap { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--border-light); border-radius: 12px; }
 .cmp-board { width: 100%; border-collapse: collapse; font-size: .86rem; }
 .cmp-board th, .cmp-board td { padding: .55rem .7rem; text-align: left; border-bottom: 1px solid var(--border-light); white-space: nowrap; }
-.cmp-board thead th { font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); font-weight: 750; }
+.cmp-board thead th { font-size: .75rem; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); font-weight: 750; }
 .cmp-board tbody tr:last-child th, .cmp-board tbody tr:last-child td { border-bottom: 0; }
 .cmp-score { display: inline-flex; align-items: center; gap: .45rem; font-variant-numeric: tabular-nums; }
 .cmp-bar { position: relative; display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text-muted) 25%, transparent); overflow: hidden; }
@@ -44,8 +44,8 @@
 .cmp-side.is-best { border-color: color-mix(in srgb, var(--accent, #3b82f6) 65%, var(--border-light)); box-shadow: 0 10px 30px color-mix(in srgb, var(--accent, #3b82f6) 18%, transparent); }
 .cmp-side header { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
 .cmp-side header b { min-width: 0; overflow-wrap: anywhere; }
-.cmp-best { padding: .1rem .5rem; border-radius: 999px; background: var(--accent, #3b82f6); color: #fff; font-size: .72rem; font-weight: 800; }
-.cmp-state { margin-left: auto; padding: .1rem .5rem; border-radius: 999px; border: 1px solid var(--border-light); color: var(--text-secondary); font-size: .72rem; font-weight: 650; }
+.cmp-best { padding: .1rem .5rem; border-radius: 999px; background: var(--accent, #3b82f6); color: #fff; font-size: .75rem; font-weight: 800; }
+.cmp-state { margin-left: auto; padding: .1rem .5rem; border-radius: 999px; border: 1px solid var(--border-light); color: var(--text-secondary); font-size: .75rem; font-weight: 650; }
 .cmp-side.is-running .cmp-state, .cmp-side.is-queued .cmp-state, .cmp-side.is-verifying .cmp-state { animation: cmp-pulse 1.4s ease-in-out infinite; }
 @keyframes cmp-pulse { 50% { opacity: .45; } }
 .cmp-score--big { margin: 0; font-size: 1.1rem; font-weight: 750; }
