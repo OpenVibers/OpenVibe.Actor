@@ -655,6 +655,29 @@ function createApi(ctx) {
         const page = await store.listTasks(s, row.owner, { limit, before, via: `agent:${row.id}` });
         res.json({ tasks: await Promise.all(page.rows.map(wireTask)), next: page.next });
     });
+    // Teach as an API (plan AD.39 item 11, §AD.33): another site, the SDK or an agent starts a lesson for one of the
+    // person's agents, shown on a desk (how 'show', kind browser|desktop) or told in words (how 'words'), then practised
+    // (practice until|once|off). The answer is the lesson and its task: the task's page is where the person shows it.
+    const lessonOf = (x) => ({
+        task_id: x.task_id, agent_id: x.agent_id, what: x.what, start_url: x.start_url || null, kind: x.desk_kind,
+        how: x.source === 'words' ? 'words' : 'show', state: x.state, steps: Number(x.steps) || 0,
+        practice_rounds: Number(x.practice_rounds) || 0, practice_done: Number(x.practice_done) || 0,
+        proposal_id: x.proposal_id || null, created_at: x.created_at, ended_at: x.ended_at || null,
+    });
+    r.post('/me/agents/:id/lessons', principal.requireCapability('actor.agent.manage'), owner, limits.budget('actor.agent.manage'), async (req, res) => {
+        const row = await loadAgent(req, res); if (!row) return;
+        const b = req.body || {};
+        const out = await teach.start(ctx, row, { what: b.what, url: b.url, kind: b.kind, how: b.how, words: b.words, practice: b.practice });
+        if (out.code) return problem(req, res, out.status || 422, out.code, out.detail);
+        const lesson = (out.session && lessonOf(out.session)) || lessonOf(await teach.session(s, out.task.id) || { task_id: out.task.id, agent_id: row.id });
+        res.set('Location', `/api/v1/tasks/${out.task.id}`);
+        res.status(201).json({ lesson, task: await wireTask(out.task), watch_url: `${String(config.baseUrl).replace(/\/+$/, '')}/tasks/${out.task.id}` });
+    });
+    r.get('/me/agents/:id/lessons', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
+        const row = await loadAgent(req, res); if (!row) return;
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
+        res.json({ lessons: (await teach.sessionsOf(s, row.owner, row.id, limit)).map(lessonOf) });
+    });
     // Suggestions the agent made for its instructions (agents/personal.js): list, then apply, dismiss or undo one.
     r.get('/me/agents/:id/suggestions', principal.requireCapability('actor.agent.manage'), owner, limits.reads('actor.agent.manage'), async (req, res) => {
         const row = await personal.get(s, req.principal.requester, req.params.id);
