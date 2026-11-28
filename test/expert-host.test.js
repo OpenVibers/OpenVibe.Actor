@@ -44,6 +44,29 @@ const EXPERT = { host: 'openvibe.expert', 'x-forwarded-host': 'openvibe.expert' 
             assert.equal(away.headers.get('location'), 'https://openvibe.actor/tasks?x=1');
         });
 
+        await check('openvibe.expert has its own robots.txt, sitemap and llms.txt: its gallery and Experts at its own address', async () => {
+            const robots = await t.get('/robots.txt', { headers: EXPERT });
+            assert.equal(robots.status, 200);
+            assert.match(robots.text, /Sitemap: https:\/\/openvibe\.expert\/sitemap\.xml/);
+            assert.doesNotMatch(robots.text, /openvibe\.actor\/sitemap/);
+            const map = await t.get('/sitemap.xml', { headers: EXPERT });
+            assert.equal(map.status, 200);
+            assert.match(map.headers.get('content-type'), /xml/);
+            assert.match(map.text, /<loc>https:\/\/openvibe\.expert\/<\/loc>/);
+            assert.doesNotMatch(map.text, /openvibe\.actor/, 'nothing at another host');
+            const list = await t.get('/experts', { headers: EXPERT });
+            const ids = [...list.text.matchAll(/href="\/experts\/(bp_[a-z0-9_]+)"/g)].map((m) => m[1]);
+            assert.ok(ids.length > 0, 'the gallery has Experts to list (OpenVibe\'s own are seeded)');
+            for (const id of new Set(ids)) assert.ok(map.text.includes(`<loc>https://openvibe.expert/${id}</loc>`), `${id} is in the sitemap`);
+            const llms = await t.get('/llms.txt', { headers: EXPERT });
+            assert.equal(llms.status, 200);
+            assert.match(llms.text, /^# OpenVibe Expert/);
+            for (const id of new Set(ids)) assert.ok(llms.text.includes(`https://openvibe.expert/${id})`), `${id} is in llms.txt`);
+            // openvibe.actor keeps its own, and the expert files are not pages there.
+            assert.match((await t.get('/robots.txt')).text, /openvibe\.actor/);
+            assert.equal((await t.get('/experts/sitemap.xml')).status, 404);
+        });
+
         await check('signing in on openvibe.expert uses its own client and callback', async () => {
             const login = await t.get('/auth/login?next=%2F', { headers: EXPERT });
             assert.ok([302, 303].includes(login.status), `login redirects (${login.status})`);

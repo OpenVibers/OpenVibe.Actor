@@ -50,6 +50,9 @@ function createExpertHost({ config }) {
         res.locals.site = { baseUrl: base, name: 'OpenVibe Expert' };
         const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
         const p = req.path;
+        // The crawler files are openvibe.expert's own: its pages and its address (11-28: it answered Actor's, which named
+        // only openvibe.actor pages, so no Expert page was in any sitemap).
+        if (/^\/(?:robots\.txt|sitemap\.xml|llms\.txt)$/.test(p)) { req.url = `/experts${p}${q}`; return next(); }
         if (PASS.test(p) || p.startsWith('/experts')) return next();
         if (p === '/' || p === '') { req.url = `/experts${q}`; return next(); }
         if (p === '/new' || p === '/mine') { req.url = `/experts${p}${q}`; return next(); }
