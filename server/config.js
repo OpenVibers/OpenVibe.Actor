@@ -99,6 +99,13 @@ function load(env = process.env) {
             sessionAudience: env.OV_SESSION_AUDIENCE || 'openvibe.network',
         },
         cookies: { secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction },
+        // openvibe.expert (plan §D item 6, 11-28): the Experts gallery on its own domain, from this process, with its
+        // own sign-in client (Network's `expert`). Off until its secret is set: then this host answers it.
+        expert: {
+            baseUrl: trim(env.EXPERT_BASE_URL || 'https://openvibe.expert'),
+            clientId: env.EXPERT_OAUTH_CLIENT_ID || 'expert',
+            clientSecret: env.EXPERT_OAUTH_CLIENT_SECRET || '',
+        },
 
         // OpenVibe.AI (plan L55 C3): the model gateway a person's own keys live in, and — with the router on — the
         // model layer of this product. Actor then holds NO provider key at all: every model call is a run of
