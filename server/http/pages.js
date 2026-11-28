@@ -1446,7 +1446,7 @@ ${table(['Agent', 'Could take it', 'Estimated cost', 'Why not'], (p.candidates |
     const exchangeModels = ctx.exchangeModels || (exchangeModelsUrl && !config.drill ? require('./exchange-models').createExchangeModels({ url: exchangeModelsUrl }) : { summary: async () => null });
     const glyphs = require('openvibe-shared/glyphs');
     const engines = require('../engines');
-    const HARNESS_NAME = { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', muse: 'Muse', 'codebuddy-code': 'CodeBuddy', qwen: 'Qwen Code', goose: 'Goose', aider: 'Aider' };
+    const HARNESS_NAME = { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', antigravity: 'Antigravity', gemini: 'Gemini CLI', muse: 'Muse', 'codebuddy-code': 'CodeBuddy', qwen: 'Qwen Code', goose: 'Goose', aider: 'Aider' };
     const WAY = {
         agent: { glyph: 'robot', href: '/chat?way=agent', name: 'Actor\'s agent', line: 'Plans, searches, uses tools, then checks its answer.', chips: ['Any model', 'Web search', 'OpenVibe tools', 'Your computers'] },
         model: { glyph: 'chat', href: '/chat?way=model', name: 'One model', line: 'One quick answer from the model you pick. No tools.', chips: ['Any model', 'Fastest', 'Cheapest'] },
