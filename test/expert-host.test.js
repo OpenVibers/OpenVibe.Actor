@@ -19,6 +19,10 @@ const EXPERT = { host: 'openvibe.expert', 'x-forwarded-host': 'openvibe.expert' 
             assert.match(gallery.text, /Agents with a personality and a job/);
             const actorHome = await t.get('/');
             assert.doesNotMatch(actorHome.text, /Agents with a personality and a job/, 'Actor\'s own home is not the gallery');
+            assert.match(gallery.text, /<link rel="canonical" href="https:\/\/openvibe\.expert\/">/, 'its own address, not Actor\'s home');
+            assert.doesNotMatch(gallery.text, /OpenVibe\.Actor<\/title>/);
+            assert.match((await t.get('/experts')).text, /<link rel="canonical" href="https:\/\/openvibe\.expert\/">/, 'Actor\'s gallery names openvibe.expert as its home');
+            assert.match(actorHome.text, /<link rel="canonical" href="https:\/\/openvibe\.actor\/">/, 'Actor\'s own pages keep theirs');
             const www = await t.get('/', { headers: { host: 'www.openvibe.expert', 'x-forwarded-host': 'www.openvibe.expert' } });
             assert.match(www.text, /Agents with a personality and a job/, 'www. is the same site');
         });
@@ -29,6 +33,8 @@ const EXPERT = { host: 'openvibe.expert', 'x-forwarded-host': 'openvibe.expert' 
             if (id) {
                 const one = await t.get(`/${id}`, { headers: EXPERT });
                 assert.equal(one.status, 200, `/${id}`);
+                assert.match(one.text, /<title>[^<]*· OpenVibe Expert<\/title>/, 'named for its own site');
+                assert.match(one.text, new RegExp(`<link rel="canonical" href="https://openvibe\\.expert/${id}">`));
                 assert.equal((await t.get(`/experts/${id}`, { headers: EXPERT })).status, 200, 'the pages\' own links work too');
             }
             const make = await t.get('/new', { headers: EXPERT });
